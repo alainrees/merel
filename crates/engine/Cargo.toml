@@ -7,6 +7,13 @@ rust-version.workspace = true
 
 [dependencies]
 mailcraft-model = { workspace = true }
+mailcraft-mime = { workspace = true }
+mailcraft-imap = { workspace = true }
+mailcraft-smtp = { workspace = true }
+mailcraft-secrets = { workspace = true }
+serde = { workspace = true }
+log = { workspace = true }
+directories = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
