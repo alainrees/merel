@@ -47,6 +47,9 @@ roxmltree = "0.21"
 # SMTP over rustls with the platform verifier; aws-lc-rs matches the IMAP side so rustls has one provider.
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "aws-lc-rs", "rustls-platform-verifier"] }
 
+# calendar: date arithmetic and the computer's time zone
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
 # ui
 egui = "0.36"
 eframe = { version = "0.36", default-features = false }

@@ -5,8 +5,10 @@
 //! above can trust what they hold.
 
 mod address;
+mod calendar;
 
 pub use address::{Address, AddressError, parse_address_list};
+pub use calendar::{Appointment, AppointmentError, Calendar, MAX_NOTES};
 
 use serde::{Deserialize, Serialize};
 

@@ -6,6 +6,7 @@
 //! changes the session directly.
 
 mod backstage;
+pub mod calendar;
 mod compose;
 mod dates;
 mod theme;
@@ -81,13 +82,22 @@ pub struct MailApp {
     tab: Tab,
     form: AccountForm,
     pub compose: Option<Compose>,
+    pub calendar: calendar::State,
     /// The last command error or note, shown in the status bar until the next action.
     notice: Option<String>,
 }
 
 impl MailApp {
     pub fn new(engine: Engine) -> Self {
-        MailApp { engine, module: Module::Mail, tab: Tab::Home, form: AccountForm::default(), compose: None, notice: None }
+        MailApp {
+            engine,
+            module: Module::Mail,
+            tab: Tab::Home,
+            form: AccountForm::default(),
+            compose: None,
+            calendar: calendar::State::default(),
+            notice: None,
+        }
     }
 
     /// Runs a command; an error is shown, never raised.
@@ -115,6 +125,7 @@ impl MailApp {
         status_bar(self, ui, &t);
         let ctx = ui.ctx().clone();
         compose::show(self, &ctx, &t);
+        calendar::window(self, &ctx, &t);
         if self.tab == Tab::File {
             backstage::show(self, ui, &t);
             return;
@@ -126,6 +137,8 @@ impl MailApp {
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading).inner_margin(Margin::same(20))).show(ui, |ui| {
                 reading_pane(self, ui, &t);
             });
+        } else if self.module == Module::Calendar {
+            calendar::show(self, ui, &t);
         } else {
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading)).show(ui, |ui| {
                 ui.centered_and_justified(|ui| {
@@ -157,6 +170,7 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .frame(egui::Frame::NONE.fill(t.ribbon).inner_margin(Margin::symmetric(10, 8)).stroke(Stroke::new(1.0, t.border)))
         .show(ui, |ui| {
             ui.horizontal(|ui| match app.tab {
+                Tab::Home if app.module == Module::Calendar => calendar_ribbon(app, ui, t),
                 Tab::Home => {
                     let has = app.engine.session.selected_message.is_some();
                     let mut open: Option<ComposeKind> = None;
@@ -194,6 +208,29 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 }
             });
         });
+}
+
+fn calendar_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    use calendar::View;
+    if ribbon_action(ui, t, "📅", "Nieuwe afspraak", true) {
+        let date = app.calendar.focus;
+        app.new_appointment(date, 9);
+    }
+    ui.separator();
+    if ribbon_action(ui, t, "◎", "Vandaag", true) {
+        app.calendar.focus = calendar::today();
+    }
+    for (glyph, label, view) in [("▯", "Dag", View::Day), ("▥", "Week", View::Week), ("▦", "Maand", View::Month)] {
+        if ribbon_action(ui, t, glyph, label, app.calendar.view != view) {
+            app.calendar.view = view;
+        }
+    }
+    ui.separator();
+    let has = app.engine.session.selected_appointment.is_some();
+    if ribbon_action(ui, t, "🗑", "Verwijderen", has) {
+        app.run("appointment.delete", Value::Null);
+        app.calendar.editor = None;
+    }
 }
 
 /// A large ribbon button: glyph above label, drawn by hand as one widget so a screen reader
@@ -547,9 +584,33 @@ mod tests {
     #[test]
     fn other_modules_show_a_placeholder() {
         let mut h = harness();
+        h.state_mut().module = Module::People;
+        h.run();
+        assert!(h.query_by_label_contains("Contacten volgt").is_some());
+    }
+
+    #[test]
+    fn calendar_shows_sample_appointments_and_saves_new_ones() {
+        let mut h = harness();
         h.state_mut().module = Module::Calendar;
         h.run();
-        assert!(h.query_by_label_contains("Agenda volgt").is_some());
+        assert!(h.query_by_label_contains("Overleg ontwerp").is_some(), "today's sample appointment is in the month view");
+        h.get_by_label("Week").click();
+        h.run();
+        assert_eq!(h.state().calendar.view, calendar::View::Week);
+        h.get_by_label("Nieuwe afspraak").click();
+        h.run();
+        h.state_mut().calendar.editor.as_mut().expect("editor").title = "Tandarts".into();
+        h.run();
+        h.get_by_label("Opslaan").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert!(h.state().calendar.editor.is_none());
+        assert!(s.appointments.iter().any(|a| a.title == "Tandarts"));
+        assert_eq!(s.selected_appointment().map(|a| a.title.as_str()), Some("Tandarts"));
+        h.get_by_label("Verwijderen").click();
+        h.run();
+        assert!(h.state().engine.session.appointments.iter().all(|a| a.title != "Tandarts"));
     }
 
     #[test]
