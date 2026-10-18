@@ -5,17 +5,9 @@
 //! are quoted before they go on the wire, so a hostile folder name cannot inject a command.
 
 use imap_proto::{BodyStructure, NameAttribute};
-use mailcraft_mime::ParsedHeader;
+pub use mailcraft_mailbox::{Credential, Flag, Mailbox, MailboxError, RemoteFolder, RemoteHeader};
 use mailcraft_model::{FolderKind, Server, Tls};
 use mailcraft_secrets::Secret;
-
-/// How to log in.
-#[derive(Clone, Debug)]
-pub enum Credential {
-    Password(Secret),
-    /// An OAuth 2.0 access token, sent with SASL XOAUTH2.
-    OAuth2(Secret),
-}
 
 struct XOAuth2<'a> {
     user: &'a str,
@@ -47,26 +39,22 @@ impl From<imap::Error> for ImapError {
     }
 }
 
-pub type Result<T> = std::result::Result<T, ImapError>;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RemoteFolder {
-    pub name: String,
-    pub kind: FolderKind,
-    pub selectable: bool,
+impl From<ImapError> for MailboxError {
+    fn from(e: ImapError) -> Self {
+        match e {
+            ImapError::Connect { host, source } => MailboxError::Connect { host, reason: source.to_string() },
+            ImapError::Login => MailboxError::Login,
+            ImapError::Protocol(e) => MailboxError::Protocol(e.to_string()),
+            ImapError::BadName(n) => MailboxError::BadName(n),
+        }
+    }
 }
 
-#[derive(Clone, Debug)]
-pub struct RemoteHeader {
-    pub uid: u32,
-    pub seen: bool,
-    pub flagged: bool,
-    pub answered: bool,
-    pub size: u32,
-    pub has_attachments: bool,
-    pub header: ParsedHeader,
-    /// Seconds since the epoch: the Date header, else the server's INTERNALDATE.
-    pub date: i64,
+pub type Result<T> = std::result::Result<T, ImapError>;
+
+/// An item id as the engine passes it back, which for IMAP is the UID in decimal.
+fn uid_of(id: &str) -> Result<u32> {
+    id.parse::<u32>().ok().filter(|u| *u > 0).ok_or_else(|| ImapError::BadName(id.chars().take(40).collect()))
 }
 
 type Conn = imap::Connection;
@@ -108,16 +96,7 @@ fn kind_of(name: &str, attrs: &[NameAttribute<'_>]) -> FolderKind {
             _ => {}
         }
     }
-    let last = name.rsplit(['/', '.']).next().unwrap_or(name).to_ascii_lowercase();
-    match last.as_str() {
-        "inbox" => FolderKind::Inbox,
-        "sent" | "sent items" | "sent messages" | "verzonden items" | "verzonden" => FolderKind::Sent,
-        "drafts" | "concepten" => FolderKind::Drafts,
-        "junk" | "spam" | "junk e-mail" | "ongewenste e-mail" => FolderKind::Junk,
-        "trash" | "deleted items" | "deleted messages" | "verwijderde items" | "prullenbak" => FolderKind::Deleted,
-        "archive" | "archief" => FolderKind::Archive,
-        _ => FolderKind::Other,
-    }
+    mailcraft_mailbox::kind_from_name(name)
 }
 
 /// Whether a BODYSTRUCTURE holds anything a person would call an attachment.
@@ -159,13 +138,14 @@ impl ImapClient {
         let mut out: Vec<RemoteFolder> = names
             .iter()
             .map(|n| RemoteFolder {
-                name: n.name().to_string(),
+                path: n.name().to_string(),
+                name: n.name().rsplit(['/', '.']).next().unwrap_or(n.name()).to_string(),
                 kind: kind_of(n.name(), n.attributes()),
                 selectable: !n.attributes().iter().any(|a| matches!(a, NameAttribute::NoSelect)),
             })
             .collect();
         if !out.iter().any(|f| f.kind == FolderKind::Inbox) {
-            out.insert(0, RemoteFolder { name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true });
+            out.insert(0, RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true });
         }
         Ok(out)
     }
@@ -193,7 +173,7 @@ impl ImapClient {
             let date = header.date.or(internal).unwrap_or(0);
             let flags = f.flags();
             out.push(RemoteHeader {
-                uid,
+                id: uid.to_string(),
                 seen: flags.contains(&imap::types::Flag::Seen),
                 flagged: flags.contains(&imap::types::Flag::Flagged),
                 answered: flags.contains(&imap::types::Flag::Answered),
@@ -215,11 +195,12 @@ impl ImapClient {
         Ok(fetches.iter().find_map(|f| f.body().map(<[u8]>::to_vec)).unwrap_or_default())
     }
 
-    /// Sets or clears one of `\Seen`, `\Flagged`, `\Answered`.
-    pub fn set_flag(&mut self, folder: &str, uid: u32, flag: &str, on: bool) -> Result<()> {
-        if !matches!(flag, "\\Seen" | "\\Flagged" | "\\Answered") {
-            return Err(ImapError::BadName(flag.to_string()));
-        }
+    /// Sets or clears `\Seen` or `\Flagged`.
+    pub fn set_flag(&mut self, folder: &str, uid: u32, flag: Flag, on: bool) -> Result<()> {
+        let flag = match flag {
+            Flag::Seen => "\\Seen",
+            Flag::Flagged => "\\Flagged",
+        };
         if self.selected.as_deref() != Some(folder) {
             self.select(folder)?;
         }
@@ -253,6 +234,40 @@ impl ImapClient {
 
     pub fn logout(mut self) {
         let _ = self.session.logout();
+    }
+}
+
+impl Mailbox for ImapClient {
+    fn folders(&mut self) -> mailcraft_mailbox::Result<Vec<RemoteFolder>> {
+        Ok(ImapClient::folders(self)?)
+    }
+
+    fn headers(&mut self, folder: &str, limit: u32) -> mailcraft_mailbox::Result<Vec<RemoteHeader>> {
+        Ok(ImapClient::headers(self, folder, limit)?)
+    }
+
+    fn body(&mut self, folder: &str, id: &str) -> mailcraft_mailbox::Result<Vec<u8>> {
+        Ok(ImapClient::body(self, folder, uid_of(id)?)?)
+    }
+
+    fn set_flag(&mut self, folder: &str, id: &str, flag: Flag, on: bool) -> mailcraft_mailbox::Result<()> {
+        Ok(ImapClient::set_flag(self, folder, uid_of(id)?, flag, on)?)
+    }
+
+    fn move_to(&mut self, folder: &str, id: &str, dest: &str) -> mailcraft_mailbox::Result<()> {
+        Ok(ImapClient::move_to(self, folder, uid_of(id)?, dest)?)
+    }
+
+    fn append(&mut self, folder: &str, message: &[u8]) -> mailcraft_mailbox::Result<()> {
+        Ok(ImapClient::append(self, folder, message)?)
+    }
+
+    fn send(&mut self, _message: &[u8]) -> mailcraft_mailbox::Result<bool> {
+        Ok(false)
+    }
+
+    fn logout(self: Box<Self>) {
+        ImapClient::logout(*self);
     }
 }
 

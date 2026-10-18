@@ -2234,7 +2234,9 @@ version = "0.1.0"
 dependencies = [
  "directories",
  "log",
+ "mailcraft-exchange",
  "mailcraft-imap",
+ "mailcraft-mailbox",
  "mailcraft-mime",
  "mailcraft-model",
  "mailcraft-oauth",
@@ -2246,12 +2248,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "mailcraft-exchange"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "log",
+ "mailcraft-mailbox",
+ "mailcraft-mime",
+ "mailcraft-model",
+ "mailcraft-secrets",
+ "roxmltree",
+ "ureq",
+]
+
+[[package]]
 name = "mailcraft-imap"
 version = "0.1.0"
 dependencies = [
  "imap",
  "imap-proto",
  "log",
+ "mailcraft-mailbox",
+ "mailcraft-mime",
+ "mailcraft-model",
+ "mailcraft-secrets",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "mailcraft-mailbox"
+version = "0.1.0"
+dependencies = [
  "mailcraft-mime",
  "mailcraft-model",
  "mailcraft-secrets",
@@ -3478,6 +3505,15 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "roxmltree"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

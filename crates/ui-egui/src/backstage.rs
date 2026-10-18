@@ -91,16 +91,27 @@ impl AccountForm {
     pub fn account(&self) -> Result<Account, String> {
         let address = Address::new(Some(self.name.trim()), self.email.trim()).map_err(|_| "Vul een geldig e-mailadres in.".to_string())?;
         let username = if self.username.trim().is_empty() { address.email().to_string() } else { self.username.trim().to_string() };
-        if username.chars().any(|c| c.is_control() || c == '"' || c == '\\') {
+        // Exchange logs in as DOMAIN\user; IMAP quotes the name, so a backslash stays out there.
+        let backslash_ok = self.kind == Protocol::Exchange;
+        if username.chars().any(|c| c.is_control() || c == '"' || (c == '\\' && !backslash_ok)) {
             return Err("De gebruikersnaam bevat tekens die niet zijn toegestaan.".into());
         }
         if self.password.is_empty() {
             return Err("Vul het wachtwoord in.".into());
         }
-        let incoming =
-            Server { host: host(&self.imap_host, "ontvangen (IMAP)")?, port: port(&self.imap_port, "ontvangen (IMAP)")?, tls: self.imap_tls };
-        let outgoing =
-            Server { host: host(&self.smtp_host, "verzenden (SMTP)")?, port: port(&self.smtp_port, "verzenden (SMTP)")?, tls: self.smtp_tls };
+        let (protocol, incoming, outgoing) = if self.kind == Protocol::Exchange {
+            (Protocol::Exchange, Server { host: host(&self.imap_host, "Exchange")?, port: 443, tls: Tls::Implicit }, None)
+        } else {
+            (
+                Protocol::ImapSmtp,
+                Server { host: host(&self.imap_host, "ontvangen (IMAP)")?, port: port(&self.imap_port, "ontvangen (IMAP)")?, tls: self.imap_tls },
+                Some(Server {
+                    host: host(&self.smtp_host, "verzenden (SMTP)")?,
+                    port: port(&self.smtp_port, "verzenden (SMTP)")?,
+                    tls: self.smtp_tls,
+                }),
+            )
+        };
         let id = format!(
             "{}-{}",
             address.email().replace(['@', '.'], "-"),
@@ -111,10 +122,10 @@ impl AccountForm {
             name: if self.name.trim().is_empty() { address.email().to_string() } else { self.name.trim().to_string() },
             address,
             username,
-            protocol: Protocol::ImapSmtp,
+            protocol,
             auth: mailcraft_model::Auth::Password,
             incoming: Some(incoming),
-            outgoing: Some(outgoing),
+            outgoing,
         })
     }
 }
@@ -205,6 +216,7 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         ui.radio_value(&mut app.form.kind, Protocol::ImapSmtp, "IMAP/SMTP");
         ui.radio_value(&mut app.form.kind, Protocol::Gmail, "Gmail");
         ui.radio_value(&mut app.form.kind, Protocol::Microsoft365, "Microsoft 365");
+        ui.radio_value(&mut app.form.kind, Protocol::Exchange, "Exchange");
     });
     ui.add_space(6.0);
     match app.form.kind {
@@ -215,26 +227,43 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 
 fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let f = &mut app.form;
+    let exchange = f.kind == Protocol::Exchange;
+    if exchange {
+        ui.label(
+            RichText::new("Voor Exchange Server 2013 of nieuwer, via Exchange Web Services (EWS) over HTTPS. Verzenden gaat via dezelfde server. Zie docs/accounts.md.")
+                .size(12.0)
+                .color(t.text_dim),
+        );
+        ui.add_space(6.0);
+    }
     field(ui, t, "Naam", &mut f.name, false);
     field(ui, t, "E-mailadres", &mut f.email, false);
-    ui.horizontal(|ui| {
-        ui.add_space(154.0);
-        if ui.small_button("Servers invullen op basis van het adres").clicked() {
-            f.suggest();
-        }
-    });
+    if !exchange {
+        ui.horizontal(|ui| {
+            ui.add_space(154.0);
+            if ui.small_button("Servers invullen op basis van het adres").clicked() {
+                f.suggest();
+            }
+        });
+    }
     field(ui, t, "Gebruikersnaam", &mut f.username, false);
     field(ui, t, "Wachtwoord", &mut f.password, true);
     ui.add_space(8.0);
-    ui.label(RichText::new("Ontvangen (IMAP)").strong().color(t.text));
-    field(ui, t, "Server", &mut f.imap_host, false);
-    field(ui, t, "Poort", &mut f.imap_port, false);
-    tls_picker(ui, t, "imap_tls", &mut f.imap_tls);
-    ui.add_space(8.0);
-    ui.label(RichText::new("Verzenden (SMTP)").strong().color(t.text));
-    field(ui, t, "Server", &mut f.smtp_host, false);
-    field(ui, t, "Poort", &mut f.smtp_port, false);
-    tls_picker(ui, t, "smtp_tls", &mut f.smtp_tls);
+    if exchange {
+        ui.label(RichText::new("Exchange-server").strong().color(t.text));
+        field(ui, t, "Server", &mut f.imap_host, false);
+        ui.label(RichText::new("Bijvoorbeeld mail.bedrijf.nl; Mailcraft gebruikt https://<server>/EWS/Exchange.asmx. Gebruikersnaam als DOMEIN\\naam of als e-mailadres.").size(12.0).color(t.text_dim));
+    } else {
+        ui.label(RichText::new("Ontvangen (IMAP)").strong().color(t.text));
+        field(ui, t, "Server", &mut f.imap_host, false);
+        field(ui, t, "Poort", &mut f.imap_port, false);
+        tls_picker(ui, t, "imap_tls", &mut f.imap_tls);
+        ui.add_space(8.0);
+        ui.label(RichText::new("Verzenden (SMTP)").strong().color(t.text));
+        field(ui, t, "Server", &mut f.smtp_host, false);
+        field(ui, t, "Poort", &mut f.smtp_port, false);
+        tls_picker(ui, t, "smtp_tls", &mut f.smtp_tls);
+    }
     ui.add_space(12.0);
     if let Some(e) = &f.error {
         ui.label(RichText::new(e).color(t.flag));
@@ -345,6 +374,23 @@ mod tests {
         f.imap_host = "imap.voorbeeld.nl".into();
         f.password.clear();
         assert!(f.account().is_err());
+    }
+
+    #[test]
+    fn exchange_accounts_take_one_server_and_a_domain_user() {
+        let mut f = AccountForm::default();
+        f.kind = Protocol::Exchange;
+        f.email = "alain@bedrijf.nl".into();
+        f.username = "BEDRIJF\\alain".into();
+        f.password = "x".into();
+        f.imap_host = "mail.bedrijf.nl".into();
+        let a = f.account().unwrap();
+        assert_eq!(a.protocol, Protocol::Exchange);
+        assert_eq!(a.username, "BEDRIJF\\alain");
+        assert_eq!(a.incoming.unwrap(), Server { host: "mail.bedrijf.nl".into(), port: 443, tls: Tls::Implicit });
+        assert!(a.outgoing.is_none());
+        f.kind = Protocol::ImapSmtp;
+        assert!(f.account().is_err(), "a backslash in an IMAP user name is refused");
     }
 
     #[test]
