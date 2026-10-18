@@ -17,6 +17,8 @@ mailcraft-mime = { path = "crates/mime" }
 mailcraft-imap = { path = "crates/imap" }
 mailcraft-smtp = { path = "crates/smtp" }
 mailcraft-oauth = { path = "crates/oauth" }
+mailcraft-mailbox = { path = "crates/mailbox" }
+mailcraft-exchange = { path = "crates/exchange" }
 
 # foundation
 thiserror = "2"
@@ -40,6 +42,8 @@ open = "5"
 sha2 = "0.11"
 base64 = "0.23"
 getrandom = "0.4"
+# Exchange Web Services responses; a read-only tree without unsafe code.
+roxmltree = "0.21"
 # SMTP over rustls with the platform verifier; aws-lc-rs matches the IMAP side so rustls has one provider.
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "aws-lc-rs", "rustls-platform-verifier"] }
 

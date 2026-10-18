@@ -43,6 +43,20 @@ Ook Microsoft werkt via de browser. Registreer de app één keer in Entra:
 Let op: een beheerder van een zakelijke tenant moet IMAP/SMTP met OAuth toestaan en, waar de
 tenant dat eist, de app goedkeuren.
 
+## Exchange Server (on-premises)
+
+Voor een eigen Exchange Server (2013 of nieuwer) gebruikt Mailcraft Exchange Web Services (EWS)
+over HTTPS; lezen, verplaatsen én verzenden gaan via dezelfde server, er is geen SMTP nodig.
+
+Bestand › Accounts › soort **Exchange**: vul naam, e-mailadres, gebruikersnaam (`DOMEIN\naam` of
+je e-mailadres), wachtwoord en de servernaam in (bijvoorbeeld `mail.bedrijf.nl`; Mailcraft
+praat met `https://mail.bedrijf.nl/EWS/Exchange.asmx`). Het certificaat van de server moet
+geldig zijn; een zelfondertekend certificaat wordt geweigerd.
+
+Let op: Mailcraft meldt zich aan met *Basic authentication* over TLS. Veel servers staan voor
+EWS alleen NTLM of Kerberos toe; Mailcraft zegt dat dan en de beheerder kan Basic voor EWS
+inschakelen. Voor Exchange Online (Microsoft 365) gebruik je de soort **Microsoft 365**.
+
 ## Hoe het aanmelden werkt
 
 Mailcraft opent je eigen browser en luistert ondertussen op een willekeurige poort op

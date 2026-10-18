@@ -172,8 +172,8 @@ pub struct Flags {
 pub struct MessageHeader {
     pub id: String,
     pub folder_id: String,
-    /// The IMAP UID; 0 for sample mail.
-    pub uid: u32,
+    /// The id the server knows the message by (IMAP UID, EWS item id); empty for sample mail.
+    pub remote_id: String,
     pub from: Address,
     pub to: Vec<Address>,
     pub subject: String,

@@ -72,7 +72,7 @@ fn build() -> Option<Session> {
             Some(MessageHeader {
                 id: format!("m{i}"),
                 folder_id: "inbox".into(),
-                uid: 0,
+                remote_id: String::new(),
                 from: addr(name, email)?,
                 to: vec![me.clone()],
                 subject: subject.into(),

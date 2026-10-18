@@ -1,0 +1,15 @@
+[package]
+name = "mailcraft-mailbox"
+description = "What every mail store looks like to the engine: folders, headers, bodies, flags, moves."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mailcraft-model = { workspace = true }
+mailcraft-mime = { workspace = true }
+mailcraft-secrets = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
