@@ -11,6 +11,7 @@
 pub mod calendar;
 mod commands;
 pub mod config;
+pub mod contacts;
 mod sample;
 pub mod signin;
 pub mod worker;
@@ -23,7 +24,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
 use mailcraft_mailbox::{Flag, RemoteFolder, RemoteHeader};
-use mailcraft_model::{Account, Appointment, Calendar, Draft, Flags, Folder, FolderKind, MessageHeader, clean_text};
+use mailcraft_model::{Account, Appointment, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, clean_text};
 use mailcraft_secrets::{Secret, SecretStore};
 
 /// How many of the newest messages a folder shows.
@@ -150,10 +151,14 @@ pub struct Session {
     pub calendars: Vec<Calendar>,
     pub appointments: Vec<Appointment>,
     pub selected_appointment: Option<String>,
-    /// Set when a command changed the calendar; the engine saves and clears it.
+    pub contacts: Vec<Contact>,
+    pub selected_contact: Option<String>,
+    /// Set when a command changed the calendar or the contacts; the engine saves and clears it.
     calendar_dirty: bool,
+    contacts_dirty: bool,
     next_draft_id: u64,
     next_appointment_id: u64,
+    next_contact_id: u64,
     pending: Vec<Job>,
 }
 
@@ -412,13 +417,27 @@ impl Engine {
         if !calendar.appointments.is_empty() || !calendar.calendars.is_empty() {
             engine.session.set_calendar_data(calendar);
         }
+        let contacts =
+            engine.config_path.as_deref().map(|p| config::load_json::<contacts::ContactsFile>(&config::contacts_path(p))).unwrap_or_default();
+        if !contacts.contacts.is_empty() {
+            engine.session.set_contacts(contacts.contacts);
+        }
         engine.dispatch();
         engine
     }
 
-    fn save_calendar(&self) -> Result<(), String> {
-        if let Some(path) = &self.config_path {
-            config::save_json(&config::calendar_path(path), &self.session.calendar_data()).map_err(|e| e.to_string())?;
+    /// Saves whatever the last command changed.
+    fn persist(&mut self) -> Result<(), CommandError> {
+        let Some(path) = self.config_path.clone() else {
+            self.session.take_calendar_dirty();
+            self.session.take_contacts_dirty();
+            return Ok(());
+        };
+        if self.session.take_calendar_dirty() {
+            config::save_json(&config::calendar_path(&path), &self.session.calendar_data()).map_err(|e| CommandError::Store(e.to_string()))?;
+        }
+        if self.session.take_contacts_dirty() {
+            config::save_json(&config::contacts_path(&path), &self.session.contacts_data()).map_err(|e| CommandError::Store(e.to_string()))?;
         }
         Ok(())
     }
@@ -490,11 +509,7 @@ impl Engine {
     pub fn run(&mut self, id: &str, params: &serde_json::Value) -> Result<(), CommandError> {
         let r = self.session.run(id, params);
         self.dispatch();
-        if self.session.take_calendar_dirty()
-            && let Err(e) = self.save_calendar()
-        {
-            return Err(CommandError::Store(e));
-        }
+        self.persist()?;
         r
     }
 
