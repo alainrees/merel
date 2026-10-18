@@ -19,6 +19,8 @@ pub struct State {
 #[derive(Default)]
 pub struct Editor {
     pub id: Option<String>,
+    /// Where a new contact goes: an account id, or empty for this computer.
+    pub account_id: String,
     pub name: String,
     pub emails: String,
     pub phones: String,
@@ -35,6 +37,7 @@ impl Editor {
     pub fn from_contact(c: &Contact) -> Self {
         Editor {
             id: Some(c.id.clone()),
+            account_id: c.account_id.clone().unwrap_or_default(),
             name: c.name.clone(),
             emails: c.emails.join("\n"),
             phones: c.phones.join("\n"),
@@ -56,8 +59,34 @@ impl Editor {
         if let Some(id) = &self.id {
             p["id"] = json!(id);
         }
+        if !self.account_id.is_empty() {
+            p["account_id"] = json!(self.account_id);
+        }
         p
     }
+}
+
+/// A row to pick where a new item goes, when there is a choice: this computer or an account.
+pub(crate) fn store_picker(ui: &mut Ui, t: &Tokens, session: &mailcraft_engine::Session, label_width: f32, account_id: &mut String) {
+    let accounts: Vec<(String, String)> = session.item_accounts().iter().map(|a| (a.id.clone(), a.name.clone())).collect();
+    if accounts.is_empty() {
+        return;
+    }
+    let name = accounts.iter().find(|(id, _)| id == account_id).map(|(_, n)| n.as_str()).unwrap_or("Op deze computer");
+    ui.horizontal(|ui| {
+        ui.add_sized([label_width, 22.0], egui::Label::new(RichText::new("Opslaan in").color(t.text)));
+        egui::ComboBox::from_id_salt(("store-picker", label_width as i32)).selected_text(name).width(320.0).show_ui(ui, |ui| {
+            ui.selectable_value(account_id, String::new(), "Op deze computer");
+            for (id, n) in &accounts {
+                ui.selectable_value(account_id, id.clone(), n);
+            }
+        });
+    });
+}
+
+/// The name of the account an item lives in, for a card.
+pub(crate) fn store_name(session: &mailcraft_engine::Session, account_id: Option<&str>) -> String {
+    account_id.and_then(|id| session.accounts.iter().find(|a| a.id == id)).map(|a| a.name.clone()).unwrap_or_else(|| "Op deze computer".into())
 }
 
 impl MailApp {
@@ -184,6 +213,9 @@ fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     for (i, p) in c.phones.iter().enumerate() {
         row(ui, t, if i == 0 { "Telefoon" } else { "" }, p);
     }
+    if !app.engine.session.item_accounts.is_empty() {
+        row(ui, t, "Opgeslagen in", &store_name(&app.engine.session, c.account_id.as_deref()));
+    }
     if !c.notes.is_empty() {
         ui.add_space(8.0);
         ui.label(RichText::new("Notities").color(t.text_dim));
@@ -210,9 +242,13 @@ fn field(ui: &mut Ui, t: &Tokens, label: &str, value: &mut String, rows: usize) 
 }
 
 fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let session = &app.engine.session;
     let Some(editor) = app.contacts.editor.as_mut() else { return };
     ui.label(RichText::new(if editor.id.is_some() { "Contact bewerken" } else { "Nieuw contact" }).size(18.0).strong().color(t.text));
     ui.add_space(8.0);
+    if editor.id.is_none() {
+        store_picker(ui, t, session, 90.0, &mut editor.account_id);
+    }
     field(ui, t, "Naam", &mut editor.name, 1);
     field(ui, t, "E-mail", &mut editor.emails, 2);
     field(ui, t, "Telefoon", &mut editor.phones, 2);
@@ -271,6 +307,9 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         app.run("contact.delete", serde_json::Value::Null);
         app.contacts.editor = None;
     }
+    if crate::ribbon_action(ui, t, "⟳", "Vernieuwen", !app.engine.session.item_accounts.is_empty()) {
+        app.run("sync.refresh", serde_json::Value::Null);
+    }
 }
 
 /// Buttons under an address field with the addresses that complete what is being typed;
@@ -317,6 +356,7 @@ mod tests {
             phones: vec!["06".into()],
             company: String::new(),
             notes: String::new(),
+            account_id: None,
         };
         let e = Editor::from_contact(&c);
         assert_eq!(e.emails, "a@b.nl\nc@d.nl");

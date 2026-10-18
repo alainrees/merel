@@ -118,6 +118,7 @@ fn tasks() -> Vec<Task> {
             priority,
             done,
             completed: done.then(|| due(0)).flatten(),
+            account_id: None,
         }
         .validated()
         .ok()
@@ -141,6 +142,7 @@ fn contacts() -> Vec<Contact> {
             phones: if phone.is_empty() { Vec::new() } else { vec![phone.into()] },
             company: company.into(),
             notes: String::new(),
+            account_id: None,
         }
         .validated()
         .ok()

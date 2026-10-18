@@ -171,9 +171,33 @@ fn connect(account: &Account, server: &Server, credentials: &mut Credentials) ->
     })
 }
 
+/// The item store of `c`; an error for a store that keeps only mail, which the engine never
+/// asks.
+fn items_of(c: &mut dyn Mailbox) -> Result<&mut dyn mailcraft_mailbox::ItemStore, MailboxError> {
+    c.items().ok_or_else(|| MailboxError::Protocol("this account keeps no appointments, contacts or tasks".into()))
+}
+
 fn run(c: &mut dyn Mailbox, account: &Account, job: &Job) -> Result<Option<Event>, MailboxError> {
     Ok(match job {
-        Job::Connect { account_id } => Some(Event::Connected { account_id: account_id.clone(), folders: c.folders()? }),
+        Job::Connect { account_id } => {
+            let folders = c.folders()?;
+            Some(Event::Connected { account_id: account_id.clone(), folders, syncs_items: c.items().is_some() })
+        }
+        Job::Sync { account_id, from, to } => {
+            let store = items_of(c)?;
+            let appointments = store.appointments(*from, *to)?;
+            let contacts = store.contacts()?;
+            let tasks = store.tasks()?;
+            Some(Event::Synced { account_id: account_id.clone(), appointments, contacts, tasks })
+        }
+        Job::SaveItem { account_id, local_id, item } => {
+            let remote_id = items_of(c)?.save(item)?;
+            Some(Event::ItemSaved { account_id: account_id.clone(), local_id: local_id.clone(), remote_id })
+        }
+        Job::DeleteItem { id, .. } => {
+            items_of(c)?.delete(id)?;
+            None
+        }
         Job::Headers { folder_id, path, .. } => Some(Event::Headers { folder_id: folder_id.clone(), headers: c.headers(path, crate::HEADER_LIMIT)? }),
         Job::Body { message_id, path, id, .. } => {
             let raw = c.body(path, id)?;

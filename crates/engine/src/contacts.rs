@@ -1,9 +1,11 @@
 //! Contacts in the session, the commands that change them, and address suggestions for the
-//! compose window. Contacts live in `contacts.json` next to the accounts file until they sync.
+//! compose window. Local contacts live in `contacts.json` next to the accounts file; an
+//! account's live in its store and are mirrored here (see [`crate::sync`]).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use mailcraft_mailbox::Item;
 use mailcraft_model::{Address, Contact, ContactError};
 
 use crate::{CommandError, Session};
@@ -20,8 +22,19 @@ impl Session {
         self.selected_contact = None;
     }
 
+    /// What goes to the file: the local contacts.
     pub fn contacts_data(&self) -> ContactsFile {
-        ContactsFile { contacts: self.contacts.clone() }
+        ContactsFile { contacts: self.contacts.iter().filter(|c| c.account_id.is_none()).cloned().collect() }
+    }
+
+    /// The account a new item should go to, from the `account_id` parameter: `None` for this
+    /// computer, an error for an account that does not keep items.
+    pub(crate) fn account_param(&self, params: &Value) -> Result<Option<String>, CommandError> {
+        match params.get("account_id").and_then(Value::as_str).filter(|a| !a.is_empty()) {
+            None => Ok(None),
+            Some(a) if self.item_accounts.contains(a) => Ok(Some(a.to_string())),
+            Some(_) => Err(CommandError::Param("account_id")),
+        }
     }
 
     pub fn contact(&self, id: &str) -> Option<&Contact> {
@@ -95,12 +108,22 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// `contact.save { id?, name, emails: [..], phones: [..], company?, notes? }`: creates the
-/// contact, or replaces the one with `id`.
+/// `contact.save { id?, account_id?, name, emails: [..], phones: [..], company?, notes? }`:
+/// creates the contact (in the account's store when `account_id` names one), or replaces the
+/// one with `id`.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
-    let id = match str_param(params, "id") {
-        Some(id) => s.contact(id).ok_or(CommandError::NotFound)?.id.clone(),
-        None => s.new_contact_id(),
+    let existing = match str_param(params, "id") {
+        Some(id) => Some(s.contact(id).ok_or(CommandError::NotFound)?.clone()),
+        None => None,
+    };
+    let account = match &existing {
+        Some(c) => c.account_id.clone(),
+        None => s.account_param(params)?,
+    };
+    let id = match (&existing, &account) {
+        (Some(c), _) => c.id.clone(),
+        (None, Some(account)) => s.pending_id(account),
+        (None, None) => s.new_contact_id(),
     };
     let contact = Contact {
         id: id.clone(),
@@ -109,31 +132,35 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         phones: list_param(params, "phones"),
         company: str_param(params, "company").unwrap_or("").to_string(),
         notes: str_param(params, "notes").unwrap_or("").to_string(),
+        account_id: account.clone(),
     }
     .validated()
     .map_err(|e| match e {
         ContactError::NoName => CommandError::Param("name"),
         ContactError::BadEmail(_) => CommandError::Param("emails"),
     })?;
+    match &account {
+        Some(account) => s.save_remote(account, existing.is_none(), Item::Contact(contact.clone()))?,
+        None => s.contacts_dirty = true,
+    }
     s.contacts.retain(|c| c.id != id);
     s.contacts.push(contact);
     s.selected_contact = Some(id);
-    s.contacts_dirty = true;
     Ok(())
 }
 
 /// `contact.delete { id? }`: the given contact, else the selected one.
 pub fn delete(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let id = str_param(params, "id").map(str::to_string).or_else(|| s.selected_contact.clone()).ok_or(CommandError::NoSelection)?;
-    let before = s.contacts.len();
+    let account = s.contact(&id).ok_or(CommandError::NotFound)?.account_id.clone();
     s.contacts.retain(|c| c.id != id);
-    if s.contacts.len() == before {
-        return Err(CommandError::NotFound);
-    }
     if s.selected_contact.as_deref() == Some(id.as_str()) {
         s.selected_contact = None;
     }
-    s.contacts_dirty = true;
+    match account {
+        Some(account) => s.delete_remote(&account, &id),
+        None => s.contacts_dirty = true,
+    }
     Ok(())
 }
 

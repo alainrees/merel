@@ -89,6 +89,8 @@ fn hm(ts: i64) -> String {
 /// The appointment window's fields, as text the person edits.
 pub struct Editor {
     pub id: Option<String>,
+    /// The calendar a new appointment goes to; `None` for the first one.
+    pub calendar_id: Option<String>,
     pub title: String,
     pub location: String,
     pub all_day: bool,
@@ -106,6 +108,7 @@ impl Editor {
         let end = start.checked_add_signed(chrono::TimeDelta::hours(1)).unwrap_or(start);
         Editor {
             id: None,
+            calendar_id: None,
             title: String::new(),
             location: String::new(),
             all_day: false,
@@ -124,6 +127,7 @@ impl Editor {
         let end = if a.all_day { to_local(a.end - 1) } else { to_local(a.end) };
         Editor {
             id: Some(a.id.clone()),
+            calendar_id: Some(a.calendar_id.clone()),
             title: a.title.clone(),
             location: a.location.clone(),
             all_day: a.all_day,
@@ -170,6 +174,9 @@ impl Editor {
         });
         if let Some(id) = &self.id {
             p["id"] = json!(id);
+        }
+        if let Some(c) = &self.calendar_id {
+            p["calendar_id"] = json!(c);
         }
         Ok(p)
     }
@@ -542,6 +549,7 @@ fn field(ui: &mut Ui, t: &Tokens, label: &str, value: &mut String, width: f32) {
 
 /// The appointment window, when one is open.
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    let calendars: Vec<(String, String)> = app.engine.session.calendars.iter().map(|c| (c.id.clone(), c.name.clone())).collect();
     let Some(editor) = app.calendar.editor.as_mut() else { return };
     let mut save = false;
     let mut delete = false;
@@ -550,6 +558,23 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     egui::Window::new(title).collapsible(false).resizable(false).default_width(420.0).show(ctx, |ui| {
         field(ui, t, "Titel", &mut editor.title, 300.0);
         field(ui, t, "Locatie", &mut editor.location, 300.0);
+        // Which calendar: a choice for a new appointment when there is one, a fact otherwise.
+        if calendars.len() > 1 {
+            let current = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _)| id.clone()));
+            let name = calendars.iter().find(|(id, _)| Some(id) == current.as_ref()).map(|(_, n)| n.as_str()).unwrap_or("");
+            ui.horizontal(|ui| {
+                ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Agenda").color(t.text)));
+                if editor.id.is_some() {
+                    ui.label(RichText::new(name).color(t.text_dim));
+                } else {
+                    egui::ComboBox::from_id_salt("appointment-calendar").selected_text(name).width(300.0).show_ui(ui, |ui| {
+                        for (id, n) in &calendars {
+                            ui.selectable_value(&mut editor.calendar_id, Some(id.clone()), n);
+                        }
+                    });
+                }
+            });
+        }
         ui.horizontal(|ui| {
             ui.add_space(94.0);
             ui.checkbox(&mut editor.all_day, "Hele dag");
