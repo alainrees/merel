@@ -8,6 +8,11 @@
 //! What is used: `GetFolder` and `FindFolder` for the folder list, `FindItem` for the message
 //! list, `GetItem` with `IncludeMimeContent` for bodies (parsed by the same MIME code as IMAP
 //! mail), `UpdateItem` for read and flagged, `MoveItem`, and `CreateItem` to send and file.
+//! The calendar, contacts and tasks live in [`items`].
+
+mod items;
+
+pub use items::windows_zone;
 
 use std::time::Duration;
 
@@ -49,10 +54,13 @@ pub struct EwsClient {
     authorization: Secret,
     /// Folder ids of the well-known folders, learned at connect.
     known: Vec<(String, FolderKind)>,
+    /// The computer's time zone as Windows names it, when known; it tells the server which
+    /// midnight an all-day appointment or a due day means.
+    time_zone: Option<&'static str>,
 }
 
 /// `s` with the five XML special characters escaped, for element text and attribute values.
-fn esc(s: &str) -> String {
+pub(crate) fn esc(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -68,42 +76,44 @@ fn esc(s: &str) -> String {
     out
 }
 
-fn envelope(body: &str) -> String {
+fn envelope(body: &str, time_zone: Option<&str>) -> String {
+    let zone = time_zone.map(|z| format!("<t:TimeZoneContext><t:TimeZoneDefinition Id=\"{}\"/></t:TimeZoneContext>", esc(z))).unwrap_or_default();
     format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
             "<soap:Envelope xmlns:soap=\"{soap}\" xmlns:t=\"{t}\" xmlns:m=\"{m}\">",
-            "<soap:Header><t:RequestServerVersion Version=\"Exchange2013\"/></soap:Header>",
+            "<soap:Header><t:RequestServerVersion Version=\"Exchange2013\"/>{zone}</soap:Header>",
             "<soap:Body>{body}</soap:Body></soap:Envelope>"
         ),
         soap = NS_SOAP,
         t = NS_T,
         m = NS_M,
+        zone = zone,
         body = body
     )
 }
 
 /// The element named `name` (in any namespace) among `node`'s descendants.
-fn find<'a>(node: Node<'a, 'a>, name: &str) -> Option<Node<'a, 'a>> {
+pub(crate) fn find<'a>(node: Node<'a, 'a>, name: &str) -> Option<Node<'a, 'a>> {
     node.descendants().find(|n| n.is_element() && n.tag_name().name() == name)
 }
 
 /// The direct child element named `name`.
-fn child<'a>(node: Node<'a, 'a>, name: &str) -> Option<Node<'a, 'a>> {
+pub(crate) fn child<'a>(node: Node<'a, 'a>, name: &str) -> Option<Node<'a, 'a>> {
     node.children().find(|n| n.is_element() && n.tag_name().name() == name)
 }
 
-fn text<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
+pub(crate) fn text<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
     child(node, name).and_then(|n| n.text()).map(str::trim)
 }
 
-fn parse(xml: &str) -> Result<Document<'_>> {
+pub(crate) fn parse(xml: &str) -> Result<Document<'_>> {
     Document::parse(xml).map_err(|e| MailboxError::Protocol(format!("unreadable reply: {e}")))
 }
 
 /// The `ResponseMessages` children of a reply, each checked for `ResponseClass="Error"`
 /// unless `lenient`, in which case failed ones come back as `None`.
-fn response_messages<'a>(doc: &'a Document<'a>, lenient: bool) -> Result<Vec<Option<Node<'a, 'a>>>> {
+pub(crate) fn response_messages<'a>(doc: &'a Document<'a>, lenient: bool) -> Result<Vec<Option<Node<'a, 'a>>>> {
     let root = doc.root_element();
     if let Some(fault) = find(root, "Fault") {
         let reason = text(fault, "faultstring").unwrap_or("SOAP fault");
@@ -126,12 +136,12 @@ fn response_messages<'a>(doc: &'a Document<'a>, lenient: bool) -> Result<Vec<Opt
     Ok(out)
 }
 
-fn clip(s: &str) -> String {
+pub(crate) fn clip(s: &str) -> String {
     clean_text(s).chars().take(200).collect()
 }
 
 /// `2026-10-18T21:45:20Z` (or with fractional seconds) as seconds since the Unix epoch.
-fn parse_datetime(s: &str) -> Option<i64> {
+pub(crate) fn parse_datetime(s: &str) -> Option<i64> {
     let s = s.trim().trim_end_matches('Z');
     let (date, time) = s.split_once('T')?;
     let mut d = date.split('-').map(|p| p.parse::<i64>().ok());
@@ -192,14 +202,28 @@ impl EwsClient {
         let agent = ureq::Agent::new_with_config(
             ureq::config::Config::builder().timeout_global(Some(Duration::from_secs(60))).http_status_as_error(false).user_agent("Mailcraft").build(),
         );
-        let mut client = EwsClient { agent, url, host, authorization, known: Vec::new() };
+        let time_zone = iana_time_zone::get_timezone().ok().as_deref().and_then(windows_zone);
+        let mut client = EwsClient { agent, url, host, authorization, known: Vec::new(), time_zone };
         client.known = client.well_known()?;
         Ok(client)
     }
 
+    /// A client that never connects, for tests of the requests it builds.
+    #[cfg(test)]
+    pub(crate) fn offline(time_zone: Option<&'static str>) -> Self {
+        EwsClient {
+            agent: ureq::Agent::new_with_defaults(),
+            url: String::new(),
+            host: "test".into(),
+            authorization: Secret::new(String::new()),
+            known: Vec::new(),
+            time_zone,
+        }
+    }
+
     /// Posts one SOAP body and returns the reply's XML.
-    fn call(&self, body: &str) -> Result<String> {
-        let xml = envelope(body);
+    pub(crate) fn call(&self, body: &str) -> Result<String> {
+        let xml = envelope(body, self.time_zone);
         let mut response = self
             .agent
             .post(&self.url)
@@ -273,11 +297,12 @@ impl EwsClient {
             .ok_or_else(|| MailboxError::Protocol("no change key".into()))
     }
 
-    fn update(&self, id: &str, change: &str) -> Result<()> {
+    pub(crate) fn update(&self, id: &str, change: &str) -> Result<()> {
         let key = self.change_key(id)?;
         let xml = self.call(&format!(
             concat!(
-                "<m:UpdateItem MessageDisposition=\"SaveOnly\" ConflictResolution=\"AlwaysOverwrite\"><m:ItemChanges><t:ItemChange>",
+                "<m:UpdateItem MessageDisposition=\"SaveOnly\" ConflictResolution=\"AlwaysOverwrite\" ",
+                "SendMeetingInvitationsOrCancellations=\"SendToNone\"><m:ItemChanges><t:ItemChange>",
                 "<t:ItemId Id=\"{id}\" ChangeKey=\"{key}\"/><t:Updates>{change}</t:Updates></t:ItemChange></m:ItemChanges></m:UpdateItem>"
             ),
             id = esc(id),
@@ -427,6 +452,10 @@ impl Mailbox for EwsClient {
         Ok(true)
     }
 
+    fn items(&mut self) -> Option<&mut dyn mailcraft_mailbox::ItemStore> {
+        Some(self)
+    }
+
     fn logout(self: Box<Self>) {}
 }
 
@@ -437,7 +466,8 @@ mod tests {
     #[test]
     fn escaping_covers_the_special_characters_and_drops_controls() {
         assert_eq!(esc("a<b>&\"c'\u{1}"), "a&lt;b&gt;&amp;&quot;c&apos;");
-        assert!(envelope("<m:X/>").contains("<soap:Body><m:X/></soap:Body>"));
+        assert!(envelope("<m:X/>", None).contains("<soap:Body><m:X/></soap:Body>"));
+        assert!(envelope("", Some("W. Europe Standard Time")).contains("<t:TimeZoneDefinition Id=\"W. Europe Standard Time\"/>"));
     }
 
     #[test]

@@ -49,6 +49,8 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 
 # calendar: date arithmetic and the computer's time zone
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# the computer's time zone by its IANA name, to tell Exchange which midnight an all-day appointment means
+iana-time-zone = "0.1"
 
 # ui
 egui = "0.36"

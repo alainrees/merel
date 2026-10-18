@@ -28,6 +28,8 @@ impl Default for State {
 #[derive(Default)]
 pub struct Editor {
     pub id: Option<String>,
+    /// Where a new task goes: an account id, or empty for this computer.
+    pub account_id: String,
     pub title: String,
     pub due: String,
     pub priority: Priority,
@@ -39,6 +41,7 @@ impl Editor {
     pub fn from_task(t: &Task) -> Self {
         Editor {
             id: Some(t.id.clone()),
+            account_id: t.account_id.clone().unwrap_or_default(),
             title: t.title.clone(),
             due: t.due.map(|d| to_local(d).format(DATE_FORMAT).to_string()).unwrap_or_default(),
             priority: t.priority,
@@ -67,6 +70,9 @@ impl Editor {
         let mut p = json!({ "title": self.title, "notes": self.notes, "due": due, "priority": priority });
         if let Some(id) = &self.id {
             p["id"] = json!(id);
+        }
+        if !self.account_id.is_empty() {
+            p["account_id"] = json!(self.account_id);
         }
         Ok(p)
     }
@@ -212,6 +218,9 @@ fn detail(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     row(ui, "Status", if task.done { "Voltooid".into() } else { "Open".into() });
     row(ui, "Vervaldatum", task.due.map(due_label).unwrap_or_else(|| "Geen".into()));
     row(ui, "Prioriteit", priority_label(task.priority).into());
+    if !app.engine.session.item_accounts.is_empty() {
+        row(ui, "Opgeslagen in", crate::contacts::store_name(&app.engine.session, task.account_id.as_deref()));
+    }
     if !task.notes.is_empty() {
         ui.add_space(8.0);
         ui.label(RichText::new("Notities").color(t.text_dim));
@@ -230,9 +239,13 @@ fn detail(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 }
 
 fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let session = &app.engine.session;
     let Some(editor) = app.tasks.editor.as_mut() else { return };
     ui.label(RichText::new(if editor.id.is_some() { "Taak bewerken" } else { "Nieuwe taak" }).size(18.0).strong().color(t.text));
     ui.add_space(8.0);
+    if editor.id.is_none() {
+        crate::contacts::store_picker(ui, t, session, 110.0, &mut editor.account_id);
+    }
     let field = |ui: &mut Ui, label: &str, value: &mut String, width: f32| {
         ui.horizontal(|ui| {
             ui.add_sized([110.0, 22.0], egui::Label::new(RichText::new(label).color(t.text)));
@@ -307,6 +320,9 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if crate::ribbon_action(ui, t, "🗑", "Verwijderen", has) {
         app.run("task.delete", serde_json::Value::Null);
         app.tasks.editor = None;
+    }
+    if crate::ribbon_action(ui, t, "⟳", "Vernieuwen", !app.engine.session.item_accounts.is_empty()) {
+        app.run("sync.refresh", serde_json::Value::Null);
     }
 }
 

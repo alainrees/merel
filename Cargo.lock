@@ -2279,6 +2279,8 @@ name = "mailcraft-exchange"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "chrono",
+ "iana-time-zone",
  "log",
  "mailcraft-mailbox",
  "mailcraft-mime",
