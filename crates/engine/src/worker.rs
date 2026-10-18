@@ -9,9 +9,9 @@ use std::thread;
 
 use mailcraft_imap::{ImapClient, ImapError};
 use mailcraft_model::{Account, Server};
-use mailcraft_secrets::Secret;
 use mailcraft_smtp::SmtpError;
 
+use crate::signin::Credentials;
 use crate::{Event, Job};
 
 pub struct Worker {
@@ -24,13 +24,18 @@ impl Worker {
         Worker { events, accounts: HashMap::new() }
     }
 
+    /// A sender for events from threads the engine starts itself.
+    pub fn events(&self) -> Sender<Event> {
+        self.events.clone()
+    }
+
     /// Starts the thread for `account`. Jobs for it queue until the connection is up.
-    pub fn start_account(&mut self, account: Account, password: Secret) {
+    pub fn start_account(&mut self, account: Account, credentials: Credentials) {
         let (tx, rx) = channel();
         let events = self.events.clone();
         let id = account.id.clone();
         let name = format!("imap-{id}");
-        if thread::Builder::new().name(name).spawn(move || serve(account, password, rx, events)).is_ok() {
+        if thread::Builder::new().name(name).spawn(move || serve(account, credentials, rx, events)).is_ok() {
             self.accounts.insert(id, tx);
         } else {
             let _ = self.events.send(Event::Failed { account_id: id, what: "Kon geen achtergrondtaak starten.".into() });
@@ -71,7 +76,7 @@ fn clip(s: &str) -> String {
     mailcraft_model::clean_text(s).chars().take(160).collect()
 }
 
-fn serve(account: Account, password: Secret, jobs: Receiver<Job>, events: Sender<Event>) {
+fn serve(account: Account, mut credentials: Credentials, jobs: Receiver<Job>, events: Sender<Event>) {
     let Some(server) = account.incoming.clone() else {
         let _ = events.send(Event::Failed { account_id: account.id, what: "Dit account heeft geen inkomende server.".into() });
         return;
@@ -79,7 +84,7 @@ fn serve(account: Account, password: Secret, jobs: Receiver<Job>, events: Sender
     let mut client: Option<ImapClient> = None;
     while let Ok(job) = jobs.recv() {
         if let Job::Send { draft_id, draft, sent_path, .. } = &job {
-            let result = send(&account, &password, draft).map(|raw| {
+            let result = send(&account, &mut credentials, draft).map(|raw| {
                 // A copy in Sent is nice to have; a failure there must not undo a successful send.
                 if let (Some(path), Some(c)) = (sent_path, client.as_mut())
                     && let Err(e) = c.append(path, &raw)
@@ -95,12 +100,14 @@ fn serve(account: Account, password: Secret, jobs: Receiver<Job>, events: Sender
         loop {
             attempts += 1;
             if client.is_none() {
-                match connect(&server, &account.username, &password) {
+                match connect(&server, &account.username, &mut credentials) {
                     Ok(c) => {
                         client = Some(c);
                     }
-                    Err(e) => {
-                        let _ = events.send(Event::Failed { account_id: account.id.clone(), what: describe(&e) });
+                    Err(what) => {
+                        // A refused login may be a stale access token: fetch a new one next time.
+                        credentials.invalidate();
+                        let _ = events.send(Event::Failed { account_id: account.id.clone(), what });
                         break;
                     }
                 }
@@ -129,15 +136,17 @@ fn serve(account: Account, password: Secret, jobs: Receiver<Job>, events: Sender
 }
 
 /// Builds and sends `draft`; returns the bytes that went out, for the Sent folder.
-fn send(account: &Account, password: &Secret, draft: &mailcraft_model::Draft) -> Result<Vec<u8>, String> {
+fn send(account: &Account, credentials: &mut Credentials, draft: &mailcraft_model::Draft) -> Result<Vec<u8>, String> {
     let server = account.outgoing.as_ref().ok_or_else(|| "Dit account heeft geen uitgaande server.".to_string())?;
     let message = mailcraft_smtp::build(&account.address, draft).map_err(|e| describe_smtp(&e))?;
-    mailcraft_smtp::send(server, &account.username, password, &message).map_err(|e| describe_smtp(&e))?;
+    let credential = credentials.smtp()?;
+    mailcraft_smtp::send(server, &account.username, &credential, &message).map_err(|e| describe_smtp(&e))?;
     Ok(message.formatted())
 }
 
-fn connect(server: &Server, username: &str, password: &Secret) -> Result<ImapClient, ImapError> {
-    ImapClient::connect(server, username, password)
+fn connect(server: &Server, username: &str, credentials: &mut Credentials) -> Result<ImapClient, String> {
+    let credential = credentials.imap()?;
+    ImapClient::connect(server, username, &credential).map_err(|e| describe(&e))
 }
 
 fn run(c: &mut ImapClient, job: &Job) -> Result<Option<Event>, ImapError> {

@@ -9,6 +9,26 @@ use mailcraft_mime::ParsedHeader;
 use mailcraft_model::{FolderKind, Server, Tls};
 use mailcraft_secrets::Secret;
 
+/// How to log in.
+#[derive(Clone, Debug)]
+pub enum Credential {
+    Password(Secret),
+    /// An OAuth 2.0 access token, sent with SASL XOAUTH2.
+    OAuth2(Secret),
+}
+
+struct XOAuth2<'a> {
+    user: &'a str,
+    token: &'a Secret,
+}
+
+impl imap::Authenticator for XOAuth2<'_> {
+    type Response = String;
+    fn process(&self, _challenge: &[u8]) -> String {
+        format!("user={}\x01auth=Bearer {}\x01\x01", self.user, self.token.expose())
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ImapError {
     #[error("could not connect to {host}: {source}")]
@@ -114,7 +134,7 @@ fn has_attachment(b: &BodyStructure<'_>) -> bool {
 
 impl ImapClient {
     /// Connects, negotiates TLS and logs in.
-    pub fn connect(server: &Server, username: &str, password: &Secret) -> Result<Self> {
+    pub fn connect(server: &Server, username: &str, credential: &Credential) -> Result<Self> {
         let mode = match server.tls {
             Tls::Implicit => imap::ConnectionMode::Tls,
             Tls::StartTls => imap::ConnectionMode::StartTls,
@@ -123,10 +143,14 @@ impl ImapClient {
             .mode(mode)
             .connect()
             .map_err(|source| ImapError::Connect { host: server.host.clone(), source: Box::new(source) })?;
-        let session = client.login(username, password.expose()).map_err(|(e, _)| match e {
+        let refused = |(e, _): (imap::Error, imap::Client<Conn>)| match e {
             imap::Error::No(_) | imap::Error::Bad(_) => ImapError::Login,
             e => ImapError::Protocol(Box::new(e)),
-        })?;
+        };
+        let session = match credential {
+            Credential::Password(p) => client.login(username, p.expose()).map_err(refused)?,
+            Credential::OAuth2(token) => client.authenticate("XOAUTH2", &XOAuth2 { user: username, token }).map_err(refused)?,
+        };
         Ok(ImapClient { session, selected: None })
     }
 
@@ -261,7 +285,7 @@ mod network_tests {
     #[ignore]
     fn tls_handshake_and_login_refusal_against_a_public_server() {
         let server = Server { host: "imap.gmail.com".into(), port: 993, tls: Tls::Implicit };
-        let r = ImapClient::connect(&server, "nobody@example.org", &Secret::new("wrong"));
+        let r = ImapClient::connect(&server, "nobody@example.org", &Credential::Password(Secret::new("wrong")));
         match r {
             Err(ImapError::Login) => {}
             Err(e) => panic!("expected a login refusal, got {e}"),

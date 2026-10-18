@@ -50,6 +50,7 @@ mod tests {
             address: Address::new(None, "a@b.nl").unwrap(),
             username: "a@b.nl".into(),
             protocol: Protocol::ImapSmtp,
+            auth: mailcraft_model::Auth::Password,
             incoming: Some(Server { host: "imap.b.nl".into(), port: 993, tls: Tls::Implicit }),
             outgoing: None,
         };

@@ -21,6 +21,7 @@ fn build() -> Option<Session> {
         address: me.clone(),
         username: "jij@example.org".into(),
         protocol: Protocol::ImapSmtp,
+        auth: mailcraft_model::Auth::Password,
         incoming: Some(Server { host: "imap.example.org".into(), port: 993, tls: Tls::Implicit }),
         outgoing: Some(Server { host: "smtp.example.org".into(), port: 465, tls: Tls::Implicit }),
     };
