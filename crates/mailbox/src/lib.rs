@@ -1,11 +1,14 @@
-//! What every mail store looks like to the engine: folders, headers, bodies, flags, moves.
+//! What every mail store looks like to the engine: folders, headers, bodies, flags, moves, and
+//! for stores that keep them, appointments, contacts and tasks.
 //!
 //! IMAP and Exchange Web Services each implement [`Mailbox`]; the engine's worker holds a
 //! `Box<dyn Mailbox>` and never knows which. Message and folder ids are opaque strings (an
-//! IMAP UID, an EWS item id) that only the store that produced them interprets.
+//! IMAP UID, an EWS item id) that only the store that produced them interprets. A store that
+//! also holds a calendar, an address book and a to-do list (Exchange does, IMAP does not)
+//! offers them through [`Mailbox::items`] as an [`ItemStore`].
 
 use mailcraft_mime::ParsedHeader;
-use mailcraft_model::FolderKind;
+use mailcraft_model::{Appointment, Contact, FolderKind, Task};
 use mailcraft_secrets::Secret;
 
 /// How to log in.
@@ -81,7 +84,51 @@ pub trait Mailbox: Send {
     /// Sends `message` through the store itself and files the copy; `Ok(false)` when this
     /// store does not send and the message has to go over SMTP.
     fn send(&mut self, message: &[u8]) -> Result<bool>;
+    /// The store's appointments, contacts and tasks; `None` for a store that keeps only mail.
+    fn items(&mut self) -> Option<&mut dyn ItemStore> {
+        None
+    }
     fn logout(self: Box<Self>);
+}
+
+/// An appointment, contact or task on its way to or from a store. Its `id` is the store's
+/// own (empty for one that does not exist there yet); the engine maps it to a session id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Item {
+    Appointment(Appointment),
+    Contact(Contact),
+    Task(Task),
+}
+
+impl Item {
+    pub fn id(&self) -> &str {
+        match self {
+            Item::Appointment(a) => &a.id,
+            Item::Contact(c) => &c.id,
+            Item::Task(t) => &t.id,
+        }
+    }
+
+    pub fn set_id(&mut self, id: String) {
+        match self {
+            Item::Appointment(a) => a.id = id,
+            Item::Contact(c) => c.id = id,
+            Item::Task(t) => t.id = id,
+        }
+    }
+}
+
+/// The calendar, address book and to-do list of a store. Times are Unix seconds in UTC; a
+/// store that keeps all-day appointments and due days as dates reports them as midnight in
+/// its own time zone, and the engine snaps them to the computer's.
+pub trait ItemStore {
+    /// The appointments touching `[from, to)`, occurrences of a repeating one included.
+    fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>>;
+    fn contacts(&mut self) -> Result<Vec<Contact>>;
+    fn tasks(&mut self) -> Result<Vec<Task>>;
+    /// Creates the item when its id is empty, replaces it otherwise; returns the store's id.
+    fn save(&mut self, item: &Item) -> Result<String>;
+    fn delete(&mut self, id: &str) -> Result<()>;
 }
 
 /// Which special folder a name denotes, in English or Dutch; `Other` when it is an ordinary one.

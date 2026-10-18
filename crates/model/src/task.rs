@@ -40,6 +40,9 @@ pub struct Task {
     /// When it was marked done, as Unix seconds.
     #[serde(default)]
     pub completed: Option<i64>,
+    /// The account the task lives in; `None` for one kept only on this computer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]

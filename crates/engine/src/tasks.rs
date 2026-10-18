@@ -1,9 +1,11 @@
-//! Tasks in the session and the commands that change them. Tasks live in `tasks.json` next to
-//! the accounts file until they sync.
+//! Tasks in the session and the commands that change them. Local tasks live in `tasks.json`
+//! next to the accounts file; an account's live in its store and are mirrored here (see
+//! [`crate::sync`]).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use mailcraft_mailbox::Item;
 use mailcraft_model::{Priority, Task, TaskError};
 
 use crate::{CommandError, Session};
@@ -28,8 +30,9 @@ impl Session {
         self.selected_task = None;
     }
 
+    /// What goes to the file: the local tasks.
     pub fn tasks_data(&self) -> TasksFile {
-        TasksFile { tasks: self.tasks.clone() }
+        TasksFile { tasks: self.tasks.iter().filter(|t| t.account_id.is_none()).cloned().collect() }
     }
 
     pub fn task(&self, id: &str) -> Option<&Task> {
@@ -95,12 +98,17 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// `task.save { id?, title, notes?, due?: seconds | null, priority?: "low" | "normal" | "high" }`:
-/// creates the task, or replaces the one with `id` (keeping whether it is done).
+/// `task.save { id?, account_id?, title, notes?, due?: seconds | null, priority?: "low" | "normal" | "high" }`:
+/// creates the task (in the account's store when `account_id` names one), or replaces the one
+/// with `id` (keeping whether it is done).
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
         Some(id) => Some(s.task(id).ok_or(CommandError::NotFound)?.clone()),
         None => None,
+    };
+    let account = match &existing {
+        Some(t) => t.account_id.clone(),
+        None => s.account_param(params)?,
     };
     let priority = match params.get("priority") {
         None | Some(Value::Null) => existing.as_ref().map(|t| t.priority).unwrap_or_default(),
@@ -110,7 +118,11 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         None | Some(Value::Null) => None,
         Some(d) => Some(d.as_i64().ok_or(CommandError::Param("due"))?),
     };
-    let id = existing.as_ref().map(|t| t.id.clone()).unwrap_or_else(|| s.new_task_id());
+    let id = match (&existing, &account) {
+        (Some(t), _) => t.id.clone(),
+        (None, Some(account)) => s.pending_id(account),
+        (None, None) => s.new_task_id(),
+    };
     let task = Task {
         id: id.clone(),
         title: str_param(params, "title").unwrap_or("").to_string(),
@@ -119,15 +131,19 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         priority,
         done: existing.as_ref().is_some_and(|t| t.done),
         completed: existing.as_ref().and_then(|t| t.completed),
+        account_id: account.clone(),
     }
     .validated()
     .map_err(|e| match e {
         TaskError::NoTitle => CommandError::Param("title"),
     })?;
+    match &account {
+        Some(account) => s.save_remote(account, existing.is_none(), Item::Task(task.clone()))?,
+        None => s.tasks_dirty = true,
+    }
     s.tasks.retain(|t| t.id != id);
     s.tasks.push(task);
     s.selected_task = Some(id);
-    s.tasks_dirty = true;
     Ok(())
 }
 
@@ -135,25 +151,31 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 /// flips.
 pub fn complete(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let id = selected_or_given(s, params)?;
-    let t = s.tasks.iter_mut().find(|t| t.id == id).ok_or(CommandError::NotFound)?;
-    t.done = params.get("done").and_then(Value::as_bool).unwrap_or(!t.done);
-    t.completed = t.done.then(now);
-    s.tasks_dirty = true;
+    let mut task = s.task(&id).ok_or(CommandError::NotFound)?.clone();
+    task.done = params.get("done").and_then(Value::as_bool).unwrap_or(!task.done);
+    task.completed = task.done.then(now);
+    match task.account_id.clone() {
+        Some(account) => s.save_remote(&account, false, Item::Task(task.clone()))?,
+        None => s.tasks_dirty = true,
+    }
+    if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id) {
+        *t = task;
+    }
     Ok(())
 }
 
 /// `task.delete { id? }`: the given task, else the selected one.
 pub fn delete(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let id = selected_or_given(s, params)?;
-    let before = s.tasks.len();
+    let account = s.task(&id).ok_or(CommandError::NotFound)?.account_id.clone();
     s.tasks.retain(|t| t.id != id);
-    if s.tasks.len() == before {
-        return Err(CommandError::NotFound);
-    }
     if s.selected_task.as_deref() == Some(id.as_str()) {
         s.selected_task = None;
     }
-    s.tasks_dirty = true;
+    match account {
+        Some(account) => s.delete_remote(&account, &id),
+        None => s.tasks_dirty = true,
+    }
     Ok(())
 }
 

@@ -53,6 +53,13 @@ je e-mailadres), wachtwoord en de servernaam in (bijvoorbeeld `mail.bedrijf.nl`;
 praat met `https://mail.bedrijf.nl/EWS/Exchange.asmx`). Het certificaat van de server moet
 geldig zijn; een zelfondertekend certificaat wordt geweigerd.
 
+Bij een Exchange-account komen ook de agenda, de contacten en de taken mee: de agenda van het
+account verschijnt naast "Mijn agenda" (afspraken van 90 dagen terug tot 400 dagen vooruit),
+contacten en taken staan tussen de lokale met de accountnaam erbij. Wat je in Mailcraft
+wijzigt, gaat meteen naar de server; bij een nieuwe afspraak, contactpersoon of taak kies je
+of die op deze computer of in het account komt. **Vernieuwen** in het lint haalt alles opnieuw
+op. Zonder verbinding zie je alleen de lokale items.
+
 Let op: Mailcraft meldt zich aan met *Basic authentication* over TLS. Veel servers staan voor
 EWS alleen NTLM of Kerberos toe; Mailcraft zegt dat dan en de beheerder kan Basic voor EWS
 inschakelen. Voor Exchange Online (Microsoft 365) gebruik je de soort **Microsoft 365**.
