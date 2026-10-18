@@ -7,6 +7,7 @@ rust-version.workspace = true
 [dependencies]
 mailcraft-model = { workspace = true }
 mailcraft-mime = { workspace = true }
+mailcraft-mailbox = { workspace = true }
 imap = { workspace = true }
 imap-proto = { workspace = true }
 mailcraft-secrets = { workspace = true }

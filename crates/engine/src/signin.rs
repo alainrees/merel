@@ -42,10 +42,10 @@ impl Credentials {
     }
 
     /// The credential to log in with right now, refreshing the access token when needed.
-    pub fn imap(&mut self) -> Result<mailcraft_imap::Credential, String> {
+    pub fn incoming(&mut self) -> Result<mailcraft_mailbox::Credential, String> {
         Ok(match self.access_token()? {
-            Some(t) => mailcraft_imap::Credential::OAuth2(t),
-            None => mailcraft_imap::Credential::Password(self.secret.clone()),
+            Some(t) => mailcraft_mailbox::Credential::OAuth2(t),
+            None => mailcraft_mailbox::Credential::Password(self.secret.clone()),
         })
     }
 
@@ -154,7 +154,7 @@ mod tests {
             a
         });
         let mut c = Credentials::new(&a.unwrap(), Secret::new("pw"), None);
-        assert!(matches!(c.imap().unwrap(), mailcraft_imap::Credential::Password(_)));
+        assert!(matches!(c.incoming().unwrap(), mailcraft_mailbox::Credential::Password(_)));
         assert!(matches!(c.smtp().unwrap(), mailcraft_smtp::Credential::Password(_)));
     }
 }

@@ -21,7 +21,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
-use mailcraft_imap::{RemoteFolder, RemoteHeader};
+use mailcraft_mailbox::{Flag, RemoteFolder, RemoteHeader};
 use mailcraft_model::{Account, Draft, Flags, Folder, FolderKind, MessageHeader, clean_text};
 use mailcraft_secrets::{Secret, SecretStore};
 
@@ -45,22 +45,22 @@ pub enum Job {
         account_id: String,
         message_id: String,
         path: String,
-        uid: u32,
+        id: String,
     },
     Flag {
         account_id: String,
         path: String,
-        uid: u32,
-        flag: &'static str,
+        id: String,
+        flag: Flag,
         on: bool,
     },
     Move {
         account_id: String,
         path: String,
-        uid: u32,
+        id: String,
         dest: String,
     },
-    /// Send `draft` over SMTP and file a copy in `sent_path` when there is one.
+    /// Send `draft` (over SMTP, or through the store itself) and file a copy in `sent_path`.
     Send {
         account_id: String,
         draft_id: u64,
@@ -96,6 +96,8 @@ pub enum Event {
     Body {
         message_id: String,
         body: Body,
+        /// The envelope as the raw message carries it; fills in what the listing left out.
+        header: mailcraft_mime::ParsedHeader,
     },
     Failed {
         account_id: String,
@@ -263,14 +265,10 @@ impl Session {
                     .into_iter()
                     .filter(|f| f.selectable)
                     .map(|f| Folder {
-                        id: format!("{account_id}/{}", f.name),
+                        id: format!("{account_id}/{}", f.path),
                         account_id: account_id.clone(),
-                        name: f
-                            .kind
-                            .dutch_name()
-                            .map(str::to_string)
-                            .unwrap_or_else(|| clean_text(f.name.rsplit(['/', '.']).next().unwrap_or(&f.name))),
-                        path: f.name,
+                        name: f.kind.dutch_name().map(str::to_string).unwrap_or_else(|| clean_text(&f.name)),
+                        path: f.path,
                         kind: f.kind,
                         unread: 0,
                     })
@@ -291,13 +289,13 @@ impl Session {
                 }
                 self.messages.retain(|m| m.folder_id != folder_id);
                 for h in headers {
-                    let id = format!("{folder_id}#{}", h.uid);
+                    let id = format!("{folder_id}#{}", h.id);
                     let from = h.header.from.clone().or_else(|| mailcraft_model::Address::new(Some("Onbekende afzender"), "unknown@invalid").ok());
                     let Some(from) = from else { continue };
                     self.messages.push(MessageHeader {
                         id,
                         folder_id: folder_id.clone(),
-                        uid: h.uid,
+                        remote_id: h.id,
                         from,
                         to: h.header.to.clone(),
                         subject: if h.header.subject.is_empty() { "(Geen onderwerp)".into() } else { h.header.subject.clone() },
@@ -310,10 +308,13 @@ impl Session {
                 }
                 self.recount_unread();
             }
-            Event::Body { message_id, body } => {
+            Event::Body { message_id, body, header } => {
                 self.loading.remove(&message_id);
                 if let Some(m) = self.messages.iter_mut().find(|m| m.id == message_id) {
                     m.preview = mailcraft_mime::preview(&body.text, 120);
+                    if m.to.is_empty() {
+                        m.to = header.to;
+                    }
                 }
                 self.bodies.insert(message_id, body);
             }
@@ -359,7 +360,7 @@ impl Session {
         if f.account_id == SAMPLE_ACCOUNT || self.bodies.contains_key(message_id) || self.loading.contains(message_id) {
             return;
         }
-        let job = Job::Body { account_id: f.account_id.clone(), message_id: m.id.clone(), path: f.path.clone(), uid: m.uid };
+        let job = Job::Body { account_id: f.account_id.clone(), message_id: m.id.clone(), path: f.path.clone(), id: m.remote_id.clone() };
         self.loading.insert(message_id.to_string());
         self.pending.push(job);
     }

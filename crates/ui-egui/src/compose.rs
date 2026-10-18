@@ -198,7 +198,7 @@ mod tests {
         MessageHeader {
             id: "m".into(),
             folder_id: "f".into(),
-            uid: 1,
+            remote_id: "1".into(),
             from: Address::new(Some("Sanne"), "sanne@example.org").unwrap(),
             to: vec![Address::new(None, "jij@example.org").unwrap(), Address::new(None, "ravi@example.org").unwrap()],
             subject: "Planning".into(),
