@@ -25,8 +25,10 @@ the system browser (OAuth 2.0 with PKCE, XOAUTH2 on IMAP and SMTP); see
 [docs/accounts.md](docs/accounts.md) for the one-time app registration. Exchange Server (2013+)
 works through Exchange Web Services over HTTPS, reading and sending alike. The calendar module
 shows a month, week or day view with a local calendar: appointments are created, edited and
-deleted in a window and kept in `calendar.json`. Next up: calendars that sync with the account
-(Exchange, Google, CalDAV), then contacts and tasks.
+deleted in a window and kept in `calendar.json`. The contacts module keeps a local address
+book (`contacts.json`) with search and a contact card, and the compose window completes
+addresses from it and from the mail you have seen. Next up: tasks, then calendars and contacts
+that sync with the account (Exchange, Google, CalDAV/CardDAV).
 
 ## Build
 

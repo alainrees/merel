@@ -1,6 +1,6 @@
 //! Built-in sample mail so the app has something to show before an account is added.
 
-use mailcraft_model::{Account, Address, Appointment, Calendar, Flags, Folder, FolderKind, MessageHeader, Protocol, Server, Tls};
+use mailcraft_model::{Account, Address, Appointment, Calendar, Contact, Flags, Folder, FolderKind, MessageHeader, Protocol, Server, Tls};
 
 use crate::Session;
 
@@ -87,7 +87,31 @@ fn build() -> Option<Session> {
 
     let mut session = Session { accounts: vec![account], folders, messages, ..Session::default() };
     session.set_calendar_data(crate::calendar::CalendarFile { calendars: vec![Calendar::local()], appointments: appointments() });
+    session.set_contacts(contacts());
     Some(session)
+}
+
+fn contacts() -> Vec<Contact> {
+    [
+        ("Sanne de Vries", "sanne@example.org", "06 12345678", "Studio ArtCraft"),
+        ("Ravi Kumar", "ravi@example.org", "020 1234567", "Drukkerij Kumar"),
+        ("Studio ArtCraft", "studio@example.org", "", ""),
+    ]
+    .into_iter()
+    .enumerate()
+    .filter_map(|(i, (name, email, phone, company))| {
+        Contact {
+            id: format!("sample-{i}"),
+            name: name.into(),
+            emails: vec![email.into()],
+            phones: if phone.is_empty() { Vec::new() } else { vec![phone.into()] },
+            company: company.into(),
+            notes: String::new(),
+        }
+        .validated()
+        .ok()
+    })
+    .collect()
 }
 
 /// Three appointments around today, so the calendar has something to show.
