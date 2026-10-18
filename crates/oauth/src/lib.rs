@@ -172,7 +172,8 @@ impl Client {
         if let Some(secret) = &self.client_secret {
             form.push_str(&format!("&client_secret={}", encode(secret.expose())));
         }
-        if self.scope.contains("outlook.office.com") {
+        // Microsoft hands out a token for the resource the scopes name; Google needs no scope here.
+        if self.token_url.contains("login.microsoftonline.com") {
             form.push_str(&format!("&scope={}", encode(&self.scope)));
         }
         self.token_request(form)
