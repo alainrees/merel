@@ -8,6 +8,7 @@
 //! [`Job`] behind; the [`Engine`] hands jobs to a background [`worker`] and feeds the
 //! [`Event`]s that come back into [`Session::apply`]. That keeps the session pure and testable.
 
+pub mod calendar;
 mod commands;
 pub mod config;
 mod sample;
@@ -22,7 +23,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
 use mailcraft_mailbox::{Flag, RemoteFolder, RemoteHeader};
-use mailcraft_model::{Account, Draft, Flags, Folder, FolderKind, MessageHeader, clean_text};
+use mailcraft_model::{Account, Appointment, Calendar, Draft, Flags, Folder, FolderKind, MessageHeader, clean_text};
 use mailcraft_secrets::{Secret, SecretStore};
 
 /// How many of the newest messages a folder shows.
@@ -146,7 +147,13 @@ pub struct Session {
     pub outbox: HashMap<u64, SendState>,
     /// A browser sign-in in progress (`Some(None)`), or how the last one ended.
     pub sign_in: Option<Option<Result<(), String>>>,
+    pub calendars: Vec<Calendar>,
+    pub appointments: Vec<Appointment>,
+    pub selected_appointment: Option<String>,
+    /// Set when a command changed the calendar; the engine saves and clears it.
+    calendar_dirty: bool,
     next_draft_id: u64,
+    next_appointment_id: u64,
     pending: Vec<Job>,
 }
 
@@ -394,6 +401,7 @@ impl Engine {
         let accounts = config_path.as_deref().map(config::load).unwrap_or_default();
         let (tx, rx) = channel();
         let worker = worker::Worker::new(tx);
+        let calendar = config_path.as_deref().map(|p| config::load_json::<calendar::CalendarFile>(&config::calendar_path(p))).unwrap_or_default();
         let mut engine = Engine { session: Session::default(), worker: Some(worker), events: rx, secrets, config_path };
         if accounts.is_empty() {
             engine.session = Session::sample();
@@ -401,8 +409,18 @@ impl Engine {
             engine.session = Session::with_accounts(accounts);
             engine.spawn_accounts();
         }
+        if !calendar.appointments.is_empty() || !calendar.calendars.is_empty() {
+            engine.session.set_calendar_data(calendar);
+        }
         engine.dispatch();
         engine
+    }
+
+    fn save_calendar(&self) -> Result<(), String> {
+        if let Some(path) = &self.config_path {
+            config::save_json(&config::calendar_path(path), &self.session.calendar_data()).map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     fn spawn_accounts(&mut self) {
@@ -472,6 +490,11 @@ impl Engine {
     pub fn run(&mut self, id: &str, params: &serde_json::Value) -> Result<(), CommandError> {
         let r = self.session.run(id, params);
         self.dispatch();
+        if self.session.take_calendar_dirty()
+            && let Err(e) = self.save_calendar()
+        {
+            return Err(CommandError::Store(e));
+        }
         r
     }
 

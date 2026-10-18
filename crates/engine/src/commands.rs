@@ -26,6 +26,8 @@ pub enum CommandError {
     NotFound,
     #[error("this account has no {0} folder")]
     NoFolder(&'static str),
+    #[error("could not save: {0}")]
+    Store(String),
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -38,6 +40,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "message.delete", label: "Delete", run: |s, _| move_selected(s, FolderKind::Deleted, "Deleted Items") },
     CommandSpec { id: "message.archive", label: "Archive", run: |s, _| move_selected(s, FolderKind::Archive, "Archive") },
     CommandSpec { id: "message.junk", label: "Junk", run: |s, _| move_selected(s, FolderKind::Junk, "Junk") },
+    CommandSpec { id: "appointment.select", label: "Open appointment", run: crate::calendar::select },
+    CommandSpec { id: "appointment.save", label: "Save appointment", run: crate::calendar::save },
+    CommandSpec { id: "appointment.delete", label: "Delete appointment", run: crate::calendar::delete },
 ];
 
 impl Session {
