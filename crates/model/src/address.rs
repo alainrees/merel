@@ -59,6 +59,36 @@ impl Address {
     }
 }
 
+/// Addresses typed by a person: `Naam <a@b.nl>, c@d.nl; "De Vries, J" <j@e.nl>`. Separators are
+/// commas, semicolons and line breaks, except inside double quotes. The first address that fails
+/// to parse is the error.
+pub fn parse_address_list(s: &str) -> Result<Vec<Address>, AddressError> {
+    let mut parts = Vec::new();
+    let mut cur = String::new();
+    let mut quoted = false;
+    for c in s.chars() {
+        match c {
+            '"' => quoted = !quoted,
+            ',' | ';' | '\n' if !quoted => parts.push(std::mem::take(&mut cur)),
+            c => cur.push(c),
+        }
+    }
+    parts.push(cur);
+    let mut out = Vec::new();
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (name, email) = match (part.rfind('<'), part.ends_with('>')) {
+            (Some(i), true) => (Some(part[..i].trim()), part[i + 1..part.len() - 1].trim()),
+            _ => (None, part),
+        };
+        out.push(Address::new(name.filter(|n| !n.is_empty()), email)?);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,6 +109,17 @@ mod tests {
         assert_eq!(Address::new(None, "a@b.nl\r\nBcc: x@y.nl"), Err(AddressError::Character));
         assert_eq!(Address::new(None, "<a@b.nl>"), Err(AddressError::Character));
         assert_eq!(Address::new(None, &format!("{}@b.nl", "a".repeat(260))), Err(AddressError::TooLong));
+    }
+
+    #[test]
+    fn parses_typed_lists() {
+        let list = parse_address_list("Sanne <sanne@example.org>; ravi@example.org,\n \"De Vries, J\" <j@example.org>").unwrap();
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[0].display(), "Sanne");
+        assert_eq!(list[1].email(), "ravi@example.org");
+        assert_eq!(list[2].display(), "De Vries, J");
+        assert!(parse_address_list("a@b.nl, nope").is_err());
+        assert!(parse_address_list("  ").unwrap().is_empty());
     }
 
     #[test]

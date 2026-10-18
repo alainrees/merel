@@ -5,14 +5,19 @@
 //! Every button runs a command id through [`mailcraft_engine::Session::run`]; nothing here
 //! changes the session directly.
 
+mod backstage;
+mod compose;
 mod dates;
 mod theme;
 
 use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
 use serde_json::{Value, json};
 
-use mailcraft_engine::Session;
+use mailcraft_engine::{AccountStatus, Engine};
 use mailcraft_model::FolderKind;
+
+pub use backstage::AccountForm;
+pub use compose::{Compose, Kind as ComposeKind};
 
 pub use theme::{APP_COLOR, Tokens};
 
@@ -71,33 +76,49 @@ impl Tab {
 }
 
 pub struct MailApp {
-    pub session: Session,
+    pub engine: Engine,
     pub module: Module,
     tab: Tab,
-    /// The last command error, shown in the status bar until the next action.
+    form: AccountForm,
+    pub compose: Option<Compose>,
+    /// The last command error or note, shown in the status bar until the next action.
     notice: Option<String>,
 }
 
 impl MailApp {
-    pub fn new(session: Session) -> Self {
-        MailApp { session, module: Module::Mail, tab: Tab::Home, notice: None }
+    pub fn new(engine: Engine) -> Self {
+        MailApp { engine, module: Module::Mail, tab: Tab::Home, form: AccountForm::default(), compose: None, notice: None }
     }
 
     /// Runs a command; an error is shown, never raised.
     fn run(&mut self, id: &str, params: Value) {
-        self.notice = match self.session.run(id, &params) {
+        self.notice = match self.engine.run(id, &params) {
             Ok(()) => None,
             Err(e) => {
                 log::warn!("{id}: {e}");
-                Some(e.to_string())
+                Some(match e {
+                    mailcraft_engine::CommandError::NoSelection => "Selecteer eerst een bericht.".to_string(),
+                    mailcraft_engine::CommandError::NoFolder(_) => "Dit account heeft die map niet.".to_string(),
+                    e => e.to_string(),
+                })
             }
         };
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
         let t = Tokens::for_dark(ui.visuals().dark_mode);
+        self.engine.poll();
+        if self.engine.session.has_pending() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+        }
         ribbon(self, ui, &t);
         status_bar(self, ui, &t);
+        let ctx = ui.ctx().clone();
+        compose::show(self, &ctx, &t);
+        if self.tab == Tab::File {
+            backstage::show(self, ui, &t);
+            return;
+        }
         rail(self, ui, &t);
         if self.module == Module::Mail {
             folder_pane(self, ui, &t);
@@ -137,8 +158,24 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .show(ui, |ui| {
             ui.horizontal(|ui| match app.tab {
                 Tab::Home => {
-                    let has = app.session.selected_message.is_some();
-                    ribbon_button(app, ui, t, "✉", "Nieuwe e-mail", None, false);
+                    let has = app.engine.session.selected_message.is_some();
+                    let mut open: Option<ComposeKind> = None;
+                    if ribbon_action(ui, t, "✉", "Nieuwe e-mail", true) {
+                        open = Some(ComposeKind::New);
+                    }
+                    ui.separator();
+                    if ribbon_action(ui, t, "↩", "Beantwoorden", has) {
+                        open = Some(ComposeKind::Reply);
+                    }
+                    if ribbon_action(ui, t, "↞", "Allen beantwoorden", has) {
+                        open = Some(ComposeKind::ReplyAll);
+                    }
+                    if ribbon_action(ui, t, "↪", "Doorsturen", has) {
+                        open = Some(ComposeKind::Forward);
+                    }
+                    if let Some(kind) = open {
+                        app.open_compose(kind);
+                    }
                     ui.separator();
                     ribbon_button(app, ui, t, "🗑", "Verwijderen", Some("message.delete"), has);
                     ribbon_button(app, ui, t, "🗄", "Archiveren", Some("message.archive"), has);
@@ -149,7 +186,8 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ribbon_button(app, ui, t, "⚑", "Vlag", Some("message.flag"), has);
                 }
                 Tab::SendReceive => {
-                    ribbon_button(app, ui, t, "⟳", "Alle mappen verzenden/ontvangen", None, false);
+                    let can = !app.engine.session.is_sample() && app.engine.session.selected_folder.is_some();
+                    ribbon_button(app, ui, t, "⟳", "Vernieuwen", Some("folder.refresh"), can);
                 }
                 _ => {
                     ui.label(RichText::new("Nog niet beschikbaar").color(t.text_dim));
@@ -158,10 +196,9 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         });
 }
 
-/// A large ribbon button: glyph above label. `command` `None` draws it disabled (not built yet).
-/// Drawn by hand as one widget, so a screen reader sees a single button named `label`.
-fn ribbon_button(app: &mut MailApp, ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, command: Option<&str>, enabled: bool) {
-    let enabled = enabled && command.is_some();
+/// A large ribbon button: glyph above label, drawn by hand as one widget so a screen reader
+/// sees a single button named `label`. Returns true when clicked.
+fn ribbon_action(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool) -> bool {
     let (rect, r) = ui.allocate_exact_size(vec2(72.0, 56.0), if enabled { Sense::click() } else { Sense::hover() });
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     let color = if enabled { t.text } else { t.text_dim.gamma_multiply(0.6) };
@@ -177,7 +214,13 @@ fn ribbon_button(app: &mut MailApp, ui: &mut Ui, t: &Tokens, glyph: &str, label:
         if enabled { t.accent } else { color },
     );
     p.text(egui::pos2(rect.center().x, rect.bottom() - 10.0), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(12.0), color);
-    if let (true, Some(id)) = (enabled && r.clicked(), command) {
+    enabled && r.clicked()
+}
+
+/// A ribbon button that runs a command. `command` `None` draws it disabled (not built yet).
+fn ribbon_button(app: &mut MailApp, ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, command: Option<&str>, enabled: bool) {
+    let enabled = enabled && command.is_some();
+    if let (true, Some(id)) = (ribbon_action(ui, t, glyph, label, enabled), command) {
         app.run(id, Value::Null);
     }
 }
@@ -220,11 +263,23 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .frame(egui::Frame::NONE.fill(t.panel).inner_margin(Margin::symmetric(8, 10)).stroke(Stroke::new(1.0, t.border)))
         .show(ui, |ui| {
             let mut pick = None;
-            for account in &app.session.accounts {
-                ui.label(RichText::new(account.address.email()).strong().color(t.text));
+            let mut open_accounts = false;
+            for account in &app.engine.session.accounts {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(account.address.email()).strong().color(t.text));
+                    let (dot, tip) = match app.engine.session.status.get(&account.id) {
+                        Some(AccountStatus::Online) => (t.accent, "Verbonden"),
+                        Some(AccountStatus::Connecting) => (t.text_dim, "Verbinden…"),
+                        Some(AccountStatus::Error(_)) => (t.flag, "Fout, zie de statusbalk"),
+                        _ => (t.border, "Niet verbonden"),
+                    };
+                    let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+                    ui.painter().circle_filled(r.center(), 4.0, dot);
+                    ui.allocate_rect(r, Sense::hover()).on_hover_text(tip);
+                });
                 ui.add_space(4.0);
-                for f in app.session.folders.iter().filter(|f| f.account_id == account.id) {
-                    let on = app.session.selected_folder.as_deref() == Some(f.id.as_str());
+                for f in app.engine.session.folders.iter().filter(|f| f.account_id == account.id) {
+                    let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
                     let r = ui.add_sized(
                         [ui.available_width(), 28.0],
                         egui::Button::new("").fill(if on { t.checked } else { Color32::TRANSPARENT }).frame_when_inactive(on),
@@ -243,6 +298,13 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     }
                 }
             }
+            ui.add_space(12.0);
+            if ui.add(egui::Button::new(RichText::new("＋ Account toevoegen").color(t.accent_text)).frame(false)).clicked() {
+                open_accounts = true;
+            }
+            if open_accounts {
+                app.tab = Tab::File;
+            }
             if let Some(id) = pick {
                 app.run("folder.select", json!({ "id": id }));
             }
@@ -253,20 +315,28 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::Panel::left("messages").default_size(360.0).resizable(true).frame(egui::Frame::NONE.fill(t.list).stroke(Stroke::new(1.0, t.border))).show(
         ui,
         |ui| {
-            let folder_name =
-                app.session.selected_folder.as_deref().and_then(|id| app.session.folder(id)).map(|f| f.name.clone()).unwrap_or_default();
+            let folder_name = app
+                .engine
+                .session
+                .selected_folder
+                .as_deref()
+                .and_then(|id| app.engine.session.folder(id))
+                .map(|f| f.name.clone())
+                .unwrap_or_default();
             egui::Frame::NONE.inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
                 ui.label(RichText::new(folder_name).size(18.0).strong().color(t.text));
             });
             let mut pick = None;
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-                let list = app.session.visible_messages();
+                let list = app.engine.session.visible_messages();
+                let loading = app.engine.session.selected_folder.as_deref().is_some_and(|f| app.engine.session.loading.contains(f));
                 if list.is_empty() {
                     ui.add_space(24.0);
-                    ui.vertical_centered(|ui| ui.label(RichText::new("Deze map is leeg.").color(t.text_dim)));
+                    let msg = if loading { "Berichten ophalen…" } else { "Deze map is leeg." };
+                    ui.vertical_centered(|ui| ui.label(RichText::new(msg).color(t.text_dim)));
                 }
                 for m in list {
-                    let on = app.session.selected_message.as_deref() == Some(m.id.as_str());
+                    let on = app.engine.session.selected_message.as_deref() == Some(m.id.as_str());
                     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 68.0), Sense::click());
                     let r = r.on_hover_text(&m.subject);
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &m.subject));
@@ -334,7 +404,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 }
 
 fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
-    let Some(m) = app.session.selected() else {
+    let Some(m) = app.engine.session.selected() else {
         ui.centered_and_justified(|ui| ui.label(RichText::new("Selecteer een bericht om het te lezen.").color(t.text_dim).size(15.0)));
         return;
     };
@@ -355,12 +425,56 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         });
     });
     ui.add_space(8.0);
-    // Privacy: remote content (images, fonts, tracking pixels) is never loaded without consent.
-    egui::Frame::NONE.fill(t.checked).corner_radius(CornerRadius::same(4)).inner_margin(Margin::symmetric(10, 6)).show(ui, |ui| {
-        ui.label(RichText::new("🛡 Externe afbeeldingen zijn geblokkeerd om je privacy te beschermen.").size(12.0).color(t.text));
+    let body = app.engine.session.selected_body().cloned();
+    let loading = app.engine.session.loading.contains(&m.id);
+    let sample = app.engine.session.is_sample();
+    if body.as_ref().is_some_and(|b| b.from_html) {
+        // Privacy: HTML is reduced to text; images, scripts and tracking pixels never load.
+        egui::Frame::NONE.fill(t.checked).corner_radius(CornerRadius::same(4)).inner_margin(Margin::symmetric(10, 6)).show(ui, |ui| {
+            ui.label(
+                RichText::new("🛡 Dit bericht is als tekst weergegeven. Externe afbeeldingen zijn geblokkeerd om je privacy te beschermen.")
+                    .size(12.0)
+                    .color(t.text),
+            );
+        });
+        ui.add_space(8.0);
+    }
+    if let Some(b) = body.as_ref().filter(|b| !b.attachments.is_empty()) {
+        ui.horizontal_wrapped(|ui| {
+            for a in &b.attachments {
+                egui::Frame::NONE
+                    .fill(t.panel)
+                    .stroke(Stroke::new(1.0, t.border))
+                    .corner_radius(CornerRadius::same(4))
+                    .inner_margin(Margin::symmetric(8, 4))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(format!("📎 {}  ({})", a.name, size_text(a.size))).size(12.0).color(t.text));
+                    });
+            }
+        });
+        ui.add_space(8.0);
+    }
+    ui.add_space(6.0);
+    let text = match (&body, loading, sample) {
+        (Some(b), _, _) => b.text.clone(),
+        (None, true, _) => "Bericht ophalen…".to_string(),
+        (None, false, true) => m.preview.clone(),
+        (None, false, false) => String::new(),
+    };
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        ui.add(egui::Label::new(RichText::new(text).color(if body.is_some() || sample { t.text } else { t.text_dim }).size(14.0)).wrap());
     });
-    ui.add_space(14.0);
-    ui.label(RichText::new(&m.preview).color(t.text).size(14.0));
+}
+
+/// "12 kB", "3,4 MB".
+fn size_text(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{} kB", bytes / 1024)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0)).replace('.', ",")
+    }
 }
 
 fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
@@ -368,14 +482,32 @@ fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .frame(egui::Frame::NONE.fill(t.status_bar).inner_margin(Margin::symmetric(10, 4)).stroke(Stroke::new(1.0, t.border)))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                let list = app.session.visible_messages();
+                let list = app.engine.session.visible_messages();
                 let unread = list.iter().filter(|m| !m.flags.seen).count();
                 ui.label(RichText::new(format!("Items: {}   Ongelezen: {}", list.len(), unread)).size(12.0).color(t.text_dim));
                 if let Some(n) = &app.notice {
-                    ui.label(RichText::new(n).size(12.0).color(t.flag));
+                    let col = if n.ends_with("verzonden.") { t.accent_text } else { t.flag };
+                    ui.label(RichText::new(n).size(12.0).color(col));
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new("Voorbeeldmail · offline").size(12.0).color(t.text_dim));
+                    let (txt, col) = if app.engine.session.is_sample() {
+                        ("Voorbeeldmail · offline".to_string(), t.text_dim)
+                    } else {
+                        let statuses = app.engine.session.status.values();
+                        let mut worst = ("Verbonden".to_string(), t.text_dim);
+                        for s in statuses {
+                            match s {
+                                AccountStatus::Error(e) => worst = (e.clone(), t.flag),
+                                AccountStatus::Connecting if worst.1 != t.flag => worst = ("Verbinden…".to_string(), t.text_dim),
+                                _ => {}
+                            }
+                        }
+                        if app.engine.session.has_pending() && worst.1 != t.flag {
+                            worst.0 = "Bezig…".to_string();
+                        }
+                        worst
+                    };
+                    ui.label(RichText::new(txt).size(12.0).color(col));
                 });
             });
         });
@@ -395,7 +527,7 @@ mod tests {
     fn harness() -> egui_kittest::Harness<'static, MailApp> {
         egui_kittest::Harness::builder()
             .with_size(vec2(1280.0, 800.0))
-            .build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(Session::sample()))
+            .build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(Engine::sample()))
     }
 
     #[test]
@@ -405,11 +537,11 @@ mod tests {
         let subject = "Planning voor donderdag";
         h.get_by_label(subject).click();
         h.run();
-        assert_eq!(h.state().session.selected().map(|m| m.subject.as_str()), Some(subject));
+        assert_eq!(h.state().engine.session.selected().map(|m| m.subject.as_str()), Some(subject));
         h.get_by_label("Verwijderen").click();
         h.run();
-        assert!(h.state().session.selected().is_none());
-        assert!(h.state().session.visible_messages().iter().all(|m| m.subject != subject));
+        assert!(h.state().engine.session.selected().is_none());
+        assert!(h.state().engine.session.visible_messages().iter().all(|m| m.subject != subject));
     }
 
     #[test]
@@ -418,6 +550,37 @@ mod tests {
         h.state_mut().module = Module::Calendar;
         h.run();
         assert!(h.query_by_label_contains("Agenda volgt").is_some());
+    }
+
+    #[test]
+    fn file_tab_opens_the_backstage_with_the_account_form() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Bestand").click();
+        h.run();
+        assert!(h.query_by_label("Toevoegen en verbinden").is_some());
+        h.get_by_label("←  Terug").click();
+        h.run();
+        assert!(h.query_by_label("Toevoegen en verbinden").is_none());
+    }
+
+    #[test]
+    fn reply_opens_the_compose_window_prefilled() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Planning voor donderdag").click();
+        h.run();
+        h.get_by_label("Beantwoorden").click();
+        h.run();
+        let c = h.state().compose.as_ref().expect("compose window");
+        assert_eq!(c.subject, "Re: Planning voor donderdag");
+        assert!(c.to.contains("sanne@example.org"));
+        h.get_by_label("Verzenden").click();
+        h.run();
+        h.run();
+        // The sample account cannot send: the window stays with the reason.
+        let c = h.state().compose.as_ref().expect("compose window still open");
+        assert!(c.error.as_deref().is_some_and(|e| e.contains("account")));
     }
 
     #[test]
