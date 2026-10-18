@@ -1,0 +1,17 @@
+[package]
+name = "mailcraft-imap"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mailcraft-model = { workspace = true }
+mailcraft-mime = { workspace = true }
+imap = { workspace = true }
+imap-proto = { workspace = true }
+mailcraft-secrets = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+
+[lints]
+workspace = true
