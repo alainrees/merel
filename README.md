@@ -28,11 +28,10 @@ shows a month, week or day view with a local calendar: appointments are created,
 deleted in a window and kept in `calendar.json`. The contacts module keeps a local address
 book (`contacts.json`) with search and a contact card, and the compose window completes
 addresses from it and from the mail you have seen. The tasks module keeps a local to-do list
-(`tasks.json`) with due days, priorities and an open/done filter. An Exchange account brings
-its own calendar, contacts and tasks along: they appear next to the local ones, changes go
-straight to the server, and a new item asks whether it belongs on this computer or in the
-account. Next up: the same for Google (Calendar, People, Tasks) and CalDAV/CardDAV, and an
-offline cache.
+(`tasks.json`) with due days, priorities and an open/done filter. An Exchange or Gmail account brings
+its own calendar, contacts and tasks along (Google Calendar, People and Tasks for Gmail): they
+appear next to the local ones, changes go straight to the server, and a new item asks whether
+it belongs on this computer or in the account. Next up: CalDAV/CardDAV and an offline cache.
 
 ## Build
 
