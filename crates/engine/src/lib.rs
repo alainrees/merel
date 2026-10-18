@@ -556,13 +556,16 @@ impl Engine {
     }
 
     /// Runs the browser sign-in again for an OAuth account, asking the provider's current
-    /// scopes, so an account signed in before a scope was added (calendar, contacts and tasks
-    /// for Gmail) gets a token that covers it. The result arrives like a first sign-in.
+    /// scopes and servers, so an account signed in before a scope was added (calendar,
+    /// contacts and tasks for Gmail; Microsoft Graph for Microsoft 365) gets a token that
+    /// covers it. The result arrives like a first sign-in.
     pub fn sign_in_again(&mut self, account_id: &str) {
         let Some(mut account) = self.session.accounts.iter().find(|a| a.id == account_id).cloned() else { return };
         let preset = account.protocol.preset();
         if let (Auth::OAuth2 { scope, .. }, Some(preset)) = (&mut account.auth, preset) {
             *scope = preset.scope;
+            account.incoming = Some(preset.incoming);
+            account.outgoing = preset.outgoing;
         }
         let client_secret = self.secrets.get(&signin::client_secret_key(&account.id)).ok().flatten();
         self.sign_in(signin::SignIn { account, client_secret });

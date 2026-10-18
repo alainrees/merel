@@ -65,18 +65,20 @@ impl Protocol {
             Protocol::ImapSmtp | Protocol::Exchange => None,
             Protocol::Gmail => Some(Preset {
                 incoming: Server { host: "imap.gmail.com".into(), port: 993, tls: Tls::Implicit },
-                outgoing: Server { host: "smtp.gmail.com".into(), port: 465, tls: Tls::Implicit },
+                outgoing: Some(Server { host: "smtp.gmail.com".into(), port: 465, tls: Tls::Implicit }),
                 auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
                 token_url: "https://oauth2.googleapis.com/token".into(),
                 // IMAP and SMTP, then the Calendar, People and Tasks APIs.
                 scope: "https://mail.google.com/ https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/tasks".into(),
             }),
+            // Everything through Microsoft Graph: mail, sending, calendar, contacts and tasks
+            // are one OAuth resource, and Exchange Online stops answering EWS in October 2026.
             Protocol::Microsoft365 => Some(Preset {
-                incoming: Server { host: "outlook.office365.com".into(), port: 993, tls: Tls::Implicit },
-                outgoing: Server { host: "smtp.office365.com".into(), port: 587, tls: Tls::StartTls },
+                incoming: Server { host: "graph.microsoft.com".into(), port: 443, tls: Tls::Implicit },
+                outgoing: None,
                 auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".into(),
                 token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token".into(),
-                scope: "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access".into(),
+                scope: "https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Calendars.ReadWrite https://graph.microsoft.com/Contacts.ReadWrite https://graph.microsoft.com/Tasks.ReadWrite offline_access".into(),
             }),
         }
     }
@@ -86,7 +88,8 @@ impl Protocol {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Preset {
     pub incoming: Server,
-    pub outgoing: Server,
+    /// `None` when the store sends itself.
+    pub outgoing: Option<Server>,
     pub auth_url: String,
     pub token_url: String,
     pub scope: String,
