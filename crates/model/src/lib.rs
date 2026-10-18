@@ -7,10 +7,12 @@
 mod address;
 mod calendar;
 mod contact;
+mod task;
 
 pub use address::{Address, AddressError, parse_address_list};
 pub use calendar::{Appointment, AppointmentError, Calendar, MAX_NOTES};
 pub use contact::{Contact, ContactError};
+pub use task::{Priority, Task, TaskError};
 
 use serde::{Deserialize, Serialize};
 

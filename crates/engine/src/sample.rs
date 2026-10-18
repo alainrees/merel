@@ -1,6 +1,8 @@
 //! Built-in sample mail so the app has something to show before an account is added.
 
-use mailcraft_model::{Account, Address, Appointment, Calendar, Contact, Flags, Folder, FolderKind, MessageHeader, Protocol, Server, Tls};
+use mailcraft_model::{
+    Account, Address, Appointment, Calendar, Contact, Flags, Folder, FolderKind, MessageHeader, Priority, Protocol, Server, Task, Tls,
+};
 
 use crate::Session;
 
@@ -88,7 +90,39 @@ fn build() -> Option<Session> {
     let mut session = Session { accounts: vec![account], folders, messages, ..Session::default() };
     session.set_calendar_data(crate::calendar::CalendarFile { calendars: vec![Calendar::local()], appointments: appointments() });
     session.set_contacts(contacts());
+    session.set_tasks(tasks());
     Some(session)
+}
+
+fn tasks() -> Vec<Task> {
+    use chrono::{Days, Local, TimeZone};
+    let today = Local::now().date_naive();
+    let due = |days: u64| {
+        let date = today.checked_add_days(Days::new(days))?;
+        Local.from_local_datetime(&date.and_hms_opt(0, 0, 0)?).earliest().map(|d| d.timestamp())
+    };
+    [
+        ("Offerte drukwerk beantwoorden", Some(0), Priority::High, false),
+        ("Schetsen voor donderdag afmaken", Some(2), Priority::Normal, false),
+        ("Portfolio bijwerken", None, Priority::Low, false),
+        ("Welkomstmail lezen", Some(0), Priority::Normal, true),
+    ]
+    .into_iter()
+    .enumerate()
+    .filter_map(|(i, (title, in_days, priority, done))| {
+        Task {
+            id: format!("sample-{i}"),
+            title: title.into(),
+            notes: String::new(),
+            due: in_days.and_then(due),
+            priority,
+            done,
+            completed: done.then(|| due(0)).flatten(),
+        }
+        .validated()
+        .ok()
+    })
+    .collect()
 }
 
 fn contacts() -> Vec<Contact> {
