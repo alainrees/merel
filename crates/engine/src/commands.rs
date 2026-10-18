@@ -208,5 +208,25 @@ mod tests {
         s.run("message.delete", &Value::Null).unwrap();
         assert_eq!(s.take_jobs(), vec![Job::Move { account_id: "acc".into(), path: "INBOX".into(), uid: 7, dest: "Trash".into() }]);
         assert_eq!(s.message("acc/INBOX#7").unwrap().folder_id, "acc/Trash");
+
+        let draft = mailcraft_model::Draft {
+            to: vec![Address::new(None, "x@y.nl").unwrap()],
+            subject: "Hoi".into(),
+            body: "Dag".into(),
+            ..Default::default()
+        };
+        let id = s.send("acc", draft.clone());
+        assert_eq!(s.outbox.get(&id), Some(&crate::SendState::Sending));
+        assert_eq!(s.take_jobs(), vec![Job::Send { account_id: "acc".into(), draft_id: id, draft: Box::new(draft), sent_path: None }]);
+        s.apply(crate::Event::Sent { account_id: "acc".into(), draft_id: id, result: Err("nee".into()) });
+        assert_eq!(s.outbox.get(&id), Some(&crate::SendState::Failed("nee".into())));
+    }
+
+    #[test]
+    fn sample_account_cannot_send() {
+        let mut s = Session::sample();
+        let id = s.send(crate::SAMPLE_ACCOUNT, mailcraft_model::Draft::default());
+        assert!(matches!(s.outbox.get(&id), Some(crate::SendState::Failed(_))));
+        assert!(s.take_jobs().is_empty());
     }
 }

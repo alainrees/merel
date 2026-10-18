@@ -19,8 +19,9 @@ and Linux.
 The Outlook-style window (ribbon, module rail, folder pane, message list, reading pane) over
 built-in sample mail, and reading mail from an IMAP account: add it under File › Accounts,
 browse folders, open messages (plain text, or HTML reduced to text), mark read or unread, flag,
-delete, archive and move to junk; changes go back to the server. Next up: sending over SMTP,
-then Gmail, Microsoft 365 and Exchange; after mail come calendar, contacts and tasks.
+delete, archive and move to junk; changes go back to the server. Sending over SMTP: new mail,
+reply, reply all and forward, with a copy filed in Sent. Next up: Gmail, Microsoft 365 and
+Exchange; after mail come calendar, contacts and tasks.
 
 ## Build
 

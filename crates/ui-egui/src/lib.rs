@@ -6,6 +6,7 @@
 //! changes the session directly.
 
 mod backstage;
+mod compose;
 mod dates;
 mod theme;
 
@@ -16,6 +17,7 @@ use mailcraft_engine::{AccountStatus, Engine};
 use mailcraft_model::FolderKind;
 
 pub use backstage::AccountForm;
+pub use compose::{Compose, Kind as ComposeKind};
 
 pub use theme::{APP_COLOR, Tokens};
 
@@ -78,13 +80,14 @@ pub struct MailApp {
     pub module: Module,
     tab: Tab,
     form: AccountForm,
-    /// The last command error, shown in the status bar until the next action.
+    pub compose: Option<Compose>,
+    /// The last command error or note, shown in the status bar until the next action.
     notice: Option<String>,
 }
 
 impl MailApp {
     pub fn new(engine: Engine) -> Self {
-        MailApp { engine, module: Module::Mail, tab: Tab::Home, form: AccountForm::default(), notice: None }
+        MailApp { engine, module: Module::Mail, tab: Tab::Home, form: AccountForm::default(), compose: None, notice: None }
     }
 
     /// Runs a command; an error is shown, never raised.
@@ -110,6 +113,8 @@ impl MailApp {
         }
         ribbon(self, ui, &t);
         status_bar(self, ui, &t);
+        let ctx = ui.ctx().clone();
+        compose::show(self, &ctx, &t);
         if self.tab == Tab::File {
             backstage::show(self, ui, &t);
             return;
@@ -154,7 +159,23 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.horizontal(|ui| match app.tab {
                 Tab::Home => {
                     let has = app.engine.session.selected_message.is_some();
-                    ribbon_button(app, ui, t, "✉", "Nieuwe e-mail", None, false);
+                    let mut open: Option<ComposeKind> = None;
+                    if ribbon_action(ui, t, "✉", "Nieuwe e-mail", true) {
+                        open = Some(ComposeKind::New);
+                    }
+                    ui.separator();
+                    if ribbon_action(ui, t, "↩", "Beantwoorden", has) {
+                        open = Some(ComposeKind::Reply);
+                    }
+                    if ribbon_action(ui, t, "↞", "Allen beantwoorden", has) {
+                        open = Some(ComposeKind::ReplyAll);
+                    }
+                    if ribbon_action(ui, t, "↪", "Doorsturen", has) {
+                        open = Some(ComposeKind::Forward);
+                    }
+                    if let Some(kind) = open {
+                        app.open_compose(kind);
+                    }
                     ui.separator();
                     ribbon_button(app, ui, t, "🗑", "Verwijderen", Some("message.delete"), has);
                     ribbon_button(app, ui, t, "🗄", "Archiveren", Some("message.archive"), has);
@@ -175,10 +196,9 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         });
 }
 
-/// A large ribbon button: glyph above label. `command` `None` draws it disabled (not built yet).
-/// Drawn by hand as one widget, so a screen reader sees a single button named `label`.
-fn ribbon_button(app: &mut MailApp, ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, command: Option<&str>, enabled: bool) {
-    let enabled = enabled && command.is_some();
+/// A large ribbon button: glyph above label, drawn by hand as one widget so a screen reader
+/// sees a single button named `label`. Returns true when clicked.
+fn ribbon_action(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool) -> bool {
     let (rect, r) = ui.allocate_exact_size(vec2(72.0, 56.0), if enabled { Sense::click() } else { Sense::hover() });
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     let color = if enabled { t.text } else { t.text_dim.gamma_multiply(0.6) };
@@ -194,7 +214,13 @@ fn ribbon_button(app: &mut MailApp, ui: &mut Ui, t: &Tokens, glyph: &str, label:
         if enabled { t.accent } else { color },
     );
     p.text(egui::pos2(rect.center().x, rect.bottom() - 10.0), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(12.0), color);
-    if let (true, Some(id)) = (enabled && r.clicked(), command) {
+    enabled && r.clicked()
+}
+
+/// A ribbon button that runs a command. `command` `None` draws it disabled (not built yet).
+fn ribbon_button(app: &mut MailApp, ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, command: Option<&str>, enabled: bool) {
+    let enabled = enabled && command.is_some();
+    if let (true, Some(id)) = (ribbon_action(ui, t, glyph, label, enabled), command) {
         app.run(id, Value::Null);
     }
 }
@@ -460,7 +486,8 @@ fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let unread = list.iter().filter(|m| !m.flags.seen).count();
                 ui.label(RichText::new(format!("Items: {}   Ongelezen: {}", list.len(), unread)).size(12.0).color(t.text_dim));
                 if let Some(n) = &app.notice {
-                    ui.label(RichText::new(n).size(12.0).color(t.flag));
+                    let col = if n.ends_with("verzonden.") { t.accent_text } else { t.flag };
+                    ui.label(RichText::new(n).size(12.0).color(col));
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let (txt, col) = if app.engine.session.is_sample() {
@@ -535,6 +562,25 @@ mod tests {
         h.get_by_label("←  Terug").click();
         h.run();
         assert!(h.query_by_label("Toevoegen en verbinden").is_none());
+    }
+
+    #[test]
+    fn reply_opens_the_compose_window_prefilled() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Planning voor donderdag").click();
+        h.run();
+        h.get_by_label("Beantwoorden").click();
+        h.run();
+        let c = h.state().compose.as_ref().expect("compose window");
+        assert_eq!(c.subject, "Re: Planning voor donderdag");
+        assert!(c.to.contains("sanne@example.org"));
+        h.get_by_label("Verzenden").click();
+        h.run();
+        h.run();
+        // The sample account cannot send: the window stays with the reason.
+        let c = h.state().compose.as_ref().expect("compose window still open");
+        assert!(c.error.as_deref().is_some_and(|e| e.contains("account")));
     }
 
     #[test]

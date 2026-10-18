@@ -19,6 +19,8 @@ pub struct ParsedHeader {
     pub subject: String,
     /// Seconds since the Unix epoch, from the Date header.
     pub date: Option<i64>,
+    /// The Message-ID, with its angle brackets.
+    pub message_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -49,6 +51,7 @@ pub fn parse_header(bytes: &[u8]) -> ParsedHeader {
         to: addresses(m.to()),
         subject: clean_text(m.subject().unwrap_or("")),
         date: m.date().map(|d| d.to_timestamp()),
+        message_id: m.message_id().map(|id| format!("<{}>", clean_text(id.trim_matches(['<', '>'])))),
     }
 }
 
@@ -112,7 +115,7 @@ pub fn preview(text: &str, n: usize) -> String {
 mod tests {
     use super::*;
 
-    const MSG: &[u8] = b"From: Sanne de Vries <sanne@example.org>\r\nTo: jij@example.org\r\nSubject: =?UTF-8?Q?Planning_voor_donderdag?=\r\nDate: Wed, 14 Oct 2026 16:16:00 +0200\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nZullen we om tien uur beginnen?\r\n";
+    const MSG: &[u8] = b"From: Sanne de Vries <sanne@example.org>\r\nTo: jij@example.org\r\nSubject: =?UTF-8?Q?Planning_voor_donderdag?=\r\nDate: Wed, 14 Oct 2026 16:16:00 +0200\r\nMessage-ID: <m1@example.org>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nZullen we om tien uur beginnen?\r\n";
 
     #[test]
     fn parses_headers_and_decodes_encoded_words() {
@@ -121,6 +124,7 @@ mod tests {
         assert_eq!(h.to[0].email(), "jij@example.org");
         assert_eq!(h.subject, "Planning voor donderdag");
         assert_eq!(h.date, Some(1_791_987_360));
+        assert_eq!(h.message_id.as_deref(), Some("<m1@example.org>"));
     }
 
     #[test]
