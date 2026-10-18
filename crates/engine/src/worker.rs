@@ -10,6 +10,7 @@ use std::thread;
 
 use mailcraft_exchange::EwsClient;
 use mailcraft_google::GoogleMailbox;
+use mailcraft_graph::GraphClient;
 use mailcraft_imap::ImapClient;
 use mailcraft_mailbox::{Mailbox, MailboxError};
 use mailcraft_model::{Account, Protocol, Server};
@@ -167,6 +168,8 @@ fn connect(account: &Account, server: &Server, credentials: &mut Credentials) ->
     Ok(match account.protocol {
         Protocol::Exchange => Box::new(EwsClient::connect(server, &account.username, &credential).map_err(|e| describe(&e))?),
         Protocol::Gmail => Box::new(GoogleMailbox::connect(server, &account.username, &credential).map_err(|e| describe(&e))?),
+        // A Microsoft 365 account signed in for Graph; one from before that still speaks IMAP.
+        Protocol::Microsoft365 if uses_graph(account) => Box::new(GraphClient::connect(server, &credential).map_err(|e| describe(&e))?),
         Protocol::ImapSmtp | Protocol::Microsoft365 => {
             Box::new(ImapClient::connect(server, &account.username, &credential).map_err(MailboxError::from).map_err(|e| describe(&e))?)
         }
@@ -177,6 +180,12 @@ fn connect(account: &Account, server: &Server, credentials: &mut Credentials) ->
 /// asks.
 fn items_of(c: &mut dyn Mailbox) -> Result<&mut dyn mailcraft_mailbox::ItemStore, MailboxError> {
     c.items().ok_or_else(|| MailboxError::Protocol("this account keeps no appointments, contacts or tasks".into()))
+}
+
+/// Whether the account's sign-in covers Microsoft Graph (an account signed in before Graph
+/// came along has IMAP scopes, and keeps working as mail only until it signs in again).
+fn uses_graph(account: &Account) -> bool {
+    matches!(&account.auth, mailcraft_model::Auth::OAuth2 { scope, .. } if scope.contains("graph.microsoft.com"))
 }
 
 fn run(c: &mut dyn Mailbox, account: &Account, job: &Job) -> Result<Option<Event>, MailboxError> {
