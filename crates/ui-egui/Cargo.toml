@@ -9,6 +9,7 @@ rust-version.workspace = true
 mailcraft-model = { workspace = true }
 mailcraft-engine = { workspace = true }
 mailcraft-secrets = { workspace = true }
+chrono = { workspace = true }
 zeroize = { workspace = true }
 egui = { workspace = true }
 serde_json = { workspace = true }

@@ -23,8 +23,10 @@ delete, archive and move to junk; changes go back to the server. Sending over SM
 reply, reply all and forward, with a copy filed in Sent. Gmail and Microsoft 365 sign in through
 the system browser (OAuth 2.0 with PKCE, XOAUTH2 on IMAP and SMTP); see
 [docs/accounts.md](docs/accounts.md) for the one-time app registration. Exchange Server (2013+)
-works through Exchange Web Services over HTTPS, reading and sending alike. Next up: calendar,
-then contacts and tasks.
+works through Exchange Web Services over HTTPS, reading and sending alike. The calendar module
+shows a month, week or day view with a local calendar: appointments are created, edited and
+deleted in a window and kept in `calendar.json`. Next up: calendars that sync with the account
+(Exchange, Google, CalDAV), then contacts and tasks.
 
 ## Build
 

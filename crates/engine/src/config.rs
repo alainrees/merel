@@ -1,30 +1,48 @@
-//! The accounts file: JSON without secrets, readable by the owner only.
+//! The configuration files: JSON without secrets, readable by the owner only. `accounts.json`
+//! holds the accounts, `calendar.json` next to it the local calendars and appointments.
 
 use std::path::{Path, PathBuf};
 
 use mailcraft_model::Account;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 /// Where the accounts file lives for this user, if the platform has a config directory.
 pub fn default_path() -> Option<PathBuf> {
     directories::ProjectDirs::from("nl", "ArtCraft", "Mailcraft").map(|d| d.config_dir().join("accounts.json"))
 }
 
+/// The calendar file that goes with an accounts file.
+pub fn calendar_path(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("calendar.json")
+}
+
 pub fn load(path: &Path) -> Vec<Account> {
-    let Ok(bytes) = std::fs::read(path) else { return Vec::new() };
-    match serde_json::from_slice::<Vec<Account>>(&bytes) {
+    load_json(path)
+}
+
+pub fn save(path: &Path, accounts: &[Account]) -> std::io::Result<()> {
+    save_json(path, &accounts)
+}
+
+/// The file's contents, or the default when it is missing or unreadable (which is logged).
+pub fn load_json<T: Default + DeserializeOwned>(path: &Path) -> T {
+    let Ok(bytes) = std::fs::read(path) else { return T::default() };
+    match serde_json::from_slice::<T>(&bytes) {
         Ok(a) => a,
         Err(e) => {
-            log::warn!("accounts file unreadable: {e}");
-            Vec::new()
+            log::warn!("{} unreadable: {e}", path.display());
+            T::default()
         }
     }
 }
 
-pub fn save(path: &Path, accounts: &[Account]) -> std::io::Result<()> {
+/// Writes `value` through a temporary file, so a crash never leaves a half-written one.
+pub fn save_json<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let json = serde_json::to_vec_pretty(accounts).map_err(std::io::Error::other)?;
+    let json = serde_json::to_vec_pretty(value).map_err(std::io::Error::other)?;
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
     #[cfg(unix)]
