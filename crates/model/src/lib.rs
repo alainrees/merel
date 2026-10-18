@@ -68,7 +68,8 @@ impl Protocol {
                 outgoing: Server { host: "smtp.gmail.com".into(), port: 465, tls: Tls::Implicit },
                 auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
                 token_url: "https://oauth2.googleapis.com/token".into(),
-                scope: "https://mail.google.com/".into(),
+                // IMAP and SMTP, then the Calendar, People and Tasks APIs.
+                scope: "https://mail.google.com/ https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/tasks".into(),
             }),
             Protocol::Microsoft365 => Some(Preset {
                 incoming: Server { host: "outlook.office365.com".into(), port: 993, tls: Tls::Implicit },

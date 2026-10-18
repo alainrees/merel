@@ -19,6 +19,7 @@ mailcraft-smtp = { path = "crates/smtp" }
 mailcraft-oauth = { path = "crates/oauth" }
 mailcraft-mailbox = { path = "crates/mailbox" }
 mailcraft-exchange = { path = "crates/exchange" }
+mailcraft-google = { path = "crates/google" }
 
 # foundation
 thiserror = "2"

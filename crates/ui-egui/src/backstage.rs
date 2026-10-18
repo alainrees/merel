@@ -26,6 +26,8 @@ pub struct AccountForm {
     pub client_id: String,
     pub client_secret: String,
     pub error: Option<String>,
+    /// How a sign-in started from the account list ended.
+    pub notice: Option<String>,
 }
 
 impl Default for AccountForm {
@@ -45,6 +47,7 @@ impl Default for AccountForm {
             client_id: String::new(),
             client_secret: String::new(),
             error: None,
+            notice: None,
         }
     }
 }
@@ -150,19 +153,41 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.label(RichText::new("Accounts").size(26.0).color(t.text));
             ui.add_space(12.0);
-            let statuses: Vec<(String, String, AccountStatus)> = app
+            // A sign-in started from this list reports here; the OAuth form consumes its own.
+            let oauth_form = matches!(app.form.kind, Protocol::Gmail | Protocol::Microsoft365);
+            if !oauth_form {
+                match app.engine.session.sign_in.take() {
+                    Some(Some(Ok(()))) => app.form.notice = Some("Opnieuw aangemeld; het account verbindt opnieuw.".into()),
+                    Some(Some(Err(e))) => app.form.notice = Some(e),
+                    Some(None) => app.engine.session.sign_in = Some(None),
+                    None => {}
+                }
+            }
+            let busy = app.engine.session.sign_in.is_some();
+            let statuses: Vec<(String, String, String, bool, AccountStatus)> = app
                 .engine
                 .session
                 .accounts
                 .iter()
                 .map(|a| {
-                    (a.name.clone(), a.address.email().to_string(), app.engine.session.status.get(&a.id).cloned().unwrap_or(AccountStatus::Offline))
+                    (
+                        a.id.clone(),
+                        a.name.clone(),
+                        a.address.email().to_string(),
+                        matches!(a.auth, mailcraft_model::Auth::OAuth2 { .. }),
+                        app.engine.session.status.get(&a.id).cloned().unwrap_or(AccountStatus::Offline),
+                    )
                 })
                 .collect();
             if app.engine.session.is_sample() {
                 ui.label(RichText::new("Er is nog geen account. Je ziet voorbeeldmail.").color(t.text_dim));
             }
-            for (name, email, status) in statuses {
+            if let Some(n) = &app.form.notice {
+                ui.label(RichText::new(n).color(t.text_dim));
+                ui.add_space(8.0);
+            }
+            let mut again = None;
+            for (id, name, email, oauth, status) in statuses {
                 if email == "jij@example.org" {
                     continue;
                 }
@@ -177,8 +202,23 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         AccountStatus::Error(e) => (e, t.flag),
                     };
                     ui.label(RichText::new(txt).size(12.0).color(col));
+                    if oauth {
+                        ui.add_space(4.0);
+                        let label = if busy { "Wacht op de browser…" } else { "Opnieuw aanmelden" };
+                        if ui
+                            .add_enabled(!busy, egui::Button::new(label))
+                            .on_hover_text("Log opnieuw in via de browser, bijvoorbeeld om toestemming te geven voor agenda, contacten en taken.")
+                            .clicked()
+                        {
+                            again = Some(id.clone());
+                        }
+                    }
                 });
                 ui.add_space(8.0);
+            }
+            if let Some(id) = again {
+                app.form.notice = None;
+                app.engine.sign_in_again(&id);
             }
             ui.add_space(16.0);
             ui.label(RichText::new("Account toevoegen").size(20.0).color(t.text));
