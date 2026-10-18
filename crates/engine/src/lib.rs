@@ -14,6 +14,7 @@ pub mod config;
 pub mod contacts;
 mod sample;
 pub mod signin;
+pub mod tasks;
 pub mod worker;
 
 pub use commands::{COMMANDS, CommandError, CommandSpec};
@@ -24,7 +25,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
 use mailcraft_mailbox::{Flag, RemoteFolder, RemoteHeader};
-use mailcraft_model::{Account, Appointment, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, clean_text};
+use mailcraft_model::{Account, Appointment, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, Task, clean_text};
 use mailcraft_secrets::{Secret, SecretStore};
 
 /// How many of the newest messages a folder shows.
@@ -153,12 +154,17 @@ pub struct Session {
     pub selected_appointment: Option<String>,
     pub contacts: Vec<Contact>,
     pub selected_contact: Option<String>,
-    /// Set when a command changed the calendar or the contacts; the engine saves and clears it.
+    pub tasks: Vec<Task>,
+    pub selected_task: Option<String>,
+    /// Set when a command changed the calendar, the contacts or the tasks; the engine saves
+    /// and clears it.
     calendar_dirty: bool,
     contacts_dirty: bool,
+    tasks_dirty: bool,
     next_draft_id: u64,
     next_appointment_id: u64,
     next_contact_id: u64,
+    next_task_id: u64,
     pending: Vec<Job>,
 }
 
@@ -422,6 +428,10 @@ impl Engine {
         if !contacts.contacts.is_empty() {
             engine.session.set_contacts(contacts.contacts);
         }
+        let tasks = engine.config_path.as_deref().map(|p| config::load_json::<tasks::TasksFile>(&config::tasks_path(p))).unwrap_or_default();
+        if !tasks.tasks.is_empty() {
+            engine.session.set_tasks(tasks.tasks);
+        }
         engine.dispatch();
         engine
     }
@@ -431,6 +441,7 @@ impl Engine {
         let Some(path) = self.config_path.clone() else {
             self.session.take_calendar_dirty();
             self.session.take_contacts_dirty();
+            self.session.take_tasks_dirty();
             return Ok(());
         };
         if self.session.take_calendar_dirty() {
@@ -438,6 +449,9 @@ impl Engine {
         }
         if self.session.take_contacts_dirty() {
             config::save_json(&config::contacts_path(&path), &self.session.contacts_data()).map_err(|e| CommandError::Store(e.to_string()))?;
+        }
+        if self.session.take_tasks_dirty() {
+            config::save_json(&config::tasks_path(&path), &self.session.tasks_data()).map_err(|e| CommandError::Store(e.to_string()))?;
         }
         Ok(())
     }

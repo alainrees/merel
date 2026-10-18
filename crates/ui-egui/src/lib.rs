@@ -10,6 +10,7 @@ pub mod calendar;
 mod compose;
 pub mod contacts;
 mod dates;
+pub mod tasks;
 mod theme;
 
 use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
@@ -85,6 +86,7 @@ pub struct MailApp {
     pub compose: Option<Compose>,
     pub calendar: calendar::State,
     pub contacts: contacts::State,
+    pub tasks: tasks::State,
     /// The last command error or note, shown in the status bar until the next action.
     notice: Option<String>,
 }
@@ -99,6 +101,7 @@ impl MailApp {
             compose: None,
             calendar: calendar::State::default(),
             contacts: contacts::State::default(),
+            tasks: tasks::State::default(),
             notice: None,
         }
     }
@@ -145,11 +148,7 @@ impl MailApp {
         } else if self.module == Module::People {
             contacts::show(self, ui, &t);
         } else {
-            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading)).show(ui, |ui| {
-                ui.centered_and_justified(|ui| {
-                    ui.label(RichText::new(format!("{} volgt na e-mail.", self.module.label())).color(t.text_dim).size(16.0));
-                });
-            });
+            tasks::show(self, ui, &t);
         }
     }
 }
@@ -177,6 +176,7 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.horizontal(|ui| match app.tab {
                 Tab::Home if app.module == Module::Calendar => calendar_ribbon(app, ui, t),
                 Tab::Home if app.module == Module::People => contacts::ribbon(app, ui, t),
+                Tab::Home if app.module == Module::Tasks => tasks::ribbon(app, ui, t),
                 Tab::Home => {
                     let has = app.engine.session.selected_message.is_some();
                     let mut open: Option<ComposeKind> = None;
@@ -588,11 +588,31 @@ mod tests {
     }
 
     #[test]
-    fn other_modules_show_a_placeholder() {
+    fn tasks_list_completes_saves_and_deletes() {
         let mut h = harness();
         h.state_mut().module = Module::Tasks;
         h.run();
-        assert!(h.query_by_label_contains("Taken volgt").is_some());
+        assert!(h.query_by_label("Offerte drukwerk beantwoorden").is_some());
+        assert!(h.query_by_label("Welkomstmail lezen").is_none(), "done tasks are hidden by the Open filter");
+        h.get_by_label("Offerte drukwerk beantwoorden voltooid").click();
+        h.run();
+        assert!(h.state().engine.session.tasks.iter().any(|t| t.title == "Offerte drukwerk beantwoorden" && t.done));
+        h.get_by_label("Alles").click();
+        h.run();
+        h.get_by_label("Welkomstmail lezen").click();
+        h.run();
+        assert_eq!(h.state().engine.session.selected_task().map(|t| t.title.as_str()), Some("Welkomstmail lezen"));
+        h.get_by_label("Nieuwe taak").click();
+        h.run();
+        h.state_mut().tasks.editor.as_mut().expect("editor").title = "Belasting".into();
+        h.run();
+        h.get_by_label("Opslaan").click();
+        h.run();
+        assert!(h.state().tasks.editor.is_none());
+        assert_eq!(h.state().engine.session.selected_task().map(|t| t.title.as_str()), Some("Belasting"));
+        h.get_by_label("Verwijderen").click();
+        h.run();
+        assert!(h.state().engine.session.tasks.iter().all(|t| t.title != "Belasting"));
     }
 
     #[test]

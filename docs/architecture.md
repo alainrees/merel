@@ -3,7 +3,7 @@
 | Layer | Crate | Job |
 |---|---|---|
 | L1 | `secrets` | Passwords in the system credential store (Keychain, Credential Manager, Secret Service) through `keyring`; a memory store for tests. Secrets are zeroed on drop and hidden from `Debug`. |
-| L1 | `model` | Accounts, folders, message headers, addresses, calendars, appointments and contacts. Validates everything that comes from the network or the keyboard (address shape, header length, control characters, appointment times). No I/O. |
+| L1 | `model` | Accounts, folders, message headers, addresses, calendars, appointments, contacts and tasks. Validates everything that comes from the network or the keyboard (address shape, header length, control characters, appointment times). No I/O. |
 | L2 | `mime` | Header and body parsing through `mail-parser`; HTML is reduced to plain text with `html2text`, so no script, style or remote reference survives. Input is bounded at 8 MB. |
 | L2 | `imap` | Blocking IMAP client over rustls (implicit TLS or STARTTLS, platform certificate verifier, no way to disable checks): folders with SPECIAL-USE, newest headers with BODYSTRUCTURE, `BODY.PEEK[]`, flags, MOVE with COPY fallback. Mailbox names are quoted; CR/LF are refused. |
 | L2 | `smtp` | Sending through `lettre` over rustls (implicit TLS or STARTTLS, platform verifier), plain-text messages with Date, In-Reply-To and References; the Message-ID is minted under the sender's domain so the computer's host name never goes on the wire. |
@@ -21,6 +21,10 @@ Appointments are session state like messages: `Session::appointments` plus `appo
 ## Contacts
 
 Contacts follow the calendar's pattern: `Session::contacts` with `contact.select`, `contact.save` and `contact.delete`, validated in `model` (every address must parse), saved to `contacts.json` right after a command changes them. `Session::suggest_addresses` serves the compose window: contacts first, then addresses seen in the session's mail, matched on the start of a word or of the address. Planned: contacts per account (EWS, Google People, CardDAV) behind the same store trait as calendars.
+
+## Tasks
+
+Tasks follow the same pattern: `Session::tasks` with `task.select`, `task.save`, `task.complete` and `task.delete`, validated in `model`, saved to `tasks.json`. A due day is stored as local midnight in Unix seconds, so "overdue" is a plain comparison with today's midnight. Open tasks sort by due day, then priority; done ones by completion. Planned: tasks per account (EWS, Google Tasks) behind the same store trait.
 
 ## Planned crates (mail module)
 

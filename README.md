@@ -27,8 +27,9 @@ works through Exchange Web Services over HTTPS, reading and sending alike. The c
 shows a month, week or day view with a local calendar: appointments are created, edited and
 deleted in a window and kept in `calendar.json`. The contacts module keeps a local address
 book (`contacts.json`) with search and a contact card, and the compose window completes
-addresses from it and from the mail you have seen. Next up: tasks, then calendars and contacts
-that sync with the account (Exchange, Google, CalDAV/CardDAV).
+addresses from it and from the mail you have seen. The tasks module keeps a local to-do list
+(`tasks.json`) with due days, priorities and an open/done filter. Next up: calendars, contacts
+and tasks that sync with the account (Exchange, Google, CalDAV/CardDAV).
 
 ## Build
 
