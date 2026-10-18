@@ -36,21 +36,27 @@ Accounts) om de extra toestemming te geven.
 
 ## Microsoft 365 / Outlook.com
 
-Ook Microsoft werkt via de browser. Registreer de app één keer in Entra:
+Ook Microsoft werkt via de browser. Mailcraft praat met Microsoft Graph: mail, verzenden,
+agenda, contacten en taken komen alle via één aanmelding mee, zonder IMAP of SMTP. Registreer
+de app één keer in Entra:
 
 1. Ga naar <https://entra.microsoft.com/> › **App registrations › New registration**.
 2. Naam bijvoorbeeld "Mailcraft"; bij *Supported account types* kies "Accounts in any
    organizational directory and personal Microsoft accounts"; bij *Redirect URI* kies
    **Public client/native (mobile & desktop)** met waarde `http://localhost`.
-3. Onder **API permissions** voeg je toe (Microsoft Graph is niet nodig): *Office 365
-   Exchange Online* › Delegated › `IMAP.AccessAsUser.All` en `SMTP.Send`, plus
+3. Onder **API permissions** voeg je toe: *Microsoft Graph* › Delegated › `Mail.ReadWrite`,
+   `Mail.Send`, `Calendars.ReadWrite`, `Contacts.ReadWrite`, `Tasks.ReadWrite` en
    `offline_access`.
 4. Onder **Authentication** zet je *Allow public client flows* op Yes.
 5. In Mailcraft: Bestand › Accounts › soort **Microsoft 365**, vul naam, e-mailadres en de
    **Application (client) ID** in, zonder client-secret, en klik op **Inloggen bij Microsoft**.
 
-Let op: een beheerder van een zakelijke tenant moet IMAP/SMTP met OAuth toestaan en, waar de
-tenant dat eist, de app goedkeuren.
+Let op: waar een zakelijke tenant dat eist, moet een beheerder de app goedkeuren. Een
+Microsoft 365-account dat is toegevoegd toen Mailcraft nog IMAP gebruikte, blijft mail doen
+via IMAP; voeg in Entra de Graph-machtigingen toe en klik bij het account op **Opnieuw
+aanmelden** (Bestand › Accounts) om over te gaan op Graph, met agenda, contacten en taken.
+Exchange Online stopt in oktober 2026 met EWS; daarom gaat Microsoft 365 niet via de
+Exchange-soort maar via Graph.
 
 ## Exchange Server (on-premises)
 

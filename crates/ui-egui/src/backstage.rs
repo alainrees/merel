@@ -350,7 +350,7 @@ fn oauth_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         _ => (
             "Microsoft",
             false,
-            "Registreer de app in Microsoft Entra (public client, redirect http://localhost) en vul de Application (client) ID in. Zie docs/accounts.md.",
+            "Registreer de app in Microsoft Entra (public client, redirect http://localhost, Microsoft Graph-machtigingen) en vul de Application (client) ID in. Zie docs/accounts.md.",
         ),
     };
     ui.label(RichText::new(help).size(12.0).color(t.text_dim));
