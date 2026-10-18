@@ -1,0 +1,13 @@
+[package]
+name = "mailcraft-mime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mailcraft-model = { workspace = true }
+mail-parser = { workspace = true }
+html2text = { workspace = true }
+
+[lints]
+workspace = true

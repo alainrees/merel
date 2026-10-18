@@ -19,6 +19,7 @@ fn build() -> Option<Session> {
         id: "sample".into(),
         name: "Voorbeeld".into(),
         address: me.clone(),
+        username: "jij@example.org".into(),
         protocol: Protocol::ImapSmtp,
         incoming: Some(Server { host: "imap.example.org".into(), port: 993, tls: Tls::Implicit }),
         outgoing: Some(Server { host: "smtp.example.org".into(), port: 465, tls: Tls::Implicit }),
@@ -32,7 +33,14 @@ fn build() -> Option<Session> {
         ("deleted", "Verwijderde items", FolderKind::Deleted),
     ]
     .into_iter()
-    .map(|(id, name, kind)| Folder { id: id.into(), account_id: account.id.clone(), name: name.into(), kind, unread: 0 })
+    .map(|(id, name, kind)| Folder {
+        id: id.into(),
+        account_id: account.id.clone(),
+        name: name.into(),
+        path: id.to_ascii_uppercase(),
+        kind,
+        unread: 0,
+    })
     .collect();
 
     let base = 1_792_000_000; // October 2026
@@ -63,6 +71,7 @@ fn build() -> Option<Session> {
             Some(MessageHeader {
                 id: format!("m{i}"),
                 folder_id: "inbox".into(),
+                uid: 0,
                 from: addr(name, email)?,
                 to: vec![me.clone()],
                 subject: subject.into(),
@@ -74,5 +83,5 @@ fn build() -> Option<Session> {
         })
         .collect();
 
-    Some(Session { accounts: vec![account], folders, messages, selected_folder: None, selected_message: None })
+    Some(Session { accounts: vec![account], folders, messages, ..Session::default() })
 }

@@ -16,9 +16,11 @@ and Linux.
 
 ## Status
 
-Early scaffold: the Outlook-style window (ribbon, module rail, folder pane, message list, reading
-pane) over built-in sample mail. Next up: IMAP/SMTP accounts, then Gmail, Microsoft 365 and
-Exchange; after mail come calendar, contacts and tasks.
+The Outlook-style window (ribbon, module rail, folder pane, message list, reading pane) over
+built-in sample mail, and reading mail from an IMAP account: add it under File › Accounts,
+browse folders, open messages (plain text, or HTML reduced to text), mark read or unread, flag,
+delete, archive and move to junk; changes go back to the server. Next up: sending over SMTP,
+then Gmail, Microsoft 365 and Exchange; after mail come calendar, contacts and tasks.
 
 ## Build
 
