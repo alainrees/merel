@@ -1,6 +1,6 @@
 //! Built-in sample mail so the app has something to show before an account is added.
 
-use mailcraft_model::{Account, Address, Flags, Folder, FolderKind, MessageHeader, Protocol, Server, Tls};
+use mailcraft_model::{Account, Address, Appointment, Calendar, Flags, Folder, FolderKind, MessageHeader, Protocol, Server, Tls};
 
 use crate::Session;
 
@@ -85,5 +85,35 @@ fn build() -> Option<Session> {
         })
         .collect();
 
-    Some(Session { accounts: vec![account], folders, messages, ..Session::default() })
+    let mut session = Session { accounts: vec![account], folders, messages, ..Session::default() };
+    session.set_calendar_data(crate::calendar::CalendarFile { calendars: vec![Calendar::local()], appointments: appointments() });
+    Some(session)
+}
+
+/// Three appointments around today, so the calendar has something to show.
+fn appointments() -> Vec<Appointment> {
+    use chrono::{Days, Local, TimeZone};
+    let today = Local::now().date_naive();
+    let at = |days: u64, hour: u32| {
+        let date = today.checked_add_days(Days::new(days))?;
+        let time = date.and_hms_opt(hour, 0, 0)?;
+        Local.from_local_datetime(&time).earliest().map(|d| d.timestamp())
+    };
+    let plan =
+        [("Overleg ontwerp", "Studio", 0, 10, 11, false), ("Lunch met Sanne", "De Kantine", 1, 12, 13, false), ("Studiodag", "", 2, 0, 24, true)];
+    plan.into_iter()
+        .enumerate()
+        .filter_map(|(i, (title, location, day, from, to, all_day))| {
+            Some(Appointment {
+                id: format!("sample-{i}"),
+                calendar_id: "local".into(),
+                title: title.into(),
+                start: at(day, from)?,
+                end: if to == 24 { at(day + 1, 0)? } else { at(day, to)? },
+                all_day,
+                location: location.into(),
+                notes: String::new(),
+            })
+        })
+        .collect()
 }
