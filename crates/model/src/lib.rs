@@ -38,6 +38,53 @@ pub struct Server {
     pub tls: Tls,
 }
 
+/// How an account proves who it is. The secret itself (password or refresh token) lives in
+/// the system keychain under the account id; this only says which kind it is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Auth {
+    Password,
+    /// OAuth 2.0 with PKCE through the system browser; the keychain holds the refresh token.
+    OAuth2 {
+        client_id: String,
+        auth_url: String,
+        token_url: String,
+        scope: String,
+    },
+}
+
+impl Protocol {
+    /// The ready-made settings for a hosted service; `None` for plain IMAP/SMTP.
+    pub fn preset(self) -> Option<Preset> {
+        match self {
+            Protocol::ImapSmtp | Protocol::Exchange => None,
+            Protocol::Gmail => Some(Preset {
+                incoming: Server { host: "imap.gmail.com".into(), port: 993, tls: Tls::Implicit },
+                outgoing: Server { host: "smtp.gmail.com".into(), port: 465, tls: Tls::Implicit },
+                auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
+                token_url: "https://oauth2.googleapis.com/token".into(),
+                scope: "https://mail.google.com/".into(),
+            }),
+            Protocol::Microsoft365 => Some(Preset {
+                incoming: Server { host: "outlook.office365.com".into(), port: 993, tls: Tls::Implicit },
+                outgoing: Server { host: "smtp.office365.com".into(), port: 587, tls: Tls::StartTls },
+                auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".into(),
+                token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token".into(),
+                scope: "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access".into(),
+            }),
+        }
+    }
+}
+
+/// Servers and OAuth endpoints of a hosted mail service.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Preset {
+    pub incoming: Server,
+    pub outgoing: Server,
+    pub auth_url: String,
+    pub token_url: String,
+    pub scope: String,
+}
+
 /// An account. Secrets (passwords, OAuth tokens) are never stored here: they live in the
 /// system keychain, looked up by `id`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,8 +95,16 @@ pub struct Account {
     /// The login name, usually the address itself.
     pub username: String,
     pub protocol: Protocol,
+    #[serde(default = "Auth::password")]
+    pub auth: Auth,
     pub incoming: Option<Server>,
     pub outgoing: Option<Server>,
+}
+
+impl Auth {
+    fn password() -> Auth {
+        Auth::Password
+    }
 }
 
 /// The folders Outlook treats specially; everything else is `Other`.
