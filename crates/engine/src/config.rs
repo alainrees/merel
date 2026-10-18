@@ -1,5 +1,6 @@
 //! The configuration files: JSON without secrets, readable by the owner only. `accounts.json`
-//! holds the accounts, `calendar.json` next to it the local calendars and appointments.
+//! holds the accounts; `calendar.json` and `contacts.json` next to it the local calendars,
+//! appointments and contacts.
 
 use std::path::{Path, PathBuf};
 
@@ -15,6 +16,11 @@ pub fn default_path() -> Option<PathBuf> {
 /// The calendar file that goes with an accounts file.
 pub fn calendar_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("calendar.json")
+}
+
+/// The contacts file that goes with an accounts file.
+pub fn contacts_path(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("contacts.json")
 }
 
 pub fn load(path: &Path) -> Vec<Account> {

@@ -8,6 +8,7 @@
 mod backstage;
 pub mod calendar;
 mod compose;
+pub mod contacts;
 mod dates;
 mod theme;
 
@@ -83,6 +84,7 @@ pub struct MailApp {
     form: AccountForm,
     pub compose: Option<Compose>,
     pub calendar: calendar::State,
+    pub contacts: contacts::State,
     /// The last command error or note, shown in the status bar until the next action.
     notice: Option<String>,
 }
@@ -96,6 +98,7 @@ impl MailApp {
             form: AccountForm::default(),
             compose: None,
             calendar: calendar::State::default(),
+            contacts: contacts::State::default(),
             notice: None,
         }
     }
@@ -139,6 +142,8 @@ impl MailApp {
             });
         } else if self.module == Module::Calendar {
             calendar::show(self, ui, &t);
+        } else if self.module == Module::People {
+            contacts::show(self, ui, &t);
         } else {
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading)).show(ui, |ui| {
                 ui.centered_and_justified(|ui| {
@@ -171,6 +176,7 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .show(ui, |ui| {
             ui.horizontal(|ui| match app.tab {
                 Tab::Home if app.module == Module::Calendar => calendar_ribbon(app, ui, t),
+                Tab::Home if app.module == Module::People => contacts::ribbon(app, ui, t),
                 Tab::Home => {
                     let has = app.engine.session.selected_message.is_some();
                     let mut open: Option<ComposeKind> = None;
@@ -235,7 +241,7 @@ fn calendar_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 
 /// A large ribbon button: glyph above label, drawn by hand as one widget so a screen reader
 /// sees a single button named `label`. Returns true when clicked.
-fn ribbon_action(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool) -> bool {
+pub(crate) fn ribbon_action(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool) -> bool {
     let (rect, r) = ui.allocate_exact_size(vec2(72.0, 56.0), if enabled { Sense::click() } else { Sense::hover() });
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     let color = if enabled { t.text } else { t.text_dim.gamma_multiply(0.6) };
@@ -584,9 +590,51 @@ mod tests {
     #[test]
     fn other_modules_show_a_placeholder() {
         let mut h = harness();
+        h.state_mut().module = Module::Tasks;
+        h.run();
+        assert!(h.query_by_label_contains("Taken volgt").is_some());
+    }
+
+    #[test]
+    fn contacts_list_selects_saves_and_mails() {
+        let mut h = harness();
         h.state_mut().module = Module::People;
         h.run();
-        assert!(h.query_by_label_contains("Contacten volgt").is_some());
+        h.get_by_label("Sanne de Vries").click();
+        h.run();
+        assert_eq!(h.state().engine.session.selected_contact().map(|c| c.name.as_str()), Some("Sanne de Vries"));
+        h.get_by_label("E-mail sturen").click();
+        h.run();
+        assert_eq!(h.state().compose.as_ref().map(|c| c.to.as_str()), Some("Sanne de Vries <sanne@example.org>"));
+        h.state_mut().compose = None;
+        h.get_by_label("Nieuw contact").click();
+        h.run();
+        {
+            let e = h.state_mut().contacts.editor.as_mut().expect("editor");
+            e.name = "Noor Bakker".into();
+            e.emails = "noor@example.org".into();
+        }
+        h.run();
+        h.get_by_label("Opslaan").click();
+        h.run();
+        assert!(h.state().contacts.editor.is_none());
+        assert!(h.state().engine.session.contacts.iter().any(|c| c.name == "Noor Bakker"));
+        h.get_by_label("Verwijderen").click();
+        h.run();
+        assert!(h.state().engine.session.contacts.iter().all(|c| c.name != "Noor Bakker"));
+    }
+
+    #[test]
+    fn compose_completes_addresses_from_contacts() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Nieuwe e-mail").click();
+        h.run();
+        h.state_mut().compose.as_mut().expect("compose").to = "sa".into();
+        h.run();
+        h.get_by_label("Sanne de Vries <sanne@example.org>").click();
+        h.run();
+        assert_eq!(h.state().compose.as_ref().map(|c| c.to.as_str()), Some("Sanne de Vries <sanne@example.org>; "));
     }
 
     #[test]
