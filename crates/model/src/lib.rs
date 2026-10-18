@@ -6,7 +6,7 @@
 
 mod address;
 
-pub use address::{Address, AddressError};
+pub use address::{Address, AddressError, parse_address_list};
 
 use serde::{Deserialize, Serialize};
 
@@ -127,6 +127,19 @@ pub struct MessageHeader {
     pub preview: String,
     pub flags: Flags,
     pub has_attachments: bool,
+    /// The Message-ID header, for replies.
+    pub message_id: Option<String>,
+}
+
+/// A message being written.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Draft {
+    pub to: Vec<Address>,
+    pub cc: Vec<Address>,
+    pub subject: String,
+    pub body: String,
+    /// The Message-ID this answers, if any.
+    pub in_reply_to: Option<String>,
 }
 
 /// `s` cut to [`MAX_TEXT`] characters with control characters (other than tab) removed, so a

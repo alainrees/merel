@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
 use mailcraft_imap::{RemoteFolder, RemoteHeader};
-use mailcraft_model::{Account, Flags, Folder, FolderKind, MessageHeader, clean_text};
+use mailcraft_model::{Account, Draft, Flags, Folder, FolderKind, MessageHeader, clean_text};
 use mailcraft_secrets::{Secret, SecretStore};
 
 /// How many of the newest messages a folder shows.
@@ -32,11 +32,40 @@ pub const SAMPLE_ACCOUNT: &str = "sample";
 /// Work for the background worker.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Job {
-    Connect { account_id: String },
-    Headers { account_id: String, folder_id: String, path: String },
-    Body { account_id: String, message_id: String, path: String, uid: u32 },
-    Flag { account_id: String, path: String, uid: u32, flag: &'static str, on: bool },
-    Move { account_id: String, path: String, uid: u32, dest: String },
+    Connect {
+        account_id: String,
+    },
+    Headers {
+        account_id: String,
+        folder_id: String,
+        path: String,
+    },
+    Body {
+        account_id: String,
+        message_id: String,
+        path: String,
+        uid: u32,
+    },
+    Flag {
+        account_id: String,
+        path: String,
+        uid: u32,
+        flag: &'static str,
+        on: bool,
+    },
+    Move {
+        account_id: String,
+        path: String,
+        uid: u32,
+        dest: String,
+    },
+    /// Send `draft` over SMTP and file a copy in `sent_path` when there is one.
+    Send {
+        account_id: String,
+        draft_id: u64,
+        draft: Box<Draft>,
+        sent_path: Option<String>,
+    },
 }
 
 impl Job {
@@ -46,7 +75,8 @@ impl Job {
             | Job::Headers { account_id, .. }
             | Job::Body { account_id, .. }
             | Job::Flag { account_id, .. }
-            | Job::Move { account_id, .. } => account_id,
+            | Job::Move { account_id, .. }
+            | Job::Send { account_id, .. } => account_id,
         }
     }
 }
@@ -54,10 +84,36 @@ impl Job {
 /// What the worker reports back.
 #[derive(Debug)]
 pub enum Event {
-    Connected { account_id: String, folders: Vec<RemoteFolder> },
-    Headers { folder_id: String, headers: Vec<RemoteHeader> },
-    Body { message_id: String, body: Body },
-    Failed { account_id: String, what: String },
+    Connected {
+        account_id: String,
+        folders: Vec<RemoteFolder>,
+    },
+    Headers {
+        folder_id: String,
+        headers: Vec<RemoteHeader>,
+    },
+    Body {
+        message_id: String,
+        body: Body,
+    },
+    Failed {
+        account_id: String,
+        what: String,
+    },
+    /// The outcome of a `Send` job; `Err` carries a sentence for the person.
+    Sent {
+        account_id: String,
+        draft_id: u64,
+        result: Result<(), String>,
+    },
+}
+
+/// Where a draft handed to [`Session::send`] is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SendState {
+    Sending,
+    Sent,
+    Failed(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,6 +135,9 @@ pub struct Session {
     pub loading: HashSet<String>,
     pub selected_folder: Option<String>,
     pub selected_message: Option<String>,
+    /// Drafts handed to `send`, by draft id.
+    pub outbox: HashMap<u64, SendState>,
+    next_draft_id: u64,
     pending: Vec<Job>,
 }
 
@@ -146,13 +205,34 @@ impl Session {
         self.selected_message.as_deref().and_then(|id| self.bodies.get(id))
     }
 
+    /// Queues `draft` for sending from `account_id`; the id tracks it in `outbox`.
+    pub fn send(&mut self, account_id: &str, draft: Draft) -> u64 {
+        self.next_draft_id += 1;
+        let draft_id = self.next_draft_id;
+        if account_id == SAMPLE_ACCOUNT || !self.accounts.iter().any(|a| a.id == account_id) {
+            self.outbox.insert(draft_id, SendState::Failed("Voeg eerst een echt account toe om te kunnen versturen.".into()));
+            return draft_id;
+        }
+        let sent_path = self.folder_of_kind(account_id, FolderKind::Sent).map(|f| f.path.clone());
+        self.outbox.insert(draft_id, SendState::Sending);
+        self.pending.push(Job::Send { account_id: account_id.to_string(), draft_id, draft: Box::new(draft), sent_path });
+        draft_id
+    }
+
+    /// The account to send from: the selected folder's, else the first.
+    pub fn current_account(&self) -> Option<&Account> {
+        let by_folder =
+            self.selected_folder.as_deref().and_then(|f| self.folder(f)).and_then(|f| self.accounts.iter().find(|a| a.id == f.account_id));
+        by_folder.or_else(|| self.accounts.first())
+    }
+
     /// Jobs left behind by commands since the last call.
     pub fn take_jobs(&mut self) -> Vec<Job> {
         std::mem::take(&mut self.pending)
     }
 
     pub fn has_pending(&self) -> bool {
-        !self.pending.is_empty() || !self.loading.is_empty()
+        !self.pending.is_empty() || !self.loading.is_empty() || self.outbox.values().any(|s| *s == SendState::Sending)
     }
 
     fn folder_of_kind(&self, account_id: &str, kind: FolderKind) -> Option<&Folder> {
@@ -218,6 +298,7 @@ impl Session {
                         preview: String::new(),
                         flags: Flags { seen: h.seen, flagged: h.flagged, answered: h.answered },
                         has_attachments: h.has_attachments,
+                        message_id: h.header.message_id.clone(),
                     });
                 }
                 self.recount_unread();
@@ -232,6 +313,19 @@ impl Session {
             Event::Failed { account_id, what } => {
                 self.loading.clear();
                 self.status.insert(account_id, AccountStatus::Error(what));
+            }
+            Event::Sent { account_id, draft_id, result } => {
+                let state = match result {
+                    Ok(()) => SendState::Sent,
+                    Err(e) => SendState::Failed(e),
+                };
+                if state == SendState::Sent
+                    && let Some(sent) = self.folder_of_kind(&account_id, FolderKind::Sent).map(|f| f.id.clone())
+                    && self.messages.iter().any(|m| m.folder_id == sent)
+                {
+                    self.request_headers(&sent);
+                }
+                self.outbox.insert(draft_id, state);
             }
         }
     }
@@ -330,6 +424,13 @@ impl Engine {
         let r = self.session.run(id, params);
         self.dispatch();
         r
+    }
+
+    /// Queues `draft` for sending; see [`Session::send`].
+    pub fn send(&mut self, account_id: &str, draft: Draft) -> u64 {
+        let id = self.session.send(account_id, draft);
+        self.dispatch();
+        id
     }
 
     /// Applies everything the worker has reported. Returns true when something changed.

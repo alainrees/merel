@@ -79,6 +79,7 @@ fn build() -> Option<Session> {
                 preview: preview.into(),
                 flags: Flags { seen, ..Flags::default() },
                 has_attachments: att,
+                message_id: Some(format!("<sample-{i}@example.org>")),
             })
         })
         .collect();

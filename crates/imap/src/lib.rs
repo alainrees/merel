@@ -220,6 +220,13 @@ impl ImapClient {
         Ok(())
     }
 
+    /// Files a sent message in `folder`, marked read.
+    pub fn append(&mut self, folder: &str, message: &[u8]) -> Result<()> {
+        let folder = quote(folder)?;
+        self.session.append(&folder, message).flag(imap::types::Flag::Seen).finish()?;
+        Ok(())
+    }
+
     pub fn logout(mut self) {
         let _ = self.session.logout();
     }

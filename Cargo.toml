@@ -15,6 +15,7 @@ mailcraft-ui-egui = { path = "crates/ui-egui" }
 mailcraft-secrets = { path = "crates/secrets" }
 mailcraft-mime = { path = "crates/mime" }
 mailcraft-imap = { path = "crates/imap" }
+mailcraft-smtp = { path = "crates/smtp" }
 
 # foundation
 thiserror = "2"
@@ -31,6 +32,8 @@ mail-parser = "0.11"
 imap-proto = "0.16"
 html2text = "0.17"
 keyring = "4"
+# SMTP over rustls with the platform verifier; aws-lc-rs matches the IMAP side so rustls has one provider.
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "aws-lc-rs", "rustls-platform-verifier"] }
 
 # ui
 egui = "0.36"
