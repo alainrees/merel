@@ -50,6 +50,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "task.save", label: "Save task", run: crate::tasks::save },
     CommandSpec { id: "task.complete", label: "Complete task", run: crate::tasks::complete },
     CommandSpec { id: "task.delete", label: "Delete task", run: crate::tasks::delete },
+    CommandSpec { id: "sync.refresh", label: "Refresh calendar, contacts and tasks", run: crate::sync::refresh },
 ];
 
 impl Session {
@@ -205,6 +206,7 @@ mod tests {
                 RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true },
                 RemoteFolder { path: "[Gmail]".into(), name: "[Gmail]".into(), kind: FolderKind::Other, selectable: false },
             ],
+            syncs_items: false,
         });
         assert_eq!(s.folders.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Postvak IN", "Verwijderde items"]);
         assert_eq!(s.selected_folder.as_deref(), Some("acc/INBOX"));

@@ -20,6 +20,9 @@ pub struct Contact {
     pub company: String,
     #[serde(default)]
     pub notes: String,
+    /// The account the contact lives in; `None` for one kept only on this computer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -88,6 +91,7 @@ mod tests {
             phones: vec!["06-12345678".into(), "".into()],
             company: "Studio".into(),
             notes: "a\u{1}b".into(),
+            account_id: None,
         }
         .validated()
         .unwrap();

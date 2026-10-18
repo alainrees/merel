@@ -237,6 +237,9 @@ fn calendar_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         app.run("appointment.delete", Value::Null);
         app.calendar.editor = None;
     }
+    if ribbon_action(ui, t, "⟳", "Vernieuwen", !app.engine.session.item_accounts.is_empty()) {
+        app.run("sync.refresh", Value::Null);
+    }
 }
 
 /// A large ribbon button: glyph above label, drawn by hand as one widget so a screen reader

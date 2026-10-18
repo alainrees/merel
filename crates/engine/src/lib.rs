@@ -14,6 +14,7 @@ pub mod config;
 pub mod contacts;
 mod sample;
 pub mod signin;
+pub mod sync;
 pub mod tasks;
 pub mod worker;
 
@@ -24,7 +25,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
-use mailcraft_mailbox::{Flag, RemoteFolder, RemoteHeader};
+use mailcraft_mailbox::{Flag, Item, RemoteFolder, RemoteHeader};
 use mailcraft_model::{Account, Appointment, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, Task, clean_text};
 use mailcraft_secrets::{Secret, SecretStore};
 
@@ -70,6 +71,23 @@ pub enum Job {
         draft: Box<Draft>,
         sent_path: Option<String>,
     },
+    /// Fetch the appointments in `[from, to)`, the contacts and the tasks of an account.
+    Sync {
+        account_id: String,
+        from: i64,
+        to: i64,
+    },
+    /// Create (empty item id) or replace an item in the account's store; `local_id` is the
+    /// session id it has meanwhile.
+    SaveItem {
+        account_id: String,
+        local_id: String,
+        item: Item,
+    },
+    DeleteItem {
+        account_id: String,
+        id: String,
+    },
 }
 
 impl Job {
@@ -80,7 +98,10 @@ impl Job {
             | Job::Body { account_id, .. }
             | Job::Flag { account_id, .. }
             | Job::Move { account_id, .. }
-            | Job::Send { account_id, .. } => account_id,
+            | Job::Send { account_id, .. }
+            | Job::Sync { account_id, .. }
+            | Job::SaveItem { account_id, .. }
+            | Job::DeleteItem { account_id, .. } => account_id,
         }
     }
 }
@@ -91,6 +112,21 @@ pub enum Event {
     Connected {
         account_id: String,
         folders: Vec<RemoteFolder>,
+        /// Whether the store also keeps appointments, contacts and tasks.
+        syncs_items: bool,
+    },
+    /// The items of an account's store, replacing what the session had of it.
+    Synced {
+        account_id: String,
+        appointments: Vec<Appointment>,
+        contacts: Vec<Contact>,
+        tasks: Vec<Task>,
+    },
+    /// The store named the item the session knew as `local_id`.
+    ItemSaved {
+        account_id: String,
+        local_id: String,
+        remote_id: String,
     },
     Headers {
         folder_id: String,
@@ -156,6 +192,8 @@ pub struct Session {
     pub selected_contact: Option<String>,
     pub tasks: Vec<Task>,
     pub selected_task: Option<String>,
+    /// Accounts whose store keeps appointments, contacts and tasks, and so syncs them.
+    pub item_accounts: HashSet<String>,
     /// Set when a command changed the calendar, the contacts or the tasks; the engine saves
     /// and clears it.
     calendar_dirty: bool,
@@ -165,6 +203,7 @@ pub struct Session {
     next_appointment_id: u64,
     next_contact_id: u64,
     next_task_id: u64,
+    next_pending_id: u64,
     pending: Vec<Job>,
 }
 
@@ -276,8 +315,12 @@ impl Session {
     /// Folds a worker event into the session.
     pub fn apply(&mut self, event: Event) {
         match event {
-            Event::Connected { account_id, folders } => {
+            Event::Connected { account_id, folders, syncs_items } => {
                 self.status.insert(account_id.clone(), AccountStatus::Online);
+                if syncs_items {
+                    self.item_accounts.insert(account_id.clone());
+                    self.request_sync(&account_id);
+                }
                 self.folders.retain(|f| f.account_id != account_id);
                 let mut new: Vec<Folder> = folders
                     .into_iter()
@@ -340,6 +383,8 @@ impl Session {
                 self.loading.clear();
                 self.status.insert(account_id, AccountStatus::Error(what));
             }
+            Event::Synced { account_id, appointments, contacts, tasks } => self.apply_synced(&account_id, appointments, contacts, tasks),
+            Event::ItemSaved { account_id, local_id, remote_id } => self.apply_saved(&account_id, &local_id, &remote_id),
             Event::SignedIn { result } => match result {
                 Ok(account) => {
                     self.sign_in = Some(Some(Ok(())));

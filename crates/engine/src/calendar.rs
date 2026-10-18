@@ -1,12 +1,14 @@
 //! Calendars and appointments in the session, and the commands that change them.
 //!
-//! Appointments live in `calendar.json` next to the accounts file until they sync with a
-//! server. Every change goes through a command, which marks the session dirty; the engine
-//! saves right after the command returns.
+//! Local appointments live in `calendar.json` next to the accounts file; an account's live in
+//! its store and are mirrored here (see [`crate::sync`]). Every change goes through a command,
+//! which marks the session dirty or leaves a job for the store; the engine saves right after
+//! the command returns.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use mailcraft_mailbox::Item;
 use mailcraft_model::{Appointment, AppointmentError, Calendar};
 
 use crate::{CommandError, Session};
@@ -29,8 +31,11 @@ impl Session {
         self.selected_appointment = None;
     }
 
+    /// What goes to the file: the local calendars and their appointments.
     pub fn calendar_data(&self) -> CalendarFile {
-        CalendarFile { calendars: self.calendars.clone(), appointments: self.appointments.clone() }
+        let calendars: Vec<Calendar> = self.calendars.iter().filter(|c| c.account_id.is_none()).cloned().collect();
+        let appointments = self.appointments.iter().filter(|a| calendars.iter().any(|c| c.id == a.calendar_id)).cloned().collect();
+        CalendarFile { calendars, appointments }
     }
 
     pub fn calendar(&self, id: &str) -> Option<&Calendar> {
@@ -95,7 +100,12 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
             .or_else(|| s.calendars.first().map(|c| c.id.clone()))
             .ok_or(CommandError::Param("calendar_id"))?,
     };
-    let id = existing.as_ref().map(|a| a.id.clone()).unwrap_or_else(|| s.new_appointment_id());
+    let account = s.appointment_account(&calendar_id);
+    let id = match (&existing, &account) {
+        (Some(a), _) => a.id.clone(),
+        (None, Some(account)) => s.pending_id(account),
+        (None, None) => s.new_appointment_id(),
+    };
     let appointment = Appointment {
         id: id.clone(),
         calendar_id,
@@ -111,25 +121,28 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         AppointmentError::NoTitle => CommandError::Param("title"),
         AppointmentError::EndsBeforeStart => CommandError::Param("end"),
     })?;
+    match &account {
+        Some(account) => s.save_remote(account, existing.is_none(), Item::Appointment(appointment.clone()))?,
+        None => s.calendar_dirty = true,
+    }
     s.appointments.retain(|a| a.id != id);
     s.appointments.push(appointment);
     s.selected_appointment = Some(id);
-    s.calendar_dirty = true;
     Ok(())
 }
 
 /// `appointment.delete { id? }`: the given appointment, else the selected one.
 pub fn delete(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let id = str_param(params, "id").map(str::to_string).or_else(|| s.selected_appointment.clone()).ok_or(CommandError::NoSelection)?;
-    let before = s.appointments.len();
+    let calendar_id = s.appointment(&id).ok_or(CommandError::NotFound)?.calendar_id.clone();
     s.appointments.retain(|a| a.id != id);
-    if s.appointments.len() == before {
-        return Err(CommandError::NotFound);
-    }
     if s.selected_appointment.as_deref() == Some(id.as_str()) {
         s.selected_appointment = None;
     }
-    s.calendar_dirty = true;
+    match s.appointment_account(&calendar_id) {
+        Some(account) => s.delete_remote(&account, &id),
+        None => s.calendar_dirty = true,
+    }
     Ok(())
 }
 
