@@ -1,0 +1,14 @@
+[package]
+name = "mailcraft-engine"
+description = "Session state and the command registry every action goes through."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mailcraft-model = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
