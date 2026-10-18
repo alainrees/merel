@@ -4,11 +4,19 @@
 use std::time::Duration;
 
 use lettre::message::{Mailbox, header::ContentType};
-use lettre::transport::smtp::authentication::Credentials;
+use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::transport::smtp::client::{Tls as SmtpTls, TlsParameters};
 use lettre::{Message, SmtpTransport, Transport};
 use mailcraft_model::{Address, Draft, Server, Tls};
 use mailcraft_secrets::Secret;
+
+/// How to log in.
+#[derive(Clone, Debug)]
+pub enum Credential {
+    Password(Secret),
+    /// An OAuth 2.0 access token, sent with SASL XOAUTH2.
+    OAuth2(Secret),
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum SmtpError {
@@ -64,16 +72,21 @@ pub fn build(from: &Address, draft: &Draft) -> Result<Message, SmtpError> {
 }
 
 /// Sends `message` through `server` as `username`.
-pub fn send(server: &Server, username: &str, password: &Secret, message: &Message) -> Result<(), SmtpError> {
+pub fn send(server: &Server, username: &str, credential: &Credential, message: &Message) -> Result<(), SmtpError> {
     let params = TlsParameters::new(server.host.clone()).map_err(|e| SmtpError::Connect { host: server.host.clone(), reason: e.to_string() })?;
     let tls = match server.tls {
         Tls::Implicit => SmtpTls::Wrapper(params),
         Tls::StartTls => SmtpTls::Required(params),
     };
+    let (secret, mechanisms) = match credential {
+        Credential::Password(p) => (p.expose().to_string(), vec![Mechanism::Plain, Mechanism::Login]),
+        Credential::OAuth2(t) => (t.expose().to_string(), vec![Mechanism::Xoauth2]),
+    };
     let transport = SmtpTransport::builder_dangerous(server.host.as_str())
         .port(server.port)
         .tls(tls)
-        .credentials(Credentials::new(username.to_string(), password.expose().to_string()))
+        .credentials(Credentials::new(username.to_string(), secret))
+        .authentication(mechanisms)
         .timeout(Some(Duration::from_secs(30)))
         .build();
     match transport.send(message) {
