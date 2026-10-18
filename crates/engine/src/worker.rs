@@ -1,7 +1,7 @@
 //! One background thread per account, holding its connection and serving [`Job`]s in order.
 //!
-//! The thread speaks IMAP or Exchange Web Services through the [`Mailbox`] trait and never
-//! knows which. It reconnects once when a command fails on a dropped connection; after that
+//! The thread speaks IMAP, Exchange Web Services or Google's APIs through the [`Mailbox`]
+//! trait and never knows which. It reconnects once when a command fails on a dropped connection; after that
 //! the failure is reported and the next job tries again from scratch.
 
 use std::collections::HashMap;
@@ -9,6 +9,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 
 use mailcraft_exchange::EwsClient;
+use mailcraft_google::GoogleMailbox;
 use mailcraft_imap::ImapClient;
 use mailcraft_mailbox::{Mailbox, MailboxError};
 use mailcraft_model::{Account, Protocol, Server};
@@ -165,7 +166,8 @@ fn connect(account: &Account, server: &Server, credentials: &mut Credentials) ->
     let credential = credentials.incoming()?;
     Ok(match account.protocol {
         Protocol::Exchange => Box::new(EwsClient::connect(server, &account.username, &credential).map_err(|e| describe(&e))?),
-        Protocol::ImapSmtp | Protocol::Gmail | Protocol::Microsoft365 => {
+        Protocol::Gmail => Box::new(GoogleMailbox::connect(server, &account.username, &credential).map_err(|e| describe(&e))?),
+        Protocol::ImapSmtp | Protocol::Microsoft365 => {
             Box::new(ImapClient::connect(server, &account.username, &credential).map_err(MailboxError::from).map_err(|e| describe(&e))?)
         }
     })

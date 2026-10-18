@@ -12,7 +12,8 @@ Google staat geen gewoon wachtwoord toe; je logt in via de browser (OAuth 2.0). 
 de app één keer bij Google geregistreerd zijn. Dat is gratis en duurt een paar minuten:
 
 1. Ga naar <https://console.cloud.google.com/> en maak een project aan (bijvoorbeeld
-   "Mailcraft").
+   "Mailcraft"). Zet onder **APIs & Services › Library** de *Google Calendar API*, de
+   *People API* en de *Tasks API* aan; zonder die drie komt alleen de mail mee.
 2. **APIs & Services › OAuth consent screen**: kies *External*, vul een appnaam en je
    e-mailadres in, en voeg jezelf toe bij *Test users*. Publiceren is niet nodig.
 3. **APIs & Services › Credentials › Create credentials › OAuth client ID**: type
@@ -22,8 +23,16 @@ de app één keer bij Google geregistreerd zijn. Dat is gratis en duurt een paar
    client-secret in en klik op **Inloggen bij Google**. Je browser opent; na het inloggen zegt
    de pagina "Gelukt" en verschijnt het account in Mailcraft.
 
-Mailcraft vraagt alleen de machtiging `https://mail.google.com/` (IMAP en SMTP). Het
-vernieuwingstoken en het client-secret gaan in de sleutelhanger.
+Mailcraft vraagt de machtigingen `https://mail.google.com/` (IMAP en SMTP) en die voor
+Google Agenda, Contacten en Taken. Het vernieuwingstoken en het client-secret gaan in de
+sleutelhanger.
+
+Met die machtigingen komen de agenda, de contacten en de taken van het Google-account mee, net
+als bij Exchange: de agenda verschijnt naast "Mijn agenda", contacten en taken staan tussen de
+lokale, en wijzigingen gaan meteen naar Google. Google Taken kent geen prioriteit; die blijft
+alleen in Mailcraft staan. Een Gmail-account dat is toegevoegd toen Mailcraft alleen om mail
+vroeg, laat alleen mail zien: klik bij dat account op **Opnieuw aanmelden** (Bestand ›
+Accounts) om de extra toestemming te geven.
 
 ## Microsoft 365 / Outlook.com
 
