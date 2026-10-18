@@ -2,6 +2,7 @@
 
 use serde_json::Value;
 
+use mailcraft_mailbox::Flag;
 use mailcraft_model::FolderKind;
 
 use crate::{Job, Session};
@@ -84,16 +85,16 @@ fn selected_mut(s: &mut Session) -> Result<&mut mailcraft_model::MessageHeader, 
     s.messages.iter_mut().find(|m| m.id == id).ok_or(CommandError::NoSelection)
 }
 
-/// The account id, mailbox path and UID of the selected message, for a remote job.
-fn remote(s: &Session) -> Option<(String, String, u32)> {
+/// The account id, folder path and server id of the selected message, for a remote job.
+fn remote(s: &Session) -> Option<(String, String, String)> {
     let m = s.selected()?;
     let f = s.folder(&m.folder_id)?;
-    (f.account_id != crate::SAMPLE_ACCOUNT).then(|| (f.account_id.clone(), f.path.clone(), m.uid))
+    (f.account_id != crate::SAMPLE_ACCOUNT).then(|| (f.account_id.clone(), f.path.clone(), m.remote_id.clone()))
 }
 
-fn set_flag(s: &mut Session, flag: &'static str, on: bool) {
-    if let Some((account_id, path, uid)) = remote(s) {
-        s.pending.push(Job::Flag { account_id, path, uid, flag, on });
+fn set_flag(s: &mut Session, flag: Flag, on: bool) {
+    if let Some((account_id, path, id)) = remote(s) {
+        s.pending.push(Job::Flag { account_id, path, id, flag, on });
     }
 }
 
@@ -103,7 +104,7 @@ fn set_seen(s: &mut Session, seen: bool) -> Result<(), CommandError> {
         return Ok(());
     }
     m.flags.seen = seen;
-    set_flag(s, "\\Seen", seen);
+    set_flag(s, Flag::Seen, seen);
     Ok(())
 }
 
@@ -111,7 +112,7 @@ fn toggle_flag(s: &mut Session, _: &Value) -> Result<(), CommandError> {
     let m = selected_mut(s)?;
     m.flags.flagged = !m.flags.flagged;
     let on = m.flags.flagged;
-    set_flag(s, "\\Flagged", on);
+    set_flag(s, Flag::Flagged, on);
     Ok(())
 }
 
@@ -119,8 +120,8 @@ fn move_selected(s: &mut Session, kind: FolderKind, what: &'static str) -> Resul
     let m = s.selected().ok_or(CommandError::NoSelection)?;
     let account = s.folder(&m.folder_id).map(|f| f.account_id.clone()).ok_or(CommandError::NotFound)?;
     let target = s.folder_of_kind(&account, kind).cloned().ok_or(CommandError::NoFolder(what))?;
-    if let Some((account_id, path, uid)) = remote(s) {
-        s.pending.push(Job::Move { account_id, path, uid, dest: target.path.clone() });
+    if let Some((account_id, path, id)) = remote(s) {
+        s.pending.push(Job::Move { account_id, path, id, dest: target.path.clone() });
     }
     selected_mut(s)?.folder_id = target.id;
     s.selected_message = None;
@@ -171,7 +172,7 @@ mod tests {
 
     #[test]
     fn real_accounts_leave_jobs_behind() {
-        use mailcraft_imap::{RemoteFolder, RemoteHeader};
+        use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
         use mailcraft_model::{Account, Address, Protocol, Server, Tls};
         let account = Account {
             id: "acc".into(),
@@ -188,9 +189,9 @@ mod tests {
         s.apply(crate::Event::Connected {
             account_id: "acc".into(),
             folders: vec![
-                RemoteFolder { name: "Trash".into(), kind: FolderKind::Deleted, selectable: true },
-                RemoteFolder { name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true },
-                RemoteFolder { name: "[Gmail]".into(), kind: FolderKind::Other, selectable: false },
+                RemoteFolder { path: "Trash".into(), name: "Trash".into(), kind: FolderKind::Deleted, selectable: true },
+                RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true },
+                RemoteFolder { path: "[Gmail]".into(), name: "[Gmail]".into(), kind: FolderKind::Other, selectable: false },
             ],
         });
         assert_eq!(s.folders.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Postvak IN", "Verwijderde items"]);
@@ -199,15 +200,24 @@ mod tests {
         let header = mailcraft_mime::parse_header(b"From: x@y.nl\r\nSubject: Hoi\r\n\r\n");
         s.apply(crate::Event::Headers {
             folder_id: "acc/INBOX".into(),
-            headers: vec![RemoteHeader { uid: 7, seen: false, flagged: false, answered: false, size: 10, has_attachments: false, header, date: 5 }],
+            headers: vec![RemoteHeader {
+                id: "7".into(),
+                seen: false,
+                flagged: false,
+                answered: false,
+                size: 10,
+                has_attachments: false,
+                header,
+                date: 5,
+            }],
         });
         assert_eq!(s.folder("acc/INBOX").unwrap().unread, 1);
         s.run("message.select", &json!({ "id": "acc/INBOX#7" })).unwrap();
         let jobs = s.take_jobs();
-        assert!(jobs.contains(&Job::Body { account_id: "acc".into(), message_id: "acc/INBOX#7".into(), path: "INBOX".into(), uid: 7 }));
-        assert!(jobs.contains(&Job::Flag { account_id: "acc".into(), path: "INBOX".into(), uid: 7, flag: "\\Seen", on: true }));
+        assert!(jobs.contains(&Job::Body { account_id: "acc".into(), message_id: "acc/INBOX#7".into(), path: "INBOX".into(), id: "7".into() }));
+        assert!(jobs.contains(&Job::Flag { account_id: "acc".into(), path: "INBOX".into(), id: "7".into(), flag: Flag::Seen, on: true }));
         s.run("message.delete", &Value::Null).unwrap();
-        assert_eq!(s.take_jobs(), vec![Job::Move { account_id: "acc".into(), path: "INBOX".into(), uid: 7, dest: "Trash".into() }]);
+        assert_eq!(s.take_jobs(), vec![Job::Move { account_id: "acc".into(), path: "INBOX".into(), id: "7".into(), dest: "Trash".into() }]);
         assert_eq!(s.message("acc/INBOX#7").unwrap().folder_id, "acc/Trash");
 
         let draft = mailcraft_model::Draft {
