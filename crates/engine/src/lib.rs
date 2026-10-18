@@ -11,6 +11,7 @@
 mod commands;
 pub mod config;
 mod sample;
+pub mod signin;
 pub mod worker;
 
 pub use commands::{COMMANDS, CommandError, CommandSpec};
@@ -106,6 +107,10 @@ pub enum Event {
         draft_id: u64,
         result: Result<(), String>,
     },
+    /// A browser sign-in finished; `Ok` carries the account to add.
+    SignedIn {
+        result: Result<Box<Account>, String>,
+    },
 }
 
 /// Where a draft handed to [`Session::send`] is.
@@ -137,6 +142,8 @@ pub struct Session {
     pub selected_message: Option<String>,
     /// Drafts handed to `send`, by draft id.
     pub outbox: HashMap<u64, SendState>,
+    /// A browser sign-in in progress (`Some(None)`), or how the last one ended.
+    pub sign_in: Option<Option<Result<(), String>>>,
     next_draft_id: u64,
     pending: Vec<Job>,
 }
@@ -314,6 +321,13 @@ impl Session {
                 self.loading.clear();
                 self.status.insert(account_id, AccountStatus::Error(what));
             }
+            Event::SignedIn { result } => match result {
+                Ok(account) => {
+                    self.sign_in = Some(Some(Ok(())));
+                    self.add_account(*account);
+                }
+                Err(e) => self.sign_in = Some(Some(Err(e))),
+            },
             Event::Sent { account_id, draft_id, result } => {
                 let state = match result {
                     Ok(()) => SendState::Sent,
@@ -391,18 +405,49 @@ impl Engine {
     }
 
     fn spawn_accounts(&mut self) {
-        let Some(worker) = &mut self.worker else { return };
-        for a in &self.session.accounts {
-            match self.secrets.get(&a.id) {
-                Ok(Some(password)) => worker.start_account(a.clone(), password),
-                Ok(None) => self
-                    .session
-                    .status
-                    .insert(a.id.clone(), AccountStatus::Error("Geen wachtwoord in de sleutelhanger.".into()))
-                    .map(|_| ())
-                    .unwrap_or(()),
-                Err(e) => self.session.status.insert(a.id.clone(), AccountStatus::Error(e.to_string())).map(|_| ()).unwrap_or(()),
+        let ids: Vec<String> = self.session.accounts.iter().map(|a| a.id.clone()).collect();
+        for id in ids {
+            self.spawn_account(&id);
+        }
+    }
+
+    /// Starts the worker thread for one account with the secrets the keychain holds for it.
+    fn spawn_account(&mut self, account_id: &str) {
+        let Some(account) = self.session.accounts.iter().find(|a| a.id == account_id).cloned() else { return };
+        let secret = match self.secrets.get(&account.id) {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                self.session.status.insert(account.id, AccountStatus::Error("Geen wachtwoord of aanmelding in de sleutelhanger.".into()));
+                return;
             }
+            Err(e) => {
+                self.session.status.insert(account.id, AccountStatus::Error(e.to_string()));
+                return;
+            }
+        };
+        let client_secret = self.secrets.get(&signin::client_secret_key(&account.id)).ok().flatten();
+        let credentials = signin::Credentials::new(&account, secret, client_secret);
+        if let Some(worker) = &mut self.worker {
+            worker.start_account(account, credentials);
+        }
+    }
+
+    /// Starts a browser sign-in on a background thread; the result arrives as an event and
+    /// `session.sign_in` follows it.
+    pub fn sign_in(&mut self, sign_in: signin::SignIn) {
+        let Some(worker) = &self.worker else {
+            self.session.sign_in = Some(Some(Err("Aanmelden kan niet in de voorbeeldmodus.".into())));
+            return;
+        };
+        self.session.sign_in = Some(None);
+        let secrets = Arc::clone(&self.secrets);
+        let events = worker.events();
+        let spawned = std::thread::Builder::new().name("oauth-sign-in".into()).spawn(move || {
+            let result = signin::run(&secrets, sign_in).map(Box::new);
+            let _ = events.send(Event::SignedIn { result });
+        });
+        if spawned.is_err() {
+            self.session.sign_in = Some(Some(Err("Kon geen achtergrondtaak starten.".into())));
         }
     }
 
@@ -410,13 +455,16 @@ impl Engine {
     pub fn add_account(&mut self, account: Account, password: Secret) -> Result<(), String> {
         self.secrets.set(&account.id, &password).map_err(|e| e.to_string())?;
         self.session.add_account(account.clone());
+        self.save_accounts()?;
+        self.spawn_account(&account.id);
+        self.dispatch();
+        Ok(())
+    }
+
+    fn save_accounts(&self) -> Result<(), String> {
         if let Some(path) = &self.config_path {
             config::save(path, &self.session.accounts).map_err(|e| e.to_string())?;
         }
-        if let Some(worker) = &mut self.worker {
-            worker.start_account(account, password);
-        }
-        self.dispatch();
         Ok(())
     }
 
@@ -437,7 +485,17 @@ impl Engine {
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
         while let Ok(e) = self.events.try_recv() {
+            let signed_in = match &e {
+                Event::SignedIn { result: Ok(a) } => Some(a.id.clone()),
+                _ => None,
+            };
             self.session.apply(e);
+            if let Some(id) = signed_in {
+                if let Err(e) = self.save_accounts() {
+                    self.session.sign_in = Some(Some(Err(e)));
+                }
+                self.spawn_account(&id);
+            }
             changed = true;
         }
         self.dispatch();

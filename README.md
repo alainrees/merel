@@ -20,8 +20,10 @@ The Outlook-style window (ribbon, module rail, folder pane, message list, readin
 built-in sample mail, and reading mail from an IMAP account: add it under File › Accounts,
 browse folders, open messages (plain text, or HTML reduced to text), mark read or unread, flag,
 delete, archive and move to junk; changes go back to the server. Sending over SMTP: new mail,
-reply, reply all and forward, with a copy filed in Sent. Next up: Gmail, Microsoft 365 and
-Exchange; after mail come calendar, contacts and tasks.
+reply, reply all and forward, with a copy filed in Sent. Gmail and Microsoft 365 sign in through
+the system browser (OAuth 2.0 with PKCE, XOAUTH2 on IMAP and SMTP); see
+[docs/accounts.md](docs/accounts.md) for the one-time app registration. Next up: Exchange;
+after mail come calendar, contacts and tasks.
 
 ## Build
 

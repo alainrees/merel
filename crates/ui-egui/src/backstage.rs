@@ -3,7 +3,7 @@
 use egui::{Margin, RichText, Stroke, Ui, vec2};
 use zeroize::Zeroize;
 
-use mailcraft_engine::AccountStatus;
+use mailcraft_engine::{AccountStatus, signin};
 use mailcraft_model::{Account, Address, Protocol, Server, Tls};
 use mailcraft_secrets::Secret;
 
@@ -11,6 +11,7 @@ use crate::{MailApp, Tab, Tokens};
 
 /// What the person has typed so far. The password is wiped when the form is dropped.
 pub struct AccountForm {
+    pub kind: Protocol,
     pub name: String,
     pub email: String,
     pub username: String,
@@ -21,12 +22,16 @@ pub struct AccountForm {
     pub smtp_host: String,
     pub smtp_port: String,
     pub smtp_tls: Tls,
+    /// OAuth registration (Gmail, Microsoft 365).
+    pub client_id: String,
+    pub client_secret: String,
     pub error: Option<String>,
 }
 
 impl Default for AccountForm {
     fn default() -> Self {
         AccountForm {
+            kind: Protocol::ImapSmtp,
             name: String::new(),
             email: String::new(),
             username: String::new(),
@@ -37,6 +42,8 @@ impl Default for AccountForm {
             smtp_host: String::new(),
             smtp_port: "465".into(),
             smtp_tls: Tls::Implicit,
+            client_id: String::new(),
+            client_secret: String::new(),
             error: None,
         }
     }
@@ -45,6 +52,7 @@ impl Default for AccountForm {
 impl Drop for AccountForm {
     fn drop(&mut self) {
         self.password.zeroize();
+        self.client_secret.zeroize();
     }
 }
 
@@ -104,6 +112,7 @@ impl AccountForm {
             address,
             username,
             protocol: Protocol::ImapSmtp,
+            auth: mailcraft_model::Auth::Password,
             incoming: Some(incoming),
             outgoing: Some(outgoing),
         })
@@ -191,6 +200,20 @@ fn tls_picker(ui: &mut Ui, t: &Tokens, id: &str, tls: &mut Tls) {
 }
 
 fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    ui.horizontal(|ui| {
+        ui.add_sized([150.0, 24.0], egui::Label::new(RichText::new("Soort account").color(t.text)));
+        ui.radio_value(&mut app.form.kind, Protocol::ImapSmtp, "IMAP/SMTP");
+        ui.radio_value(&mut app.form.kind, Protocol::Gmail, "Gmail");
+        ui.radio_value(&mut app.form.kind, Protocol::Microsoft365, "Microsoft 365");
+    });
+    ui.add_space(6.0);
+    match app.form.kind {
+        Protocol::ImapSmtp | Protocol::Exchange => password_form(app, ui, t),
+        Protocol::Gmail | Protocol::Microsoft365 => oauth_form(app, ui, t),
+    }
+}
+
+fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let f = &mut app.form;
     field(ui, t, "Naam", &mut f.name, false);
     field(ui, t, "E-mailadres", &mut f.email, false);
@@ -236,6 +259,70 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
 }
 
+fn oauth_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    // A finished sign-in closes the form; a failed one shows why.
+    match app.engine.session.sign_in.take() {
+        Some(Some(Ok(()))) => {
+            app.form = AccountForm::default();
+            app.tab = Tab::Home;
+            return;
+        }
+        Some(Some(Err(e))) => app.form.error = Some(e),
+        Some(None) => app.engine.session.sign_in = Some(None),
+        None => {}
+    }
+    let busy = app.engine.session.sign_in.is_some();
+    let (provider, secret_needed, help) = match app.form.kind {
+        Protocol::Gmail => (
+            "Google",
+            true,
+            "Maak in de Google Cloud Console een OAuth-client van het type Desktop app en vul de client-ID en het client-secret in. Zie docs/accounts.md.",
+        ),
+        _ => (
+            "Microsoft",
+            false,
+            "Registreer de app in Microsoft Entra (public client, redirect http://localhost) en vul de Application (client) ID in. Zie docs/accounts.md.",
+        ),
+    };
+    ui.label(RichText::new(help).size(12.0).color(t.text_dim));
+    ui.add_space(6.0);
+    let f = &mut app.form;
+    ui.add_enabled_ui(!busy, |ui| {
+        field(ui, t, "Naam", &mut f.name, false);
+        field(ui, t, "E-mailadres", &mut f.email, false);
+        field(ui, t, "Client-ID", &mut f.client_id, false);
+        if secret_needed {
+            field(ui, t, "Client-secret", &mut f.client_secret, true);
+        }
+    });
+    ui.add_space(12.0);
+    if let Some(e) = &f.error {
+        ui.label(RichText::new(e).color(t.flag));
+    }
+    let label = if busy { "Wacht op de browser…".to_string() } else { format!("Inloggen bij {provider}") };
+    let click =
+        ui.add_enabled(!busy, egui::Button::new(RichText::new(label).color(t.on_accent)).fill(t.accent).min_size(vec2(220.0, 30.0))).clicked();
+    if busy {
+        ui.label(
+            RichText::new("Log in in het browservenster dat is geopend. Daarna verschijnt het account hier vanzelf.").size(12.0).color(t.text_dim),
+        );
+    }
+    if click {
+        match signin::account(app.form.kind, &app.form.name, &app.form.email, &app.form.client_id) {
+            Ok(account) => {
+                let client_secret = (secret_needed && !app.form.client_secret.trim().is_empty()).then(|| Secret::new(app.form.client_secret.trim()));
+                if secret_needed && client_secret.is_none() {
+                    app.form.error = Some("Vul het client-secret in dat Google bij de OAuth-client toonde.".into());
+                    return;
+                }
+                app.form.error = None;
+                app.engine.sign_in(signin::SignIn { account, client_secret });
+            }
+            Err(e) => app.form.error = Some(e),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,5 +345,25 @@ mod tests {
         f.imap_host = "imap.voorbeeld.nl".into();
         f.password.clear();
         assert!(f.account().is_err());
+    }
+
+    #[test]
+    fn oauth_kinds_show_a_browser_button() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        app.tab = Tab::File;
+        app.form.kind = Protocol::Gmail;
+        let mut harness = Harness::builder().with_size(vec2(1100.0, 760.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        harness.run();
+        harness.get_by_label("Inloggen bij Google");
+        harness.get_by_label("Client-secret");
+        harness.state_mut().form.kind = Protocol::Microsoft365;
+        harness.run();
+        harness.get_by_label("Inloggen bij Microsoft");
+        assert!(harness.query_by_label("Client-secret").is_none());
+        harness.get_by_label("Inloggen bij Microsoft").click();
+        harness.run();
+        assert_eq!(harness.state().form.error.as_deref(), Some("Vul een geldig e-mailadres in."));
     }
 }
