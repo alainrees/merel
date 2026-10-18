@@ -6,9 +6,11 @@
 
 mod address;
 mod calendar;
+mod contact;
 
 pub use address::{Address, AddressError, parse_address_list};
 pub use calendar::{Appointment, AppointmentError, Calendar, MAX_NOTES};
+pub use contact::{Contact, ContactError};
 
 use serde::{Deserialize, Serialize};
 

@@ -152,7 +152,9 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 });
                 ui.add_space(8.0);
                 field(ui, t, "Aan", &mut c.to);
+                crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut c.to);
                 field(ui, t, "CC", &mut c.cc);
+                crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut c.cc);
                 field(ui, t, "Onderwerp", &mut c.subject);
                 if let Some(e) = &c.error {
                     ui.label(RichText::new(e).color(t.flag));
