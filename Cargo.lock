@@ -2262,6 +2262,7 @@ dependencies = [
  "directories",
  "log",
  "mailcraft-exchange",
+ "mailcraft-google",
  "mailcraft-imap",
  "mailcraft-mailbox",
  "mailcraft-mime",
@@ -2287,6 +2288,20 @@ dependencies = [
  "mailcraft-model",
  "mailcraft-secrets",
  "roxmltree",
+ "ureq",
+]
+
+[[package]]
+name = "mailcraft-google"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "log",
+ "mailcraft-imap",
+ "mailcraft-mailbox",
+ "mailcraft-model",
+ "mailcraft-secrets",
+ "serde_json",
  "ureq",
 ]
 

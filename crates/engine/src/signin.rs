@@ -142,7 +142,7 @@ mod tests {
     fn gmail_account_takes_the_preset() {
         let a = account(Protocol::Gmail, "Alain", "alain@gmail.com", "abc.apps.googleusercontent.com").unwrap();
         assert_eq!(a.incoming.unwrap().host, "imap.gmail.com");
-        assert!(matches!(a.auth, Auth::OAuth2 { ref scope, .. } if scope == "https://mail.google.com/"));
+        assert!(matches!(a.auth, Auth::OAuth2 { ref scope, .. } if scope.starts_with("https://mail.google.com/ ") && scope.contains("/auth/tasks")));
         assert!(account(Protocol::ImapSmtp, "", "a@b.nl", "x").is_err());
         assert!(account(Protocol::Gmail, "", "a@b.nl", " ").is_err());
     }

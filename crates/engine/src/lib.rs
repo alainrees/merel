@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
 use mailcraft_mailbox::{Flag, Item, RemoteFolder, RemoteHeader};
-use mailcraft_model::{Account, Appointment, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, Task, clean_text};
+use mailcraft_model::{Account, Appointment, Auth, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, Task, clean_text};
 use mailcraft_secrets::{Secret, SecretStore};
 
 /// How many of the newest messages a folder shows.
@@ -226,8 +226,15 @@ impl Session {
         s
     }
 
-    /// Registers an account and queues its connection. The sample account goes away.
+    /// Registers an account and queues its connection; an account with the same id (one that
+    /// signed in again) is replaced. The sample account goes away.
     pub fn add_account(&mut self, account: Account) {
+        if let Some(existing) = self.accounts.iter_mut().find(|a| a.id == account.id) {
+            *existing = account.clone();
+            self.status.insert(account.id.clone(), AccountStatus::Connecting);
+            self.pending.push(Job::Connect { account_id: account.id });
+            return;
+        }
         if self.accounts.iter().any(|a| a.id == SAMPLE_ACCOUNT) {
             self.accounts.clear();
             self.folders.clear();
@@ -546,6 +553,19 @@ impl Engine {
         if spawned.is_err() {
             self.session.sign_in = Some(Some(Err("Kon geen achtergrondtaak starten.".into())));
         }
+    }
+
+    /// Runs the browser sign-in again for an OAuth account, asking the provider's current
+    /// scopes, so an account signed in before a scope was added (calendar, contacts and tasks
+    /// for Gmail) gets a token that covers it. The result arrives like a first sign-in.
+    pub fn sign_in_again(&mut self, account_id: &str) {
+        let Some(mut account) = self.session.accounts.iter().find(|a| a.id == account_id).cloned() else { return };
+        let preset = account.protocol.preset();
+        if let (Auth::OAuth2 { scope, .. }, Some(preset)) = (&mut account.auth, preset) {
+            *scope = preset.scope;
+        }
+        let client_secret = self.secrets.get(&signin::client_secret_key(&account.id)).ok().flatten();
+        self.sign_in(signin::SignIn { account, client_secret });
     }
 
     /// Stores the password in the keychain, saves the account and connects it.

@@ -324,6 +324,19 @@ mod tests {
     }
 
     #[test]
+    fn an_account_that_signs_in_again_is_replaced_not_doubled() {
+        let mut s = Session::with_accounts(vec![account("acc", "Werk")]);
+        s.take_jobs();
+        let mut renamed = account("acc", "Werk (nieuw)");
+        renamed.auth = Auth::OAuth2 { client_id: "c".into(), auth_url: "a".into(), token_url: "t".into(), scope: "wide".into() };
+        s.add_account(renamed);
+        assert_eq!(s.accounts.len(), 1);
+        assert_eq!(s.accounts[0].name, "Werk (nieuw)");
+        assert_eq!(s.take_jobs(), vec![Job::Connect { account_id: "acc".into() }]);
+        assert_eq!(s.status.get("acc"), Some(&crate::AccountStatus::Connecting));
+    }
+
+    #[test]
     fn ids_say_where_an_item_lives() {
         assert_eq!(Session::remote_item_id("acc", "acc/AAMk=/x+"), Some("AAMk=/x+".to_string()));
         assert_eq!(Session::remote_item_id("acc", "acc/pending-1-2"), None);
