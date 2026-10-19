@@ -1,11 +1,12 @@
 //! How the message list is shown: which messages (a [`Filter`], and a category with
 //! `view.category { name? }`) and in what order (a [`Sort`]), set with `view.filter { filter }`
 //! and `view.sort { sort }`. The search box narrows the list further; all of it leaves the
-//! folder itself alone.
+//! folder itself alone. [`conversations`] groups the list by subject for the conversation view.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
-use mailcraft_model::MessageHeader;
+use mailcraft_model::{MessageHeader, conversation_key};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -79,6 +80,46 @@ impl Sort {
     }
 }
 
+/// The messages on one subject, in the order of the list; the first is the one a folded
+/// conversation shows.
+#[derive(Debug)]
+pub struct Conversation<'a> {
+    /// [`conversation_key`] of the subject.
+    pub key: String,
+    pub messages: Vec<&'a MessageHeader>,
+}
+
+impl Conversation<'_> {
+    pub fn unread(&self) -> usize {
+        self.messages.iter().filter(|m| !m.flags.seen).count()
+    }
+}
+
+/// Groups a list by [`conversation_key`]; each conversation stands where its first message
+/// stood, with its messages in the list's order.
+pub fn conversations(list: Vec<&MessageHeader>) -> Vec<Conversation<'_>> {
+    let mut out: Vec<Conversation<'_>> = Vec::new();
+    let mut index: HashMap<String, usize> = HashMap::new();
+    for m in list {
+        let key = conversation_key(&m.subject);
+        match index.get(&key) {
+            Some(&i) => out[i].messages.push(m),
+            None => {
+                index.insert(key.clone(), out.len());
+                out.push(Conversation { key, messages: vec![m] });
+            }
+        }
+    }
+    out
+}
+
+impl Session {
+    /// [`Self::visible_messages`] grouped by subject; see [`conversations`].
+    pub fn visible_conversations(&self) -> Vec<Conversation<'_>> {
+        conversations(self.visible_messages())
+    }
+}
+
 /// `view.filter { filter }`: "all", "unread", "flagged" or "attachments".
 pub fn filter(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     s.filter = serde_json::from_value(params.get("filter").cloned().unwrap_or(Value::Null)).map_err(|_| CommandError::Param("filter"))?;
@@ -109,6 +150,31 @@ mod tests {
 
     fn subjects(s: &Session) -> Vec<String> {
         s.visible_messages().iter().map(|m| m.subject.clone()).collect()
+    }
+
+    #[test]
+    fn conversations_gather_replies_behind_the_message_that_stands_first() {
+        let mut s = Session::sample();
+        let mut earlier = s.message("m2").expect("Re: Offerte drukwerk").clone();
+        earlier.id = "m9".into();
+        earlier.subject = "Offerte drukwerk".into();
+        earlier.date -= 86_400;
+        earlier.flags.seen = false;
+        s.messages.push(earlier);
+        let groups = s.visible_conversations();
+        assert_eq!(groups.len(), 4, "five messages, four subjects");
+        let g = groups.iter().find(|g| g.key == "offerte drukwerk").expect("the group");
+        assert_eq!(g.messages.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["m2", "m9"], "newest first, as the list");
+        assert_eq!(g.unread(), 1);
+        s.run("view.sort", &json!({ "sort": "oldest" })).expect("sort");
+        let groups = s.visible_conversations();
+        assert_eq!(
+            groups[0].messages.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["m9", "m2"],
+            "the group stands where its first message stands"
+        );
+        s.run("view.filter", &json!({ "filter": "unread" })).expect("filter");
+        assert!(s.visible_conversations().iter().all(|g| g.messages.iter().all(|m| !m.flags.seen)), "the filter applies before grouping");
     }
 
     #[test]
