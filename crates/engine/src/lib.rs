@@ -297,6 +297,9 @@ impl Session {
     pub fn add_account(&mut self, account: Account) {
         if let Some(existing) = self.accounts.iter_mut().find(|a| a.id == account.id) {
             *existing = account.clone();
+            // Whatever the old connection was fetching is forgotten with it.
+            let prefix = format!("{}/", account.id);
+            self.loading.retain(|id| !id.starts_with(&prefix) && *id != format!("sync/{}", account.id));
             self.status.insert(account.id.clone(), AccountStatus::Connecting);
             self.pending.push(Job::Connect { account_id: account.id });
             return;
@@ -828,6 +831,34 @@ impl Engine {
         Ok(())
     }
 
+    /// Replaces the name, address, user name and servers of a password account, and its
+    /// password when a new one is given, then connects it again. The id, the signature and the
+    /// kind of sign-in stay as they were, so its folders, messages and offline cache stay with it.
+    pub fn update_account(&mut self, mut account: Account, password: Option<Secret>) -> Result<(), String> {
+        let existing = self
+            .session
+            .accounts
+            .iter()
+            .find(|a| a.id == account.id && a.id != SAMPLE_ACCOUNT)
+            .ok_or_else(|| "Dit account bestaat niet meer.".to_string())?;
+        if !matches!(existing.auth, Auth::Password) {
+            return Err("Dit account meldt zich aan via de browser; gebruik Opnieuw aanmelden.".into());
+        }
+        account.signature = existing.signature.clone();
+        account.auth = Auth::Password;
+        if let Some(password) = password {
+            self.secrets.set(&account.id, &password).map_err(|e| e.to_string())?;
+        }
+        if let Some(worker) = &mut self.worker {
+            worker.stop_account(&account.id);
+        }
+        self.session.add_account(account.clone());
+        self.save_accounts()?;
+        self.spawn_account(&account.id);
+        self.dispatch();
+        Ok(())
+    }
+
     /// Removes an account for good: its worker stops, its password or sign-in and its
     /// offline cache are deleted, and the accounts file is rewritten. Mail on the server is
     /// not touched.
@@ -1124,5 +1155,40 @@ mod tests {
         assert!(engine.session.is_sample(), "the last account gone brings the sample mail back");
         assert!(engine.session.appointments.iter().any(|a| a.title == "Lokaal"), "local items survive");
         assert!(engine.remove_account("b").is_err());
+    }
+
+    #[test]
+    fn editing_an_account_keeps_its_id_signature_and_mail_and_connects_again() {
+        let mut engine = Engine::sample();
+        engine.add_account(account("a"), Secret::new("pw")).unwrap();
+        engine.set_signature("a", "Groet").unwrap();
+        let s = &mut engine.session;
+        s.apply(Event::Connected {
+            account_id: "a".into(),
+            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true }],
+            syncs_items: false,
+        });
+        s.apply(Event::Headers { folder_id: "a/INBOX".into(), headers: vec![header(1)], offset: 0, limit: HEADER_LIMIT });
+        s.loading.insert("a/INBOX".into());
+        s.take_jobs();
+
+        let mut changed = account("a");
+        changed.name = "Alain".into();
+        changed.username = "alain".into();
+        changed.incoming = Some(Server { host: "imap.voorbeeld.nl".into(), port: 143, tls: Tls::StartTls });
+        changed.signature = "weg".into();
+        engine.update_account(changed, None).unwrap();
+        let s = &engine.session;
+        let a = &s.accounts[0];
+        assert_eq!((a.id.as_str(), a.name.as_str(), a.username.as_str(), a.signature.as_str()), ("a", "Alain", "alain", "Groet"));
+        assert_eq!(a.incoming.as_ref().map(|i| i.port), Some(143));
+        assert_eq!(s.messages.len(), 1, "fetched mail stays with the account");
+        assert!(!s.loading.contains("a/INBOX"), "what the old connection was fetching is forgotten");
+        assert_eq!(s.status.get("a"), Some(&AccountStatus::Connecting));
+        assert_eq!(engine.secrets.get("a").unwrap().map(|p| p.expose().to_string()), Some("pw".into()), "no new password keeps the old one");
+
+        engine.update_account(account("a"), Some(Secret::new("new"))).unwrap();
+        assert_eq!(engine.secrets.get("a").unwrap().map(|p| p.expose().to_string()), Some("new".into()));
+        assert!(engine.update_account(account("nope"), None).is_err());
     }
 }
