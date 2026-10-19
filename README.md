@@ -36,7 +36,10 @@ message in the Junk folder, or in its menu) brings a message back and trusts its
 blokkeren" and "Geen ongewenst" also tell the server what you decided, so its filter learns and your phone sees the
 same: the `$Junk`/`$NotJunk` keywords over IMAP, `MarkAsJunk` on Exchange (which also keeps the sender in the
 mailbox's blocked list); Gmail learns from the move to Spam itself and Microsoft 365 over Graph from the move to
-Junk Email. The lists live on your computer; nothing about your mail is sent anywhere to be checked. Phishing: a message that shows signs of it
+Junk Email. The window also sets the level, as Outlook's junk options do: "Standaard" files only the blocked
+senders, "Hoog" also a sender whose header shows signs of phishing (a contact's name with another address, a
+look-alike of a known domain), and "Alleen veilige lijsten" everything that is not from a contact, a safe sender or
+one of your own addresses. The lists live on your computer; nothing about your mail is sent anywhere to be checked. Phishing: a message that shows signs of it
 gets a warning strip above its text that names them, with "Afzender blokkeren" at hand: a sender who uses a
 contact's name (or an address as a name) with another address, a domain one letter or one look-alike letter away
 from a domain you know (your contacts', your own), failed SPF/DKIM/DMARC checks reported by your mail server in the
