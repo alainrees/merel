@@ -58,6 +58,11 @@ pub fn groups_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("contact_groups.json")
 }
 
+/// The text templates file that goes with an accounts file.
+pub fn templates_path(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("templates.json")
+}
+
 /// The categories (coloured labels) file that goes with an accounts file.
 pub fn categories_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("categories.json")

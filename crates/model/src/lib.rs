@@ -14,6 +14,7 @@ mod quicksteps;
 mod rules;
 mod safety;
 mod task;
+mod templates;
 
 pub use address::{Address, AddressError, parse_address_list};
 pub use calendar::{
@@ -27,6 +28,7 @@ pub use quicksteps::{MAX_QUICK_STEP_NAME, QuickStep, QuickStepError};
 pub use rules::{MAX_RULE_TEXT, Rule, RuleError, RuleField};
 pub use safety::{RISKY_EXTENSIONS, Warning, attachment_warnings, authentication_warning, host_of, link_warnings, lookalike, sender_warnings};
 pub use task::{Priority, Task, TaskError};
+pub use templates::{MAX_TEMPLATE_NAME, MAX_TEMPLATE_TEXT, Template, TemplateError};
 
 use serde::{Deserialize, Serialize};
 

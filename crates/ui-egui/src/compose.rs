@@ -409,6 +409,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut pick = false;
     let mut remove = None;
     let mut anyway = false;
+    let mut template: Option<crate::templates::Pick> = None;
     // The message may have changed since the check: the strip follows it and goes when nothing
     // is left to say.
     if c.check.is_some() {
@@ -469,6 +470,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                         pick = true;
                     }
                     crate::importance::chooser(ui, t, &mut c.importance);
+                    template = crate::templates::menu(ui, &app.engine.session.templates_sorted());
                     if sending {
                         ui.label(RichText::new("Verzenden…").color(t.text_dim));
                     } else if hovering {
@@ -557,6 +559,18 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     if let Some(i) = remove.filter(|i| *i < c.attachments.len()) {
         c.attachments.remove(i);
         c.error = None;
+    }
+    match template {
+        Some(crate::templates::Pick::Insert(text)) => c.body = crate::templates::insert(&c.body, &text),
+        Some(crate::templates::Pick::SaveAs) => {
+            let text = crate::templates::own_text(&c.body).to_string();
+            let state = app.templates.get_or_insert_with(Default::default);
+            state.form = Some(crate::templates::Form { id: None, name: String::new(), text, error: None });
+        }
+        Some(crate::templates::Pick::Manage) => {
+            app.templates.get_or_insert_with(Default::default);
+        }
+        None => {}
     }
     if pick {
         // The computer's own dialog; it blocks until the person has chosen or cancelled.
@@ -862,6 +876,51 @@ mod tests {
         h.run();
         let c = h.state().compose.as_ref().expect("the window stays");
         assert!(c.check.is_none() && c.error.as_deref().is_some_and(|e| e.contains("ontvanger")), "{:?}", c.error);
+    }
+
+    #[test]
+    fn a_template_is_dropped_in_above_the_signature_and_the_text_can_be_saved_as_one() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        app.engine.run("template.save", &serde_json::json!({ "name": "Route", "text": "Kom via de A2, afslag 9." })).unwrap();
+        app.open_compose(Kind::New);
+        if let Some(c) = app.compose.as_mut() {
+            c.body = "Hoi Sanne,\n\n-- \nAlain".into();
+        }
+        let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        h.run();
+        h.get_by_label(crate::templates::MENU).click();
+        h.run();
+        h.get_by_label("Route").click();
+        h.run();
+        assert_eq!(h.state().compose.as_ref().map(|c| c.body.as_str()), Some("Hoi Sanne,\n\nKom via de A2, afslag 9.\n\n-- \nAlain"));
+
+        // The text written so far becomes a new template through the window.
+        h.get_by_label(crate::templates::MENU).click();
+        h.run();
+        h.get_by_label(crate::templates::SAVE_AS).click();
+        h.run();
+        let form = h.state().templates.as_ref().and_then(|s| s.form.clone()).expect("the window with the form");
+        assert_eq!(form.text, "Hoi Sanne,\n\nKom via de A2, afslag 9.");
+        h.get_by_label("Opslaan").click();
+        h.run();
+        assert!(h.state().templates.as_ref().and_then(|s| s.form.as_ref()).is_some_and(|f| f.error.is_some()), "no name yet");
+        if let Some(f) = h.state_mut().templates.as_mut().and_then(|s| s.form.as_mut()) {
+            f.name = "Begroeting".into();
+        }
+        h.run();
+        h.get_by_label("Opslaan").click();
+        h.run();
+        let names: Vec<String> = h.state().engine.session.templates_sorted().iter().map(|t| t.name.clone()).collect();
+        assert_eq!(names, ["Begroeting", "Route"]);
+        h.get_all_by_label("Sjabloon verwijderen").next().expect("a delete button per template").click();
+        h.run();
+        let names: Vec<String> = h.state().engine.session.templates_sorted().iter().map(|t| t.name.clone()).collect();
+        assert_eq!(names, ["Route"], "the first in the list, Begroeting, is gone");
+        h.get_by_label("Sluiten").click();
+        h.run();
+        assert!(h.state().templates.is_none());
     }
 
     #[test]
