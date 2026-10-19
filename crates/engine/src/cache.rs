@@ -167,6 +167,7 @@ impl Session {
         let appointments = self.appointments.iter().filter(|a| calendars.iter().any(|c| c.id == a.calendar_id)).cloned().collect();
         let contacts = self.contacts.iter().filter(|c| c.account_id.as_deref() == Some(account_id)).cloned().collect();
         let tasks = self.tasks.iter().filter(|t| t.account_id.as_deref() == Some(account_id)).cloned().collect();
+        let drafts = self.drafts.iter().filter(|d| d.account_id == account_id).cloned().collect();
         AccountCache {
             account_id: account_id.to_string(),
             saved_at: now(),
@@ -179,6 +180,7 @@ impl Session {
             appointments,
             contacts,
             tasks,
+            drafts,
         }
     }
 
@@ -202,6 +204,8 @@ impl Session {
         self.contacts.extend(cached.contacts.iter().cloned());
         self.tasks.retain(|t| t.account_id.as_deref() != Some(id));
         self.tasks.extend(cached.tasks.iter().cloned());
+        self.drafts.retain(|d| d.account_id != id);
+        self.drafts.extend(cached.drafts.iter().cloned());
         if cached.syncs_items {
             self.item_accounts.insert(id.to_string());
         }
