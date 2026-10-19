@@ -99,6 +99,10 @@ pub trait Mailbox: Send {
     fn rename_folder(&mut self, folder: &str, name: &str) -> Result<()>;
     /// Removes a folder with the messages in it.
     fn delete_folder(&mut self, folder: &str) -> Result<()>;
+    /// Removes one message for good (a plain delete is a move to the Deleted folder).
+    fn delete_message(&mut self, folder: &str, id: &str) -> Result<()>;
+    /// Removes every message in a folder for good; subfolders stay.
+    fn empty_folder(&mut self, folder: &str) -> Result<()>;
     /// The store's appointments, contacts and tasks; `None` for a store that keeps only mail.
     fn items(&mut self) -> Option<&mut dyn ItemStore> {
         None

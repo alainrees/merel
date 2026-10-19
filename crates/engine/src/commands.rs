@@ -37,6 +37,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "folder.create", label: "New folder", run: crate::folders::create },
     CommandSpec { id: "folder.rename", label: "Rename folder", run: crate::folders::rename },
     CommandSpec { id: "folder.delete", label: "Delete folder", run: crate::folders::delete },
+    CommandSpec { id: "folder.empty", label: "Empty folder", run: crate::folders::empty },
+    CommandSpec { id: "folder.mark_all_read", label: "Mark all as read", run: crate::folders::mark_all_read },
     CommandSpec {
         id: "search.server",
         label: "Search on the server",
@@ -50,7 +52,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "message.mark_unread", label: "Mark as Unread", run: |s, _| set_seen(s, false) },
     CommandSpec { id: "message.flag", label: "Flag", run: toggle_flag },
     CommandSpec { id: "message.move", label: "Move to folder", run: message_move },
-    CommandSpec { id: "message.delete", label: "Delete", run: |s, _| move_selected(s, FolderKind::Deleted, "Deleted Items") },
+    CommandSpec { id: "message.delete", label: "Delete", run: message_delete },
     CommandSpec { id: "message.archive", label: "Archive", run: |s, _| move_selected(s, FolderKind::Archive, "Archive") },
     CommandSpec { id: "message.junk", label: "Junk", run: |s, _| move_selected(s, FolderKind::Junk, "Junk") },
     CommandSpec { id: "appointment.select", label: "Open appointment", run: crate::calendar::select },
@@ -154,6 +156,33 @@ fn toggle_flag(s: &mut Session, _: &Value) -> Result<(), CommandError> {
     m.flags.flagged = !m.flags.flagged;
     let on = m.flags.flagged;
     set_flag(s, Flag::Flagged, on);
+    Ok(())
+}
+
+/// `message.delete`: the selected message goes to the Deleted folder; one that is there already
+/// goes for good, the way Outlook has it (the window asks first).
+fn message_delete(s: &mut Session, _: &Value) -> Result<(), CommandError> {
+    let m = s.selected().ok_or(CommandError::NoSelection)?;
+    if s.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Deleted) {
+        let id = m.id.clone();
+        return delete_message(s, &id);
+    }
+    move_selected(s, FolderKind::Deleted, "Deleted Items")
+}
+
+/// Removes one message for good: out of the session and, for a real account, off the server.
+pub(crate) fn delete_message(s: &mut Session, message_id: &str) -> Result<(), CommandError> {
+    let m = s.message(message_id).cloned().ok_or(CommandError::NotFound)?;
+    let from = s.folder(&m.folder_id).cloned().ok_or(CommandError::NotFound)?;
+    if from.account_id != crate::SAMPLE_ACCOUNT {
+        s.pending.push(Job::Delete { account_id: from.account_id, path: from.path, id: m.remote_id });
+    }
+    s.messages.retain(|h| h.id != message_id);
+    s.bodies.remove(message_id);
+    if s.selected_message.as_deref() == Some(message_id) {
+        s.selected_message = None;
+    }
+    s.recount_unread();
     Ok(())
 }
 
