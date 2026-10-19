@@ -6,12 +6,15 @@ use egui::{Align2, Color32, CornerRadius, FontId, Margin, RichText, Sense, Strok
 use serde_json::json;
 
 use mailcraft_engine::{CommandError, followup, tasks::TaskFilter};
-use mailcraft_model::{MessageHeader, Priority, Task};
+use mailcraft_model::{Frequency, MessageHeader, Priority, Repeat, Task};
 
 use crate::calendar::{to_local, to_timestamp, today};
 use crate::{MailApp, Tokens};
 
 const DATE_FORMAT: &str = "%d-%m-%Y";
+
+/// Before the title of a repeating task in the list, as the calendar marks a series.
+const REPEAT_MARK: &str = "🔁";
 
 /// What the tasks module remembers between frames.
 pub struct State {
@@ -78,8 +81,23 @@ pub struct Editor {
     pub due: String,
     pub priority: Priority,
     pub notes: String,
+    /// Outlook's "Terugkeerpatroon": how often the task comes back, if at all.
+    pub repeat: Option<Frequency>,
+    /// Every so many units; 0 counts as 1.
+    pub interval: u32,
     pub error: Option<String>,
 }
+
+/// The repeat choices of the form, with their names.
+pub const REPEATS: [(Option<Frequency>, &str); 5] = [
+    (None, "Niet"),
+    (Some(Frequency::Daily), "Dagelijks"),
+    (Some(Frequency::Weekly), "Wekelijks"),
+    (Some(Frequency::Monthly), "Maandelijks"),
+    (Some(Frequency::Yearly), "Jaarlijks"),
+];
+
+pub const REPEAT_NEEDS_DUE: &str = "Een herhalende taak heeft een vervaldatum nodig en blijft op deze computer.";
 
 impl Editor {
     pub fn from_task(t: &Task) -> Self {
@@ -90,8 +108,15 @@ impl Editor {
             due: t.due.map(|d| to_local(d).format(DATE_FORMAT).to_string()).unwrap_or_default(),
             priority: t.priority,
             notes: t.notes.clone(),
+            repeat: t.repeat.map(|r| r.frequency),
+            interval: t.repeat.map(|r| r.interval).unwrap_or(1),
             error: None,
         }
+    }
+
+    /// The repeat the fields describe.
+    pub fn repeat(&self) -> Option<Repeat> {
+        self.repeat.map(|frequency| Repeat { frequency, interval: self.interval.max(1) })
     }
 
     /// The `task.save` parameters, or what is wrong with the fields.
@@ -111,7 +136,10 @@ impl Editor {
             Priority::Normal => "normal",
             Priority::High => "high",
         };
-        let mut p = json!({ "title": self.title, "notes": self.notes, "due": due, "priority": priority });
+        if self.repeat.is_some() && (due.is_none() || !self.account_id.is_empty()) {
+            return Err(REPEAT_NEEDS_DUE.into());
+        }
+        let mut p = json!({ "title": self.title, "notes": self.notes, "due": due, "priority": priority, "repeat": self.repeat() });
         if let Some(id) = &self.id {
             p["id"] = json!(id);
         }
@@ -137,6 +165,7 @@ impl MailApp {
 fn describe(e: &CommandError) -> String {
     match e {
         CommandError::Param("title") => "Vul een titel in.".into(),
+        CommandError::Param("repeat") => REPEAT_NEEDS_DUE.into(),
         CommandError::Store(m) => format!("Opslaan is mislukt: {m}"),
         CommandError::NotFound => "Deze taak bestaat niet meer.".into(),
         e => e.to_string(),
@@ -236,7 +265,8 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     }
                     let x = rect.left() + 28.0;
                     let title_color = if task.done { t.text_dim } else { t.text };
-                    p.text(egui::pos2(x, rect.center().y - 1.0), Align2::LEFT_BOTTOM, &task.title, FontId::proportional(13.5), title_color);
+                    let title = if task.repeat.is_some() { format!("{REPEAT_MARK} {}", task.title) } else { task.title.clone() };
+                    p.text(egui::pos2(x, rect.center().y - 1.0), Align2::LEFT_BOTTOM, title, FontId::proportional(13.5), title_color);
                     let mut sub = Vec::new();
                     if let Some(due) = task.due {
                         sub.push(due_label(due));
@@ -326,6 +356,9 @@ fn detail(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     row(ui, "Status", if task.done { "Voltooid".into() } else { "Open".into() });
     row(ui, "Vervaldatum", task.due.map(due_label).unwrap_or_else(|| "Geen".into()));
     row(ui, "Prioriteit", priority_label(task.priority).into());
+    if let Some(r) = task.repeat {
+        row(ui, "Herhalen", r.describe());
+    }
     if !app.engine.session.item_accounts.is_empty() {
         row(ui, "Opgeslagen in", crate::contacts::store_name(&app.engine.session, task.account_id.as_deref()));
     }
@@ -353,6 +386,10 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.add_space(8.0);
     if editor.id.is_none() {
         crate::contacts::store_picker(ui, t, session, 110.0, &mut editor.account_id);
+        if !editor.account_id.is_empty() {
+            // A repeat is kept on this computer only: a server would not know it.
+            editor.repeat = None;
+        }
     }
     let field = |ui: &mut Ui, label: &str, value: &mut String, width: f32| {
         ui.horizontal(|ui| {
@@ -368,11 +405,36 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.radio_value(&mut editor.priority, p, priority_label(p));
         }
     });
+    if editor.account_id.is_empty() {
+        ui.horizontal(|ui| {
+            ui.add_sized([110.0, 22.0], egui::Label::new(RichText::new("Herhalen").color(t.text)));
+            let name = REPEATS.iter().find(|(f, _)| *f == editor.repeat).map(|(_, n)| *n).unwrap_or("Niet");
+            egui::ComboBox::from_id_salt("task-repeat").width(110.0).selected_text(name).show_ui(ui, |ui| {
+                for (f, name) in REPEATS {
+                    ui.selectable_value(&mut editor.repeat, f, name);
+                }
+            });
+            if let Some(f) = editor.repeat {
+                ui.label(RichText::new("om de").color(t.text));
+                ui.add(egui::DragValue::new(&mut editor.interval).range(1..=99));
+                let unit = match f {
+                    Frequency::Daily => "dagen",
+                    Frequency::Weekly => "weken",
+                    Frequency::Monthly => "maanden",
+                    Frequency::Yearly => "jaar",
+                };
+                ui.label(RichText::new(unit).color(t.text));
+            }
+        });
+    }
     ui.horizontal(|ui| {
         ui.add_sized([110.0, 22.0], egui::Label::new(RichText::new("Notities").color(t.text)));
         ui.add(egui::TextEdit::multiline(&mut editor.notes).desired_width(320.0).desired_rows(4));
     });
     ui.label(RichText::new("Vervaldatum als dag-maand-jaar, of leeg voor geen deadline.").size(11.5).color(t.text_dim));
+    if editor.repeat.is_some() {
+        ui.label(RichText::new("Na Voltooien komt de taak terug met de volgende vervaldatum.").size(11.5).color(t.text_dim));
+    }
     if let Some(e) = &editor.error {
         ui.label(RichText::new(e).color(t.flag));
     }
@@ -450,5 +512,22 @@ mod tests {
         assert!(e.params().unwrap_err().contains("vervaldatum"));
         e.title = String::new();
         assert_eq!(e.params(), Err("Vul een titel in.".to_string()));
+    }
+
+    #[test]
+    fn a_repeat_goes_along_only_with_a_due_day_on_this_computer() {
+        let mut e = Editor { title: "Weekrapport".into(), repeat: Some(Frequency::Weekly), interval: 2, ..Editor::default() };
+        assert_eq!(e.params(), Err(REPEAT_NEEDS_DUE.to_string()), "no due day");
+        e.due = "19-10-2026".into();
+        assert_eq!(e.params().unwrap()["repeat"], json!({ "frequency": "weekly", "interval": 2 }));
+        e.account_id = "acc".into();
+        assert_eq!(e.params(), Err(REPEAT_NEEDS_DUE.to_string()), "a server would not know the repeat");
+        e.account_id.clear();
+        e.repeat = None;
+        assert!(e.params().unwrap()["repeat"].is_null());
+        let t =
+            Task { title: "x".into(), due: Some(0), repeat: Some(Repeat { interval: 3, ..Repeat::every(Frequency::Monthly) }), ..Task::default() };
+        let from = Editor::from_task(&t);
+        assert_eq!((from.repeat, from.interval), (Some(Frequency::Monthly), 3));
     }
 }

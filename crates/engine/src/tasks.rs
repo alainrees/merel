@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use mailcraft_mailbox::Item;
-use mailcraft_model::{Priority, Task, TaskError};
+use mailcraft_model::{Priority, Repeat, Task, TaskError};
 
 use crate::{CommandError, Session};
 
@@ -108,9 +108,10 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// `task.save { id?, account_id?, title, notes?, due?: seconds | null, priority?: "low" | "normal" | "high" }`:
-/// creates the task (in the account's store when `account_id` names one), or replaces the one
-/// with `id` (keeping whether it is done).
+/// `task.save { id?, account_id?, title, notes?, due?: seconds | null, priority?: "low" | "normal" | "high",
+/// repeat?: { frequency, interval } | null }`: creates the task (in the account's store when
+/// `account_id` names one), or replaces the one with `id` (keeping whether it is done). A
+/// repeat needs a due day and a task on this computer; left out, the existing repeat stays.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
         Some(id) => Some(s.task(id).ok_or(CommandError::NotFound)?.clone()),
@@ -128,6 +129,11 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         None | Some(Value::Null) => None,
         Some(d) => Some(d.as_i64().ok_or(CommandError::Param("due"))?),
     };
+    let repeat = match params.get("repeat") {
+        None => existing.as_ref().and_then(|t| t.repeat),
+        Some(Value::Null) => None,
+        Some(r) => Some(serde_json::from_value::<Repeat>(r.clone()).map_err(|_| CommandError::Param("repeat"))?),
+    };
     let id = match (&existing, &account) {
         (Some(t), _) => t.id.clone(),
         (None, Some(account)) => s.pending_id(account),
@@ -142,10 +148,12 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         done: existing.as_ref().is_some_and(|t| t.done),
         completed: existing.as_ref().and_then(|t| t.completed),
         account_id: account.clone(),
+        repeat,
     }
     .validated()
     .map_err(|e| match e {
         TaskError::NoTitle => CommandError::Param("title"),
+        TaskError::RepeatNeedsDue => CommandError::Param("repeat"),
     })?;
     match &account {
         Some(account) => s.save_remote(account, existing.is_none(), Item::Task(task.clone()))?,
@@ -158,20 +166,34 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 }
 
 /// `task.complete { id?, done? }`: marks the task done (or open again); without `done` it
-/// flips.
+/// flips. Finishing a repeating task adds the next one, due a repeat later, as Outlook does;
+/// the finished one stays as it is.
 pub fn complete(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let id = selected_or_given(s, params)?;
     let mut task = s.task(&id).ok_or(CommandError::NotFound)?.clone();
+    let was_done = task.done;
     task.done = params.get("done").and_then(Value::as_bool).unwrap_or(!task.done);
     task.completed = task.done.then(now);
     match task.account_id.clone() {
         Some(account) => s.save_remote(&account, false, Item::Task(task.clone()))?,
         None => s.tasks_dirty = true,
     }
+    let next = (task.done && !was_done).then(|| next_task(s, &task)).flatten();
     if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id) {
         *t = task;
     }
+    if let Some(next) = next {
+        s.tasks_dirty = true;
+        s.tasks.push(next);
+    }
     Ok(())
+}
+
+/// The task that follows a finished repeating one: the same task, open, due a repeat later.
+fn next_task(s: &mut Session, done: &Task) -> Option<Task> {
+    let (Some(repeat), Some(due)) = (done.repeat, done.due) else { return None };
+    let due = repeat.next_due(due, &chrono::Local)?;
+    Some(Task { id: s.new_task_id(), due: Some(due), done: false, completed: None, ..done.clone() })
 }
 
 /// `task.delete { id? }`: the given task, else the selected one.
@@ -194,6 +216,31 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn finishing_a_repeating_task_makes_the_next_one_a_fortnight_later() {
+        use chrono::{Days, Local, NaiveDate, NaiveTime, TimeZone};
+        let midnight = |d: NaiveDate| Local.from_local_datetime(&d.and_time(NaiveTime::MIN)).earliest().unwrap().timestamp();
+        let day = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+        let mut s = Session::default();
+        let weekly = json!({ "title": "Weekrapport", "due": midnight(day), "repeat": { "frequency": "weekly", "interval": 2 } });
+        s.run("task.save", &weekly).unwrap();
+        assert_eq!(
+            s.run("task.save", &json!({ "title": "x", "repeat": { "frequency": "daily" } })),
+            Err(CommandError::Param("repeat")),
+            "no due day"
+        );
+        let id = s.tasks[0].id.clone();
+        s.run("task.complete", &json!({ "id": id })).unwrap();
+        assert_eq!(s.tasks.len(), 2, "the next one is added");
+        let next = s.tasks.iter().find(|t| t.id != id).unwrap();
+        assert_eq!((next.title.as_str(), next.done, next.due), ("Weekrapport", false, Some(midnight(day.checked_add_days(Days::new(14)).unwrap()))));
+        assert_eq!(next.repeat, s.tasks[0].repeat, "it repeats on");
+        assert!(s.tasks[0].done);
+        s.run("task.complete", &json!({ "id": id })).unwrap();
+        s.run("task.complete", &json!({ "id": id })).unwrap();
+        assert_eq!(s.tasks.len(), 3, "reopening and finishing again adds another");
+    }
 
     #[test]
     fn the_search_box_narrows_the_list_to_tasks_holding_every_word() {
