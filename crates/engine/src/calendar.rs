@@ -200,6 +200,31 @@ pub fn move_to(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// `appointment.resize { id, end }`: gives the appointment a new end (Unix seconds), keeping
+/// its start and everything else; the UI uses it when the bottom edge of a block is dragged. An
+/// end at or before the start is `Param("end")`; a recurring appointment is refused with
+/// `Param("id")`. In an account's calendar the change goes to the server like a save.
+pub fn resize(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let id = str_param(params, "id").ok_or(CommandError::Param("id"))?.to_string();
+    let end = i64_param(params, "end")?;
+    let a = s.appointment(&id).ok_or(CommandError::NotFound)?.clone();
+    if a.recurrence.is_some() {
+        return Err(CommandError::Param("id"));
+    }
+    if end <= a.start {
+        return Err(CommandError::Param("end"));
+    }
+    let resized = Appointment { end, ..a };
+    match s.appointment_account(&resized.calendar_id) {
+        Some(account) => s.save_remote(&account, false, Item::Appointment(resized.clone()))?,
+        None => s.calendar_dirty = true,
+    }
+    s.appointments.retain(|x| x.id != id);
+    s.appointments.push(resized);
+    s.selected_appointment = Some(id);
+    Ok(())
+}
+
 /// `appointment.skip { id?, start }`: takes one occurrence, the one starting at `start`, out of
 /// a recurring appointment (the given one, else the selected one). The series stays.
 pub fn skip(s: &mut Session, params: &Value) -> Result<(), CommandError> {
@@ -267,6 +292,27 @@ mod tests {
         assert_eq!(s.appointment(&series).unwrap().start, 10_000);
         assert!(matches!(s.run("appointment.move", &json!({ "id": "nope", "start": 1 })), Err(CommandError::NotFound)));
         assert!(matches!(s.run("appointment.move", &json!({ "id": id })), Err(CommandError::Param("start"))));
+    }
+
+    #[test]
+    fn a_resized_appointment_keeps_its_start_and_cannot_end_before_it() {
+        let mut s = Session::default();
+        s.set_calendar_data(CalendarFile::default());
+        s.run("appointment.save", &json!({ "title": "Tandarts", "start": 3_600, "end": 7_200, "location": "Centrum" })).unwrap();
+        let id = s.selected_appointment().unwrap().id.clone();
+        s.take_calendar_dirty();
+        s.run("appointment.resize", &json!({ "id": id, "end": 9_000 })).unwrap();
+        let a = s.appointment(&id).unwrap();
+        assert_eq!((a.start, a.end, a.location.as_str()), (3_600, 9_000, "Centrum"));
+        assert!(s.take_calendar_dirty(), "the new end is saved");
+        s.run("appointment.resize", &json!({ "id": id, "end": 5_400 })).unwrap();
+        assert_eq!(s.appointment(&id).unwrap().end, 5_400, "shorter works too");
+        assert!(matches!(s.run("appointment.resize", &json!({ "id": id, "end": 3_600 })), Err(CommandError::Param("end"))));
+        assert!(matches!(s.run("appointment.resize", &json!({ "id": id })), Err(CommandError::Param("end"))));
+        s.run("appointment.save", &json!({ "title": "Weekstart", "start": 10_000, "end": 11_800, "recurrence": { "frequency": "weekly" } })).unwrap();
+        let series = s.selected_appointment().unwrap().id.clone();
+        assert!(matches!(s.run("appointment.resize", &json!({ "id": series, "end": 20_000 })), Err(CommandError::Param("id"))));
+        assert!(matches!(s.run("appointment.resize", &json!({ "id": "nope", "end": 1 })), Err(CommandError::NotFound)));
     }
 
     #[test]

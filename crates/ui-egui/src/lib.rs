@@ -1907,6 +1907,32 @@ mod tests {
     }
 
     #[test]
+    fn dragging_the_bottom_edge_of_an_appointment_changes_its_end() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.state_mut().calendar.view = calendar::View::Day;
+        h.state_mut().calendar.focus = calendar::today();
+        h.run();
+        let before = h.state().engine.session.appointment("sample-0").expect("today's sample appointment").clone();
+        let handle = h.get_by_label("Eindtijd van Overleg ontwerp verslepen").rect();
+        let from = handle.center();
+        h.drag_at(from);
+        h.run();
+        // One hour further down the grid, in small steps as a pointer moves.
+        for step in 1..=4 {
+            h.hover_at(from + vec2(0.0, 11.0 * step as f32));
+            h.run();
+        }
+        assert_eq!(h.state().calendar.resizing.as_ref().map(|r| r.end), Some(before.end + 3_600), "the block follows the pointer");
+        h.drop_at(from + vec2(0.0, 44.0));
+        h.run();
+        let after = h.state().engine.session.appointment("sample-0").unwrap();
+        assert_eq!((after.start, after.end), (before.start, before.end + 3_600));
+        assert!(h.state().calendar.resizing.is_none());
+        assert!(h.state().notice.is_none());
+    }
+
+    #[test]
     fn the_window_title_counts_the_unread_inbox_mail_and_follows_it() {
         assert_eq!(window_title(0), "Mailcraft");
         assert_eq!(window_title(3), "Mailcraft (3)");
