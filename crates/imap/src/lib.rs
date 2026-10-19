@@ -160,26 +160,37 @@ impl ImapClient {
     pub fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> Result<Vec<RemoteHeader>> {
         let mb = self.select(folder)?;
         let Some((first, last)) = Self::fetch_range(mb.exists, offset, limit) else { return Ok(Vec::new()) };
-        let query = format!("(UID FLAGS INTERNALDATE RFC822.SIZE BODYSTRUCTURE {HEADER_FIELDS})");
-        let fetches = self.session.fetch(format!("{first}:{last}"), query)?;
-        let mut out = Vec::with_capacity(fetches.len());
-        for f in fetches.iter() {
-            let Some(uid) = f.uid else { continue };
-            let header = mailcraft_mime::parse_header(f.header().unwrap_or(b""));
-            let internal = f.internal_date().map(|d| d.timestamp());
-            let date = header.date.or(internal).unwrap_or(0);
-            let flags = f.flags();
-            out.push(RemoteHeader {
-                id: uid.to_string(),
-                seen: flags.contains(&imap::types::Flag::Seen),
-                flagged: flags.contains(&imap::types::Flag::Flagged),
-                answered: flags.contains(&imap::types::Flag::Answered),
-                size: f.size.unwrap_or(0),
-                has_attachments: f.bodystructure().is_some_and(has_attachment),
-                header,
-                date,
-            });
+        let fetches = self.session.fetch(format!("{first}:{last}"), header_query())?;
+        Ok(fetches.iter().filter_map(header_of).collect())
+    }
+
+    /// The newest `limit` messages of `folder` that match every word of `query`, by the
+    /// server's own `SEARCH`. Words are sent quoted; when the server refuses that (words beyond
+    /// ASCII on a server without UTF-8 support) they go once more as UTF-8 literals.
+    pub fn search(&mut self, folder: &str, query: &str, limit: u32) -> Result<Vec<RemoteHeader>> {
+        let words: Vec<&str> = query.split_whitespace().filter(|w| !w.chars().any(|c| matches!(c, '\r' | '\n' | '\0'))).collect();
+        if words.is_empty() {
+            return Ok(Vec::new());
         }
+        self.select(folder)?;
+        let uids = match self.session.uid_search(search_keys(&words, false)?) {
+            Ok(uids) => uids,
+            Err(e) if words.iter().any(|w| !w.is_ascii()) => match self.session.uid_search(search_keys(&words, true)?) {
+                Ok(uids) => uids,
+                Err(_) => return Err(e.into()),
+            },
+            Err(e) => return Err(e.into()),
+        };
+        let mut uids: Vec<u32> = uids.into_iter().collect();
+        uids.sort_unstable_by(|a, b| b.cmp(a));
+        uids.truncate(limit.max(1) as usize);
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let set = uids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        let fetches = self.session.uid_fetch(set, header_query())?;
+        let mut out: Vec<RemoteHeader> = fetches.iter().filter_map(header_of).collect();
+        out.sort_by_key(|h| h.id.parse::<u32>().unwrap_or(0));
         Ok(out)
     }
 
@@ -242,6 +253,52 @@ impl ImapClient {
     }
 }
 
+/// What a listing fetches per message: flags, size, structure and the envelope headers.
+fn header_query() -> String {
+    format!("(UID FLAGS INTERNALDATE RFC822.SIZE BODYSTRUCTURE {HEADER_FIELDS})")
+}
+
+/// One fetched message as a header; `None` for a reply without a UID.
+fn header_of(f: &imap::types::Fetch) -> Option<RemoteHeader> {
+    let uid = f.uid?;
+    let header = mailcraft_mime::parse_header(f.header().unwrap_or(b""));
+    let internal = f.internal_date().map(|d| d.timestamp());
+    let date = header.date.or(internal).unwrap_or(0);
+    let flags = f.flags();
+    Some(RemoteHeader {
+        id: uid.to_string(),
+        seen: flags.contains(&imap::types::Flag::Seen),
+        flagged: flags.contains(&imap::types::Flag::Flagged),
+        answered: flags.contains(&imap::types::Flag::Answered),
+        size: f.size.unwrap_or(0),
+        has_attachments: f.bodystructure().is_some_and(has_attachment),
+        header,
+        date,
+    })
+}
+
+/// The `SEARCH` keys for `words`: a `TEXT` key per word, every word required. Quoted strings
+/// by default; with `literals`, `CHARSET UTF-8` and a non-synchronising literal (RFC 7888)
+/// per word, for servers that do not take UTF-8 inside quotes.
+fn search_keys(words: &[&str], literals: bool) -> Result<String> {
+    let mut out = String::new();
+    if literals {
+        out.push_str("CHARSET UTF-8");
+    }
+    for w in words {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str("TEXT ");
+        if literals {
+            out.push_str(&format!("{{{}+}}\r\n{w}", w.len()));
+        } else {
+            out.push_str(&quote(w)?);
+        }
+    }
+    Ok(out)
+}
+
 impl Mailbox for ImapClient {
     fn folders(&mut self) -> mailcraft_mailbox::Result<Vec<RemoteFolder>> {
         Ok(ImapClient::folders(self)?)
@@ -249,6 +306,10 @@ impl Mailbox for ImapClient {
 
     fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> mailcraft_mailbox::Result<Vec<RemoteHeader>> {
         Ok(ImapClient::headers(self, folder, offset, limit)?)
+    }
+
+    fn search(&mut self, folder: &str, query: &str, limit: u32) -> mailcraft_mailbox::Result<Vec<RemoteHeader>> {
+        Ok(ImapClient::search(self, folder, query, limit)?)
     }
 
     fn body(&mut self, folder: &str, id: &str) -> mailcraft_mailbox::Result<Vec<u8>> {
@@ -279,6 +340,13 @@ impl Mailbox for ImapClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_keys_require_every_word_and_can_go_as_literals() {
+        assert_eq!(search_keys(&["factuur", "2026"], false).unwrap(), "TEXT \"factuur\" TEXT \"2026\"");
+        assert_eq!(search_keys(&["a\"b"], false).unwrap(), "TEXT \"a\\\"b\"");
+        assert_eq!(search_keys(&["café", "x"], true).unwrap(), "CHARSET UTF-8 TEXT {5+}\r\ncafé TEXT {1+}\r\nx");
+    }
 
     #[test]
     fn quoting_escapes_and_refuses_line_breaks() {

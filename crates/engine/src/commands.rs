@@ -34,6 +34,14 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "folder.select", label: "Open folder", run: folder_select },
     CommandSpec { id: "folder.refresh", label: "Refresh folder", run: folder_refresh },
     CommandSpec { id: "folder.older", label: "Load older messages", run: folder_older },
+    CommandSpec {
+        id: "search.server",
+        label: "Search on the server",
+        run: |s, _| {
+            s.request_server_search();
+            Ok(())
+        },
+    },
     CommandSpec { id: "message.select", label: "Open message", run: message_select },
     CommandSpec { id: "message.mark_read", label: "Mark as Read", run: |s, _| set_seen(s, true) },
     CommandSpec { id: "message.mark_unread", label: "Mark as Unread", run: |s, _| set_seen(s, false) },
