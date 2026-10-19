@@ -2,7 +2,8 @@
 //! is due (today, tomorrow, this week, next week or a day of choice). The flag goes to the
 //! server as before; the date stays on this computer in `follow_ups.json`, filed under the
 //! message's Message-ID so a move between folders keeps it. Taking the flag off takes the
-//! date with it.
+//! date with it. From the due day on, the reminders window names the message, as Outlook
+//! reminds of flagged items; closing that reminder is kept in the file, putting it off is not.
 
 use chrono::{Datelike, Days, NaiveDate};
 use serde::{Deserialize, Serialize};
@@ -69,6 +70,29 @@ impl Session {
         self.follow_ups.iter().find(|f| f.key == k)
     }
 
+    /// The flagged messages whose follow-up day has come (seen from `today`) and whose reminder
+    /// was neither closed nor put off past `now`: the earliest day first, then the newest mail.
+    pub fn due_follow_ups(&self, today: NaiveDate, now: i64) -> Vec<(MessageHeader, NaiveDate)> {
+        let mut seen: Vec<String> = Vec::new();
+        let mut due: Vec<(MessageHeader, NaiveDate)> = self
+            .messages
+            .iter()
+            .filter(|m| m.flags.flagged)
+            .filter_map(|m| {
+                let k = key(m);
+                let f = self.follow_ups.iter().find(|f| f.key == k && !f.dismissed)?;
+                let day = due_day(f).filter(|d| *d <= today)?;
+                if self.snoozed_follow_ups.get(&k).is_some_and(|until| *until > now) || seen.contains(&k) {
+                    return None;
+                }
+                seen.push(k);
+                Some((m.clone(), day))
+            })
+            .collect();
+        due.sort_by(|(a, da), (b, db)| da.cmp(db).then(b.date.cmp(&a.date)));
+        due
+    }
+
     /// Drops the date of a message whose flag came off.
     pub(crate) fn clear_follow_up(&mut self, message_id: &str) {
         let Some(k) = self.message(message_id).map(key) else { return };
@@ -101,11 +125,48 @@ pub fn follow_up(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         commands::flag_message(s, &id, true)?;
         let k = key(&m);
         s.follow_ups.retain(|f| f.key != k);
+        s.snoozed_follow_ups.remove(&k);
         if let Some(due) = due {
-            s.follow_ups.push(FollowUp { key: k, due: due.format("%Y-%m-%d").to_string(), subject: m.subject });
+            s.follow_ups.push(FollowUp { key: k, due: due.format("%Y-%m-%d").to_string(), subject: m.subject, dismissed: false });
         }
         s.follow_ups_dirty = true;
     }
+    Ok(())
+}
+
+/// The follow-up a reminder command is about: the message `id` names, with a date.
+fn entry_key(s: &Session, params: &Value) -> Result<String, CommandError> {
+    let id = commands::str_param(params, "id")?;
+    let m = s.message(id).ok_or(CommandError::NotFound)?;
+    let k = key(m);
+    s.follow_ups.iter().find(|f| f.key == k).map(|_| k).ok_or(CommandError::NotFound)
+}
+
+fn now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+/// `followup.dismiss { id }`: closes the reminder of the message's follow-up; the flag and the
+/// day stay. A new day (another `message.follow_up`) opens it again.
+pub fn dismiss(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let k = entry_key(s, params)?;
+    s.snoozed_follow_ups.remove(&k);
+    if let Some(f) = s.follow_ups.iter_mut().find(|f| f.key == k && !f.dismissed) {
+        f.dismissed = true;
+        s.follow_ups_dirty = true;
+    }
+    Ok(())
+}
+
+/// `followup.snooze { id, minutes }`: puts the message's follow-up reminder off for `minutes`.
+pub fn snooze(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let k = entry_key(s, params)?;
+    let minutes = params
+        .get("minutes")
+        .and_then(Value::as_u64)
+        .filter(|m| (1..=u64::from(mailcraft_model::MAX_REMINDER)).contains(m))
+        .ok_or(CommandError::Param("minutes"))?;
+    s.snoozed_follow_ups.insert(k, now() + minutes as i64 * 60);
     Ok(())
 }
 
@@ -131,6 +192,36 @@ mod tests {
         assert_eq!(due_for("next_week", sat), Some(day("2026-10-30")));
         assert_eq!(due_for("2026-12-01", wed), Some(day("2026-12-01")));
         assert_eq!(due_for("someday", wed), None);
+    }
+
+    #[test]
+    fn a_follow_up_reminds_from_its_day_until_closed_or_put_off() {
+        let mut s = Session::sample();
+        let ids: Vec<String> = s.visible_messages().iter().take(2).map(|m| m.id.clone()).collect();
+        let today = chrono::Local::now().date_naive();
+        let t = now();
+        s.run("message.follow_up", &json!({ "when": "today", "id": ids[0] })).unwrap();
+        s.run("message.follow_up", &json!({ "when": "tomorrow", "id": ids[1] })).unwrap();
+        let due = s.due_follow_ups(today, t);
+        assert_eq!(due.iter().map(|(m, _)| m.id.as_str()).collect::<Vec<_>>(), [ids[0].as_str()], "tomorrow's is not due yet");
+        assert_eq!(due[0].1, today);
+        assert_eq!(s.due_follow_ups(today.succ_opt().unwrap(), t).len(), 2, "a passed day keeps reminding");
+
+        s.run("followup.snooze", &json!({ "id": ids[0], "minutes": 5 })).unwrap();
+        assert!(s.due_follow_ups(today, t).is_empty());
+        assert_eq!(s.due_follow_ups(today, t + 301).len(), 1, "and it is back after five minutes");
+        assert_eq!(s.run("followup.snooze", &json!({ "id": ids[0], "minutes": 0 })), Err(CommandError::Param("minutes")));
+        assert_eq!(s.run("followup.dismiss", &json!({ "id": "missing" })), Err(CommandError::NotFound));
+
+        s.take_follow_ups_dirty();
+        s.run("followup.dismiss", &json!({ "id": ids[0] })).unwrap();
+        assert!(s.take_follow_ups_dirty(), "closing is kept in the file");
+        assert!(s.due_follow_ups(today, t + 301).is_empty());
+        assert!(s.message(&ids[0]).unwrap().flags.flagged && s.follow_up(&ids[0]).is_some(), "the flag and the day stay");
+        s.run("message.follow_up", &json!({ "when": "today", "id": ids[0] })).unwrap();
+        assert_eq!(s.due_follow_ups(today, t).len(), 1, "a new day opens the reminder again");
+        s.run("message.flag", &json!({ "id": ids[0] })).unwrap();
+        assert!(s.due_follow_ups(today, t).is_empty(), "no flag, no reminder");
     }
 
     #[test]

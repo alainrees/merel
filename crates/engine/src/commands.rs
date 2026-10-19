@@ -61,6 +61,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "message.mark_unread", label: "Mark as Unread", run: |s, _| set_seen(s, false) },
     CommandSpec { id: "message.flag", label: "Flag", run: toggle_flag },
     CommandSpec { id: "message.follow_up", label: "Follow up", run: crate::followup::follow_up },
+    CommandSpec { id: "followup.dismiss", label: "Close follow-up reminder", run: crate::followup::dismiss },
+    CommandSpec { id: "followup.snooze", label: "Snooze follow-up reminder", run: crate::followup::snooze },
     CommandSpec { id: "message.move", label: "Move to folder", run: message_move },
     CommandSpec { id: "message.delete", label: "Delete", run: message_delete },
     CommandSpec { id: "message.archive", label: "Archive", run: |s, _| move_selected(s, FolderKind::Archive, "Archive") },
