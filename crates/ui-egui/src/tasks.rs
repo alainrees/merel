@@ -324,7 +324,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let selected = app.engine.session.selected_task().cloned();
     let has = selected.is_some();
-    if crate::ribbon_action(ui, t, "✔", "Nieuwe taak", true) {
+    if crate::ribbon_action_hint(ui, t, "✔", "Nieuwe taak", true, Some(&crate::key_hint("Shift+K"))) {
         app.new_task();
     }
     ui.separator();
