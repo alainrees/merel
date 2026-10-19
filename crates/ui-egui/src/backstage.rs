@@ -229,6 +229,10 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 }
                 app.tab = Tab::Home;
             }
+            if item(ui, "Ongewenste e-mail") {
+                app.junk = Some(crate::junk::Options::default());
+                app.tab = Tab::Home;
+            }
         });
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading).inner_margin(Margin::same(28))).show(ui, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| {
