@@ -187,6 +187,7 @@ fn appointments() -> Vec<Appointment> {
                 recurrence: None,
                 reminder: None,
                 private: false,
+                show_as: mailcraft_model::ShowAs::Busy,
             })
         })
         .collect();
@@ -206,6 +207,7 @@ fn appointments() -> Vec<Appointment> {
             recurrence: Some(Recurrence::every(Frequency::Weekly)),
             reminder: None,
             private: false,
+            show_as: mailcraft_model::ShowAs::Busy,
         });
     }
     list

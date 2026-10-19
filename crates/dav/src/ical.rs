@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use chrono_tz::Tz;
-use mailcraft_model::{Appointment, Contact, Priority, Task, clean_text};
+use mailcraft_model::{Appointment, Contact, Priority, ShowAs, Task, clean_text};
 
 /// One `NAME;PARAM=value:value` line, with the value as written (escapes intact).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -319,9 +319,23 @@ pub fn appointment_of(event: &Component, id: String) -> Option<Appointment> {
         recurrence: None,
         reminder: reminder_of(event),
         private: private_class(&event.text("CLASS")),
+        show_as: show_as_of(event),
     }
     .validated()
     .ok()
+}
+
+/// Outlook's free/busy status from its own `X-MICROSOFT-CDO-BUSYSTATUS`, else from `TRANSP`:
+/// a transparent event leaves the time free, any other takes it.
+fn show_as_of(event: &Component) -> ShowAs {
+    match event.text("X-MICROSOFT-CDO-BUSYSTATUS").to_ascii_uppercase().as_str() {
+        "FREE" => ShowAs::Free,
+        "TENTATIVE" => ShowAs::Tentative,
+        "BUSY" => ShowAs::Busy,
+        "OOF" => ShowAs::Oof,
+        _ if event.text("TRANSP").eq_ignore_ascii_case("TRANSPARENT") => ShowAs::Free,
+        _ => ShowAs::Busy,
+    }
 }
 
 /// Whether a `CLASS` keeps the event from those the calendar is shared with.
@@ -431,6 +445,14 @@ pub fn write_appointment(event: &mut Component, a: &Appointment) {
     if a.private != private_class(&event.text("CLASS")) {
         event.set_text("CLASS", if a.private { "PRIVATE" } else { "" });
     }
+    event.set_text("TRANSP", if a.show_as == ShowAs::Free { "TRANSPARENT" } else { "OPAQUE" });
+    let busy = match a.show_as {
+        ShowAs::Free => "FREE",
+        ShowAs::Tentative => "TENTATIVE",
+        ShowAs::Busy => "BUSY",
+        ShowAs::Oof => "OOF",
+    };
+    event.set_text("X-MICROSOFT-CDO-BUSYSTATUS", busy);
     write_reminder(event, &a.title, a.reminder);
     stamp(event);
 }
@@ -601,6 +623,29 @@ mod tests {
         assert!(appointment_of(again[0].find("VEVENT").unwrap(), "e:1".into()).unwrap().private);
         write_appointment(hidden.find_mut("VEVENT").unwrap(), &changed);
         assert!(!hidden.serialize().contains("CLASS:"), "unticked, the class goes away");
+    }
+
+    #[test]
+    fn weergeven_als_travels_as_transp_and_outlooks_busy_status() {
+        let roots = parse(EVENT);
+        let a = appointment_of(roots[0].find("VEVENT").unwrap(), "e:1".into()).unwrap();
+        assert_eq!(a.show_as, ShowAs::Busy, "no TRANSP means the time is taken");
+        let mut root = roots[0].clone();
+        write_appointment(root.find_mut("VEVENT").unwrap(), &a);
+        let text = root.serialize();
+        assert!(text.contains("TRANSP:OPAQUE\r\n") && text.contains("X-MICROSOFT-CDO-BUSYSTATUS:BUSY\r\n"), "{text}");
+        write_appointment(root.find_mut("VEVENT").unwrap(), &Appointment { show_as: ShowAs::Free, ..a.clone() });
+        let text = root.serialize();
+        assert!(text.contains("TRANSP:TRANSPARENT\r\n") && text.contains("X-MICROSOFT-CDO-BUSYSTATUS:FREE\r\n"), "{text}");
+        assert_eq!(text.matches("TRANSP:").count(), 1, "rewritten, not added: {text}");
+        assert_eq!(appointment_of(parse(&text)[0].find("VEVENT").unwrap(), "e:1".into()).unwrap().show_as, ShowAs::Free);
+        write_appointment(root.find_mut("VEVENT").unwrap(), &Appointment { show_as: ShowAs::Oof, ..a.clone() });
+        assert_eq!(appointment_of(root.find("VEVENT").unwrap(), "e:1".into()).unwrap().show_as, ShowAs::Oof);
+        // Another program's event with only TRANSP: transparent is free, the rest busy.
+        let plain = parse(
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20261019T080000Z\r\nDURATION:PT2H\r\nSUMMARY:x\r\nTRANSP:TRANSPARENT\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+        );
+        assert_eq!(appointment_of(plain[0].find("VEVENT").unwrap(), "e:2".into()).unwrap().show_as, ShowAs::Free);
 
         // A series carries its rule, with a start in a named zone when the computer has one.
         let weekly = mailcraft_model::Recurrence {

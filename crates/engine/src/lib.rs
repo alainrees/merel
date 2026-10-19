@@ -1612,6 +1612,7 @@ mod tests {
                 recurrence: None,
                 reminder: None,
                 private: false,
+                show_as: mailcraft_model::ShowAs::Busy,
             }],
             contacts: Vec::new(),
             tasks: Vec::new(),

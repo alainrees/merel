@@ -106,14 +106,15 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// `appointment.save { id?, calendar_id?, title, start, end, all_day?, location?, notes?, recurrence?, reminder?, private? }`:
+/// `appointment.save { id?, calendar_id?, title, start, end, all_day?, location?, notes?, recurrence?, reminder?, private?, show_as? }`:
 /// creates the appointment, or replaces the one with `id`. Times are Unix seconds. `recurrence`
 /// is a [`Recurrence`] object (or null for a single appointment); in an account's calendar only
 /// a new appointment takes one (the server then owns the series and lists its occurrences one
 /// by one), on this computer the occurrences a series had skipped stay skipped unless the
 /// object names its own `skipped` list. `reminder` is minutes before the start, null for none;
 /// left out, an existing appointment keeps its reminder. `private` marks the appointment as
-/// Outlook's "Privé"; false when left out.
+/// Outlook's "Privé"; false when left out. `show_as` is `free`, `tentative`, `busy` or `oof`;
+/// left out, an existing appointment keeps its status and a new one is busy.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
         Some(id) => Some(s.appointment(id).ok_or(CommandError::NotFound)?.clone()),
@@ -146,6 +147,10 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         Some(Value::Null) => None,
         Some(v) => Some(v.as_u64().and_then(|m| u32::try_from(m).ok()).ok_or(CommandError::Param("reminder"))?),
     };
+    let show_as = match params.get("show_as") {
+        None => existing.as_ref().map(|a| a.show_as).unwrap_or_default(),
+        Some(v) => serde_json::from_value::<mailcraft_model::ShowAs>(v.clone()).map_err(|_| CommandError::Param("show_as"))?,
+    };
     let id = match (&existing, &account) {
         (Some(a), _) => a.id.clone(),
         (None, Some(account)) => s.pending_id(account),
@@ -163,6 +168,7 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         recurrence,
         reminder,
         private: params.get("private").and_then(Value::as_bool).unwrap_or(false),
+        show_as,
     }
     .validated()
     .map_err(|e| match e {
@@ -341,6 +347,15 @@ mod tests {
         assert!(s.appointment(&a.id).unwrap().private, "Privé is kept");
         s.run("appointment.save", &json!({ "id": a.id, "title": "Dokter", "start": 1000, "end": 4600 })).unwrap();
         assert!(!s.appointment(&a.id).unwrap().private, "left out means not private");
+        assert_eq!(s.appointment(&a.id).unwrap().show_as, mailcraft_model::ShowAs::Busy, "busy unless said otherwise");
+        s.run("appointment.save", &json!({ "id": a.id, "title": "Dokter", "start": 1000, "end": 4600, "show_as": "free" })).unwrap();
+        assert_eq!(s.appointment(&a.id).unwrap().show_as, mailcraft_model::ShowAs::Free);
+        s.run("appointment.save", &json!({ "id": a.id, "title": "Dokter", "start": 1000, "end": 4600 })).unwrap();
+        assert_eq!(s.appointment(&a.id).unwrap().show_as, mailcraft_model::ShowAs::Free, "left out keeps the status");
+        assert_eq!(
+            s.run("appointment.save", &json!({ "title": "x", "start": 1, "end": 2, "show_as": "maybe" })),
+            Err(CommandError::Param("show_as"))
+        );
         assert_eq!(
             s.run("appointment.save", &json!({ "title": "x", "start": 1, "end": 2, "reminder": "soon" })),
             Err(CommandError::Param("reminder"))

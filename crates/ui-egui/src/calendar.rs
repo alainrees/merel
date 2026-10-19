@@ -10,7 +10,7 @@ use egui::{Align2, Color32, CornerRadius, FontId, Margin, Rect, RichText, Sense,
 use serde_json::json;
 
 use mailcraft_engine::{CommandError, tasks::TaskFilter};
-use mailcraft_model::{Appointment, Frequency, Recurrence, Task, describe_recurrence};
+use mailcraft_model::{Appointment, Frequency, Recurrence, ShowAs, Task, describe_recurrence};
 
 use crate::{MailApp, Module, Tokens};
 
@@ -242,7 +242,18 @@ pub struct Editor {
     pub reminder: Option<u32>,
     /// Outlook's "Privé".
     pub private: bool,
+    /// Outlook's "Weergeven als".
+    pub show_as: ShowAs,
     pub error: Option<String>,
+}
+
+/// The "Weergeven als" choices of the window, in Outlook's order.
+const SHOW_AS: [(ShowAs, &str); 4] = [(ShowAs::Free, "Vrij"), (ShowAs::Tentative, "Voorlopig"), (ShowAs::Busy, "Bezet"), (ShowAs::Oof, "Afwezig")];
+/// Outlook paints an out-of-office appointment purple, whatever its calendar's colour.
+const OOF_COLOR: Color32 = Color32::from_rgb(122, 86, 170);
+
+pub fn show_as_label(show_as: ShowAs) -> &'static str {
+    SHOW_AS.iter().find(|(s, _)| *s == show_as).map(|(_, label)| *label).unwrap_or("Bezet")
 }
 
 /// The reminder choices of the window: minutes before the start, and the label.
@@ -293,6 +304,7 @@ impl Editor {
             // Outlook's default: a quarter of an hour before.
             reminder: Some(15),
             private: false,
+            show_as: mailcraft_model::ShowAs::Busy,
             error: None,
         }
     }
@@ -311,6 +323,7 @@ impl Editor {
         e.all_day = a.all_day;
         e.reminder = a.reminder;
         e.private = a.private;
+        e.show_as = a.show_as;
         e.end_date = end.format(DATE_FORMAT).to_string();
         e.end_time = end.format(TIME_FORMAT).to_string();
         e.notes = a.notes.clone();
@@ -410,6 +423,7 @@ impl Editor {
             "recurrence": recurrence,
             "reminder": self.reminder,
             "private": self.private,
+            "show_as": self.show_as,
         });
         if recurrence.is_some() {
             // The engine keeps the occurrences that were skipped; the window never lists them.
@@ -741,7 +755,23 @@ fn chip_title(a: &Appointment) -> String {
 
 /// A clickable block for one appointment, a drag source when `drag` is given. Returns true
 /// when clicked.
-fn chip(ui: &mut Ui, rect: Rect, label: &str, fill: Color32, selected: bool, drag: Option<DraggedAppointment>, t: &Tokens) -> bool {
+/// The block's look for a free/busy status, as Outlook draws them: a free appointment is a
+/// pale block with the calendar's colour as its border, a tentative one half-transparent with
+/// that border, a busy one solid and an out-of-office one purple.
+fn chip_paint(fill: Color32, show_as: ShowAs, hovered: bool, text: Color32) -> (Color32, Option<Stroke>, Color32) {
+    let with_alpha = |c: Color32, a: u8| Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a);
+    match show_as {
+        ShowAs::Free => (with_alpha(fill, if hovered { 70 } else { 40 }), Some(Stroke::new(1.5, fill)), text),
+        ShowAs::Tentative => (with_alpha(fill, if hovered { 170 } else { 130 }), Some(Stroke::new(1.5, fill)), Color32::WHITE),
+        ShowAs::Busy => (with_alpha(fill, if hovered { 255 } else { 220 }), None, Color32::WHITE),
+        ShowAs::Oof => (with_alpha(OOF_COLOR, if hovered { 255 } else { 220 }), None, Color32::WHITE),
+    }
+}
+
+/// A clickable block for one appointment, a drag source when `drag` is given. Returns true
+/// when clicked.
+#[allow(clippy::too_many_arguments)]
+fn chip(ui: &mut Ui, rect: Rect, label: &str, fill: Color32, show_as: ShowAs, selected: bool, drag: Option<DraggedAppointment>, t: &Tokens) -> bool {
     let sense = if drag.is_some() { Sense::click_and_drag() } else { Sense::click() };
     let r = ui.interact(rect, ui.make_persistent_id(("chip", rect.min.x as i32, rect.min.y as i32, label)), sense);
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
@@ -749,14 +779,17 @@ fn chip(ui: &mut Ui, rect: Rect, label: &str, fill: Color32, selected: bool, dra
         r.dnd_set_drag_payload(payload);
     }
     let p = ui.painter();
-    let alpha = if r.hovered() { 255 } else { 220 };
-    p.rect_filled(rect, CornerRadius::same(3), Color32::from_rgba_unmultiplied(fill.r(), fill.g(), fill.b(), alpha));
+    let (fill, border, text) = chip_paint(fill, show_as, r.hovered(), t.text);
+    p.rect_filled(rect, CornerRadius::same(3), fill);
+    if let Some(border) = border {
+        p.rect_stroke(rect, CornerRadius::same(3), border, egui::StrokeKind::Inside);
+    }
     if selected {
         p.rect_stroke(rect, CornerRadius::same(3), Stroke::new(2.0, t.text), egui::StrokeKind::Inside);
     }
     let text_rect = rect.shrink2(vec2(5.0, 1.0));
-    let galley = p.layout(label.to_string(), FontId::proportional(11.5), Color32::WHITE, text_rect.width());
-    p.with_clip_rect(text_rect).galley(text_rect.left_top(), galley, Color32::WHITE);
+    let galley = p.layout(label.to_string(), FontId::proportional(11.5), text, text_rect.width());
+    p.with_clip_rect(text_rect).galley(text_rect.left_top(), galley, text);
     r.clicked()
 }
 
@@ -845,7 +878,16 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         let y = rect.top() + 24.0 + i as f32 * 20.0;
                         let chip_rect = Rect::from_min_size(pos2(rect.left() + 3.0, y), vec2(rect.width() - 6.0, 18.0));
                         let label = if a.all_day { chip_title(a) } else { format!("{} {}", hm(a.start), chip_title(a)) };
-                        if chip(ui, chip_rect, &label, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), draggable(a), t) {
+                        if chip(
+                            ui,
+                            chip_rect,
+                            &label,
+                            appointment_color(app, a, t),
+                            a.show_as,
+                            selected.as_deref() == Some(a.id.as_str()),
+                            draggable(a),
+                            t,
+                        ) {
                             open = Some((a.id.clone(), a.start));
                         }
                     }
@@ -933,7 +975,16 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                 if let Some(a) = items.first() {
                     let label = if items.len() > 1 { format!("{} (+{})", chip_title(a), items.len() - 1) } else { chip_title(a) };
                     let chip_rect = rect.shrink2(vec2(2.0, 3.0));
-                    if chip(ui, chip_rect, &label, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), draggable(a), t) {
+                    if chip(
+                        ui,
+                        chip_rect,
+                        &label,
+                        appointment_color(app, a, t),
+                        a.show_as,
+                        selected.as_deref() == Some(a.id.as_str()),
+                        draggable(a),
+                        t,
+                    ) {
                         open = Some((a.id.clone(), a.start));
                     }
                 }
@@ -1001,7 +1052,7 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                 let block =
                     Rect::from_min_max(pos2(x + 2.0, grid.top() + top + 1.0), pos2(x + col_w - 2.0, grid.top() + bottom.max(top + 18.0) - 1.0));
                 let label = format!("{} {}\n{}", hm(a.start), hm(end), chip_title(a));
-                if chip(ui, block, &label, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), draggable(a), t) {
+                if chip(ui, block, &label, appointment_color(app, a, t), a.show_as, selected.as_deref() == Some(a.id.as_str()), draggable(a), t) {
                     open = Some((a.id.clone(), a.start));
                 }
                 if draggable(a).is_none() || a.end > to {
@@ -1145,6 +1196,7 @@ fn search_results(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 format!("{} {} {} {} · {} – {}", weekday_name(day), day.day(), month_name(day.month()), day.year(), hm(a.start), hm(a.end))
             };
             let sub = if a.location.is_empty() { when } else { format!("{when} · {}", a.location) };
+            let sub = if a.show_as == ShowAs::Busy { sub } else { format!("{sub} · {}", show_as_label(a.show_as)) };
             p.text(pos2(x, rect.bottom() - 2.0), Align2::LEFT_BOTTOM, sub, FontId::proportional(11.5), t.text_dim);
             if r.clicked() {
                 open = Some((a.id.clone(), a.start));
@@ -1303,6 +1355,14 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 }
             });
         });
+        ui.horizontal(|ui| {
+            ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Weergeven als").color(t.text)));
+            egui::ComboBox::from_id_salt("appointment-show-as").selected_text(show_as_label(editor.show_as)).width(160.0).show_ui(ui, |ui| {
+                for (s, label) in SHOW_AS {
+                    ui.selectable_value(&mut editor.show_as, s, label);
+                }
+            });
+        });
         // A calendar on this computer keeps a series as its rule. An account's server owns its
         // own series: a new appointment there can start one, but what comes back is listed and
         // edited one occurrence at a time.
@@ -1451,6 +1511,7 @@ mod tests {
             recurrence: None,
             reminder: None,
             private: false,
+            show_as: mailcraft_model::ShowAs::Busy,
         };
         let moved = to_local(dropped_start(&a, d(2026, 10, 23), None).unwrap());
         assert_eq!((moved.date(), moved.time()), (d(2026, 10, 23), NaiveTime::from_hms_opt(14, 0, 0).unwrap()), "a month drop keeps the time");
@@ -1518,9 +1579,22 @@ mod tests {
             recurrence: None,
             reminder: None,
             private: true,
+            show_as: mailcraft_model::ShowAs::Busy,
         };
         assert!(Editor::from_appointment(&a, None).private);
         assert_eq!(chip_title(&a), "🔒 Dokter");
+        assert_eq!(e.params().unwrap()["show_as"], json!("busy"), "busy unless chosen otherwise");
+        e.show_as = ShowAs::Oof;
+        assert_eq!(e.params().unwrap()["show_as"], json!("oof"));
+        let free = Appointment { show_as: ShowAs::Free, ..a.clone() };
+        assert_eq!(Editor::from_appointment(&free, None).show_as, ShowAs::Free);
+        assert_eq!((show_as_label(ShowAs::Free), show_as_label(ShowAs::Tentative), show_as_label(ShowAs::Oof)), ("Vrij", "Voorlopig", "Afwezig"));
+        let blue = Color32::from_rgb(0, 0, 255);
+        let (fill, border, _) = chip_paint(blue, ShowAs::Free, false, Color32::BLACK);
+        assert!(fill.a() < 80 && border.is_some(), "a free block is pale with a border");
+        let (fill, border, _) = chip_paint(blue, ShowAs::Busy, false, Color32::BLACK);
+        assert!(fill.a() > 200 && border.is_none(), "a busy block is solid");
+        assert_eq!(chip_paint(blue, ShowAs::Oof, true, Color32::BLACK).0, OOF_COLOR, "out of office is purple, whatever the calendar's colour");
         assert_eq!(chip_title(&Appointment { recurrence: Some(Recurrence::every(Frequency::Weekly)), ..a.clone() }), "🔒 🔁 Dokter");
         assert_eq!(chip_title(&Appointment { private: false, ..a }), "Dokter");
     }
@@ -1557,6 +1631,7 @@ mod tests {
             recurrence: None,
             reminder: None,
             private: false,
+            show_as: mailcraft_model::ShowAs::Busy,
         };
         let back = Editor::from_appointment(&a, None);
         assert_eq!((back.start_date.as_str(), back.end_date.as_str()), ("21-10-2026", "21-10-2026"));
@@ -1615,6 +1690,7 @@ mod tests {
             recurrence: Some(Recurrence { interval: 2, count: Some(8), ..Recurrence::every(Frequency::Monthly) }),
             reminder: None,
             private: false,
+            show_as: mailcraft_model::ShowAs::Busy,
         };
         let back = Editor::from_appointment(&a, Some(a.start + 86_400 * 61));
         assert_eq!((back.repeat, back.interval.as_str(), back.ends, back.count.as_str()), (Some(Frequency::Monthly), "2", Ends::AfterCount, "8"));
