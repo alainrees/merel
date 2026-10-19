@@ -92,6 +92,13 @@ pub trait Mailbox: Send {
     /// Sends `message` through the store itself and files the copy; `Ok(false)` when this
     /// store does not send and the message has to go over SMTP.
     fn send(&mut self, message: &[u8]) -> Result<bool>;
+    /// Makes a folder called `name` under the folder `parent` (its path), or at the top of
+    /// the mailbox when there is none. The caller lists the folders again afterwards.
+    fn create_folder(&mut self, parent: Option<&str>, name: &str) -> Result<()>;
+    /// Gives a folder a new name in the place where it is.
+    fn rename_folder(&mut self, folder: &str, name: &str) -> Result<()>;
+    /// Removes a folder with the messages in it.
+    fn delete_folder(&mut self, folder: &str) -> Result<()>;
     /// The store's appointments, contacts and tasks; `None` for a store that keeps only mail.
     fn items(&mut self) -> Option<&mut dyn ItemStore> {
         None

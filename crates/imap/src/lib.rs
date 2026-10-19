@@ -248,6 +248,70 @@ impl ImapClient {
         Ok(())
     }
 
+    /// The character between a folder and its subfolders, as the server lists `folder` (the
+    /// top level when empty); "/" when the server names none.
+    fn delimiter(&mut self, folder: &str) -> Result<String> {
+        let names = if folder.is_empty() { self.session.list(Some(""), Some("\"\""))? } else { self.session.list(None, Some(&quote(folder)?))? };
+        Ok(names.iter().find_map(|n| n.delimiter()).unwrap_or("/").to_string())
+    }
+
+    /// Leaves `folder` when it is the selected one, so it can be renamed or removed.
+    fn leave(&mut self, folder: &str) -> Result<()> {
+        if self.selected.as_deref() == Some(folder) {
+            self.selected = None;
+            self.session.select("INBOX")?;
+        }
+        Ok(())
+    }
+
+    /// Makes `name` under `parent`, or at the top level, and subscribes to it for clients
+    /// that list subscriptions only.
+    pub fn create_folder(&mut self, parent: Option<&str>, name: &str) -> Result<()> {
+        let delimiter = self.delimiter(parent.unwrap_or(""))?;
+        if name.is_empty() || name.contains(&delimiter) || name.chars().any(|c| matches!(c, '\r' | '\n' | '\0' | '%' | '*')) {
+            return Err(ImapError::BadName(name.chars().take(40).collect()));
+        }
+        let path = match parent {
+            Some(p) => format!("{p}{delimiter}{name}"),
+            None => name.to_string(),
+        };
+        self.session.create(&path)?;
+        if let Err(e) = self.session.subscribe(&path) {
+            log::debug!("could not subscribe to {path}: {e}");
+        }
+        Ok(())
+    }
+
+    /// Renames the last segment of `folder` to `name`; subfolders move along, as RFC 3501 has it.
+    pub fn rename_folder(&mut self, folder: &str, name: &str) -> Result<()> {
+        let delimiter = self.delimiter(folder)?;
+        if name.is_empty() || name.contains(&delimiter) || name.chars().any(|c| matches!(c, '\r' | '\n' | '\0' | '%' | '*')) {
+            return Err(ImapError::BadName(name.chars().take(40).collect()));
+        }
+        quote(folder)?;
+        let path = match folder.rsplit_once(delimiter.as_str()) {
+            Some((parent, _)) => format!("{parent}{delimiter}{name}"),
+            None => name.to_string(),
+        };
+        self.leave(folder)?;
+        self.session.rename(folder, &path)?;
+        if let Err(e) = self.session.subscribe(&path) {
+            log::debug!("could not subscribe to {path}: {e}");
+        }
+        Ok(())
+    }
+
+    /// Removes `folder` and the messages in it; subfolders stay, as the protocol has it.
+    pub fn delete_folder(&mut self, folder: &str) -> Result<()> {
+        quote(folder)?;
+        self.leave(folder)?;
+        if let Err(e) = self.session.unsubscribe(folder) {
+            log::debug!("could not unsubscribe from {folder}: {e}");
+        }
+        self.session.delete(folder)?;
+        Ok(())
+    }
+
     pub fn logout(mut self) {
         let _ = self.session.logout();
     }
@@ -330,6 +394,18 @@ impl Mailbox for ImapClient {
 
     fn send(&mut self, _message: &[u8]) -> mailcraft_mailbox::Result<bool> {
         Ok(false)
+    }
+
+    fn create_folder(&mut self, parent: Option<&str>, name: &str) -> mailcraft_mailbox::Result<()> {
+        Ok(ImapClient::create_folder(self, parent, name)?)
+    }
+
+    fn rename_folder(&mut self, folder: &str, name: &str) -> mailcraft_mailbox::Result<()> {
+        Ok(ImapClient::rename_folder(self, folder, name)?)
+    }
+
+    fn delete_folder(&mut self, folder: &str) -> mailcraft_mailbox::Result<()> {
+        Ok(ImapClient::delete_folder(self, folder)?)
     }
 
     fn logout(self: Box<Self>) {

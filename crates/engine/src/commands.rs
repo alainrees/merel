@@ -34,6 +34,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "folder.select", label: "Open folder", run: folder_select },
     CommandSpec { id: "folder.refresh", label: "Refresh folder", run: folder_refresh },
     CommandSpec { id: "folder.older", label: "Load older messages", run: folder_older },
+    CommandSpec { id: "folder.create", label: "New folder", run: crate::folders::create },
+    CommandSpec { id: "folder.rename", label: "Rename folder", run: crate::folders::rename },
+    CommandSpec { id: "folder.delete", label: "Delete folder", run: crate::folders::delete },
     CommandSpec {
         id: "search.server",
         label: "Search on the server",
@@ -81,7 +84,7 @@ impl Session {
     }
 }
 
-fn str_param<'a>(params: &'a Value, key: &'static str) -> Result<&'a str, CommandError> {
+pub(crate) fn str_param<'a>(params: &'a Value, key: &'static str) -> Result<&'a str, CommandError> {
     params.get(key).and_then(Value::as_str).ok_or(CommandError::Param(key))
 }
 
