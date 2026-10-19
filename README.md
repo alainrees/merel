@@ -35,8 +35,9 @@ brings its own calendar, contacts and tasks along (Google Calendar, People and T
 appear next to the local ones, changes go straight to the server, and a new item asks whether
 it belongs on this computer or in the account. Everything an account showed is kept in an
 encrypted offline cache, so the window fills at once on the next start and mail you opened
-before can be read without a connection. Next up: CalDAV/CardDAV and an offline queue for
-changes made without a connection.
+before can be read without a connection, and changes you make without one (flags, moves,
+appointments, contacts, tasks) wait and reach the server when it is back, even after a restart.
+Next up: CalDAV/CardDAV.
 
 ## Build
 

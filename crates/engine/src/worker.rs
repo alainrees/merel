@@ -1,12 +1,16 @@
 //! One background thread per account, holding its connection and serving [`Job`]s in order.
 //!
-//! The thread speaks IMAP, Exchange Web Services or Google's APIs through the [`Mailbox`]
-//! trait and never knows which. It reconnects once when a command fails on a dropped connection; after that
-//! the failure is reported and the next job tries again from scratch.
+//! The thread speaks IMAP, Exchange Web Services, Microsoft Graph or Google's APIs through the
+//! [`Mailbox`] trait and never knows which. It reconnects once when a command fails on a
+//! dropped connection; after that the failure is reported and the next job tries again from
+//! scratch. A change (flag, move, item) that finds no connection is handed back as
+//! [`Event::Deferred`] for the offline queue, and the thread tries the server again on its
+//! own, at growing intervals, until it is back.
 
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread;
+use std::time::Duration;
 
 use mailcraft_exchange::EwsClient;
 use mailcraft_google::GoogleMailbox;
@@ -18,6 +22,11 @@ use mailcraft_smtp::SmtpError;
 
 use crate::signin::Credentials;
 use crate::{Event, Job};
+
+/// First wait before trying the server again after a failed connection; it doubles each time.
+const FIRST_RETRY: Duration = Duration::from_secs(15);
+/// Longest wait between two tries.
+const MAX_RETRY: Duration = Duration::from_secs(5 * 60);
 
 pub struct Worker {
     events: Sender<Event>,
@@ -93,13 +102,58 @@ fn failure(account_id: &str, job: &Job, what: String) -> Event {
     }
 }
 
+/// What a job that found no connection becomes: a change waits, anything else fails.
+fn no_connection(account_id: &str, job: &Job, what: String) -> Event {
+    if job.is_change() { Event::Deferred { account_id: account_id.to_string(), job: Box::new(job.clone()) } } else { failure(account_id, job, what) }
+}
+
+fn longer(wait: Option<Duration>) -> Option<Duration> {
+    Some(wait.map_or(FIRST_RETRY, |w| (w * 2).min(MAX_RETRY)))
+}
+
 fn serve(account: Account, mut credentials: Credentials, jobs: Receiver<Job>, events: Sender<Event>) {
     let Some(server) = account.incoming.clone() else {
         let _ = events.send(Event::Failed { account_id: account.id, what: "Dit account heeft geen inkomende server.".into() });
         return;
     };
     let mut client: Option<Box<dyn Mailbox>> = None;
-    while let Ok(job) = jobs.recv() {
+    // Set after a failed connection: how long to wait for a job before trying the server again.
+    let mut retry: Option<Duration> = None;
+    loop {
+        let job = match retry {
+            None => match jobs.recv() {
+                Ok(job) => job,
+                Err(_) => break,
+            },
+            Some(wait) => match jobs.recv_timeout(wait) {
+                Ok(job) => job,
+                Err(RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Timeout) => {
+                    // Nobody asked for anything; see whether the server is back. Connecting
+                    // reports the folders, and the engine replays the offline queue.
+                    match connect(&account, &server, &mut credentials) {
+                        Ok(mut c) => match run(c.as_mut(), &account, &Job::Connect { account_id: account.id.clone() }) {
+                            Ok(ev) => {
+                                if let Some(ev) = ev {
+                                    let _ = events.send(ev);
+                                }
+                                client = Some(c);
+                                retry = None;
+                            }
+                            Err(e) => {
+                                log::warn!("{}: {e} (reconnect)", account.id);
+                                retry = longer(retry);
+                            }
+                        },
+                        Err(_) => {
+                            credentials.invalidate();
+                            retry = longer(retry);
+                        }
+                    }
+                    continue;
+                }
+            },
+        };
         // Mail for an SMTP server goes out before the store is touched, so a dead IMAP
         // connection never holds up sending.
         if let Job::Send { draft_id, draft, sent_path, .. } = &job
@@ -126,7 +180,8 @@ fn serve(account: Account, mut credentials: Credentials, jobs: Receiver<Job>, ev
                     Err(what) => {
                         // A refused login may be a stale access token: fetch a new one next time.
                         credentials.invalidate();
-                        let _ = events.send(failure(&account.id, &job, what));
+                        retry = longer(retry);
+                        let _ = events.send(no_connection(&account.id, &job, what));
                         break;
                     }
                 }
@@ -134,15 +189,23 @@ fn serve(account: Account, mut credentials: Credentials, jobs: Receiver<Job>, ev
             let Some(c) = client.as_mut() else { break };
             match run(c.as_mut(), &account, &job) {
                 Ok(Some(ev)) => {
+                    retry = None;
                     let _ = events.send(ev);
                     break;
                 }
-                Ok(None) => break,
+                Ok(None) => {
+                    retry = None;
+                    break;
+                }
                 Err(e) => {
                     log::warn!("{}: {} (attempt {attempts})", account.id, e);
                     client = None;
                     if attempts >= 2 {
-                        let _ = events.send(failure(&account.id, &job, describe(&e)));
+                        let ev = match e {
+                            MailboxError::Connect { .. } => no_connection(&account.id, &job, describe(&e)),
+                            _ => failure(&account.id, &job, describe(&e)),
+                        };
+                        let _ = events.send(ev);
                         break;
                     }
                 }
@@ -235,4 +298,47 @@ fn run(c: &mut dyn Mailbox, account: &Account, job: &Job) -> Result<Option<Event
             Some(Event::Sent { account_id: account.id.clone(), draft_id: *draft_id, result })
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use mailcraft_mailbox::Flag;
+    use mailcraft_model::{Address, Auth, Server, Tls};
+    use mailcraft_secrets::Secret;
+
+    use super::*;
+
+    /// An account whose server refuses the connection at once (nothing listens on port 1).
+    fn unreachable() -> Account {
+        Account {
+            id: "a1".into(),
+            name: "Test".into(),
+            address: Address::new(None, "a@b.nl").unwrap(),
+            username: "a@b.nl".into(),
+            protocol: Protocol::ImapSmtp,
+            auth: Auth::Password,
+            incoming: Some(Server { host: "127.0.0.1".into(), port: 1, tls: Tls::Implicit }),
+            outgoing: None,
+        }
+    }
+
+    #[test]
+    fn without_a_connection_changes_wait_and_reads_fail() {
+        let (tx, rx) = channel();
+        let mut worker = Worker::new(tx);
+        let account = unreachable();
+        worker.start_account(account.clone(), Credentials::new(&account, Secret::new("pw"), None));
+        let flag = Job::Flag { account_id: "a1".into(), path: "INBOX".into(), id: "7".into(), flag: Flag::Seen, on: true };
+        worker.submit(flag.clone());
+        worker.submit(Job::Headers { account_id: "a1".into(), folder_id: "a1/INBOX".into(), path: "INBOX".into() });
+        let wait = Duration::from_secs(20);
+        match rx.recv_timeout(wait).expect("an event") {
+            Event::Deferred { account_id, job } => assert_eq!((account_id.as_str(), *job), ("a1", flag)),
+            other => panic!("expected the change to wait, got {other:?}"),
+        }
+        match rx.recv_timeout(wait).expect("an event") {
+            Event::Failed { account_id, what } => assert!(account_id == "a1" && what.contains("127.0.0.1"), "{what}"),
+            other => panic!("expected a failure, got {other:?}"),
+        }
+    }
 }

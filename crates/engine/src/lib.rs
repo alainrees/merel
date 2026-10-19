@@ -29,14 +29,16 @@ use std::sync::mpsc::{Receiver, channel};
 use mailcraft_mailbox::{Flag, Item, RemoteFolder, RemoteHeader};
 use mailcraft_model::{Account, Appointment, Auth, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, Task, clean_text};
 use mailcraft_secrets::{Secret, SecretStore};
+use serde::{Deserialize, Serialize};
 
 /// How many of the newest messages a folder shows.
 pub const HEADER_LIMIT: u32 = 200;
 /// The sample account's id; it has no server behind it.
 pub const SAMPLE_ACCOUNT: &str = "sample";
 
-/// Work for the background worker.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Work for the background worker. A job that changes the server (`is_change`) is kept when
+/// there is no connection and done when it is back, across restarts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Job {
     Connect {
         account_id: String,
@@ -105,6 +107,11 @@ impl Job {
             | Job::DeleteItem { account_id, .. } => account_id,
         }
     }
+
+    /// Whether the job changes something on the server, so it must not be lost offline.
+    pub fn is_change(&self) -> bool {
+        matches!(self, Job::Flag { .. } | Job::Move { .. } | Job::SaveItem { .. } | Job::DeleteItem { .. })
+    }
 }
 
 /// What the worker reports back.
@@ -144,6 +151,12 @@ pub enum Event {
     Failed {
         account_id: String,
         what: String,
+    },
+    /// A change could not reach the server because there is no connection; it waits in the
+    /// offline queue until the account connects again.
+    Deferred {
+        account_id: String,
+        job: Box<Job>,
     },
     /// The outcome of a `Send` job; `Err` carries a sentence for the person.
     Sent {
@@ -197,6 +210,8 @@ pub struct Session {
     pub selected_task: Option<String>,
     /// Accounts whose store keeps appointments, contacts and tasks, and so syncs them.
     pub item_accounts: HashSet<String>,
+    /// Changes waiting for a connection, per account.
+    pub queued: HashMap<String, usize>,
     /// Set when a command changed the calendar, the contacts or the tasks; the engine saves
     /// and clears it.
     calendar_dirty: bool,
@@ -307,6 +322,12 @@ impl Session {
         std::mem::take(&mut self.pending)
     }
 
+    /// Puts `jobs` ahead of whatever is pending: the offline queue goes first on connect.
+    pub fn prepend_jobs(&mut self, mut jobs: Vec<Job>) {
+        jobs.append(&mut self.pending);
+        self.pending = jobs;
+    }
+
     pub fn has_pending(&self) -> bool {
         !self.pending.is_empty() || !self.loading.is_empty() || self.outbox.values().any(|s| *s == SendState::Sending)
     }
@@ -327,6 +348,7 @@ impl Session {
         match event {
             Event::Connected { account_id, folders, syncs_items } => {
                 self.status.insert(account_id.clone(), AccountStatus::Online);
+                self.queued.remove(&account_id);
                 if syncs_items {
                     self.item_accounts.insert(account_id.clone());
                     self.request_sync(&account_id);
@@ -400,6 +422,10 @@ impl Session {
             Event::Failed { account_id, what } => {
                 self.loading.clear();
                 self.status.insert(account_id, AccountStatus::Error(what));
+            }
+            Event::Deferred { account_id, .. } => {
+                *self.queued.entry(account_id.clone()).or_default() += 1;
+                self.status.insert(account_id, AccountStatus::Offline);
             }
             Event::Synced { account_id, appointments, contacts, tasks } => self.apply_synced(&account_id, appointments, contacts, tasks),
             Event::ItemSaved { account_id, local_id, remote_id } => self.apply_saved(&account_id, &local_id, &remote_id),
@@ -634,7 +660,13 @@ impl Engine {
                 _ => None,
             };
             self.cache.note_event(&self.session, &e);
+            // Changes made offline reach the server before anything else does.
+            let replay = match &e {
+                Event::Connected { account_id, .. } => self.cache.take_pending(account_id),
+                _ => Vec::new(),
+            };
             self.session.apply(e);
+            self.session.prepend_jobs(replay);
             if let Some(id) = signed_in {
                 if let Err(e) = self.save_accounts() {
                     self.session.sign_in = Some(Some(Err(e)));
