@@ -496,6 +496,8 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
             compose = Some(ComposeKind::Forward);
         } else if i.consume_key(Modifiers::COMMAND, Key::P) {
             command = Some("message.print");
+        } else if i.consume_key(Modifiers::COMMAND, Key::S) {
+            command = Some("message.save_as");
         } else if i.consume_key(Modifiers::CTRL, Key::Delete) {
             command = Some("conversation.ignore");
         } else if i.consume_key(Modifiers::NONE, Key::Delete) || (MAC && i.consume_key(Modifiers::NONE, Key::Backspace)) {
@@ -551,6 +553,7 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
         }
         Some("message.print") if app.can_print() => app.print_selected(),
         Some("forward_attached") if has => app.forward_as_attachment(),
+        Some("message.save_as") => app.save_as_file(),
         Some(id) if has => app.run(id, Value::Null),
         _ => {}
     }
