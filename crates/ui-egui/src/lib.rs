@@ -16,6 +16,7 @@ mod dates;
 pub mod folders;
 pub mod help;
 mod html;
+pub mod importance;
 pub mod invitation;
 pub mod junk;
 pub mod message_menu;
@@ -1146,13 +1147,22 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     if m.flags.flagged {
                         right = format!("⚑ {right}");
                     }
-                    p.text(
+                    let right_rect = p.text(
                         egui::pos2(x + w, rect.top() + 14.0),
                         egui::Align2::RIGHT_CENTER,
                         right,
                         egui::FontId::proportional(12.0),
                         if m.flags.flagged { t.flag } else { t.text_dim },
                     );
+                    if let Some((glyph, color)) = importance::mark(m.importance, t) {
+                        p.text(
+                            egui::pos2(right_rect.left() - 6.0, rect.top() + 14.0),
+                            egui::Align2::RIGHT_CENTER,
+                            glyph,
+                            egui::FontId::proportional(15.0),
+                            color,
+                        );
+                    }
                     let squares = categories::squares(app, p, egui::pos2(x + w, rect.top() + 34.0), &m.categories);
                     p.text(
                         egui::pos2(x, rect.top() + 34.0),
@@ -1314,6 +1324,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     ui.label(RichText::new(&m.subject).size(20.0).strong().color(t.text));
     ui.add_space(10.0);
+    importance::strip(ui, t, m.importance);
     if m.flags.flagged {
         // The follow-up strip, as Outlook puts it over a flagged message: the due day, red once
         // it has passed, and the way to mark it done.
@@ -1982,6 +1993,17 @@ mod tests {
     }
 
     #[test]
+    fn an_urgent_message_gets_the_strip_over_it_and_a_normal_one_does_not() {
+        let mut h = harness();
+        h.get_by_label("Planning voor donderdag").click();
+        h.run();
+        h.get_by_label(importance::HIGH_STRIP);
+        h.get_by_label("Re: Offerte drukwerk").click();
+        h.run();
+        assert!(h.query_by_label(importance::HIGH_STRIP).is_none() && h.query_by_label(importance::LOW_STRIP).is_none());
+    }
+
+    #[test]
     fn a_message_with_signs_of_phishing_gets_a_warning_strip_that_can_block_the_sender() {
         use mailcraft_model::{Address, Flags, MessageHeader};
         let mut h = harness();
@@ -1999,6 +2021,7 @@ mod tests {
             has_attachments: true,
             message_id: None,
             categories: Vec::new(),
+            importance: Default::default(),
         };
         let body = mailcraft_engine::Body {
             rich: Some(mailcraft_html::parse(r#"<p><a href="https://evil.example/login">https://www.bank.nl/inloggen</a></p>"#)),
