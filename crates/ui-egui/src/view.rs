@@ -107,6 +107,10 @@ pub struct ViewPrefs {
     /// What was last typed in the mail search box, newest first, as Outlook's "Recente
     /// zoekopdrachten"; at most [`RECENT_SEARCHES`].
     pub recent_searches: Vec<String>,
+    /// The calendars whose tick box under "Mijn agenda's" is off, by id: their appointments stay
+    /// out of the views, the search list and the printed page, as in Outlook when a calendar is
+    /// unticked. Reminders still come.
+    pub hidden_calendars: Vec<String>,
 }
 
 /// How many recent searches the menu next to the search box keeps.
@@ -131,11 +135,25 @@ impl Default for ViewPrefs {
             favorites: Vec::new(),
             search_folders: Vec::new(),
             recent_searches: Vec::new(),
+            hidden_calendars: Vec::new(),
         }
     }
 }
 
 impl ViewPrefs {
+    /// Whether the calendar's tick box is on, so its appointments show.
+    pub fn calendar_shown(&self, calendar_id: &str) -> bool {
+        !self.hidden_calendars.iter().any(|c| c == calendar_id)
+    }
+
+    /// Ticks or unticks the calendar.
+    pub fn set_calendar_shown(&mut self, calendar_id: &str, shown: bool) {
+        self.hidden_calendars.retain(|c| c != calendar_id);
+        if !shown {
+            self.hidden_calendars.push(calendar_id.to_string());
+        }
+    }
+
     /// Puts `query` at the top of the recent searches, once, dropping the oldest beyond the
     /// limit. Blank text is not kept.
     pub fn remember_search(&mut self, query: &str) {
