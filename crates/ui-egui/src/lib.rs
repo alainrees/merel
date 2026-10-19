@@ -1164,6 +1164,20 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
 }
 
+impl MailApp {
+    /// Shows a message in the mail module: its folder opens and it is selected, from wherever
+    /// the person was (the flagged mail in the tasks module, for one).
+    pub fn open_message(&mut self, id: &str) {
+        let Some(folder) = self.engine.session.message(id).map(|m| m.folder_id.clone()) else { return };
+        self.module = Module::Mail;
+        self.drafts_for = None;
+        if self.engine.session.selected_folder.as_deref() != Some(folder.as_str()) {
+            self.run("folder.select", json!({ "id": folder }));
+        }
+        self.run("message.select", json!({ "id": id }));
+    }
+}
+
 /// The modifiers held during this frame's click: those on the button-up event, which is what
 /// makes a click, else the ones held now.
 fn click_modifiers(ui: &Ui) -> egui::Modifiers {
@@ -1952,6 +1966,30 @@ mod tests {
         h.get_by_label("Start").click();
         h.run();
         assert!(h.query_by_label("Vandaag").is_none());
+    }
+
+    #[test]
+    fn flagged_mail_shows_in_the_tasks_module_opens_in_mail_and_is_done_from_its_checkbox() {
+        let mut h = harness();
+        h.state_mut().run("message.follow_up", json!({ "when": "today", "id": "m1" }));
+        h.state_mut().run("message.flag", json!({ "id": "m3" }));
+        h.state_mut().module = Module::Tasks;
+        h.run();
+        h.get_by_label(tasks::FLAGGED_HEADING);
+        assert!(h.query_by_label("Planning voor donderdag").is_some() && h.query_by_label("Wat er deze maand speelt").is_some());
+        h.get_by_label("Voltooid").click();
+        h.run();
+        assert!(h.query_by_label(tasks::FLAGGED_HEADING).is_none(), "the done filter is about tasks; flagged mail is open by nature");
+        h.get_by_label("Open").click();
+        h.run();
+        h.get_by_label("Vlag weghalen van Wat er deze maand speelt").click();
+        h.run();
+        assert!(!h.state().engine.session.message("m3").unwrap().flags.flagged);
+        assert!(h.query_by_label("Wat er deze maand speelt").is_none());
+        h.get_by_label("Planning voor donderdag").click();
+        h.run();
+        assert_eq!(h.state().module, Module::Mail);
+        assert_eq!(h.state().engine.session.selected_message.as_deref(), Some("m1"));
     }
 
     #[test]
