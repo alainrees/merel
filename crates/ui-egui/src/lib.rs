@@ -260,6 +260,9 @@ impl MailApp {
         if hits > 0 {
             self.notice = Some(rules::rule_notice(hits));
         }
+        if let Some(failure) = self.engine.session.take_scheduled_failures().pop() {
+            self.notice = Some(failure);
+        }
         let title = window_title(self.engine.session.inbox_unread());
         if self.title.as_deref() != Some(title.as_str()) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
@@ -807,7 +810,9 @@ fn drafts_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens, account_id: &str) {
     egui::Frame::NONE.inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
         ui.label(RichText::new(format!("Concepten ({})", drafts.len())).size(18.0).strong().color(t.text));
         ui.label(
-            RichText::new("Berichten die je opzij hebt gezet. Ze staan alleen op deze computer, in de versleutelde offline kopie.")
+            RichText::new(
+                "Berichten die je opzij hebt gezet, en berichten die later verzonden worden. Ze staan alleen op deze computer, in de versleutelde offline kopie.",
+            )
                 .size(12.0)
                 .color(t.text_dim),
         );
@@ -825,8 +830,14 @@ fn drafts_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens, account_id: &str) {
                 let subject = if d.subject.is_empty() { "(Geen onderwerp)" } else { d.subject.as_str() };
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(clip(subject, 48)).strong().color(t.text));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(dates::short(d.updated)).size(12.0).color(t.text_dim));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match d.send_at {
+                        Some(ts) => {
+                            ui.label(RichText::new(format!("⏰ Verzenden {}", compose::when_text(ts))).size(12.0).color(t.accent_text))
+                                .on_hover_text("Gaat op dat moment vanzelf weg, als Mailcraft dan draait. Open het concept om dat te veranderen.");
+                        }
+                        None => {
+                            ui.label(RichText::new(dates::short(d.updated)).size(12.0).color(t.text_dim));
+                        }
                     });
                 });
                 let to = if d.to.trim().is_empty() { "(nog geen ontvanger)" } else { d.to.as_str() };
