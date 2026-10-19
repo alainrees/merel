@@ -33,6 +33,7 @@ pub fn shortcut_list() -> Vec<(String, &'static str)> {
         (key_hint("Shift+K"), "Nieuwe taak, vanuit elke module"),
         (key_hint("R"), "Beantwoorden"),
         (key_hint("Shift+R"), "Allen beantwoorden"),
+        (key_hint("Alt+R"), "Beantwoorden met vergaderverzoek"),
         (key_hint("F"), "Doorsturen"),
         (key_hint("Shift+V"), "Verplaatsen naar een map"),
         (key_hint("P"), "Afdrukken via de browser (in de agenda: de open dag, week of maand)"),
@@ -128,7 +129,7 @@ mod tests {
     #[test]
     fn the_shortcut_list_names_every_key_the_mail_module_takes() {
         let list = shortcut_list();
-        assert_eq!(list.len(), 23);
+        assert_eq!(list.len(), 24);
         assert!(list.iter().any(|(k, _)| k.ends_with("+Shift+V")));
         assert!(list.iter().all(|(k, what)| !k.is_empty() && !what.is_empty()));
     }

@@ -1,11 +1,13 @@
 //! The right-click menu on a message row: the everyday actions of the "Start" tab, and a task
 //! or an appointment made from the message, with the subject as title and the sender, the date
-//! and the text as notes, the way Outlook turns a mail into a to-do or a meeting.
+//! and the text as notes, the way Outlook turns a mail into a to-do or a meeting. "Beantwoorden
+//! met vergaderverzoek" goes one step further, as in Outlook: the appointment window opens with
+//! the sender and the other recipients as attendees, ready to send.
 
 use chrono::Timelike;
 use egui::Response;
 use mailcraft_engine::Session;
-use mailcraft_model::MessageHeader;
+use mailcraft_model::{Address, MessageHeader, mailbox};
 use serde_json::{Value, json};
 
 use crate::{ComposeKind, MailApp, Module, calendar, dates, tasks};
@@ -20,6 +22,8 @@ pub enum Pick {
     Move,
     Task,
     Appointment,
+    /// The appointment window with the sender and the other recipients as attendees.
+    Meeting,
     /// The sender's card, or the form for a new contact with the sender's name and address.
     Sender,
     /// The rules window with a new rule for the sender's address filled in.
@@ -33,6 +37,20 @@ pub enum Pick {
 /// How much of a message's text goes into the notes of a task or an appointment.
 const NOTES_CHARS: usize = 2000;
 
+/// Outlook's "Beantwoorden met vergaderverzoek".
+pub const MEETING: &str = "Beantwoorden met vergaderverzoek";
+
+/// The sender and the other recipients of `m`, without `me`, as the "Genodigden" line.
+pub fn attendee_line(m: &MessageHeader, me: &str) -> String {
+    let mut list: Vec<&Address> = Vec::new();
+    for a in std::iter::once(&m.from).chain(m.to.iter()) {
+        if !a.email().eq_ignore_ascii_case(me) && !list.iter().any(|x| x.email().eq_ignore_ascii_case(a.email())) {
+            list.push(a);
+        }
+    }
+    list.into_iter().map(mailbox).collect::<Vec<_>>().join("; ")
+}
+
 /// Draws the menu on `r` for message `m`; what was clicked comes back once, to be run by
 /// [`MailApp::act_on_message`]. `known_sender` says whether the sender is in the contacts,
 /// `in_junk` whether the message sits in the Junk folder, `ignored` whether its conversation
@@ -44,10 +62,11 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
         let sender = if known_sender { "Afzender openen in contacten" } else { "Afzender toevoegen aan contacten" };
         let junk = if in_junk { ("Geen ongewenst", "junk.trust") } else { ("Afzender blokkeren", "junk.block") };
         let ignore = if ignored { ("Gesprek niet meer negeren", "conversation.unignore") } else { ("Gesprek negeren", "conversation.ignore") };
-        let items: [(&str, Pick); 16] = [
+        let items: [(&str, Pick); 17] = [
             ("Beantwoorden", Pick::Compose(ComposeKind::Reply)),
             ("Allen beantwoorden", Pick::Compose(ComposeKind::ReplyAll)),
             ("Doorsturen", Pick::Compose(ComposeKind::Forward)),
+            (MEETING, Pick::Meeting),
             (read.0, Pick::Command(read.1)),
             ("Verplaatsen naar…", Pick::Move),
             ("Archiveren", Pick::Command("message.archive")),
@@ -63,10 +82,10 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
             ("Regel maken voor deze afzender…", Pick::Rule),
         ];
         for (i, (label, p)) in items.into_iter().enumerate() {
-            if matches!(i, 3 | 11 | 14) {
+            if matches!(i, 4 | 12 | 15) {
                 ui.separator();
             }
-            if i == 4 {
+            if i == 5 {
                 // Outlook's "Opvolgen": the flag with a due day, under its own arrow.
                 ui.menu_button("Opvolgen", |ui| {
                     for (when, label) in mailcraft_engine::followup::WHEN {
@@ -121,6 +140,7 @@ impl MailApp {
             Pick::Move => self.move_to = true,
             Pick::Task => self.task_from_message(m),
             Pick::Appointment => self.appointment_from_message(m),
+            Pick::Meeting => self.meeting_from_message(m),
             Pick::Sender => self.open_or_add_sender(&m.from),
             Pick::Rule => self.open_rules(true),
             Pick::Cleanup => self.ask_cleanup_conversation(&m.id),
@@ -150,6 +170,26 @@ impl MailApp {
         editor.title = m.subject.clone();
         editor.notes = notes_from(&self.engine.session, m);
         self.calendar.editor = Some(editor);
+    }
+
+    /// Outlook's "Beantwoorden met vergaderverzoek": the appointment window for a new meeting on
+    /// the next full hour, named after the message, with the sender and the other recipients as
+    /// attendees and the message as notes, in the calendar of the account the message came to.
+    pub fn meeting_from_message(&mut self, m: &MessageHeader) {
+        self.appointment_from_message(m);
+        let session = &self.engine.session;
+        let account = session.folder(&m.folder_id).map(|f| f.account_id.clone());
+        let me = account
+            .as_deref()
+            .and_then(|id| session.accounts.iter().find(|a| a.id == id))
+            .map(|a| a.address.email().to_string())
+            .or_else(|| session.current_account().map(|a| a.address.email().to_string()))
+            .unwrap_or_default();
+        let calendar = account.map(|id| Session::account_calendar_id(&id)).filter(|c| session.calendar(c).is_some());
+        if let Some(e) = self.calendar.editor.as_mut() {
+            e.attendees = attendee_line(m, &me);
+            e.calendar_id = calendar;
+        }
     }
 }
 
@@ -182,6 +222,21 @@ mod tests {
         let e = app.calendar.editor.as_ref().expect("appointment window");
         assert_eq!((e.id.as_deref(), e.title.as_str(), e.all_day), (None, "Planning voor donderdag", false));
         assert!(e.notes.starts_with("Van: "));
+        assert_eq!(e.attendees, "", "a plain appointment invites nobody");
+    }
+
+    #[test]
+    fn reply_with_meeting_invites_the_sender_and_the_other_recipients_but_not_me() {
+        let mut app = MailApp::new(Engine::sample());
+        let mut m = app.engine.session.message("m1").expect("sample mail").clone();
+        m.to.push(mailcraft_model::Address::new(Some("Ravi"), "ravi@example.org").unwrap());
+        m.to.push(mailcraft_model::Address::new(None, "SANNE@example.org").unwrap());
+        app.act_on_message(&m, Pick::Meeting);
+        let e = app.calendar.editor.as_ref().expect("appointment window");
+        assert_eq!(e.title, "Planning voor donderdag");
+        assert_eq!(e.attendees, "Sanne de Vries <sanne@example.org>; Ravi <ravi@example.org>", "me (jij@example.org) left out, Sanne once");
+        assert!(e.notes.starts_with("Van: Sanne de Vries"));
+        assert_eq!(e.calendar_id, None, "the sample account has no calendar of its own; the window picks the default");
     }
 
     #[test]
