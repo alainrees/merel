@@ -1,11 +1,12 @@
-//! The tasks module: a list with an open/done filter, and the form to add or change a task.
+//! The tasks module: a list with an open/done filter, the flagged mail under it (Outlook's
+//! To-Do list shows those too), and the form to add or change a task.
 
 use chrono::{Days, NaiveDate, NaiveTime};
 use egui::{Align2, Color32, CornerRadius, FontId, Margin, RichText, Sense, Stroke, Ui, vec2};
 use serde_json::json;
 
-use mailcraft_engine::{CommandError, tasks::TaskFilter};
-use mailcraft_model::{Priority, Task};
+use mailcraft_engine::{CommandError, followup, tasks::TaskFilter};
+use mailcraft_model::{MessageHeader, Priority, Task};
 
 use crate::calendar::{to_local, to_timestamp, today};
 use crate::{MailApp, Tokens};
@@ -22,6 +23,44 @@ pub struct State {
 
 /// The search box's widget id, so Ctrl+E can put the cursor there.
 pub(crate) const SEARCH_BOX: &str = "tasks_search_box";
+
+/// The heading over the flagged messages in the list, as Outlook's To-Do list has it.
+pub(crate) const FLAGGED_HEADING: &str = "Gemarkeerde e-mail";
+
+/// The flagged messages the list shows under the tasks: those matching `query` (subject or
+/// sender), the ones with a due day first and soonest first, then the newest mail first.
+fn flagged_mail(app: &MailApp, query: &str) -> Vec<(MessageHeader, Option<NaiveDate>)> {
+    let needle = query.trim().to_lowercase();
+    let mut list: Vec<(MessageHeader, Option<NaiveDate>)> = app
+        .engine
+        .session
+        .messages
+        .iter()
+        .filter(|m| m.flags.flagged)
+        .filter(|m| needle.is_empty() || m.subject.to_lowercase().contains(&needle) || m.from.display().to_lowercase().contains(&needle))
+        .map(|m| (m.clone(), app.engine.session.follow_up(&m.id).and_then(followup::due_day)))
+        .collect();
+    list.sort_by(|(a, da), (b, db)| match (da, db) {
+        (Some(x), Some(y)) => x.cmp(y).then(b.date.cmp(&a.date)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => b.date.cmp(&a.date),
+    });
+    list
+}
+
+/// "vandaag", "morgen", "verlopen op …" or "vóór …" for a follow-up day.
+fn follow_up_label(due: NaiveDate, today: NaiveDate) -> String {
+    if due == today {
+        "vandaag".into()
+    } else if due < today {
+        format!("verlopen op {}", crate::dates::day_name(due))
+    } else if Some(due) == today.checked_add_days(Days::new(1)) {
+        "morgen".into()
+    } else {
+        format!("vóór {}", crate::dates::day_name(due))
+    }
+}
 
 impl Default for State {
     fn default() -> Self {
@@ -167,6 +206,11 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let today_ts = to_timestamp(midnight).unwrap_or(0);
             let mut pick = None;
             let mut toggle = None;
+            let mut open_mail = None;
+            let mut unflag = None;
+            // Flagged mail belongs with the open work, as in Outlook's To-Do list; it is not a
+            // task, so the done filter leaves it out.
+            let flagged = if app.tasks.filter == TaskFilter::Done { Vec::new() } else { flagged_mail(app, &app.tasks.query) };
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 for task in &list {
                     let on = selected.as_deref() == Some(task.id.as_str());
@@ -208,6 +252,45 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         pick = Some(task.id.clone());
                     }
                 }
+                if !flagged.is_empty() {
+                    ui.add_space(12.0);
+                    ui.label(RichText::new(FLAGGED_HEADING).strong().color(t.text));
+                    ui.add_space(4.0);
+                    let today = today();
+                    for (m, due) in &flagged {
+                        let r =
+                            ui.add_sized([ui.available_width(), 40.0], egui::Button::new("").fill(Color32::TRANSPARENT).frame_when_inactive(false));
+                        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &m.subject));
+                        let r = r.on_hover_text("Opent het bericht in E-mail.");
+                        let rect = r.rect.shrink2(vec2(8.0, 4.0));
+                        // The flag is its own widget: a click takes it off, as the checkbox finishes a task.
+                        let check = egui::Rect::from_center_size(egui::pos2(rect.left() + 10.0, rect.center().y), vec2(18.0, 18.0));
+                        let c = ui.interact(check, ui.make_persistent_id(("mail-flag", &m.id)), Sense::click());
+                        c.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Checkbox, true, format!("Vlag weghalen van {}", m.subject)));
+                        let c = c.on_hover_text("Haalt de vlag (en de datum) weg.");
+                        let p = ui.painter();
+                        p.text(check.center(), Align2::CENTER_CENTER, "⚑", FontId::proportional(15.0), t.flag);
+                        let x = rect.left() + 28.0;
+                        p.text(egui::pos2(x, rect.center().y - 1.0), Align2::LEFT_BOTTOM, &m.subject, FontId::proportional(13.5), t.text);
+                        let mut sub = vec![format!("van {}", m.from.display())];
+                        if let Some(d) = due {
+                            sub.push(follow_up_label(*d, today));
+                        }
+                        let late = due.is_some_and(|d| d < today);
+                        p.text(
+                            egui::pos2(x, rect.center().y + 2.0),
+                            Align2::LEFT_TOP,
+                            sub.join(" · "),
+                            FontId::proportional(11.5),
+                            if late { t.flag } else { t.text_dim },
+                        );
+                        if c.clicked() {
+                            unflag = Some(m.id.clone());
+                        } else if r.clicked() {
+                            open_mail = Some(m.id.clone());
+                        }
+                    }
+                }
             });
             if let Some(id) = toggle {
                 app.run("task.complete", json!({ "id": id }));
@@ -215,6 +298,12 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             if let Some(id) = pick {
                 app.run("task.select", json!({ "id": id }));
                 app.tasks.editor = None;
+            }
+            if let Some(id) = unflag {
+                app.run("message.flag", json!({ "id": id }));
+            }
+            if let Some(id) = open_mail {
+                app.open_message(&id);
             }
         });
 }
