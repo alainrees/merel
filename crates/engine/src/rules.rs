@@ -91,7 +91,7 @@ impl Session {
 
     /// Sets a flag on a message as a rule asks, with the job for the server; false when the
     /// flag was already so.
-    fn flag_message(&mut self, message_id: &str, flag: Flag, on: bool, remote: &Option<(String, String, String)>) -> bool {
+    pub(crate) fn flag_message(&mut self, message_id: &str, flag: Flag, on: bool, remote: &Option<(String, String, String)>) -> bool {
         let Some(h) = self.messages.iter_mut().find(|h| h.id == message_id) else { return false };
         let slot = match flag {
             Flag::Seen => &mut h.flags.seen,

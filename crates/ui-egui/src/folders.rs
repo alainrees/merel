@@ -1,5 +1,6 @@
-//! Making, renaming and removing folders: the "Map" tab in the ribbon, the right-click menu on
-//! a folder row, and one small window for the name or the confirmation.
+//! Making, renaming, removing, emptying and marking folders read: the "Map" tab in the ribbon,
+//! the right-click menu on a folder row, and one small window for the name or the question
+//! before something goes for good (a folder, its contents, or a message in the Deleted folder).
 
 use egui::RichText;
 use mailcraft_engine::CommandError;
@@ -21,6 +22,14 @@ pub enum Action {
     },
     Delete {
         id: String,
+    },
+    /// Every message in the folder goes for good.
+    Empty {
+        id: String,
+    },
+    /// A message in the Deleted folder goes for good.
+    DeleteForever {
+        message_id: String,
     },
 }
 
@@ -76,6 +85,26 @@ impl MailApp {
     }
 }
 
+impl MailApp {
+    /// Opens the window that asks before every message in a folder is removed.
+    pub fn empty_folder(&mut self, id: String) {
+        let Some(f) = self.engine.session.folder(&id).cloned() else { return };
+        self.folder_edit = Some(FolderEdit::new(Action::Empty { id }, f.name));
+    }
+
+    /// Opens the window that asks before the selected message, already in the Deleted folder,
+    /// is removed for good.
+    pub fn delete_forever(&mut self) {
+        let Some(m) = self.engine.session.selected().cloned() else { return };
+        self.folder_edit = Some(FolderEdit::new(Action::DeleteForever { message_id: m.id }, m.subject));
+    }
+
+    /// Whether the selected message sits in the Deleted folder, so deleting it is for good.
+    pub fn selected_is_deleted(&self) -> bool {
+        self.engine.session.selected().and_then(|m| self.engine.session.folder(&m.folder_id)).is_some_and(|f| f.kind == FolderKind::Deleted)
+    }
+}
+
 const SPECIAL: &str = "Deze map hoort bij het account en kan niet worden hernoemd of verwijderd.";
 
 /// The error of a folder command, as a sentence.
@@ -103,15 +132,31 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
         app.rename_folder(id);
     }
     if ribbon_action_hint(ui, t, "🗑", "Map verwijderen", ordinary, Some("De geselecteerde map met alles erin verwijderen"))
-        && let Some(id) = selected
+        && let Some(id) = selected.clone()
     {
         app.delete_folder(id);
+    }
+    ui.separator();
+    let (has_mail, has_unread) = selected
+        .as_deref()
+        .map(|id| (app.engine.session.messages.iter().any(|m| m.folder_id == id), app.engine.session.folder(id).is_some_and(|f| f.unread > 0)))
+        .unwrap_or((false, false));
+    if ribbon_action_hint(ui, t, "🧹", "Map leegmaken", has_mail, Some("Alle berichten in de geselecteerde map definitief verwijderen"))
+        && let Some(id) = selected.clone()
+    {
+        app.empty_folder(id);
+    }
+    if ribbon_action_hint(ui, t, "◉", "Alles gelezen", has_unread, Some("Alle berichten in de geselecteerde map als gelezen markeren"))
+        && let Some(id) = selected
+    {
+        app.run("folder.mark_all_read", json!({ "id": id }));
     }
 }
 
 /// The right-click menu of a folder row.
 pub fn context_menu(app: &mut MailApp, r: &egui::Response, id: &str, kind: FolderKind) {
     let mut action: Option<Action> = None;
+    let mut mark_read = false;
     r.context_menu(|ui| {
         if ui.button("Nieuwe map…").clicked() {
             action = Some(Action::Create { account_id: String::new(), parent: Some(id.to_string()) });
@@ -127,12 +172,25 @@ pub fn context_menu(app: &mut MailApp, r: &egui::Response, id: &str, kind: Folde
                 ui.close();
             }
         }
+        ui.separator();
+        if ui.button("Alles als gelezen markeren").clicked() {
+            mark_read = true;
+            ui.close();
+        }
+        if ui.button("Map leegmaken…").clicked() {
+            action = Some(Action::Empty { id: id.to_string() });
+            ui.close();
+        }
     });
+    if mark_read {
+        app.run("folder.mark_all_read", json!({ "id": id }));
+    }
     match action {
         Some(Action::Create { parent, .. }) => app.new_folder(parent),
         Some(Action::Rename { id }) => app.rename_folder(id),
         Some(Action::Delete { id }) => app.delete_folder(id),
-        None => {}
+        Some(Action::Empty { id }) => app.empty_folder(id),
+        Some(Action::DeleteForever { .. }) | None => {}
     }
 }
 
@@ -143,6 +201,8 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         Action::Create { .. } => "Nieuwe map",
         Action::Rename { .. } => "Naam van map wijzigen",
         Action::Delete { .. } => "Map verwijderen",
+        Action::Empty { .. } => "Map leegmaken",
+        Action::DeleteForever { .. } => "Definitief verwijderen",
     };
     let place = match &edit.action {
         Action::Create { account_id, parent } => match parent.as_deref().and_then(|p| app.engine.session.folder(p)) {
@@ -160,6 +220,15 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         match &edit.action {
             Action::Delete { .. } => {
                 ui.label(RichText::new(format!("De map “{}” en alle berichten erin worden verwijderd.", edit.name)).color(t.text));
+            }
+            Action::Empty { .. } => {
+                ui.label(
+                    RichText::new(format!("Alle berichten in “{}” worden definitief verwijderd, ook wat nog niet in de lijst staat.", edit.name))
+                        .color(t.text),
+                );
+            }
+            Action::DeleteForever { .. } => {
+                ui.label(RichText::new(format!("“{}” wordt definitief verwijderd en is dan niet meer terug te halen.", edit.name)).color(t.text));
             }
             _ => {
                 if !place.is_empty() {
@@ -183,7 +252,8 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             let ok = match &edit.action {
                 Action::Create { .. } => "Map aanmaken",
                 Action::Rename { .. } => "Opslaan",
-                Action::Delete { .. } => "Ja, verwijderen",
+                Action::Delete { .. } | Action::DeleteForever { .. } => "Ja, verwijderen",
+                Action::Empty { .. } => "Ja, leegmaken",
             };
             if ui.button(ok).clicked() {
                 submit = true;
@@ -197,12 +267,15 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         let params = match &edit.action {
             Action::Create { account_id, parent } => json!({ "name": edit.name, "parent": parent, "account_id": account_id }),
             Action::Rename { id } => json!({ "id": id, "name": edit.name }),
-            Action::Delete { id } => json!({ "id": id }),
+            Action::Delete { id } | Action::Empty { id } => json!({ "id": id }),
+            Action::DeleteForever { message_id } => json!({ "id": message_id }),
         };
         let command = match &edit.action {
             Action::Create { .. } => "folder.create",
             Action::Rename { .. } => "folder.rename",
             Action::Delete { .. } => "folder.delete",
+            Action::Empty { .. } => "folder.empty",
+            Action::DeleteForever { .. } => "message.delete",
         };
         match app.engine.run(command, &params) {
             Ok(()) => close = true,

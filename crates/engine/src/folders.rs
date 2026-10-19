@@ -1,9 +1,10 @@
-//! Folders a person makes, renames and removes: `folder.create`, `folder.rename` and
-//! `folder.delete`. The sample account changes at once; a real account hands the server the
+//! Folders a person makes, renames, removes, empties or marks read: `folder.create`,
+//! `folder.rename`, `folder.delete`, `folder.empty` and `folder.mark_all_read`. The sample account changes at once; a real account hands the server the
 //! job and takes the folder list the server answers with (`Event::Folders`), so what the pane
 //! shows is always what the server has. Only ordinary folders can be renamed or removed: the
 //! inbox and the other special folders belong to the account.
 
+use mailcraft_mailbox::Flag;
 use mailcraft_model::{Folder, FolderKind, clean_text};
 use serde_json::Value;
 
@@ -100,6 +101,47 @@ pub fn delete(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// `{ id? }`: every message in the folder (the selected one by default) goes for good; the
+/// server empties the whole folder, also what was not listed yet.
+pub fn empty(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let folder = named(s, params)?;
+    if folder.account_id != SAMPLE_ACCOUNT {
+        s.pending.push(Job::Empty { account_id: folder.account_id, path: folder.path });
+    }
+    let gone: Vec<String> = s.messages.iter().filter(|m| m.folder_id == folder.id).map(|m| m.id.clone()).collect();
+    for id in &gone {
+        s.bodies.remove(id);
+    }
+    s.messages.retain(|m| m.folder_id != folder.id);
+    if s.selected_message.as_ref().is_some_and(|id| gone.contains(id)) {
+        s.selected_message = None;
+    }
+    s.complete_folders.insert(folder.id);
+    s.recount_unread();
+    Ok(())
+}
+
+/// `{ id? }`: every listed unread message of the folder (the selected one by default) is
+/// marked read, each as its own change so it works offline like a single one.
+pub fn mark_all_read(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let folder = named(s, params)?;
+    let unread: Vec<(String, String)> =
+        s.messages.iter().filter(|m| m.folder_id == folder.id && !m.flags.seen).map(|m| (m.id.clone(), m.remote_id.clone())).collect();
+    let real = folder.account_id != SAMPLE_ACCOUNT;
+    for (id, remote_id) in unread {
+        let remote = real.then(|| (folder.account_id.clone(), folder.path.clone(), remote_id));
+        s.flag_message(&id, Flag::Seen, true, &remote);
+    }
+    s.recount_unread();
+    Ok(())
+}
+
+/// The folder `id` names, else the selected one.
+fn named(s: &Session, params: &Value) -> Result<Folder, CommandError> {
+    let id = params.get("id").and_then(Value::as_str).map(str::to_string).or_else(|| s.selected_folder.clone()).ok_or(CommandError::NoSelection)?;
+    s.folder(&id).cloned().ok_or(CommandError::NotFound)
+}
+
 /// The folder `id` names, when it is one a person may rename or remove.
 fn ordinary(s: &Session, params: &Value) -> Result<Folder, CommandError> {
     let folder = s.folder(str_param(params, "id")?).cloned().ok_or(CommandError::NotFound)?;
@@ -145,6 +187,59 @@ mod tests {
         assert!(s.folder("sample/INBOX/Klanten").is_none());
         assert_eq!(s.selected_folder.as_deref(), Some(inbox.as_str()), "back to the inbox");
         assert!(s.take_jobs().is_empty(), "the sample account has no server");
+    }
+
+    #[test]
+    fn a_folder_is_emptied_or_marked_read_and_deleted_mail_goes_for_good() {
+        let mut s = Session::sample();
+        let inbox = s.selected_folder.clone().expect("inbox");
+        let unread_before = s.folder(&inbox).map(|f| f.unread).unwrap_or(0);
+        assert!(unread_before > 0);
+        s.run("folder.mark_all_read", &json!({})).expect("mark all read");
+        assert_eq!(s.folder(&inbox).map(|f| f.unread), Some(0));
+        assert!(s.messages.iter().all(|m| m.flags.seen));
+
+        s.run("message.select", &json!({ "id": "m0" })).expect("select");
+        s.run("message.delete", &json!({})).expect("to the deleted folder");
+        assert_eq!(s.message("m0").map(|m| m.folder_id.as_str()), Some("deleted"));
+        s.run("folder.select", &json!({ "id": "deleted" })).expect("open deleted");
+        s.run("message.select", &json!({ "id": "m0" })).expect("select again");
+        s.run("message.delete", &json!({})).expect("for good");
+        assert!(s.message("m0").is_none() && s.selected_message.is_none());
+
+        s.run("folder.empty", &json!({ "id": inbox })).expect("empty");
+        assert!(s.messages.is_empty());
+        assert!(s.take_jobs().is_empty(), "the sample account has no server");
+    }
+
+    #[test]
+    fn a_real_account_queues_a_delete_for_good_and_an_empty_folder() {
+        use mailcraft_mailbox::RemoteFolder;
+
+        let mut s = Session::with_accounts(vec![crate::tests::account("acc")]);
+        let folders = vec![
+            RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true },
+            RemoteFolder { path: "Trash".into(), name: "Trash".into(), kind: FolderKind::Deleted, selectable: true },
+        ];
+        s.apply(crate::Event::Connected { account_id: "acc".into(), folders, syncs_items: false });
+        s.apply(crate::Event::Headers {
+            folder_id: "acc/Trash".into(),
+            headers: vec![crate::tests::header(7)],
+            offset: 0,
+            limit: crate::HEADER_LIMIT,
+        });
+        s.take_jobs();
+        s.run("folder.select", &json!({ "id": "acc/Trash" })).expect("open trash");
+        s.take_jobs();
+        s.run("message.select", &json!({ "id": "acc/Trash#7" })).expect("select");
+        s.take_jobs();
+        s.run("message.delete", &json!({})).expect("for good");
+        assert!(s.message("acc/Trash#7").is_none());
+        let jobs = s.take_jobs();
+        assert_eq!(jobs, vec![Job::Delete { account_id: "acc".into(), path: "Trash".into(), id: "7".into() }]);
+        assert!(jobs[0].is_change(), "kept when offline");
+        s.run("folder.empty", &json!({})).expect("empty");
+        assert_eq!(s.take_jobs(), vec![Job::Empty { account_id: "acc".into(), path: "Trash".into() }]);
     }
 
     #[test]

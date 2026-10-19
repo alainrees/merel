@@ -59,7 +59,11 @@ Folders are yours to arrange: the "Map" tab in the ribbon (or a right click on a
 a new folder under the selected one, renames an ordinary folder or removes it with everything in
 it, after asking; the inbox and the other special folders stay as they are. The change goes to
 the server at once (IMAP `CREATE`/`RENAME`/`DELETE`, Exchange Web Services, Microsoft Graph) and
-the folder pane shows the list the server answers with, so it needs a connection.
+the folder pane shows the list the server answers with, so it needs a connection. The same tab
+and menu empty a folder ("Map leegmaken", after asking: everything in it goes for good, on the
+server too) and mark all its mail read. Deleting a message that is already in "Verwijderde
+items" removes it for good, after a question; Exchange and Microsoft 365 keep such mail
+recoverable on the server for a while, as they do for Outlook.
 
 Rules sort incoming mail: "Regels" in the ribbon opens a window where a rule says which part of a
 message (sender, recipient, subject or the whole envelope) must contain which text, and what then
