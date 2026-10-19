@@ -2635,6 +2635,7 @@ dependencies = [
  "mail-parser",
  "mailcraft-html",
  "mailcraft-model",
+ "mailcraft-smime",
 ]
 
 [[package]]

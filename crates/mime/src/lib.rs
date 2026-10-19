@@ -70,6 +70,8 @@ pub struct Body {
     /// Where the sender asks a read receipt to go (`Disposition-Notification-To`), as Outlook's
     /// "Leesbevestiging vragen" sets it. Nothing is sent back unless the person asks for it.
     pub receipt_to: Option<Address>,
+    /// The S/MIME signature on the message, when it is signed.
+    pub signature: Option<mailcraft_smime::Signature>,
 }
 
 fn addresses(a: Option<&mail_parser::Address<'_>>) -> Vec<Address> {
@@ -108,6 +110,8 @@ fn importance_of(m: &mail_parser::Message<'_>) -> Importance {
 
 /// Parses a whole message into what the reading pane shows. Oversized input is truncated.
 pub fn parse_body(bytes: &[u8]) -> Body {
+    // Checked on the whole message: a signature covers every byte.
+    let signature = mailcraft_smime::check_message(bytes);
     let truncated = bytes.len() > MAX_BODY;
     let bytes = bytes.get(..bytes.len().min(MAX_BODY)).unwrap_or(bytes);
     let Some(m) = MessageParser::default().parse(bytes) else {
@@ -162,6 +166,8 @@ pub fn parse_body(bytes: &[u8]) -> Body {
     let attachments = m
         .attachments()
         .filter(|p| !cid_of(p).is_some_and(|c| images.iter().any(|i| i.cid == c)))
+        // The signature itself is shown as the strip over the message, not as a file.
+        .filter(|p| signature.is_none() || !matches!(mime_of(p).as_str(), "application/pkcs7-signature" | "application/x-pkcs7-signature"))
         .map(|p| Attachment {
             name: clean_text(p.attachment_name().unwrap_or("bijlage")),
             mime: mime_of(p),
@@ -169,7 +175,7 @@ pub fn parse_body(bytes: &[u8]) -> Body {
             bytes: p.contents().into(),
         })
         .collect();
-    Body { text, from_html, rich, images, attachments, authentication, unsubscribe, receipt_to }
+    Body { text, from_html, rich, images, attachments, authentication, unsubscribe, receipt_to, signature }
 }
 
 fn mime_of(p: &mail_parser::MessagePart<'_>) -> String {
@@ -308,5 +314,15 @@ mod tests {
         assert_eq!(b.attachments.len(), 1);
         assert_eq!((b.attachments[0].name.as_str(), b.attachments[0].mime.as_str()), ("invite.ics", "text/calendar"));
         assert!(std::str::from_utf8(&b.attachments[0].bytes).unwrap().contains("SUMMARY:Kickoff"));
+    }
+
+    #[test]
+    fn a_signed_message_carries_its_signature_instead_of_an_attachment() {
+        let b = parse_body(include_bytes!("../../smime/testdata/signed-openssl.eml"));
+        assert!(b.text.starts_with("Hallo Sanne,"), "{}", b.text);
+        assert!(matches!(b.signature, Some(mailcraft_smime::Signature::Valid { .. })));
+        assert!(b.attachments.is_empty(), "smime.p7s is not listed");
+        assert_eq!(parse_body(include_bytes!("../../smime/testdata/signed-tampered.eml")).signature, Some(mailcraft_smime::Signature::Broken));
+        assert_eq!(parse_body(b"Subject: x\r\n\r\nHoi").signature, None);
     }
 }

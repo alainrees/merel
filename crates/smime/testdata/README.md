@@ -8,3 +8,5 @@ exist only for the tests, and the password of every `.p12` file is `geheim`.
 - `server.p12`: a TLS server certificate, which may not sign mail.
 
 All are valid from 19 October 2026 for a hundred years.
+- `signed-openssl.eml`, `signed-ec.eml`: mail signed by `openssl smime -sign`, by "Jij Tester" (RSA) and by
+  "Ec Tester" <ec@example.org> (ECDSA P-256); `signed-tampered.eml` is the first with its text changed afterwards.
