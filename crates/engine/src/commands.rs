@@ -59,6 +59,14 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "message.select_many", label: "Select these messages", run: message_select_many },
     CommandSpec { id: "message.mark_read", label: "Mark as Read", run: |s, _| set_seen(s, true) },
     CommandSpec { id: "message.mark_unread", label: "Mark as Unread", run: |s, _| set_seen(s, false) },
+    CommandSpec {
+        id: "message.mark_read_one",
+        label: "Mark this message as read",
+        run: |s, p| {
+            let id = str_param(p, "id")?.to_string();
+            set_seen_one(s, &id, true)
+        },
+    },
     CommandSpec { id: "message.flag", label: "Flag", run: toggle_flag },
     CommandSpec { id: "message.follow_up", label: "Follow up", run: crate::followup::follow_up },
     CommandSpec { id: "followup.dismiss", label: "Close follow-up reminder", run: crate::followup::dismiss },
@@ -150,15 +158,16 @@ fn folder_refresh(s: &mut Session, _: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// `message.select { id }`: the one selected message; whatever was marked with the previous
-/// one is let go.
+/// `message.select { id, mark_read? }`: the one selected message; whatever was marked with the
+/// previous one is let go. It is marked read unless `mark_read` is false (the Beeld tab's
+/// "Gelezen markeren" then does it later, or leaves it to the person).
 fn message_select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let id = str_param(params, "id")?.to_string();
     s.message(&id).ok_or(CommandError::NotFound)?;
     s.marked.clear();
     s.selected_message = Some(id.clone());
     s.request_body(&id);
-    set_seen_one(s, &id, true)
+    if params.get("mark_read").and_then(Value::as_bool).unwrap_or(true) { set_seen_one(s, &id, true) } else { Ok(()) }
 }
 
 /// `message.select_more { id }` (Ctrl-click): the message joins the selection, or leaves it
@@ -382,6 +391,18 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn selecting_without_mark_read_leaves_the_message_unread_until_asked() {
+        let mut s = Session::sample();
+        let id = s.visible_messages().iter().find(|m| !m.flags.seen).unwrap().id.clone();
+        s.run("message.select", &json!({ "id": id, "mark_read": false })).unwrap();
+        assert_eq!(s.selected_message.as_deref(), Some(id.as_str()));
+        assert!(!s.message(&id).unwrap().flags.seen, "selecting alone leaves it unread");
+        s.run("message.mark_read_one", &json!({ "id": id })).unwrap();
+        assert!(s.message(&id).unwrap().flags.seen);
+        assert!(s.run("message.mark_read_one", &json!({})).is_err(), "the id is required");
+    }
 
     #[test]
     fn opening_a_message_marks_it_read() {

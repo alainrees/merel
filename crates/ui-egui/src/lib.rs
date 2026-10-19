@@ -116,6 +116,8 @@ pub struct MailApp {
     notice: Option<String>,
     /// The message whose body is on screen; when it changes, its pictures leave the cache.
     shown_message: Option<String>,
+    /// The message waiting to be marked read, and since when, for "Gelezen markeren: Na 5 seconden".
+    read_timer: Option<(String, std::time::Instant)>,
     /// Pictures on the internet, fetched for the open message only when asked.
     pub remote: remote::RemoteImages,
     /// The account whose drafts the message list shows instead of a folder, if any.
@@ -246,6 +248,7 @@ impl MailApp {
             message_window: false,
             search_folder_form: None,
             shown_message: None,
+            read_timer: None,
             remote: remote::RemoteImages::default(),
             drafts_for: None,
             announced_reminders: std::collections::HashSet::new(),
@@ -294,6 +297,7 @@ impl MailApp {
         egui_extras::install_image_loaders(ui.ctx());
         self.engine.poll();
         self.wake_snoozed();
+        self.tick_read_timer(ui.ctx());
         let arrivals = self.engine.session.take_arrivals();
         if arrivals > 0 {
             self.notice =
@@ -543,7 +547,7 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
             (Some(i), _) => i.checked_sub(1).and_then(|j| ids.get(j)),
         };
         if let Some(id) = next.cloned() {
-            app.run("message.select", serde_json::json!({ "id": id }));
+            app.select_message(&id);
         }
     }
 }
@@ -1225,7 +1229,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 }
                 if let Some(id) = open_window {
                     if app.engine.session.selected_message.as_deref() != Some(id.as_str()) || !app.engine.session.marked.is_empty() {
-                        app.run("message.select", json!({ "id": id }));
+                        app.select_message(&id);
                     }
                     app.message_window = true;
                 }
@@ -1279,7 +1283,7 @@ impl MailApp {
         if self.engine.session.selected_folder.as_deref() != Some(folder.as_str()) {
             self.run("folder.select", json!({ "id": folder }));
         }
-        self.run("message.select", json!({ "id": id }));
+        self.select_message(id);
     }
 }
 
@@ -1317,7 +1321,7 @@ fn select_row(app: &mut MailApp, row_ids: &[String], id: String, mods: egui::Mod
     } else if mods.command {
         app.run("message.select_more", json!({ "id": id }));
     } else {
-        app.run("message.select", json!({ "id": id }));
+        app.select_message(&id);
     }
 }
 
@@ -2023,6 +2027,32 @@ mod tests {
         h.get_by_label("Sanne de Vries <sanne@example.org>").click();
         h.run();
         assert_eq!(h.state().compose.as_ref().map(|c| c.to.as_str()), Some("Sanne de Vries <sanne@example.org>; "));
+    }
+
+    #[test]
+    fn gelezen_markeren_can_wait_a_few_seconds_or_be_left_to_the_person() {
+        let mut h = harness();
+        let id = h.state().engine.session.messages.iter().find(|m| !m.flags.seen).map(|m| m.id.clone()).expect("an unread sample message");
+        h.state_mut().view.mark_read = view::MarkRead::Never;
+        h.state_mut().select_message(&id);
+        h.run();
+        assert!(!h.state().engine.session.message(&id).unwrap().flags.seen, "not by itself");
+        h.state_mut().view.mark_read = view::MarkRead::AfterSeconds;
+        h.state_mut().select_message(&id);
+        h.run();
+        assert!(!h.state().engine.session.message(&id).unwrap().flags.seen, "not yet");
+        h.state_mut().read_timer = Some((id.clone(), std::time::Instant::now() - std::time::Duration::from_secs(6)));
+        h.run();
+        assert!(h.state().engine.session.message(&id).unwrap().flags.seen, "read once it has been open long enough");
+        assert!(h.state().read_timer.is_none());
+        h.get_by_label("Beeld").click();
+        h.run();
+        h.get_by_label(view::MARK_READ_MENU).click();
+        h.run();
+        h.get_all_by_label("Meteen").next().expect("the menu item").click();
+        h.run();
+        assert_eq!(h.state().view.mark_read, view::MarkRead::Now);
+        h.get_by_label("Donker");
     }
 
     #[test]
