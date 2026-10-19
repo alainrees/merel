@@ -177,6 +177,13 @@ happens by itself: a window first says what will be done, a mail to the list's a
 came in on (preferred, since it tells the sender nothing new) or the list's web page in the browser (which does tell
 the sender the mail was read), and the person decides. Mail in the Junk folder gets no such offer.
 
+A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
+hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the
+list until then and comes back unread, with a line in the status bar; the "Gesluimerd" filter on the Beeld tab shows
+what is put off, a strip over such a message names the moment, and "Niet meer sluimeren" brings it back now. The list
+stays on this computer (`snoozed.json`, filed under the Message-ID so a move keeps it); the server only sees the
+unread flag when the message returns.
+
 Several messages can be selected at once, as in Outlook: Ctrl+click (Cmd on a Mac) adds a message to the
 selection or takes it out, Shift+click selects the run from the open message to the clicked one and Ctrl+A
 takes the whole list. The reading pane then says how many are selected, and Delete, Archive, Junk, Move,

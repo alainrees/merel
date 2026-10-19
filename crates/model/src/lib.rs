@@ -495,6 +495,17 @@ pub struct IgnoredConversation {
     pub subject: String,
 }
 
+/// A snoozed message, Outlook's "Sluimeren": out of the list until `until` (Unix seconds),
+/// then back as unread. Filed under `key` (the message's Message-ID, else its id) so a move
+/// between folders keeps it; `subject` is the subject as it was, for showing.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Snooze {
+    pub key: String,
+    pub until: i64,
+    #[serde(default)]
+    pub subject: String,
+}
+
 /// A follow-up flag with a date, Outlook's "Opvolgen": the day a flagged message is due. The
 /// flag itself is on the server; the date is this computer's, filed under `key` (the
 /// message's Message-ID, else its id) so a move between folders keeps it. `due` is an ISO
