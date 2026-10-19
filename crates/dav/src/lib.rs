@@ -73,6 +73,10 @@ impl Mailbox for DavMailbox {
         Mailbox::headers(&mut self.imap, folder, offset, limit)
     }
 
+    fn search(&mut self, folder: &str, query: &str, limit: u32) -> Result<Vec<RemoteHeader>> {
+        Mailbox::search(&mut self.imap, folder, query, limit)
+    }
+
     fn body(&mut self, folder: &str, id: &str) -> Result<Vec<u8>> {
         Mailbox::body(&mut self.imap, folder, id)
     }

@@ -105,6 +105,7 @@ fn clip(s: &str) -> String {
 fn failure(account_id: &str, job: &Job, what: String) -> Event {
     match job {
         Job::Send { draft_id, .. } => Event::Sent { account_id: account_id.to_string(), draft_id: *draft_id, result: Err(what) },
+        Job::Search { folder_id, query, .. } => Event::Found { folder_id: folder_id.clone(), query: query.clone(), result: Err(what) },
         _ => Event::Failed { account_id: account_id.to_string(), what },
     }
 }
@@ -286,6 +287,10 @@ fn run(c: &mut dyn Mailbox, account: &Account, job: &Job) -> Result<Option<Event
         }
         Job::Headers { folder_id, path, offset, limit, .. } => {
             Some(Event::Headers { folder_id: folder_id.clone(), headers: c.headers(path, *offset, *limit)?, offset: *offset, limit: *limit })
+        }
+        Job::Search { folder_id, path, query, .. } => {
+            let result = c.search(path, query, crate::SEARCH_LIMIT).map_err(|e| describe(&e));
+            Some(Event::Found { folder_id: folder_id.clone(), query: query.clone(), result })
         }
         Job::Body { message_id, path, id, .. } => {
             let raw = c.body(path, id)?;

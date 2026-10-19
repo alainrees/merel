@@ -27,7 +27,8 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
-use mailcraft_mailbox::{Flag, Item, RemoteFolder, RemoteHeader};
+use mailcraft_mailbox::{Flag, Item};
+pub use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
 use mailcraft_model::{Account, Appointment, Auth, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, Task, clean_text};
 use mailcraft_secrets::{Secret, SecretStore};
 use serde::{Deserialize, Serialize};
@@ -69,6 +70,13 @@ pub enum Job {
         message_id: String,
         path: String,
         id: String,
+    },
+    /// Ask the server which messages of a folder match `query`.
+    Search {
+        account_id: String,
+        folder_id: String,
+        path: String,
+        query: String,
     },
     Flag {
         account_id: String,
@@ -115,6 +123,7 @@ impl Job {
             Job::Connect { account_id }
             | Job::Headers { account_id, .. }
             | Job::Body { account_id, .. }
+            | Job::Search { account_id, .. }
             | Job::Flag { account_id, .. }
             | Job::Move { account_id, .. }
             | Job::Send { account_id, .. }
@@ -160,6 +169,12 @@ pub enum Event {
         /// The limit the job asked for; fewer headers than this means the folder's start.
         limit: u32,
     },
+    /// What the server found for a search in a folder, or why it could not search.
+    Found {
+        folder_id: String,
+        query: String,
+        result: Result<Vec<RemoteHeader>, String>,
+    },
     Body {
         message_id: String,
         body: Box<Body>,
@@ -198,6 +213,24 @@ pub enum SendState {
     Failed(String),
 }
 
+/// A listed header as the session shows it; `None` when it has no usable sender.
+fn message_of(folder_id: &str, h: RemoteHeader) -> Option<MessageHeader> {
+    let from = h.header.from.clone().or_else(|| mailcraft_model::Address::new(Some("Onbekende afzender"), "unknown@invalid").ok())?;
+    Some(MessageHeader {
+        id: format!("{folder_id}#{}", h.id),
+        folder_id: folder_id.to_string(),
+        remote_id: h.id,
+        from,
+        to: h.header.to.clone(),
+        subject: if h.header.subject.is_empty() { "(Geen onderwerp)".into() } else { h.header.subject.clone() },
+        date: h.date,
+        preview: String::new(),
+        flags: Flags { seen: h.seen, flagged: h.flagged, answered: h.answered },
+        has_attachments: h.has_attachments,
+        message_id: h.header.message_id.clone(),
+    })
+}
+
 /// Whether every word of `needle` (lower-case) occurs in the message's subject, sender,
 /// recipients or preview.
 fn matches(m: &MessageHeader, needle: &str) -> bool {
@@ -226,6 +259,17 @@ pub enum AccountStatus {
     Error(String),
 }
 
+/// The outcome of a search run on the server; see [`Session::server_hits`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ServerHits {
+    pub folder_id: String,
+    pub query: String,
+    pub ids: HashSet<String>,
+}
+
+/// How many messages a server search lists at most.
+pub const SEARCH_LIMIT: u32 = 200;
+
 #[derive(Debug, Default)]
 pub struct Session {
     pub accounts: Vec<Account>,
@@ -245,6 +289,12 @@ pub struct Session {
     pub search: String,
     /// Whether a search covers every folder of every account, or the selected folder only.
     pub search_all: bool,
+    /// What the server found for the last search asked of it: the folder, the words, and the
+    /// ids of the messages (now listed) it named. Shown next to the local matches while the
+    /// search box still holds those words and that folder is selected.
+    pub server_hits: Option<ServerHits>,
+    /// Why the last server search gave nothing, when it failed.
+    pub search_error: Option<String>,
     /// Drafts handed to `send`, by draft id.
     pub outbox: HashMap<u64, SendState>,
     /// A browser sign-in in progress (`Some(None)`), or how the last one ended.
@@ -337,6 +387,9 @@ impl Session {
         self.bodies.retain(|id, _| !id.starts_with(&prefix));
         self.loading.retain(|id| !id.starts_with(&prefix) && *id != format!("sync/{account_id}"));
         self.complete_folders.retain(|id| !id.starts_with(&prefix));
+        if self.server_hits.as_ref().is_some_and(|h| h.folder_id.starts_with(&prefix)) {
+            self.server_hits = None;
+        }
         self.status.remove(account_id);
         self.queued.remove(account_id);
         self.item_accounts.remove(account_id);
@@ -378,7 +431,7 @@ impl Session {
             | Event::Failed { account_id, .. }
             | Event::Deferred { account_id, .. }
             | Event::Sent { account_id, .. } => self.accounts.iter().any(|a| &a.id == account_id),
-            Event::Headers { folder_id, .. } => self.folder(folder_id).is_some(),
+            Event::Headers { folder_id, .. } | Event::Found { folder_id, .. } => self.folder(folder_id).is_some(),
             Event::Body { message_id, .. } => self.message(message_id).is_some(),
             Event::SignedIn { .. } => true,
         }
@@ -398,12 +451,17 @@ impl Session {
     /// what the offline cache holds, not the whole server.
     pub fn visible_messages(&self) -> Vec<&MessageHeader> {
         let needle = self.search.trim().to_lowercase();
+        let hits = self.current_hits().map(|h| &h.ids);
         let mut list: Vec<&MessageHeader> = self
             .messages
             .iter()
             .filter(|m| {
                 let in_folder = self.selected_folder.as_deref() == Some(m.folder_id.as_str());
-                if needle.is_empty() { in_folder } else { (in_folder || self.search_all) && matches(m, &needle) }
+                if needle.is_empty() {
+                    in_folder
+                } else {
+                    ((in_folder || self.search_all) && matches(m, &needle)) || hits.is_some_and(|ids| ids.contains(&m.id))
+                }
             })
             .collect();
         list.sort_by_key(|m| std::cmp::Reverse(m.date));
@@ -413,6 +471,34 @@ impl Session {
     /// Whether the message list shows search results rather than a folder.
     pub fn is_searching(&self) -> bool {
         !self.search.trim().is_empty()
+    }
+
+    /// The server's answer for the search as it stands now, if it has been asked.
+    pub fn current_hits(&self) -> Option<&ServerHits> {
+        self.server_hits.as_ref().filter(|h| Some(h.folder_id.as_str()) == self.selected_folder.as_deref() && h.query == self.search.trim())
+    }
+
+    /// Whether the server is being asked about the selected folder right now.
+    pub fn searching_server(&self) -> bool {
+        self.selected_folder.as_deref().is_some_and(|f| self.loading.contains(&format!("search/{f}")))
+    }
+
+    /// Whether a server search makes sense now: words in the box and a real, connected folder.
+    pub fn can_search_server(&self) -> bool {
+        let Some(f) = self.selected_folder.as_deref().and_then(|id| self.folder(id)) else { return false };
+        self.is_searching() && f.account_id != SAMPLE_ACCOUNT && self.status.get(&f.account_id) == Some(&AccountStatus::Online)
+    }
+
+    /// Asks the server of the selected folder which of its messages match the search box.
+    pub fn request_server_search(&mut self) {
+        if !self.can_search_server() || self.searching_server() {
+            return;
+        }
+        let Some(f) = self.selected_folder.as_deref().and_then(|id| self.folder(id)).cloned() else { return };
+        let query = self.search.trim().to_string();
+        self.search_error = None;
+        self.loading.insert(format!("search/{}", f.id));
+        self.pending.push(Job::Search { account_id: f.account_id, folder_id: f.id, path: f.path, query });
     }
 
     pub fn selected(&self) -> Option<&MessageHeader> {
@@ -533,23 +619,35 @@ impl Session {
                     if offset == 0 && is_inbox && !h.seen && !known.is_empty() && !known.contains(&id) {
                         self.arrivals += 1;
                     }
-                    let from = h.header.from.clone().or_else(|| mailcraft_model::Address::new(Some("Onbekende afzender"), "unknown@invalid").ok());
-                    let Some(from) = from else { continue };
-                    self.messages.push(MessageHeader {
-                        id,
-                        folder_id: folder_id.clone(),
-                        remote_id: h.id,
-                        from,
-                        to: h.header.to.clone(),
-                        subject: if h.header.subject.is_empty() { "(Geen onderwerp)".into() } else { h.header.subject.clone() },
-                        date: h.date,
-                        preview: String::new(),
-                        flags: Flags { seen: h.seen, flagged: h.flagged, answered: h.answered },
-                        has_attachments: h.has_attachments,
-                        message_id: h.header.message_id.clone(),
-                    });
+                    if let Some(m) = message_of(&folder_id, h) {
+                        self.messages.push(m);
+                    }
                 }
                 self.recount_unread();
+            }
+            Event::Found { folder_id, query, result } => {
+                self.loading.remove(&format!("search/{folder_id}"));
+                if self.folder(&folder_id).is_none() {
+                    return;
+                }
+                match result {
+                    Ok(headers) => {
+                        let mut ids = HashSet::new();
+                        for h in headers {
+                            let id = format!("{folder_id}#{}", h.id);
+                            // A hit the listing does not hold yet (older mail) joins it.
+                            if !self.messages.iter().any(|m| m.id == id)
+                                && let Some(m) = message_of(&folder_id, h)
+                            {
+                                self.messages.push(m);
+                            }
+                            ids.insert(id);
+                        }
+                        self.recount_unread();
+                        self.server_hits = Some(ServerHits { folder_id, query, ids });
+                    }
+                    Err(what) => self.search_error = Some(what),
+                }
             }
             Event::Body { message_id, body, header, .. } => {
                 self.loading.remove(&message_id);
@@ -1007,6 +1105,50 @@ mod tests {
             header: mailcraft_mime::parse_header(format!("From: x@y.nl\r\nSubject: Bericht {n}\r\n\r\n").as_bytes()),
             date: i64::from(n),
         }
+    }
+
+    #[test]
+    fn a_server_search_lists_what_the_server_found_next_to_local_matches() {
+        let mut s = Session::with_accounts(vec![account("a")]);
+        s.apply(Event::Connected {
+            account_id: "a".into(),
+            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true }],
+            syncs_items: false,
+        });
+        s.apply(Event::Headers { folder_id: "a/INBOX".into(), headers: vec![header(1), header(2)], offset: 0, limit: HEADER_LIMIT });
+        s.selected_folder = Some("a/INBOX".into());
+        s.take_jobs();
+        assert!(!s.can_search_server(), "nothing to search for yet");
+        s.search = " factuur ".into();
+        assert!(s.can_search_server());
+        s.request_server_search();
+        assert!(s.searching_server());
+        let jobs = s.take_jobs();
+        assert_eq!(jobs, vec![Job::Search { account_id: "a".into(), folder_id: "a/INBOX".into(), path: "INBOX".into(), query: "factuur".into() }]);
+        s.request_server_search();
+        assert!(s.take_jobs().is_empty(), "one search at a time");
+        assert!(s.visible_messages().is_empty(), "no local match for that word");
+
+        // The server names a listed message and one the listing did not hold.
+        s.apply(Event::Found { folder_id: "a/INBOX".into(), query: "factuur".into(), result: Ok(vec![header(2), header(9)]) });
+        assert!(!s.searching_server());
+        let mut ids: Vec<&str> = s.visible_messages().iter().map(|m| m.id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["a/INBOX#2", "a/INBOX#9"]);
+        assert_eq!(s.messages.len(), 3, "the older hit joined the listing once");
+        s.search = "factuur 2026".into();
+        assert!(s.current_hits().is_none() && s.visible_messages().is_empty(), "other words, other answer");
+        s.search = "factuur".into();
+        assert_eq!(s.visible_messages().len(), 2);
+        s.search.clear();
+        assert_eq!(s.visible_messages().len(), 3, "the folder shows everything listed, hits included");
+
+        s.search = "x".into();
+        s.apply(Event::Found { folder_id: "a/INBOX".into(), query: "x".into(), result: Err("De server gaf een fout: nee".into()) });
+        assert_eq!(s.search_error.as_deref(), Some("De server gaf een fout: nee"));
+        assert!(s.current_hits().is_none());
+        s.remove_account("a");
+        assert!(s.server_hits.is_none());
     }
 
     #[test]

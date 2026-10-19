@@ -79,6 +79,10 @@ pub trait Mailbox: Send {
     /// the top of the folder, `offset` 200 the page below it. Fewer than `limit` means the
     /// folder's start has been reached.
     fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> Result<Vec<RemoteHeader>>;
+    /// The newest `limit` messages of `folder` in which the server finds every word of `query`
+    /// (in the subject, the addresses or the text), newest last. The server decides what
+    /// matches, so the set can differ from what a local filter would give.
+    fn search(&mut self, folder: &str, query: &str, limit: u32) -> Result<Vec<RemoteHeader>>;
     /// The whole raw message, without marking it read.
     fn body(&mut self, folder: &str, id: &str) -> Result<Vec<u8>>;
     fn set_flag(&mut self, folder: &str, id: &str, flag: Flag, on: bool) -> Result<()>;
