@@ -662,6 +662,33 @@ fn folder_icon(kind: FolderKind) -> &'static str {
     }
 }
 
+/// One row of the folder pane: icon, name and the unread count, highlighted when it is the
+/// open folder. `hint` is shown on hover, when there is one.
+fn folder_row(ui: &mut Ui, t: &Tokens, f: &mailcraft_model::Folder, on: bool, hint: Option<String>) -> egui::Response {
+    let r = ui.add_sized(
+        [ui.available_width(), 28.0],
+        egui::Button::new("").fill(if on { t.checked } else { Color32::TRANSPARENT }).frame_when_inactive(on),
+    );
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &f.name));
+    let r = match hint {
+        Some(h) => r.on_hover_text(h),
+        None => r,
+    };
+    let rect = r.rect.shrink2(vec2(8.0, 0.0));
+    let p = ui.painter();
+    let name = format!("{}  {}", folder_icon(f.kind), f.name);
+    let font = egui::FontId::proportional(13.5);
+    p.text(rect.left_center(), egui::Align2::LEFT_CENTER, name, font.clone(), t.text);
+    if f.unread > 0 {
+        p.text(rect.right_center(), egui::Align2::RIGHT_CENTER, f.unread.to_string(), font, t.accent_text);
+    }
+    // A message dragged from the list lands here.
+    if r.dnd_hover_payload::<DraggedMessage>().is_some() {
+        p.rect_stroke(r.rect, CornerRadius::same(4), Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
+    }
+    r
+}
+
 fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::Panel::left("folders")
         .default_size(220.0)
@@ -673,6 +700,27 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let mut drop_on: Option<(String, String)> = None;
             let mut menu_on: Option<(egui::Response, String, FolderKind)> = None;
             let mut open_accounts = false;
+            // Outlook's "Favorieten": the pinned folders of every account, above the accounts.
+            let favorites: Vec<mailcraft_model::Folder> = app.view.favorites.iter().filter_map(|id| app.engine.session.folder(id).cloned()).collect();
+            if !favorites.is_empty() {
+                ui.label(RichText::new("★ Favorieten").strong().color(t.text));
+                ui.add_space(4.0);
+                for f in &favorites {
+                    let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
+                    let account = app.engine.session.accounts.iter().find(|a| a.id == f.account_id).map(|a| a.address.email().to_string());
+                    let r = folder_row(ui, t, f, on, account.map(|a| format!("{} van {a}", f.name)));
+                    if let Some(dragged) = r.dnd_release_payload::<DraggedMessage>() {
+                        drop_on = Some((dragged.0.clone(), f.id.clone()));
+                    }
+                    if r.clicked() {
+                        pick = Some(f.id.clone());
+                    }
+                    if r.secondary_clicked() || r.context_menu_opened() {
+                        menu_on = Some((r, f.id.clone(), f.kind));
+                    }
+                }
+                ui.add_space(12.0);
+            }
             for account in &app.engine.session.accounts {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(account.address.email()).strong().color(t.text));
@@ -689,23 +737,7 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 ui.add_space(4.0);
                 for f in app.engine.session.folders.iter().filter(|f| f.account_id == account.id) {
                     let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
-                    let r = ui.add_sized(
-                        [ui.available_width(), 28.0],
-                        egui::Button::new("").fill(if on { t.checked } else { Color32::TRANSPARENT }).frame_when_inactive(on),
-                    );
-                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &f.name));
-                    let rect = r.rect.shrink2(vec2(8.0, 0.0));
-                    let p = ui.painter();
-                    let name = format!("{}  {}", folder_icon(f.kind), f.name);
-                    let font = egui::FontId::proportional(13.5);
-                    p.text(rect.left_center(), egui::Align2::LEFT_CENTER, name, font.clone(), t.text);
-                    if f.unread > 0 {
-                        p.text(rect.right_center(), egui::Align2::RIGHT_CENTER, f.unread.to_string(), font, t.accent_text);
-                    }
-                    // A message dragged from the list lands here.
-                    if r.dnd_hover_payload::<DraggedMessage>().is_some() {
-                        p.rect_stroke(r.rect, CornerRadius::same(4), Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
-                    }
+                    let r = folder_row(ui, t, f, on, None);
                     if let Some(dragged) = r.dnd_release_payload::<DraggedMessage>() {
                         drop_on = Some((dragged.0.clone(), f.id.clone()));
                     }
@@ -1831,6 +1863,31 @@ mod tests {
         h.get_by_label("Start").click();
         h.run();
         assert!(h.query_by_label("Vandaag").is_none());
+    }
+
+    #[test]
+    fn a_folder_is_pinned_under_favorites_from_its_menu_and_taken_off_from_the_ribbon() {
+        let mut h = harness();
+        h.run();
+        assert!(h.query_by_label("★ Favorieten").is_none());
+        h.get_by_label("Archief").click_secondary();
+        h.run();
+        h.get_by_label("Toevoegen aan Favorieten").click();
+        h.run();
+        assert_eq!(h.state().view.favorites, ["archive"]);
+        h.get_by_label("★ Favorieten");
+        let rows: Vec<_> = h.get_all_by_label("Archief").collect();
+        assert_eq!(rows.len(), 2, "the folder shows under Favorieten and under its account");
+        rows[0].click();
+        h.run();
+        assert_eq!(h.state().engine.session.selected_folder.as_deref(), Some("archive"));
+
+        h.get_by_label("Map").click();
+        h.run();
+        h.get_by_label("Favoriet").click();
+        h.run();
+        assert!(h.state().view.favorites.is_empty());
+        assert!(h.query_by_label("★ Favorieten").is_none());
     }
 
     #[test]
