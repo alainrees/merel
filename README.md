@@ -112,7 +112,10 @@ replies, Ctrl+Shift+R replies to all, Ctrl+F forwards, Ctrl+Shift+V moves to a f
 Ctrl+E puts the cursor in the search box, Ctrl+P prints, Ctrl+Shift+1 to 9 run the account's quick steps, Esc clears a
 search and F5 refreshes the folder. From every module, Ctrl+Shift+M, Ctrl+Shift+A, Ctrl+Shift+C and Ctrl+Shift+K start a
 new message, appointment, contact or task, as in Outlook (the contact and task forms open in their own module). None
-of them fires while you are typing in a text field or writing a message. Hovering a ribbon button
+of them fires while you are typing in a text field or writing a message. A right click on a message opens a menu with
+the everyday actions (reply, forward, read or unread, flag, move, archive, junk, delete) and two Outlook favourites:
+"Taak maken van dit bericht" and "Afspraak maken van dit bericht", which open a new task or appointment named after the
+message, with the sender, the date and the text as notes. Hovering a ribbon button
 shows its shortcut, and the "Help" tab lists them all in one window; the same tab opens the folder
 that holds your settings and cache, the project page, and "Over Mailcraft" with the version.
 
