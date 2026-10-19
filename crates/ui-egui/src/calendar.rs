@@ -18,6 +18,23 @@ pub const MONTHS: [&str; 12] =
     ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"];
 pub const WEEKDAYS: [&str; 7] = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"];
 const WEEKDAYS_SHORT: [&str; 7] = ["ma", "di", "wo", "do", "vr", "za", "zo"];
+
+/// The width of the week-number column in the month view, when it is shown.
+const WEEK_GUTTER: f32 = 30.0;
+
+/// The label of the week-number cell left of a week, as Outlook's "Weeknummers weergeven".
+pub(crate) fn week_label(d: NaiveDate) -> String {
+    format!("Week {}", d.iso_week().week())
+}
+
+/// A cell with the week number of the week `d` falls in, named so a screen reader (and the
+/// tests) find it.
+fn week_cell(ui: &mut Ui, t: &Tokens, size: egui::Vec2, d: NaiveDate) {
+    let (rect, r) = ui.allocate_exact_size(size, Sense::hover());
+    let label = week_label(d);
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label.clone()));
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, d.iso_week().week().to_string(), FontId::proportional(11.0), t.text_dim);
+}
 /// Marks an occurrence of a recurring appointment in the views.
 const REPEAT_MARK: &str = "🔁";
 /// The search box's widget id, so Ctrl+E can put the cursor there.
@@ -667,16 +684,21 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let start = week_start(first);
     let today = today();
     let selected = app.engine.session.selected_appointment.clone();
+    let week_numbers = app.view.week_numbers;
+    let gutter = if week_numbers { WEEK_GUTTER } else { 0.0 };
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        let w = ui.available_width() / 7.0;
+        let w = (ui.available_width() - gutter) / 7.0;
+        if week_numbers {
+            ui.allocate_exact_size(vec2(gutter, 22.0), Sense::hover());
+        }
         for d in WEEKDAYS_SHORT {
             let (rect, _) = ui.allocate_exact_size(vec2(w, 22.0), Sense::hover());
             ui.painter().text(rect.center(), Align2::CENTER_CENTER, d, FontId::proportional(12.0), t.text_dim);
         }
     });
     let avail = ui.available_size();
-    let w = avail.x / 7.0;
+    let w = (avail.x - gutter) / 7.0;
     let h = (avail.y / 6.0).max(60.0);
     let mut open: Option<(String, i64)> = None;
     let mut pick_day: Option<NaiveDate> = None;
@@ -686,6 +708,9 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     for _ in 0..6 {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
+            if week_numbers {
+                week_cell(ui, t, vec2(gutter, h), day);
+            }
             for _ in 0..7 {
                 let (rect, r) = ui.allocate_exact_size(vec2(w, h), Sense::click());
                 r.widget_info(|| {
@@ -783,10 +808,14 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
     let mut resized: Option<String> = None;
     let resizing = app.calendar.resizing.clone();
     let col_w = ((ui.available_width() - gutter) / days as f32).max(40.0);
-    // Day headers.
+    // Day headers, with the week number in the time gutter when asked for.
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        ui.allocate_exact_size(vec2(gutter, 36.0), Sense::hover());
+        if app.view.week_numbers {
+            week_cell(ui, t, vec2(gutter, 36.0), first);
+        } else {
+            ui.allocate_exact_size(vec2(gutter, 36.0), Sense::hover());
+        }
         for i in 0..days {
             let d = add_days(first, i);
             let (rect, _) = ui.allocate_exact_size(vec2(col_w, 36.0), Sense::hover());
