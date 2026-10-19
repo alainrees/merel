@@ -72,7 +72,8 @@ Changes made without a connection (flags, moves, deletions, items saved or delet
 | Crate | Job | Security notes |
 |---|---|---|
 | `sync` | Background refresh of folders and items, conflict handling | Per-account rate limits and back-off |
-| `smime` | S/MIME: PKCS#12 import, signing, verification, encryption and decryption (`envelope`); OpenPGP later | aws-lc-rs for the cryptography, RustCrypto `cms`/`x509-cert`/`p12-keystore` for the structures |
+| `smime` | S/MIME: PKCS#12 import, signing, verification, encryption and decryption (`envelope`), the issuer chain (`trust`), and byte-level MIME helpers (`raw`) | aws-lc-rs for the cryptography, RustCrypto `cms`/`x509-cert`/`p12-keystore` for the structures |
+| `pgp` | OpenPGP: own key import, PGP/MIME signatures and decryption, Autocrypt keys | rPGP (`pgp`), pure Rust |
 
 ## OWASP top 10 mapping
 

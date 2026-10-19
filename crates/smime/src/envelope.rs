@@ -21,7 +21,8 @@ use x509_cert::ext::pkix::{KeyUsage, SubjectKeyIdentifier};
 use x509_cert::spki::AlgorithmIdentifierOwned;
 use zeroize::Zeroizing;
 
-use crate::{Identity, RSA_ENCRYPTION, SmimeError, crlf, find, header, split_entity, split_message};
+use crate::raw::{crlf, find, header, split_entity, split_message};
+use crate::{Identity, RSA_ENCRYPTION, SmimeError};
 
 const ID_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.7.1");
 const ID_ENVELOPED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.7.3");

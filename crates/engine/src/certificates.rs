@@ -18,6 +18,7 @@ use base64::Engine as _;
 use mailcraft_mime::{Body, Encryption};
 use mailcraft_model::{Account, Address, Draft};
 use mailcraft_smime::{CertInfo, Identity, Signature};
+use mailcraft_store::KeyKind;
 use serde::{Deserialize, Serialize};
 
 use crate::{Engine, SAMPLE_ACCOUNT, config};
@@ -40,6 +41,8 @@ pub struct Keys {
     /// The computer's trusted root certificates, DER, read the first time a signature needs
     /// them.
     pub roots: Arc<OnceLock<Vec<Vec<u8>>>>,
+    /// The OpenPGP keys, the accounts' own and the correspondents'.
+    pub openpgp: crate::openpgp::PgpKeys,
 }
 
 impl Keys {
@@ -142,8 +145,16 @@ pub fn missing_text(missing: &[String]) -> String {
 /// certificate first; one that does not open shows why instead of its contents. A signature
 /// is judged for trust ([`Keys::judge`]).
 pub fn parse_body(keys: &Keys, account_id: &str, raw: &[u8]) -> Body {
+    if mailcraft_pgp::is_encrypted(raw) {
+        let mut body = keys.openpgp.open_body(account_id, raw);
+        keys.judge(&mut body);
+        return body;
+    }
     let mut body = open_body(&keys.identities, account_id, raw);
     keys.judge(&mut body);
+    if body.pgp_signature.is_none() {
+        body.pgp_signature = keys.openpgp.check(raw);
+    }
     body
 }
 
@@ -184,7 +195,7 @@ impl Engine {
         self.keep_certificate(email, certificate);
     }
 
-    fn in_junk(&self, message_id: &str) -> bool {
+    pub(crate) fn in_junk(&self, message_id: &str) -> bool {
         self.session.message(message_id).and_then(|m| self.session.folder(&m.folder_id)).is_some_and(|f| f.kind == mailcraft_model::FolderKind::Junk)
     }
 
@@ -244,7 +255,7 @@ impl Engine {
     pub(crate) fn load_identities(&mut self) {
         let Ok(mut map) = self.keys.identities.write() else { return };
         for account in &self.session.accounts {
-            if let Some(plain) = self.cache.load_identity(&account.id) {
+            if let Some(plain) = self.cache.load_identity(&account.id, KeyKind::Certificate) {
                 match Identity::from_stored(&plain) {
                     Ok(identity) => {
                         map.insert(account.id.clone(), Arc::new(identity));
@@ -283,7 +294,9 @@ impl Engine {
         if !self.cache.has_store() {
             self.cache = crate::cache::Cache::open(self.config_path.as_deref(), &*self.secrets);
         }
-        self.cache.save_identity(account_id, &identity.to_stored()).map_err(|e| format!("Het certificaat kan niet worden bewaard: {e}"))?;
+        self.cache
+            .save_identity(account_id, KeyKind::Certificate, &identity.to_stored())
+            .map_err(|e| format!("Het certificaat kan niet worden bewaard: {e}"))?;
         let info = identity.info().clone();
         self.keys
             .identities
@@ -295,7 +308,7 @@ impl Engine {
 
     /// Forgets the certificate of `account_id`, on disk too.
     pub fn remove_certificate(&mut self, account_id: &str) {
-        self.cache.remove_identity(account_id);
+        self.cache.remove_identity(account_id, KeyKind::Certificate);
         if let Ok(mut map) = self.keys.identities.write() {
             map.remove(account_id);
         }

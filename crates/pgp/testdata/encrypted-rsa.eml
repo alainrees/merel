@@ -1,0 +1,36 @@
+From: Jij Tester <jij@example.org>
+To: alain@voorbeeld.nl
+Subject: ...
+MIME-Version: 1.0
+Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary="=-=-=pgp-encrypted=-=-="
+
+This is an OpenPGP/MIME encrypted message (RFC 4880 and 3156)
+--=-=-=pgp-encrypted=-=-=
+Content-Type: application/pgp-encrypted
+Content-Description: PGP/MIME version identification
+
+Version: 1
+
+--=-=-=pgp-encrypted=-=-=
+Content-Type: application/octet-stream; name="encrypted.asc"
+Content-Description: OpenPGP encrypted message
+Content-Disposition: inline; filename="encrypted.asc"
+
+-----BEGIN PGP MESSAGE-----
+
+hQGMAykhyGvL/iZrAQwAnBcZ4kqI6MjhXkfsPIDwC0X+Hdc56ylbCuhcH917+8B7
+UU6zy70/6ab4qb+yHiA9kCJgraYdK7zMc09UAYASBd/M/2aTstZQtXHlgf6hzpVS
+GTbMu5YuLF1mj7lDrP4v9yOYUTqg1bqI7BAcUzm9ncJgaxGqF6Qb+GFdblQOo8lE
+sLZ12mAxcYPZ/aggkdPhVol8tkcHZj5Y08Wk0GQP45krjwskJ1Fw+ap1+K4nDR8s
+WKb2DDWa5StXH35XPLRVJCCNxXc32vO9h3vA/XaTxlCtjkPQ6ol+HFsi364Gsv/5
+3tQTplMQ/LRrMP+z+8q9S+UtV4cNRHqcfBBwlgaFxJwgcn2ny8LetUwA/hoiqYhw
+HZyvpUQc3HcN7L8BriN35WLfNK5Ib56b9kuCX9RR8gpY3R8BtGpmV2iw/NC4Q2eh
+4iJNDxVscaAwicZRUYqlLpCBN7Hf1FHyKCxV8BS8VhvWbnn2Jd/ZM3ePzfmp7boV
+zaqrZzvn13HCdGfTxXrc1KQBCQIQ4m9FaHz39ziXBtWxhRSdpOiQ2CjeB+N+fvbh
+jwK8vEG2q9+1xop1PG9Ijnlp1/ef/sk8UeOtyWObAMRIjPMYpvlpfW6hhcx8Ufnl
+d//m67ul8CERxULhqnzP2smu5MCzj9fvBj+HsFsIuorcTV01OsH6O1Kz8EeZ9Q9Y
+aFIVXDoURoNLy2tkprNxpSk/8IvYoG14rMAbLqn60mNb1AF0hA==
+=ARuu
+-----END PGP MESSAGE-----
+
+--=-=-=pgp-encrypted=-=-=--

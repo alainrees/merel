@@ -444,6 +444,7 @@ mod tests {
             unsubscribe: Vec::new(),
             receipt_to: None,
             signature: None,
+            pgp_signature: None,
             encrypted: None,
         };
         let html = page(&header(), Some(&body));

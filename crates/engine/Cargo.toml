@@ -18,6 +18,7 @@ mailcraft-smtp = { workspace = true }
 mailcraft-oauth = { workspace = true }
 mailcraft-secrets = { workspace = true }
 mailcraft-store = { workspace = true }
+mailcraft-pgp = { workspace = true }
 mailcraft-smime = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }

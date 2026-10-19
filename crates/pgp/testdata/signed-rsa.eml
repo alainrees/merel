@@ -1,0 +1,31 @@
+From: Rsa Tester <rsa@example.org>
+To: alain@voorbeeld.nl
+Subject: Ondertekend met PGP
+MIME-Version: 1.0
+Content-Type: multipart/signed; micalg=pgp-sha256; protocol="application/pgp-signature"; boundary="=-=-=pgp-signed=-=-="
+
+--=-=-=pgp-signed=-=-=
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Hallo Alain, dit is van mij.
+
+--=-=-=pgp-signed=-=-=
+Content-Type: application/pgp-signature; name="signature.asc"
+
+-----BEGIN PGP SIGNATURE-----
+
+iQHEBAABCAAuFiEE5SWbjXfJ2lGBfLvpw/aQSHRzgq4FAmrWmmIQHHJzYUBleGFt
+cGxlLm9yZwAKCRDD9pBIdHOCrlCqDACMW4DY4XrD2QAAp2dR+lBgvG+cJjS/Dl46
+56bp6XNksnEmECeqM9MrCPwe1RfOc86/lZ9VG0UVXj7cKUxOJBFJBb7vx5H2CPcK
+ujafEPLTxEM9lcWkmpqnYAsqVpDfuUgfm40xc8HjHIv5/zjraf5o6tM+wWOOyWwV
+a9f7FMfpjaC4w//s+OxpS59gPt/SZ6vy550fhpYgk5S9d8D/BjnCnB+HWhqT5A/o
+njp4brrMwnV8wLdlyYXzpmeC+i7wSKYxsoJXkkAiGpVk1irMsP3zu06AnSQDA3tz
+ihC646CkXZSK9vOfTJQni+GcyHCRjOMhLLZEp9aHw9vpo4/dnazYb9ikpaGgMfZS
+Qaf7+6CbLbD9NdXuXKpC8sDZqA6Ckfg0x/FA/lNbxgSN7mFyiMU01XLsVASdIkyK
+v5t5hzDHax8BZN+naJ8cKBqfZNDuvWdq6OWqBWBU1Ktk/rXAk7XMPwZ33QF6BTpG
+AcB+hMRbfLPGOfAJPj86HL8edYdoy68=
+=T3wy
+-----END PGP SIGNATURE-----
+
+--=-=-=pgp-signed=-=-=--

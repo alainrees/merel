@@ -43,6 +43,11 @@ pub fn certificates_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("certificates.json")
 }
 
+/// The correspondents' OpenPGP keys, next to the accounts file.
+pub fn pgp_keys_path(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("pgp_keys.json")
+}
+
 /// The ignored conversations, next to the accounts file.
 pub fn ignored_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("ignored.json")

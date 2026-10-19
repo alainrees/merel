@@ -22,6 +22,7 @@ pub mod followup;
 pub mod groups;
 pub mod ignore;
 pub mod junk;
+pub mod openpgp;
 pub mod quicksteps;
 pub mod reminders;
 pub mod rules;
@@ -1066,6 +1067,7 @@ impl Engine {
             engine.cache.restore(&mut engine.session);
             engine.load_identities();
             engine.load_people();
+            engine.load_pgp_keys();
             engine.spawn_accounts();
         }
         if !calendar.appointments.is_empty() || !calendar.calendars.is_empty() {
@@ -1282,6 +1284,7 @@ impl Engine {
         }
         self.cache.remove(account_id);
         self.remove_certificate(account_id);
+        self.remove_pgp_key(account_id);
         self.session.remove_account(account_id);
         self.save_accounts()?;
         self.persist().map_err(|e| e.to_string())?;
@@ -1357,8 +1360,9 @@ impl Engine {
                 continue;
             }
             self.cache.note_event(&self.session, &e);
-            if let Event::Body { message_id, body, header, .. } = &e {
+            if let Event::Body { message_id, body, header, raw } = &e {
                 self.learn_certificate(message_id, header.from.as_ref(), body);
+                self.learn_autocrypt(message_id, header.from.as_ref(), raw);
             }
             // Changes made offline reach the server before anything else does.
             let replay = match &e {

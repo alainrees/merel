@@ -1,0 +1,24 @@
+From: Jij Tester <jij@example.org>
+To: alain@voorbeeld.nl
+Subject: Ondertekend met PGP
+MIME-Version: 1.0
+Content-Type: multipart/signed; micalg=pgp-sha256; protocol="application/pgp-signature"; boundary="=-=-=pgp-signed=-=-="
+
+--=-=-=pgp-signed=-=-=
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Hallo Alain, dit is van hem.
+
+--=-=-=pgp-signed=-=-=
+Content-Type: application/pgp-signature; name="signature.asc"
+
+-----BEGIN PGP SIGNATURE-----
+
+iIYEABYIAC4WIQTBEu3abicWR59R1Ac1czV5P8GV4wUCataaYhAcamlqQGV4YW1w
+bGUub3JnAAoJEDVzNXk/wZXjmP4BALl8CU9bxnqt01ri/AIylsWMNbB6XFTIyXTv
+VcgWraJgAQCBzuL1jsF82w0JBMAWWuY7JWTHWDa86ASWrEErZVV/Dg==
+=d6TO
+-----END PGP SIGNATURE-----
+
+--=-=-=pgp-signed=-=-=--
