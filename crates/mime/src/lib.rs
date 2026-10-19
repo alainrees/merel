@@ -34,6 +34,8 @@ pub struct Attachment {
     pub name: String,
     pub mime: String,
     pub size: usize,
+    /// The decoded contents, so the attachment can be saved.
+    pub bytes: Arc<[u8]>,
 }
 
 /// A picture that travels inside the message and that its HTML refers to by content id.
@@ -109,7 +111,12 @@ pub fn parse_body(bytes: &[u8]) -> Body {
     let attachments = m
         .attachments()
         .filter(|p| !cid_of(p).is_some_and(|c| images.iter().any(|i| i.cid == c)))
-        .map(|p| Attachment { name: clean_text(p.attachment_name().unwrap_or("bijlage")), mime: mime_of(p), size: p.contents().len() })
+        .map(|p| Attachment {
+            name: clean_text(p.attachment_name().unwrap_or("bijlage")),
+            mime: mime_of(p),
+            size: p.contents().len(),
+            bytes: p.contents().into(),
+        })
         .collect();
     Body { text, from_html, rich, images, attachments }
 }
