@@ -53,7 +53,9 @@ addresses from it and from the mail you have seen. The tasks module keeps a loca
 (`tasks.json`) with due days, priorities, an open/done filter and a search box. The calendar has a search box
 too: while it holds words, a list of the matching appointments of the past year and the two years ahead
 (title, location or notes; one row per occurrence of a series) replaces the view, and a click opens the
-appointment. In all three modules Ctrl+E goes to the search box and Esc clears it, as in the mail module. An Exchange, Microsoft 365 or Gmail account
+appointment. An appointment can be dragged to another day in the month view, or to another day and half
+hour in the week and day views; it keeps its length and everything else, in an account's calendar the move
+goes to the server, and a repeating series is changed through its window instead. In all three modules Ctrl+E goes to the search box and Esc clears it, as in the mail module. An Exchange, Microsoft 365 or Gmail account
 brings its own calendar, contacts and tasks along (Google Calendar, People and Tasks for Gmail), and so
 does an IMAP account with a CalDAV/CardDAV server next to it (Fastmail, iCloud, Nextcloud and the like): they
 appear next to the local ones, changes go straight to the server, and a new item asks whether

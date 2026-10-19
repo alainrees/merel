@@ -178,6 +178,28 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// `appointment.move { id, start }`: shifts the appointment so it begins at `start` (Unix
+/// seconds), keeping its length and everything else; the UI uses it when a block is dragged to
+/// another day or time. A recurring appointment is refused with `Param("id")`: a series is
+/// changed through its window. In an account's calendar the move goes to the server like a save.
+pub fn move_to(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let id = str_param(params, "id").ok_or(CommandError::Param("id"))?.to_string();
+    let start = i64_param(params, "start")?;
+    let a = s.appointment(&id).ok_or(CommandError::NotFound)?.clone();
+    if a.recurrence.is_some() {
+        return Err(CommandError::Param("id"));
+    }
+    let moved = Appointment { start, end: start + (a.end - a.start), ..a };
+    match s.appointment_account(&moved.calendar_id) {
+        Some(account) => s.save_remote(&account, false, Item::Appointment(moved.clone()))?,
+        None => s.calendar_dirty = true,
+    }
+    s.appointments.retain(|x| x.id != id);
+    s.appointments.push(moved);
+    s.selected_appointment = Some(id);
+    Ok(())
+}
+
 /// `appointment.skip { id?, start }`: takes one occurrence, the one starting at `start`, out of
 /// a recurring appointment (the given one, else the selected one). The series stays.
 pub fn skip(s: &mut Session, params: &Value) -> Result<(), CommandError> {
@@ -226,6 +248,25 @@ mod tests {
         assert_eq!(titles(s.appointments_matching("WEEK", 0, 3 * week)).len(), 3, "one hit per occurrence in the period");
         assert_eq!(titles(s.appointments_matching("week start", 0, week)), [("Weekstart".to_string(), 10_000)], "every word must occur");
         assert!(s.appointments_matching("lunch", 0, 3 * week).is_empty());
+    }
+
+    #[test]
+    fn a_dragged_appointment_keeps_its_length_but_a_series_stays_put() {
+        let mut s = Session::default();
+        s.set_calendar_data(CalendarFile::default());
+        s.run("appointment.save", &json!({ "title": "Tandarts", "start": 3_600, "end": 7_200, "location": "Centrum" })).unwrap();
+        let id = s.selected_appointment().unwrap().id.clone();
+        s.take_calendar_dirty();
+        s.run("appointment.move", &json!({ "id": id, "start": 90_000 })).unwrap();
+        let a = s.appointment(&id).unwrap();
+        assert_eq!((a.start, a.end, a.location.as_str()), (90_000, 93_600, "Centrum"));
+        assert!(s.take_calendar_dirty(), "the move is saved");
+        s.run("appointment.save", &json!({ "title": "Weekstart", "start": 10_000, "end": 11_800, "recurrence": { "frequency": "weekly" } })).unwrap();
+        let series = s.selected_appointment().unwrap().id.clone();
+        assert!(matches!(s.run("appointment.move", &json!({ "id": series, "start": 20_000 })), Err(CommandError::Param("id"))));
+        assert_eq!(s.appointment(&series).unwrap().start, 10_000);
+        assert!(matches!(s.run("appointment.move", &json!({ "id": "nope", "start": 1 })), Err(CommandError::NotFound)));
+        assert!(matches!(s.run("appointment.move", &json!({ "id": id })), Err(CommandError::Param("start"))));
     }
 
     #[test]
