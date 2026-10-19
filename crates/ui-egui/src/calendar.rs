@@ -1112,6 +1112,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut save = false;
     let mut delete = false;
     let mut skip = false;
+    let mut forward = false;
     let mut close = false;
     let title = match (&editor.id, editor.repeat) {
         (None, _) => "Nieuwe afspraak",
@@ -1223,6 +1224,10 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 }
                 let label = if editor.occurrence.is_some() { "Reeks verwijderen" } else { "Verwijderen" };
                 delete = ui.add(egui::Button::new(label).min_size(vec2(90.0, 26.0))).clicked();
+                forward = ui
+                    .add(egui::Button::new(crate::meeting::FORWARD).min_size(vec2(90.0, 26.0)))
+                    .on_hover_text("Opent een nieuw bericht met de afspraak als bijlage, zodat iemand anders hem in zijn agenda kan zetten.")
+                    .clicked();
             }
             close = ui.add(egui::Button::new("Annuleren").min_size(vec2(90.0, 26.0))).clicked();
         });
@@ -1261,6 +1266,15 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 }
             }
             Err(e) => editor.error = Some(e),
+        }
+    }
+    if forward && let Some(id) = editor.id.clone() {
+        match app.engine.session.appointment(&id).cloned() {
+            Some(a) => {
+                app.compose = Some(crate::meeting::forward_window(&app.engine.session, &a));
+                close = true;
+            }
+            None => editor.error = Some(describe(&CommandError::NotFound)),
         }
     }
     if delete && let Some(id) = editor.id.clone() {
