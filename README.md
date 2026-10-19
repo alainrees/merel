@@ -83,7 +83,10 @@ it is due a window lists it with the time left, to open the appointment, close t
 it off for a while, and the app asks for attention once. The same window names a flagged message from its follow-up
 day on (as Outlook reminds of flagged items), to open it, mark it done, close the reminder or put it off; closing is
 kept in `follow_ups.json`, a new follow-up day opens it again. Reminders travel with Exchange, Microsoft
-365, Google and CalDAV appointments as the server's own reminder or alarm. The contacts module keeps a local address
+365, Google and CalDAV appointments as the server's own reminder or alarm. An appointment can be marked
+"Privé", as in Outlook: it shows a lock in the calendar, and the mark travels to Exchange and Microsoft 365 as
+sensitivity Private, to Google as visibility private and to CalDAV as `CLASS:PRIVATE`, so anyone the calendar is
+shared with there sees only that the time is taken. The contacts module keeps a local address
 book (`contacts.json`) with search and a contact card, and the compose window completes
 addresses from it and from the mail you have seen. A sender goes into the address book in one click: "Toevoegen aan
 contacten" next to the sender in the reading pane (and "Afzender toevoegen aan contacten" in the message's right-click

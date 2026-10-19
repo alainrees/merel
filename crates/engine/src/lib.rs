@@ -1611,6 +1611,7 @@ mod tests {
                 notes: String::new(),
                 recurrence: None,
                 reminder: None,
+                private: false,
             }],
             contacts: Vec::new(),
             tasks: Vec::new(),

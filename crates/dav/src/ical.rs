@@ -318,9 +318,15 @@ pub fn appointment_of(event: &Component, id: String) -> Option<Appointment> {
         notes: event.text("DESCRIPTION"),
         recurrence: None,
         reminder: reminder_of(event),
+        private: private_class(&event.text("CLASS")),
     }
     .validated()
     .ok()
+}
+
+/// Whether a `CLASS` keeps the event from those the calendar is shared with.
+fn private_class(class: &str) -> bool {
+    class.eq_ignore_ascii_case("PRIVATE") || class.eq_ignore_ascii_case("CONFIDENTIAL")
 }
 
 /// The first alarm that fires before the start, in minutes: a `VALARM` whose `TRIGGER` is a
@@ -420,6 +426,10 @@ pub fn write_appointment(event: &mut Component, a: &Appointment) {
     }
     if let Some(r) = &a.recurrence {
         event.set("RRULE", Some(Prop { name: "RRULE".into(), params: Vec::new(), raw: r.rrule(a.all_day) }));
+    }
+    // A CONFIDENTIAL event stays as it is; the class changes only when the person flips Privé.
+    if a.private != private_class(&event.text("CLASS")) {
+        event.set_text("CLASS", if a.private { "PRIVATE" } else { "" });
     }
     write_reminder(event, &a.title, a.reminder);
     stamp(event);
@@ -577,9 +587,20 @@ mod tests {
         assert!(text.contains("DTSTART;VALUE=DATE:2026"), "{text}");
         assert!(!text.contains("TZID=Europe/Amsterdam:2026"), "{text}");
         assert!(text.contains("SUMMARY:Lunch\r\n"));
+        assert!(!text.contains("CLASS:"), "not private, no class: {text}");
         let again = parse(&text);
         let b = appointment_of(again[0].find("VEVENT").unwrap(), "e:1".into()).unwrap();
         assert!(b.all_day && b.end - b.start == 86_400 * 2);
+        assert!(!b.private);
+
+        let mut hidden = root.clone();
+        write_appointment(hidden.find_mut("VEVENT").unwrap(), &Appointment { private: true, ..changed.clone() });
+        let text = hidden.serialize();
+        assert!(text.contains("CLASS:PRIVATE\r\n"), "Privé goes as CLASS:PRIVATE: {text}");
+        let again = parse(&text);
+        assert!(appointment_of(again[0].find("VEVENT").unwrap(), "e:1".into()).unwrap().private);
+        write_appointment(hidden.find_mut("VEVENT").unwrap(), &changed);
+        assert!(!hidden.serialize().contains("CLASS:"), "unticked, the class goes away");
 
         // A series carries its rule, with a start in a named zone when the computer has one.
         let weekly = mailcraft_model::Recurrence {

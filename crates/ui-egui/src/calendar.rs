@@ -37,6 +37,9 @@ fn week_cell(ui: &mut Ui, t: &Tokens, size: egui::Vec2, d: NaiveDate) {
 }
 /// Marks an occurrence of a recurring appointment in the views.
 const REPEAT_MARK: &str = "🔁";
+/// Outlook's "Privé": the lock before a private appointment, and the checkbox in the window.
+const PRIVATE_MARK: &str = "🔒";
+pub const PRIVATE: &str = "Privé";
 /// The search box's widget id, so Ctrl+E can put the cursor there.
 pub(crate) const SEARCH_BOX: &str = "calendar_search_box";
 /// How far a search looks: this many days back and ahead of today.
@@ -237,6 +240,8 @@ pub struct Editor {
     pub occurrence: Option<i64>,
     /// Minutes before the start a reminder comes; `None` for none.
     pub reminder: Option<u32>,
+    /// Outlook's "Privé".
+    pub private: bool,
     pub error: Option<String>,
 }
 
@@ -287,6 +292,7 @@ impl Editor {
             occurrence: None,
             // Outlook's default: a quarter of an hour before.
             reminder: Some(15),
+            private: false,
             error: None,
         }
     }
@@ -304,6 +310,7 @@ impl Editor {
         e.location = a.location.clone();
         e.all_day = a.all_day;
         e.reminder = a.reminder;
+        e.private = a.private;
         e.end_date = end.format(DATE_FORMAT).to_string();
         e.end_time = end.format(TIME_FORMAT).to_string();
         e.notes = a.notes.clone();
@@ -402,6 +409,7 @@ impl Editor {
             "notes": self.notes,
             "recurrence": recurrence,
             "reminder": self.reminder,
+            "private": self.private,
         });
         if recurrence.is_some() {
             // The engine keeps the occurrences that were skipped; the window never lists them.
@@ -719,7 +727,16 @@ fn grid_time(y: f32, top: f32) -> NaiveTime {
 
 /// The chip text for an occurrence: the title, marked when it repeats.
 fn chip_title(a: &Appointment) -> String {
-    if a.recurrence.is_some() { format!("{REPEAT_MARK} {}", a.title) } else { a.title.clone() }
+    let mut s = String::new();
+    if a.private {
+        s += PRIVATE_MARK;
+        s.push(' ');
+    }
+    if a.recurrence.is_some() {
+        s += REPEAT_MARK;
+        s.push(' ');
+    }
+    s + &a.title
 }
 
 /// A clickable block for one appointment, a drag source when `drag` is given. Returns true
@@ -1260,6 +1277,9 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         ui.horizontal(|ui| {
             ui.add_space(94.0);
             ui.checkbox(&mut editor.all_day, "Hele dag");
+            ui.add_space(12.0);
+            ui.checkbox(&mut editor.private, format!("{PRIVATE_MARK} {PRIVATE}"))
+                .on_hover_text("Wie je agenda deelt, ziet alleen dat je bezet bent.");
         });
         ui.horizontal(|ui| {
             ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Begin").color(t.text)));
@@ -1430,6 +1450,7 @@ mod tests {
             notes: String::new(),
             recurrence: None,
             reminder: None,
+            private: false,
         };
         let moved = to_local(dropped_start(&a, d(2026, 10, 23), None).unwrap());
         assert_eq!((moved.date(), moved.time()), (d(2026, 10, 23), NaiveTime::from_hms_opt(14, 0, 0).unwrap()), "a month drop keeps the time");
@@ -1479,6 +1500,32 @@ mod tests {
     }
 
     #[test]
+    fn prive_goes_through_the_window_and_shows_a_lock() {
+        let mut e = Editor::new_at(d(2026, 10, 21).and_hms_opt(14, 0, 0).unwrap());
+        e.title = "Dokter".into();
+        assert_eq!(e.params().unwrap()["private"], json!(false));
+        e.private = true;
+        assert_eq!(e.params().unwrap()["private"], json!(true));
+        let a = Appointment {
+            id: "a".into(),
+            calendar_id: "local".into(),
+            title: "Dokter".into(),
+            start: 1_792_404_000,
+            end: 1_792_407_600,
+            all_day: false,
+            location: String::new(),
+            notes: String::new(),
+            recurrence: None,
+            reminder: None,
+            private: true,
+        };
+        assert!(Editor::from_appointment(&a, None).private);
+        assert_eq!(chip_title(&a), "🔒 Dokter");
+        assert_eq!(chip_title(&Appointment { recurrence: Some(Recurrence::every(Frequency::Weekly)), ..a.clone() }), "🔒 🔁 Dokter");
+        assert_eq!(chip_title(&Appointment { private: false, ..a }), "Dokter");
+    }
+
+    #[test]
     fn editor_fields_round_trip_through_params() {
         let mut e = Editor::new_at(d(2026, 10, 21).and_hms_opt(14, 0, 0).unwrap());
         assert_eq!((e.start_date.as_str(), e.start_time.as_str(), e.end_time.as_str()), ("21-10-2026", "14:00", "15:00"));
@@ -1509,6 +1556,7 @@ mod tests {
             notes: String::new(),
             recurrence: None,
             reminder: None,
+            private: false,
         };
         let back = Editor::from_appointment(&a, None);
         assert_eq!((back.start_date.as_str(), back.end_date.as_str()), ("21-10-2026", "21-10-2026"));
@@ -1566,6 +1614,7 @@ mod tests {
             notes: String::new(),
             recurrence: Some(Recurrence { interval: 2, count: Some(8), ..Recurrence::every(Frequency::Monthly) }),
             reminder: None,
+            private: false,
         };
         let back = Editor::from_appointment(&a, Some(a.start + 86_400 * 61));
         assert_eq!((back.repeat, back.interval.as_str(), back.ends, back.count.as_str()), (Some(Frequency::Monthly), "2", Ends::AfterCount, "8"));

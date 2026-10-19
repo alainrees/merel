@@ -203,6 +203,7 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         reminder: (e.get("isReminderOn").and_then(Value::as_bool) == Some(true))
             .then(|| e.get("reminderMinutesBeforeStart").and_then(Value::as_u64).and_then(|m| u32::try_from(m).ok()))
             .flatten(),
+        private: matches!(e.get("sensitivity").and_then(Value::as_str), Some("private" | "confidential")),
     }
     .validated()
     .ok()
@@ -270,6 +271,7 @@ impl GraphClient {
             "isAllDay": a.all_day,
             "location": { "displayName": a.location },
             "isReminderOn": a.reminder.is_some(),
+            "sensitivity": if a.private { "private" } else { "normal" },
         });
         if let Some(m) = a.reminder {
             event["reminderMinutesBeforeStart"] = json!(m);
@@ -613,7 +615,7 @@ impl Mailbox for GraphClient {
 impl ItemStore for GraphClient {
     fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>> {
         let path = format!(
-            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart",
+            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity",
             encode(&utc(from)),
             encode(&utc(to.max(from)))
         );
@@ -720,6 +722,13 @@ mod tests {
         );
         let body = GraphClient::event_json(&a, "UTC");
         assert_eq!((body["isReminderOn"].as_bool(), body["reminderMinutesBeforeStart"].as_u64()), (Some(true), Some(45)));
+        assert!(!a.private);
+        assert_eq!(body["sensitivity"], "normal");
+        let mut hidden = e.clone();
+        hidden["sensitivity"] = json!("private");
+        let h = appointment_of(&hidden).unwrap();
+        assert!(h.private, "Privé comes back from the sensitivity");
+        assert_eq!(GraphClient::event_json(&h, "UTC")["sensitivity"], "private");
         let silent = Appointment { reminder: None, ..a.clone() };
         let body = GraphClient::event_json(&silent, "UTC");
         assert_eq!(body["isReminderOn"], false);
