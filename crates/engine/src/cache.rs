@@ -102,6 +102,12 @@ impl Cache {
         }
     }
 
+    /// The message as the server sent it, while it is still in the cache; `None` for sample
+    /// mail, for a message never opened and for one too large to keep.
+    pub fn raw(&self, account_id: &str, message_id: &str) -> Option<&[u8]> {
+        self.accounts.get(account_id).and_then(|c| c.body(message_id))
+    }
+
     /// The changes waiting for `account_id`, oldest first; the queue is emptied. A change that
     /// fails again comes back through `Event::Deferred`.
     pub fn take_pending(&mut self, account_id: &str) -> Vec<Job> {

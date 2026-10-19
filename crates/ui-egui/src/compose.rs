@@ -134,7 +134,7 @@ fn join(list: &[Address]) -> String {
         .join("; ")
 }
 
-fn prefixed(subject: &str, prefix: &str) -> String {
+pub(crate) fn prefixed(subject: &str, prefix: &str) -> String {
     let s = subject.trim();
     if s.to_ascii_lowercase().starts_with(&prefix.to_ascii_lowercase()) { s.to_string() } else { format!("{prefix} {s}") }
 }
