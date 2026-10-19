@@ -461,6 +461,8 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
             quick = Some(n);
         } else if i.consume_key(Modifiers::COMMAND, Key::N) {
             compose = Some(ComposeKind::New);
+        } else if i.consume_key(Modifiers::COMMAND | Modifiers::ALT, Key::R) {
+            command = Some("meeting");
         } else if i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::R) {
             compose = Some(ComposeKind::ReplyAll);
         } else if i.consume_key(Modifiers::COMMAND, Key::R) {
@@ -517,6 +519,11 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
             }
         }
         Some("message.move_window") if has => app.move_to = true,
+        Some("meeting") => {
+            if let Some(m) = app.engine.session.selected().cloned() {
+                app.meeting_from_message(&m);
+            }
+        }
         Some("message.print") if app.can_print() => app.print_selected(),
         Some(id) if has => app.run(id, Value::Null),
         _ => {}
@@ -1813,6 +1820,15 @@ mod tests {
         h.run();
         let c = h.state().compose.as_ref().expect("reply all opens");
         assert!(c.subject.starts_with("Re:") && !c.to.is_empty());
+        h.state_mut().compose = None;
+        h.run();
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::R);
+        h.run();
+        let e = h.state().calendar.editor.as_ref().expect("reply with meeting opens the appointment window");
+        assert!(!e.attendees.is_empty(), "the sender is invited: {:?}", e.attendees);
+        h.state_mut().calendar.editor = None;
+        h.run();
+        h.state_mut().compose = Some(Compose::new(ComposeKind::New, None));
         h.key_press(Key::Delete);
         h.run();
         assert_eq!(h.state().engine.session.selected_message.as_deref(), Some(ids[0].as_str()), "keys do nothing while a message is being written");
