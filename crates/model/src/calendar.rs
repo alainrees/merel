@@ -17,6 +17,8 @@ pub const MAX_NOTES: usize = 10_000;
 pub const MAX_OCCURRENCES: usize = 5_000;
 /// The largest step between occurrences.
 pub const MAX_INTERVAL: u32 = 999;
+/// The earliest a reminder may come, in minutes before the start: four weeks.
+pub const MAX_REMINDER: u32 = 4 * 7 * 24 * 60;
 
 /// A calendar: local, or one of an account once calendars sync.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,6 +55,10 @@ pub struct Appointment {
     /// first occurrence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recurrence: Option<Recurrence>,
+    /// Minutes before the start a reminder comes; `None` for no reminder. For a series, before
+    /// every occurrence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reminder: Option<u32>,
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -220,6 +226,7 @@ impl Appointment {
         if self.end <= self.start {
             return Err(AppointmentError::EndsBeforeStart);
         }
+        self.reminder = self.reminder.map(|m| m.min(MAX_REMINDER));
         if let Some(r) = self.recurrence.take() {
             let r = r.normalized();
             if self.end - self.start > r.shortest_gap() {
@@ -323,6 +330,7 @@ mod tests {
             location: String::new(),
             notes: "x\u{7}y".into(),
             recurrence: None,
+            reminder: None,
         }
     }
 
@@ -333,6 +341,9 @@ mod tests {
     fn validation_cleans_and_checks() {
         let ok = a(0, 3600).validated().unwrap();
         assert_eq!((ok.title.as_str(), ok.notes.as_str()), ("Lunch", "xy"));
+        let mut early = a(0, 3600);
+        early.reminder = Some(u32::MAX);
+        assert_eq!(early.validated().unwrap().reminder, Some(MAX_REMINDER));
         assert_eq!(a(3600, 3600).validated(), Err(AppointmentError::EndsBeforeStart));
         let mut untitled = a(0, 1);
         untitled.title = "  ".into();

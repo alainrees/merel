@@ -169,13 +169,27 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         location: str_of(e, "location").to_string(),
         notes: str_of(e, "description").to_string(),
         recurrence: None,
+        reminder: reminder_of(e),
     }
     .validated()
     .ok()
 }
 
+/// The event's own pop-up reminder, in minutes before the start. An event that uses the
+/// calendar's default reminders shows none here: what those are is not in the event.
+fn reminder_of(e: &Value) -> Option<u32> {
+    let reminders = e.get("reminders")?;
+    if reminders.get("useDefault").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    let overrides = reminders.get("overrides").and_then(Value::as_array)?;
+    let minutes = |o: &Value| o.get("minutes").and_then(Value::as_u64).and_then(|m| u32::try_from(m).ok());
+    overrides.iter().find(|o| str_of(o, "method") == "popup").and_then(minutes).or_else(|| overrides.iter().find_map(minutes))
+}
+
 /// The event as the Calendar API takes it. The field not in use is cleared, so a `PATCH`
-/// that turns a timed appointment into an all-day one (or back) takes.
+/// that turns a timed appointment into an all-day one (or back) takes. A reminder becomes
+/// the event's own pop-up; none hands the event back to the calendar's default reminders.
 fn event_json(a: &Appointment) -> Value {
     let time = |ts| {
         if a.all_day {
@@ -184,7 +198,11 @@ fn event_json(a: &Appointment) -> Value {
             json!({ "dateTime": rfc3339(ts), "date": null })
         }
     };
-    json!({ "summary": a.title, "description": a.notes, "location": a.location, "start": time(a.start), "end": time(a.end) })
+    let reminders = match a.reminder {
+        Some(m) => json!({ "useDefault": false, "overrides": [{ "method": "popup", "minutes": m }] }),
+        None => json!({ "useDefault": true }),
+    };
+    json!({ "summary": a.title, "description": a.notes, "location": a.location, "start": time(a.start), "end": time(a.end), "reminders": reminders })
 }
 
 fn first_str<'a>(v: &'a Value, list: &str, key: &str) -> &'a str {
@@ -471,12 +489,16 @@ mod tests {
     #[test]
     fn events_become_appointments_and_back() {
         let timed = json!({ "id": "e1", "summary": "Overleg", "location": "Studio", "description": "d",
-            "start": { "dateTime": "2026-10-14T19:46:40+02:00" }, "end": { "dateTime": "2026-10-14T20:46:40+02:00" } });
+            "start": { "dateTime": "2026-10-14T19:46:40+02:00" }, "end": { "dateTime": "2026-10-14T20:46:40+02:00" },
+            "reminders": { "useDefault": false, "overrides": [{ "method": "email", "minutes": 1440 }, { "method": "popup", "minutes": 20 }] } });
         let a = appointment_of(&timed).unwrap();
         assert_eq!((a.id.as_str(), a.title.as_str(), a.start, a.end, a.all_day), ("event:e1", "Overleg", 1_792_000_000, 1_792_003_600, false));
-        let whole = json!({ "id": "e2", "start": { "date": "2026-10-18" }, "end": { "date": "2026-10-19" } });
+        assert_eq!(a.reminder, Some(20), "the pop-up counts, not the e-mail");
+        assert_eq!(event_json(&a)["reminders"], json!({ "useDefault": false, "overrides": [{ "method": "popup", "minutes": 20 }] }));
+        let whole = json!({ "id": "e2", "start": { "date": "2026-10-18" }, "end": { "date": "2026-10-19" }, "reminders": { "useDefault": true } });
         let a = appointment_of(&whole).unwrap();
-        assert_eq!((a.title.as_str(), a.all_day, a.end - a.start), ("(Zonder titel)", true, 86_400));
+        assert_eq!((a.title.as_str(), a.all_day, a.end - a.start, a.reminder), ("(Zonder titel)", true, 86_400, None));
+        assert_eq!(event_json(&a)["reminders"], json!({ "useDefault": true }), "no reminder here leaves the calendar's defaults");
         assert_eq!(a.start, midnight_of("2026-10-18").unwrap());
         assert!(
             appointment_of(&json!({ "id": "e3", "status": "cancelled", "start": { "date": "2026-10-18" }, "end": { "date": "2026-10-19" } }))
