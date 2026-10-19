@@ -106,13 +106,14 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// `appointment.save { id?, calendar_id?, title, start, end, all_day?, location?, notes?, recurrence?, reminder? }`:
+/// `appointment.save { id?, calendar_id?, title, start, end, all_day?, location?, notes?, recurrence?, reminder?, private? }`:
 /// creates the appointment, or replaces the one with `id`. Times are Unix seconds. `recurrence`
 /// is a [`Recurrence`] object (or null for a single appointment); in an account's calendar only
 /// a new appointment takes one (the server then owns the series and lists its occurrences one
 /// by one), on this computer the occurrences a series had skipped stay skipped unless the
 /// object names its own `skipped` list. `reminder` is minutes before the start, null for none;
-/// left out, an existing appointment keeps its reminder.
+/// left out, an existing appointment keeps its reminder. `private` marks the appointment as
+/// Outlook's "Privé"; false when left out.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
         Some(id) => Some(s.appointment(id).ok_or(CommandError::NotFound)?.clone()),
@@ -161,6 +162,7 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         notes: str_param(params, "notes").unwrap_or("").to_string(),
         recurrence,
         reminder,
+        private: params.get("private").and_then(Value::as_bool).unwrap_or(false),
     }
     .validated()
     .map_err(|e| match e {
@@ -334,6 +336,11 @@ mod tests {
         assert_eq!(s.appointment(&a.id).unwrap().reminder, Some(30), "left out keeps the reminder");
         s.run("appointment.save", &json!({ "id": a.id, "title": "Lunch met Sanne", "start": 1000, "end": 4600, "reminder": null })).unwrap();
         assert_eq!(s.appointment(&a.id).unwrap().reminder, None);
+        assert!(!s.appointment(&a.id).unwrap().private);
+        s.run("appointment.save", &json!({ "id": a.id, "title": "Dokter", "start": 1000, "end": 4600, "private": true })).unwrap();
+        assert!(s.appointment(&a.id).unwrap().private, "Privé is kept");
+        s.run("appointment.save", &json!({ "id": a.id, "title": "Dokter", "start": 1000, "end": 4600 })).unwrap();
+        assert!(!s.appointment(&a.id).unwrap().private, "left out means not private");
         assert_eq!(
             s.run("appointment.save", &json!({ "title": "x", "start": 1, "end": 2, "reminder": "soon" })),
             Err(CommandError::Param("reminder"))

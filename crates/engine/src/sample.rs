@@ -186,6 +186,7 @@ fn appointments() -> Vec<Appointment> {
                 notes: String::new(),
                 recurrence: None,
                 reminder: None,
+                private: false,
             })
         })
         .collect();
@@ -204,6 +205,7 @@ fn appointments() -> Vec<Appointment> {
             notes: String::new(),
             recurrence: Some(Recurrence::every(Frequency::Weekly)),
             reminder: None,
+            private: false,
         });
     }
     list
