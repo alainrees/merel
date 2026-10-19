@@ -100,6 +100,10 @@ fn build() -> Option<Session> {
     });
     session.set_contacts(contacts());
     session.set_tasks(tasks());
+    // The sample tasks show what a due day looks like; their reminders are closed so the demo
+    // does not nag about them.
+    session.dismissed_task_reminders =
+        session.tasks.iter().filter_map(|t| t.due.map(|due| crate::tasks::TaskReminderKey { id: t.id.clone(), due })).collect();
     Some(session)
 }
 

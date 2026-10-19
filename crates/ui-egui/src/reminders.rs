@@ -1,5 +1,5 @@
-//! The reminders window: the appointments whose reminder is due and the flagged messages whose
-//! follow-up day has come, each to open, close or put off. It appears on its own, asks for the
+//! The reminders window: the appointments whose reminder is due, the flagged messages whose
+//! follow-up day has come and the tasks whose due day has come, each to open, close or put off. It appears on its own, asks for the
 //! window's attention once per reminder, and goes away when nothing is due.
 
 use std::collections::HashSet;
@@ -60,6 +60,11 @@ enum Action {
     Done(String),
     DismissMail(String),
     SnoozeMail(String, u32),
+    /// On a task: the task id.
+    OpenTask(String),
+    DoneTask(String),
+    DismissTask(String),
+    SnoozeTask(String, u32),
     DismissAll,
 }
 
@@ -80,12 +85,14 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let today = chrono::Local::now().date_naive();
     let due = app.engine.session.due_reminders(now);
     let follow = app.engine.session.due_follow_ups(today, now);
-    if due.is_empty() && follow.is_empty() {
+    let tasks = app.engine.session.due_task_reminders(today, now);
+    if due.is_empty() && follow.is_empty() && tasks.is_empty() {
         app.announced_reminders.clear();
         return;
     }
     let mut keys: HashSet<(String, i64)> = due.iter().map(|a| (a.id.clone(), a.start)).collect();
     keys.extend(follow.iter().map(|(m, d)| (format!("followup:{}", m.id), i64::from(d.num_days_from_ce()))));
+    keys.extend(tasks.iter().map(|t| (format!("task:{}", t.id), t.due.unwrap_or(0))));
     if keys.iter().any(|k| !app.announced_reminders.contains(k)) {
         ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
     }
@@ -93,7 +100,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     // The soonest reminder decides when to look again, so the window shows up on time.
     ctx.request_repaint_after(std::time::Duration::from_secs(5));
     let mut action: Option<Action> = None;
-    let count = due.len() + follow.len();
+    let count = due.len() + follow.len() + tasks.len();
     let title = if count == 1 { "Herinnering".to_string() } else { format!("Herinneringen ({count})") };
     egui::Window::new(title)
         .id(egui::Id::new("reminders"))
@@ -160,6 +167,36 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 });
                 ui.add_space(4.0);
             }
+            // Tasks whose due day has come, as Outlook reminds of tasks with a due date.
+            for task in &tasks {
+                egui::Frame::new().fill(t.list).corner_radius(6).inner_margin(8).show(ui, |ui| {
+                    ui.set_width(340.0);
+                    ui.label(RichText::new(format!("☑ Taak: {}", task.title)).strong().color(t.text));
+                    let day = to_local(task.due.unwrap_or(now)).date();
+                    let late = day < today;
+                    ui.label(RichText::new(follow_up_due(day, today)).color(if late { t.flag } else { t.accent_text }));
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Openen").clicked() {
+                            action = Some(Action::OpenTask(task.id.clone()));
+                        }
+                        if ui.button("Voltooid").on_hover_text("Vinkt de taak af.").clicked() {
+                            action = Some(Action::DoneTask(task.id.clone()));
+                        }
+                        if ui.button("Sluiten").on_hover_text("Sluit de herinnering; de taak blijft open.").clicked() {
+                            action = Some(Action::DismissTask(task.id.clone()));
+                        }
+                        egui::ComboBox::from_id_salt(("snooze-task", &task.id)).selected_text("Uitstellen…").width(130.0).show_ui(ui, |ui| {
+                            for (minutes, label) in SNOOZES {
+                                if ui.selectable_label(false, label).clicked() {
+                                    action = Some(Action::SnoozeTask(task.id.clone(), minutes));
+                                }
+                            }
+                        });
+                    });
+                });
+                ui.add_space(4.0);
+            }
             if count > 1 && ui.button("Alles sluiten").clicked() {
                 action = Some(Action::DismissAll);
             }
@@ -176,12 +213,22 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         Some(Action::Done(id)) => app.run("message.flag", json!({ "id": id })),
         Some(Action::DismissMail(id)) => app.run("followup.dismiss", json!({ "id": id })),
         Some(Action::SnoozeMail(id, minutes)) => app.run("followup.snooze", json!({ "id": id, "minutes": minutes })),
+        Some(Action::OpenTask(id)) => {
+            app.module = Module::Tasks;
+            app.run("task.select", json!({ "id": id }));
+        }
+        Some(Action::DoneTask(id)) => app.run("task.complete", json!({ "id": id, "done": true })),
+        Some(Action::DismissTask(id)) => app.run("task.reminder_dismiss", json!({ "id": id })),
+        Some(Action::SnoozeTask(id, minutes)) => app.run("task.reminder_snooze", json!({ "id": id, "minutes": minutes })),
         Some(Action::DismissAll) => {
             for a in &due {
                 app.run("reminder.dismiss", json!({ "id": a.id, "start": a.start }));
             }
             for (m, _) in &follow {
                 app.run("followup.dismiss", json!({ "id": m.id }));
+            }
+            for task in &tasks {
+                app.run("task.reminder_dismiss", json!({ "id": task.id }));
             }
         }
         None => {}
