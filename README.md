@@ -28,7 +28,8 @@ two minutes (calendar, contacts and tasks every five), the status bar counts new
 and the window asks for attention. A search box above the
 message list narrows it by subject, sender, recipient or preview text, in the current folder or
 across every folder of every account (it searches what Mailcraft has fetched so far). Sending over SMTP: new mail,
-reply, reply all and forward, with a copy filed in Sent and the account's signature under the text. Gmail and Microsoft 365 sign in through
+reply, reply all and forward, with a copy filed in Sent and the account's signature under the text. A password account's name,
+servers, user name and password can be changed afterwards from the account list. Gmail and Microsoft 365 sign in through
 the system browser (OAuth 2.0 with PKCE; XOAUTH2 on IMAP and SMTP for Gmail, Microsoft Graph
 for Microsoft 365); see [docs/accounts.md](docs/accounts.md) for the one-time app
 registration. Exchange Server (2013+)

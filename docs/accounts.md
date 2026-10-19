@@ -107,6 +107,16 @@ De tekst komt onder elk nieuw bericht, antwoord en doorgestuurd bericht van dat 
 het aangehaalde bericht, met de gebruikelijke `-- ` ervoor zodat andere mailprogramma's hem
 herkennen. Elk account heeft zijn eigen handtekening; leeg betekent geen.
 
+## Account bewerken
+
+Bestand › Accounts, bij een IMAP- of Exchange-account de knop **Account bewerken**. Het formulier
+onderaan staat dan vol met de gegevens van dat account: naam, adres, gebruikersnaam, servers en
+de CalDAV/CardDAV-adressen. Verander wat nodig is en klik **Opslaan en opnieuw verbinden**. Het
+wachtwoordveld mag leeg blijven; dan blijft het wachtwoord in de sleutelhanger staan. Het account
+houdt zijn mappen, berichten, offline kopie en handtekening en verbindt opnieuw met de nieuwe
+gegevens. De soort account (IMAP/SMTP of Exchange) staat vast; een Gmail- of Microsoft
+365-account verandert via **Opnieuw aanmelden**.
+
 ## Account verwijderen
 
 Bestand › Accounts, bij het account de knop **Account verwijderen**, en dan **Ja, verwijderen**.
