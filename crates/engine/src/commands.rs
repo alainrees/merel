@@ -220,7 +220,16 @@ mod tests {
         });
         assert_eq!(s.folders.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Postvak IN", "Verwijderde items"]);
         assert_eq!(s.selected_folder.as_deref(), Some("acc/INBOX"));
-        assert_eq!(s.take_jobs(), vec![Job::Headers { account_id: "acc".into(), folder_id: "acc/INBOX".into(), path: "INBOX".into(), offset: 0 }]);
+        assert_eq!(
+            s.take_jobs(),
+            vec![Job::Headers {
+                account_id: "acc".into(),
+                folder_id: "acc/INBOX".into(),
+                path: "INBOX".into(),
+                offset: 0,
+                limit: crate::HEADER_LIMIT
+            }]
+        );
         let header = mailcraft_mime::parse_header(b"From: x@y.nl\r\nSubject: Hoi\r\n\r\n");
         s.apply(crate::Event::Headers {
             folder_id: "acc/INBOX".into(),
@@ -235,6 +244,7 @@ mod tests {
                 date: 5,
             }],
             offset: 0,
+            limit: crate::HEADER_LIMIT,
         });
         assert_eq!(s.folder("acc/INBOX").unwrap().unread, 1);
         s.run("message.select", &json!({ "id": "acc/INBOX#7" })).unwrap();
