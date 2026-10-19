@@ -380,6 +380,10 @@ fn module_shortcuts(app: &mut MailApp, ctx: &egui::Context) {
     if !ctx.egui_wants_keyboard_input() && new_item_shortcuts(app, ctx) {
         return;
     }
+    if app.module == Module::Calendar && !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::P)) {
+        app.print_calendar();
+        return;
+    }
     let (box_id, query) = match app.module {
         Module::Mail => return,
         Module::Calendar => (calendar::SEARCH_BOX, &mut app.calendar.query),
