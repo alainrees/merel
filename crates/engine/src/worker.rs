@@ -57,6 +57,12 @@ impl Worker {
         }
     }
 
+    /// Ends the thread for `account_id`: dropping its queue makes the loop in `serve` return
+    /// after the job in hand, and the connection is dropped with it.
+    pub fn stop_account(&mut self, account_id: &str) {
+        self.accounts.remove(account_id);
+    }
+
     pub fn submit(&self, job: Job) {
         let id = job.account_id().to_string();
         if let Some(tx) = self.accounts.get(&id) {
