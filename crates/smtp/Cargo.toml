@@ -11,5 +11,8 @@ mailcraft-secrets = { workspace = true }
 lettre = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+mailcraft-mime = { workspace = true }
+
 [lints]
 workspace = true
