@@ -59,6 +59,9 @@ pub struct Body {
     /// The embedded pictures `rich` refers to.
     pub images: Vec<InlineImage>,
     pub attachments: Vec<Attachment>,
+    /// The `Authentication-Results` headers the receiving servers added (SPF, DKIM, DMARC), as
+    /// text, for the phishing check.
+    pub authentication: Vec<String>,
 }
 
 fn addresses(a: Option<&mail_parser::Address<'_>>) -> Vec<Address> {
@@ -107,6 +110,12 @@ pub fn parse_body(bytes: &[u8]) -> Body {
             images.push(InlineImage { cid, mime, bytes: p.contents().into() });
         }
     }
+    let authentication = m
+        .headers()
+        .iter()
+        .filter(|h| h.name.as_str().eq_ignore_ascii_case("Authentication-Results"))
+        .filter_map(|h| h.value.as_text().map(clean_text).or_else(|| h.value.as_text_list().map(|l| clean_text(&l.join(" ")))))
+        .collect();
     // A picture shown in the body is not listed as an attachment as well.
     let attachments = m
         .attachments()
@@ -118,7 +127,7 @@ pub fn parse_body(bytes: &[u8]) -> Body {
             bytes: p.contents().into(),
         })
         .collect();
-    Body { text, from_html, rich, images, attachments }
+    Body { text, from_html, rich, images, attachments, authentication }
 }
 
 fn mime_of(p: &mail_parser::MessagePart<'_>) -> String {
@@ -154,6 +163,15 @@ pub fn preview(text: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn authentication_results_headers_come_along_with_the_body() {
+        let raw = b"From: a@example.org\r\nAuthentication-Results: mx.example;\r\n spf=fail smtp.mailfrom=example.org;\r\n dmarc=fail header.from=example.org\r\nAuthentication-Results: other.example; dkim=pass\r\nSubject: x\r\nContent-Type: text/plain\r\n\r\nHallo\r\n";
+        let b = parse_body(raw);
+        assert_eq!(b.authentication.len(), 2, "{:?}", b.authentication);
+        assert!(b.authentication[0].contains("dmarc=fail") && b.authentication[1].contains("dkim=pass"));
+        assert!(parse_body(b"From: a@example.org\r\n\r\nHallo").authentication.is_empty());
+    }
 
     const MSG: &[u8] = b"From: Sanne de Vries <sanne@example.org>\r\nTo: jij@example.org\r\nSubject: =?UTF-8?Q?Planning_voor_donderdag?=\r\nDate: Wed, 14 Oct 2026 16:16:00 +0200\r\nMessage-ID: <m1@example.org>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nZullen we om tien uur beginnen?\r\n";
 

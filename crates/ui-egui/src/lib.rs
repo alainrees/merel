@@ -30,7 +30,7 @@ use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke
 use serde_json::{Value, json};
 
 use mailcraft_engine::{AccountStatus, Engine};
-use mailcraft_model::FolderKind;
+use mailcraft_model::{FolderKind, Warning};
 
 pub use backstage::AccountForm;
 pub use compose::{Compose, Kind as ComposeKind};
@@ -1153,6 +1153,34 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         app.remote.reset();
         app.shown_message = Some(message_id.clone());
     }
+    // Signs of phishing go above everything else, with the way to be rid of the sender.
+    let warnings = message_warnings(app, &m, body.as_ref());
+    if !warnings.is_empty() {
+        let mut block = false;
+        egui::Frame::NONE.fill(t.flag.gamma_multiply(0.18)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::symmetric(10, 6)).show(
+            ui,
+            |ui| {
+                ui.label(RichText::new(PHISHING_TITLE).strong().color(t.text));
+                for w in &warnings {
+                    ui.label(RichText::new(format!("• {}", w.text())).size(12.0).color(t.text));
+                }
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("Klik niet op links, open geen bijlagen en antwoord niet als je twijfelt.").size(12.0).color(t.text_dim));
+                    block = ui
+                        .small_button("Afzender blokkeren")
+                        .on_hover_text(
+                            "Zet het bericht in Ongewenste e-mail en blokkeert de afzender; volgende mail van dit adres gaat daar meteen heen.",
+                        )
+                        .clicked();
+                });
+            },
+        );
+        ui.add_space(8.0);
+        if block {
+            app.run("junk.block", json!({ "id": message_id }));
+            return;
+        }
+    }
     let rich = body.as_ref().and_then(|b| b.rich.as_ref());
     let blocked = rich.map(|d| d.remote_images).unwrap_or(0);
     let allowed = app.remote.allowed(&message_id);
@@ -1231,6 +1259,24 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
         ui.add(egui::Label::new(RichText::new(text).color(if body.is_some() || sample { t.text } else { t.text_dim }).size(14.0)).wrap());
     });
+}
+
+/// The first line of the strip above a message that shows signs of phishing.
+pub(crate) const PHISHING_TITLE: &str = "⚠ Pas op: dit bericht heeft kenmerken van phishing.";
+
+/// What points to phishing in `m`, from its sender (against the contacts and the person's own
+/// addresses) and, once fetched, its body: the server's authentication results, the links and
+/// the attachments.
+fn message_warnings(app: &MailApp, m: &mailcraft_model::MessageHeader, body: Option<&mailcraft_engine::Body>) -> Vec<Warning> {
+    let s = &app.engine.session;
+    let own: Vec<&str> = s.accounts.iter().map(|a| a.address.email()).collect();
+    let mut out = mailcraft_model::sender_warnings(&m.from, &s.contacts, &own);
+    if let Some(b) = body {
+        out.extend(mailcraft_model::authentication_warning(&b.authentication));
+        out.extend(mailcraft_model::link_warnings(&b.rich.as_ref().map(|d| d.links()).unwrap_or_default()));
+        out.extend(mailcraft_model::attachment_warnings(b.attachments.iter().map(|a| a.name.as_str())));
+    }
+    out
 }
 
 /// "12 kB", "3,4 MB".
@@ -1603,6 +1649,63 @@ mod tests {
         h.get_by_label("Opslaan").click();
         h.run();
         assert_eq!(h.state().engine.session.contact_with_email("news@example.org").map(|c| c.name.as_str()), Some("Nieuwsbrief"));
+    }
+
+    #[test]
+    fn a_message_with_signs_of_phishing_gets_a_warning_strip_that_can_block_the_sender() {
+        use mailcraft_model::{Address, Flags, MessageHeader};
+        let mut h = harness();
+        let from = Address::new(Some("Sanne de Vries"), "sanne@examp1e.org").unwrap();
+        let m = MessageHeader {
+            id: "inbox#phish".into(),
+            folder_id: "inbox".into(),
+            remote_id: String::new(),
+            from,
+            to: Vec::new(),
+            subject: "Uw account".into(),
+            date: 0,
+            preview: String::new(),
+            flags: Flags::default(),
+            has_attachments: true,
+            message_id: None,
+            categories: Vec::new(),
+        };
+        let body = mailcraft_engine::Body {
+            rich: Some(mailcraft_html::parse(r#"<p><a href="https://evil.example/login">https://www.bank.nl/inloggen</a></p>"#)),
+            attachments: vec![mailcraft_mime::Attachment {
+                name: "factuur.pdf.exe".into(),
+                mime: "application/octet-stream".into(),
+                size: 3,
+                bytes: std::sync::Arc::from(&b"abc"[..]),
+            }],
+            authentication: vec!["mx.example; spf=pass; dmarc=fail header.from=examp1e.org".into()],
+            ..Default::default()
+        };
+        h.state_mut().engine.session.messages.push(m);
+        h.state_mut().engine.session.bodies.insert("inbox#phish".into(), body);
+        h.state_mut().engine.session.selected_message = Some("inbox#phish".into());
+        h.run();
+        h.get_by_label(PHISHING_TITLE);
+        let expected = [
+            Warning::Impersonation { name: "Sanne de Vries".into() },
+            Warning::LookalikeDomain { domain: "examp1e.org".into(), like: "example.org".into() },
+            Warning::Unauthenticated { checks: "DMARC".into() },
+            Warning::MisleadingLink { shown: "www.bank.nl".into(), host: "evil.example".into() },
+            Warning::RiskyAttachment { name: "factuur.pdf.exe".into() },
+        ];
+        for w in &expected {
+            h.get_by_label(format!("• {}", w.text()).as_str());
+        }
+        h.get_by_label("Afzender blokkeren").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert_eq!(s.message("inbox#phish").map(|m| m.folder_id.as_str()), Some("junk"));
+        assert_eq!(s.junk.blocked, ["sanne@examp1e.org"]);
+
+        // An ordinary message has no strip.
+        h.state_mut().engine.session.selected_message = Some("m1".into());
+        h.run();
+        assert!(h.query_by_label(PHISHING_TITLE).is_none());
     }
 
     #[test]
