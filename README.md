@@ -85,7 +85,10 @@ reminder (a quarter of an hour before by default, from "op het moment zelf" to a
 it is due a window lists it with the time left, to open the appointment, close the reminder or put
 it off for a while, and the app asks for attention once. The same window names a flagged message from its follow-up
 day on (as Outlook reminds of flagged items), to open it, mark it done, close the reminder or put it off; closing is
-kept in `follow_ups.json`, a new follow-up day opens it again. Reminders travel with Exchange, Microsoft
+kept in `follow_ups.json`, a new follow-up day opens it again. A task with a due day reminds in the same window from eight
+in the morning of that day until it is done, as Outlook does for tasks with a due date, with "Openen" (the task in its
+module), "Voltooid", "Sluiten" and "Uitstellen"; closing is kept in `tasks.json` for that due day, so a new due day
+reminds again. Reminders travel with Exchange, Microsoft
 365, Google and CalDAV appointments as the server's own reminder or alarm. An appointment can be marked
 "Privé", as in Outlook: it shows a lock in the calendar, and the mark travels to Exchange and Microsoft 365 as
 sensitivity Private, to Google as visibility private and to CalDAV as `CLASS:PRIVATE`, so anyone the calendar is

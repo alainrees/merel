@@ -2574,6 +2574,41 @@ mod tests {
     }
 
     #[test]
+    fn a_task_whose_due_day_has_come_shows_in_the_reminders_window() {
+        use chrono::{Days, Local, NaiveTime, TimeZone};
+        let mut h = harness();
+        h.run();
+        assert!(h.query_by_label_contains("Herinnering").is_none(), "the sample tasks do not nag");
+        let yesterday = Local::now().date_naive().checked_sub_days(Days::new(1)).unwrap();
+        let due = Local.from_local_datetime(&yesterday.and_time(NaiveTime::MIN)).earliest().unwrap().timestamp();
+        h.state_mut().run("task.save", json!({ "title": "Belastingaangifte", "due": due }));
+        h.run();
+        h.get_by_label("☑ Taak: Belastingaangifte");
+        h.get_by_label("Gisteren");
+        assert!(h.state().announced_reminders.iter().any(|(k, _)| k.starts_with("task:")), "the window asked for attention once");
+        h.get_by_label("Openen").click();
+        h.run();
+        assert_eq!(h.state().module, Module::Tasks);
+        assert_eq!(h.state().engine.session.selected_task().map(|t| t.title.as_str()), Some("Belastingaangifte"));
+        h.get_by_label("Sluiten").click();
+        h.run();
+        assert!(h.query_by_label("☑ Taak: Belastingaangifte").is_none(), "closed; the task stays open");
+        assert!(h.state().engine.session.tasks.iter().any(|t| t.title == "Belastingaangifte" && !t.done));
+        let id = h.state().engine.session.tasks.iter().find(|t| t.title == "Belastingaangifte").map(|t| t.id.clone()).unwrap();
+        assert!(h.state().engine.session.tasks_data().dismissed.iter().any(|k| k.id == id && k.due == due), "closing is kept for this due day");
+
+        // Back in the mail module, so the task module's own "Voltooid" filter is not on screen.
+        h.state_mut().module = Module::Mail;
+        h.state_mut().run("task.save", json!({ "title": "Verslag", "due": due }));
+        h.run();
+        h.get_by_label("☑ Taak: Verslag");
+        h.get_by_label("Voltooid").click();
+        h.run();
+        assert!(h.query_by_label("☑ Taak: Verslag").is_none());
+        assert!(h.state().engine.session.tasks.iter().any(|t| t.title == "Verslag" && t.done), "Voltooid ticks the task off");
+    }
+
+    #[test]
     fn an_invitation_in_the_mail_opens_the_appointment_window_filled_in() {
         let mut h = harness();
         let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:k1@x\r\nDTSTART:20261021T080000Z\r\nDTEND:20261021T093000Z\r\nSUMMARY:Kickoff\r\nLOCATION:Kantoor\r\nORGANIZER;CN=Sanne:mailto:sanne@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";

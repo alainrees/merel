@@ -410,6 +410,10 @@ pub struct Session {
     follow_ups_dirty: bool,
     /// Follow-up reminders put off until a moment, by the follow-up's key; in memory only.
     pub snoozed_follow_ups: HashMap<String, i64>,
+    /// Task reminders closed for a due day, kept in `tasks.json`; see [`tasks`].
+    pub dismissed_task_reminders: Vec<tasks::TaskReminderKey>,
+    /// Task reminders put off until a moment, by task id; in memory only.
+    pub snoozed_task_reminders: HashMap<String, i64>,
     /// Messages put off with "Sluimeren", kept in `snoozed.json`; see [`snooze`].
     pub snoozes: Vec<mailcraft_model::Snooze>,
     snoozes_dirty: bool,
@@ -554,7 +558,7 @@ impl Session {
             let mut fresh = Session::sample();
             fresh.set_calendar_data(calendar);
             fresh.set_contacts(contacts.contacts);
-            fresh.set_tasks(tasks.tasks);
+            fresh.set_tasks_data(tasks);
             // The lists that are not an account's stay, and what the removal changed still
             // reaches its file.
             fresh.junk = std::mem::take(&mut self.junk);
@@ -1065,7 +1069,7 @@ impl Engine {
         }
         let tasks = engine.config_path.as_deref().map(|p| config::load_json::<tasks::TasksFile>(&config::tasks_path(p))).unwrap_or_default();
         if !tasks.tasks.is_empty() {
-            engine.session.set_tasks(tasks.tasks);
+            engine.session.set_tasks_data(tasks);
         }
         let rules = engine.config_path.as_deref().map(|p| config::load_json::<rules::RulesFile>(&config::rules_path(p))).unwrap_or_default();
         engine.session.set_rules(rules.rules);
