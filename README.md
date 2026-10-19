@@ -25,7 +25,7 @@ delete, archive and move to junk; changes go back to the server. A folder shows 
 messages and a button at the bottom of the list fetches the next 200, as often as needed. A search box above the
 message list narrows it by subject, sender, recipient or preview text, in the current folder or
 across every folder of every account (it searches what Mailcraft has fetched so far). Sending over SMTP: new mail,
-reply, reply all and forward, with a copy filed in Sent. Gmail and Microsoft 365 sign in through
+reply, reply all and forward, with a copy filed in Sent and the account's signature under the text. Gmail and Microsoft 365 sign in through
 the system browser (OAuth 2.0 with PKCE; XOAUTH2 on IMAP and SMTP for Gmail, Microsoft Graph
 for Microsoft 365); see [docs/accounts.md](docs/accounts.md) for the one-time app
 registration. Exchange Server (2013+)

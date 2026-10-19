@@ -334,6 +334,7 @@ mod tests {
             incoming: Some(Server { host: "127.0.0.1".into(), port: 1, tls: Tls::Implicit }),
             outgoing: None,
             dav: None,
+            signature: String::new(),
         }
     }
 

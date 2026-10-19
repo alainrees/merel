@@ -790,6 +790,13 @@ impl Engine {
         }
     }
 
+    /// Stores the signature of `account_id` and rewrites the accounts file.
+    pub fn set_signature(&mut self, account_id: &str, signature: &str) -> Result<(), String> {
+        let account = self.session.accounts.iter_mut().find(|a| a.id == account_id).ok_or_else(|| "Dit account bestaat niet meer.".to_string())?;
+        account.signature = mailcraft_model::clean_signature(signature);
+        self.save_accounts()
+    }
+
     fn save_accounts(&self) -> Result<(), String> {
         if let Some(path) = &self.config_path {
             config::save(path, &self.session.accounts).map_err(|e| e.to_string())?;
@@ -879,6 +886,7 @@ mod tests {
             incoming: Some(Server { host: "127.0.0.1".into(), port: 1, tls: Tls::Implicit }),
             outgoing: None,
             dav: None,
+            signature: String::new(),
         }
     }
 
