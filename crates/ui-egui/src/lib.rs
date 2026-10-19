@@ -10,6 +10,7 @@ pub mod calendar;
 mod compose;
 pub mod contacts;
 mod dates;
+mod html;
 pub mod tasks;
 mod theme;
 
@@ -89,6 +90,8 @@ pub struct MailApp {
     pub tasks: tasks::State,
     /// The last command error or note, shown in the status bar until the next action.
     notice: Option<String>,
+    /// The message whose body is on screen; when it changes, its pictures leave the cache.
+    shown_message: Option<String>,
 }
 
 impl MailApp {
@@ -103,6 +106,7 @@ impl MailApp {
             contacts: contacts::State::default(),
             tasks: tasks::State::default(),
             notice: None,
+            shown_message: None,
         }
     }
 
@@ -123,6 +127,8 @@ impl MailApp {
 
     pub fn ui(&mut self, ui: &mut Ui) {
         let t = Tokens::for_dark(ui.visuals().dark_mode);
+        // Decoders for pictures embedded in mail; a no-op after the first frame.
+        egui_extras::install_image_loaders(ui.ctx());
         self.engine.poll();
         if self.engine.session.has_pending() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
@@ -471,17 +477,27 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         });
     });
     ui.add_space(8.0);
+    let message_id = m.id.clone();
     let body = app.engine.session.selected_body().cloned();
     let loading = app.engine.session.loading.contains(&m.id);
     let sample = app.engine.session.is_sample();
-    if body.as_ref().is_some_and(|b| b.from_html) {
-        // Privacy: HTML is reduced to text; images, scripts and tracking pixels never load.
+    if app.shown_message.as_deref() != Some(message_id.as_str()) {
+        // The pictures of the previous message are not needed any more.
+        ui.ctx().forget_all_images();
+        app.shown_message = Some(message_id.clone());
+    }
+    let rich = body.as_ref().and_then(|b| b.rich.as_ref());
+    let blocked = rich.map(|d| d.remote_images).unwrap_or(0);
+    // Privacy: nothing in a message runs or loads; pictures on the internet stay blocked.
+    let notice = match (rich, body.as_ref().is_some_and(|b| b.from_html)) {
+        (Some(_), _) if blocked > 0 => Some("🛡 Afbeeldingen van internet zijn geblokkeerd om je privacy te beschermen."),
+        (Some(_), _) => None,
+        (None, true) => Some("🛡 Dit bericht is als tekst weergegeven. Externe afbeeldingen zijn geblokkeerd om je privacy te beschermen."),
+        (None, false) => None,
+    };
+    if let Some(notice) = notice {
         egui::Frame::NONE.fill(t.checked).corner_radius(CornerRadius::same(4)).inner_margin(Margin::symmetric(10, 6)).show(ui, |ui| {
-            ui.label(
-                RichText::new("🛡 Dit bericht is als tekst weergegeven. Externe afbeeldingen zijn geblokkeerd om je privacy te beschermen.")
-                    .size(12.0)
-                    .color(t.text),
-            );
+            ui.label(RichText::new(notice).size(12.0).color(t.text));
         });
         ui.add_space(8.0);
     }
@@ -501,6 +517,17 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         ui.add_space(8.0);
     }
     ui.add_space(6.0);
+    if let Some(b) = body.as_ref()
+        && let Some(doc) = b.rich.as_ref()
+    {
+        let clicked = egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| html::show(ui, t, doc, &b.images, &message_id)).inner;
+        if let Some(html::Clicked::Mailto(address)) = clicked {
+            let mut c = Compose::new(ComposeKind::New, None);
+            c.to = address;
+            app.compose = Some(c);
+        }
+        return;
+    }
     let text = match (&body, loading, sample) {
         (Some(b), _, _) => b.text.clone(),
         (None, true, _) => "Bericht ophalen…".to_string(),

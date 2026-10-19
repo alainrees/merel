@@ -7,7 +7,7 @@ and Linux.
 ## Principles
 
 - **Security and privacy by design.** No browser engine in the app, so mail cannot run scripts.
-  HTML mail is sanitised before it is shown; remote images are blocked until you allow them.
+  HTML mail is reduced to a layout tree before it is drawn; pictures on the internet are blocked.
   Transport is TLS only. Credentials live in the system keychain, never in files. `unsafe` is
   forbidden across the workspace and nothing user-facing may panic.
 - **One command list.** Every action (open a folder, delete, flag, archive) is a command id run
@@ -18,7 +18,8 @@ and Linux.
 
 The Outlook-style window (ribbon, module rail, folder pane, message list, reading pane) over
 built-in sample mail, and reading mail from an IMAP account: add it under File › Accounts,
-browse folders, open messages (plain text, or HTML reduced to text), mark read or unread, flag,
+browse folders, open messages (plain text, or HTML drawn with its headings, lists, tables, links
+and embedded pictures, while pictures on the internet stay blocked), mark read or unread, flag,
 delete, archive and move to junk; changes go back to the server. Sending over SMTP: new mail,
 reply, reply all and forward, with a copy filed in Sent. Gmail and Microsoft 365 sign in through
 the system browser (OAuth 2.0 with PKCE; XOAUTH2 on IMAP and SMTP for Gmail, Microsoft Graph
