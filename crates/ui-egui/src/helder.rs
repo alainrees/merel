@@ -29,49 +29,123 @@ pub const TITLE_TEXT: f32 = 20.0;
 /// The line icons the app draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Icon {
+    Archive,
     Bell,
     Calendar,
+    CalendarDay,
+    CalendarCheck,
+    CalendarDays,
+    CalendarPlus,
+    CalendarRange,
+    CalendarSearch,
     CalendarX,
     ChevronDown,
     ChevronLeft,
     ChevronRight,
+    CircleCheck,
     Clock,
+    Columns,
     Ellipsis,
+    Eraser,
+    Flag,
+    FolderInput,
+    FolderOpen,
+    FolderPlus,
     Forward,
+    Globe,
+    Info,
+    Keyboard,
+    ListFilter,
     Lock,
+    Mail,
+    MailCheck,
+    MailOpen,
     MapPin,
     Notes,
+    Pencil,
+    RefreshCw,
     Repeat,
+    Reply,
+    ReplyAll,
     Save,
     Send,
+    Sparkles,
+    Star,
+    Inbox,
+    Folder,
+    FilePen,
+    ShieldAlert,
+    SquareCheck,
+    Tag,
     Trash,
     Type,
+    User,
+    UserPlus,
     Users,
+    UsersRound,
     X,
+    Zap,
 }
 
 impl Icon {
     /// Every icon, for the test that each one loads.
-    pub const ALL: [Icon; 19] = [
+    pub const ALL: [Icon; 56] = [
+        Icon::Archive,
         Icon::Bell,
         Icon::Calendar,
+        Icon::CalendarDay,
+        Icon::CalendarCheck,
+        Icon::CalendarDays,
+        Icon::CalendarPlus,
+        Icon::CalendarRange,
+        Icon::CalendarSearch,
         Icon::CalendarX,
         Icon::ChevronDown,
         Icon::ChevronLeft,
         Icon::ChevronRight,
+        Icon::CircleCheck,
         Icon::Clock,
+        Icon::Columns,
         Icon::Ellipsis,
+        Icon::Eraser,
+        Icon::Flag,
+        Icon::FolderInput,
+        Icon::FolderOpen,
+        Icon::FolderPlus,
         Icon::Forward,
+        Icon::Globe,
+        Icon::Info,
+        Icon::Keyboard,
+        Icon::ListFilter,
         Icon::Lock,
+        Icon::Mail,
+        Icon::MailCheck,
+        Icon::MailOpen,
         Icon::MapPin,
         Icon::Notes,
+        Icon::Pencil,
+        Icon::RefreshCw,
         Icon::Repeat,
+        Icon::Reply,
+        Icon::ReplyAll,
         Icon::Save,
         Icon::Send,
+        Icon::Sparkles,
+        Icon::Star,
+        Icon::Inbox,
+        Icon::Folder,
+        Icon::FilePen,
+        Icon::ShieldAlert,
+        Icon::SquareCheck,
+        Icon::Tag,
         Icon::Trash,
         Icon::Type,
+        Icon::User,
+        Icon::UserPlus,
         Icon::Users,
+        Icon::UsersRound,
         Icon::X,
+        Icon::Zap,
     ];
 
     /// The image's uri and its SVG source.
@@ -82,25 +156,62 @@ impl Icon {
             };
         }
         match self {
+            Icon::Archive => svg!("archive"),
             Icon::Bell => svg!("bell"),
             Icon::Calendar => svg!("calendar"),
+            Icon::CalendarDay => svg!("calendar-1"),
+            Icon::CalendarCheck => svg!("calendar-check"),
+            Icon::CalendarDays => svg!("calendar-days"),
+            Icon::CalendarPlus => svg!("calendar-plus"),
+            Icon::CalendarRange => svg!("calendar-range"),
+            Icon::CalendarSearch => svg!("calendar-search"),
             Icon::CalendarX => svg!("calendar-x"),
             Icon::ChevronDown => svg!("chevron-down"),
             Icon::ChevronLeft => svg!("chevron-left"),
             Icon::ChevronRight => svg!("chevron-right"),
+            Icon::CircleCheck => svg!("circle-check"),
             Icon::Clock => svg!("clock"),
+            Icon::Columns => svg!("columns-3"),
             Icon::Ellipsis => svg!("ellipsis"),
+            Icon::Eraser => svg!("eraser"),
+            Icon::Flag => svg!("flag"),
+            Icon::FolderInput => svg!("folder-input"),
+            Icon::FolderOpen => svg!("folder-open"),
+            Icon::FolderPlus => svg!("folder-plus"),
             Icon::Forward => svg!("forward"),
+            Icon::Globe => svg!("globe"),
+            Icon::Info => svg!("info"),
+            Icon::Keyboard => svg!("keyboard"),
+            Icon::ListFilter => svg!("list-filter"),
             Icon::Lock => svg!("lock"),
+            Icon::Mail => svg!("mail"),
+            Icon::MailCheck => svg!("mail-check"),
+            Icon::MailOpen => svg!("mail-open"),
             Icon::MapPin => svg!("map-pin"),
             Icon::Notes => svg!("notes"),
+            Icon::Pencil => svg!("pencil"),
+            Icon::RefreshCw => svg!("refresh-cw"),
             Icon::Repeat => svg!("repeat"),
+            Icon::Reply => svg!("reply"),
+            Icon::ReplyAll => svg!("reply-all"),
             Icon::Save => svg!("save"),
             Icon::Send => svg!("send"),
+            Icon::Sparkles => svg!("sparkles"),
+            Icon::Star => svg!("star"),
+            Icon::Inbox => svg!("inbox"),
+            Icon::Folder => svg!("folder"),
+            Icon::FilePen => svg!("file-pen"),
+            Icon::ShieldAlert => svg!("shield-alert"),
+            Icon::SquareCheck => svg!("square-check"),
+            Icon::Tag => svg!("tag"),
             Icon::Trash => svg!("trash"),
             Icon::Type => svg!("type"),
+            Icon::User => svg!("user"),
+            Icon::UserPlus => svg!("user-plus"),
             Icon::Users => svg!("users"),
+            Icon::UsersRound => svg!("users-round"),
             Icon::X => svg!("x"),
+            Icon::Zap => svg!("zap"),
         }
     }
 
@@ -200,12 +311,64 @@ pub fn bar_separator(ui: &mut Ui, t: &Tokens) {
 
 /// A white card with rounded corners around `add`.
 pub fn card<R>(ui: &mut Ui, t: &Tokens, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
-    Frame::new()
-        .fill(t.card)
-        .stroke(Stroke::new(1.0, t.card_border))
-        .corner_radius(CARD_RADIUS)
-        .inner_margin(Margin { left: 8, right: 24, top: 16, bottom: 16 })
-        .show(ui, add)
+    card_frame(t).inner_margin(Margin { left: 8, right: 24, top: 16, bottom: 16 }).show(ui, add)
+}
+
+/// The frame of a card, for a panel that is one.
+pub fn card_frame(t: &Tokens) -> Frame {
+    Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.card_border)).corner_radius(CARD_RADIUS)
+}
+
+/// Whether a ribbon button shows only its icon; its name is then a tooltip and stays its label
+/// for a screen reader. These are the actions everyone knows by their icon.
+pub fn ribbon_icon_only(label: &str) -> bool {
+    matches!(label, "Verwijderen" | "Archiveren" | "Ongewenst" | "Gelezen" | "Ongelezen" | "Vlag" | "Beheren…")
+}
+
+/// The icon of a ribbon button, by its label, else by the glyph it had before the Helder style.
+pub fn ribbon_icon(label: &str, glyph: &str) -> Option<Icon> {
+    Some(match label {
+        "Nieuwe e-mail" | "E-mail sturen" => Icon::Mail,
+        "Beantwoorden" => Icon::Reply,
+        "Allen beantwoorden" => Icon::ReplyAll,
+        "Doorsturen" => Icon::Forward,
+        "Archiveren" => Icon::Archive,
+        "Ongewenst" => Icon::ShieldAlert,
+        "Verplaatsen" => Icon::FolderInput,
+        "Regels" => Icon::ListFilter,
+        "Gelezen" => Icon::MailOpen,
+        "Ongelezen" => Icon::Mail,
+        "Alles gelezen" => Icon::MailCheck,
+        "Vlag" => Icon::Flag,
+        "Nieuwe afspraak" => Icon::CalendarPlus,
+        "Vandaag" => Icon::CalendarCheck,
+        "Ga naar datum" => Icon::CalendarSearch,
+        "Dag" => Icon::CalendarDay,
+        "Werkweek" => Icon::Columns,
+        "Week" => Icon::CalendarRange,
+        "Maand" => Icon::CalendarDays,
+        "Vernieuwen" => Icon::RefreshCw,
+        "Sneltoetsen" => Icon::Keyboard,
+        "Over Mailcraft" => Icon::Info,
+        "Op GitHub" => Icon::Globe,
+        "Nieuw contact" => Icon::UserPlus,
+        "Nieuwe groep" => Icon::UsersRound,
+        "Nieuwe taak" => Icon::CircleCheck,
+        "Nieuwe map" => Icon::FolderPlus,
+        "Map leegmaken" => Icon::Eraser,
+        "Opruimen" => Icon::Sparkles,
+        _ => match glyph {
+            "🗑" => Icon::Trash,
+            "✎" => Icon::Pencil,
+            "📂" => Icon::FolderOpen,
+            "☑" => Icon::SquareCheck,
+            "⚡" => Icon::Zap,
+            // A folder that is not a favourite yet; a favourite keeps its filled ★.
+            "☆" => Icon::Star,
+            "⚙" => Icon::Ellipsis,
+            _ => return None,
+        },
+    })
 }
 
 /// A window's frame in the Helder style: the grey ground the cards sit on.

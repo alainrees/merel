@@ -141,6 +141,8 @@ impl Tokens {
             w.fg_stroke.color = self.text;
         }
         visuals.weak_text_color = Some(self.text_dim);
+        // What shows between the panels: the Helder window's grey ground.
+        visuals.panel_fill = self.window;
         visuals.disabled_alpha = DISABLED_ALPHA;
         visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, self.control_border);
         visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, self.text_dim);

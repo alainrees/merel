@@ -145,25 +145,16 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let has = app.engine.session.selected_message.is_some();
     let mut run: Option<String> = None;
     let mut manage = false;
-    ui.vertical(|ui| {
-        ui.set_max_width(160.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.set_max_width(160.0);
-            for (n, (id, name)) in steps.iter().enumerate() {
-                let mut button = ui.add_enabled(has, egui::Button::new(RichText::new(format!("⚡ {name}")).size(12.0)));
-                if n < 9 {
-                    button = button.on_hover_text(format!("{name} ({})", key_hint(&format!("Shift+{}", n + 1))));
-                }
-                if button.clicked() {
-                    run = Some(id.clone());
-                }
+    crate::view::group(ui, t, "Snelle stappen", |ui| {
+        for (n, (id, name)) in steps.iter().enumerate() {
+            let hint = (n < 9).then(|| key_hint(&format!("Shift+{}", n + 1)));
+            if crate::ribbon_action_hint(ui, t, "⚡", name, has, hint.as_deref()) {
+                run = Some(id.clone());
             }
-            if ui.add(egui::Button::new(RichText::new("Beheren…").size(12.0))).on_hover_text("Snelle stappen maken of wijzigen").clicked() {
-                manage = true;
-            }
-        });
-        ui.add_space(2.0);
-        ui.label(RichText::new("Snelle stappen").size(11.0).color(t.text_dim));
+        }
+        if crate::ribbon_action_hint(ui, t, "⚙", "Beheren…", true, Some("Snelle stappen maken of wijzigen")) {
+            manage = true;
+        }
     });
     if let Some(id) = run {
         app.run_quick_step_id(&id);

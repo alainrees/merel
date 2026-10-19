@@ -79,31 +79,32 @@ pub fn menu(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let mut clear = false;
     let mut manage = false;
     ui.add_enabled_ui(has, |ui| {
-        ui.vertical(|ui| {
-            ui.menu_button(RichText::new("🏷 Categoriseren").color(t.text), |ui| {
-                ui.set_min_width(220.0);
-                for c in &known {
-                    let on = carried.iter().any(|x| x.eq_ignore_ascii_case(&c.name));
-                    if entry(ui, color_of(c.color), &c.name, on) {
-                        toggle = Some(c.name.clone());
+        crate::view::group(ui, t, "Categorieën", |ui| {
+            crate::helder::quiet(ui, t, |ui| {
+                crate::helder::menu_button(ui, t, Some(crate::helder::Icon::Tag), "Categoriseren", |ui| {
+                    ui.set_min_width(220.0);
+                    for c in &known {
+                        let on = carried.iter().any(|x| x.eq_ignore_ascii_case(&c.name));
+                        if entry(ui, color_of(c.color), &c.name, on) {
+                            toggle = Some(c.name.clone());
+                        }
                     }
-                }
-                for name in carried.iter().filter(|n| !known.iter().any(|c| c.name.eq_ignore_ascii_case(n))) {
-                    if entry(ui, color_of(CategoryColor::Gray), name, true) {
-                        toggle = Some(name.clone());
+                    for name in carried.iter().filter(|n| !known.iter().any(|c| c.name.eq_ignore_ascii_case(n))) {
+                        if entry(ui, color_of(CategoryColor::Gray), name, true) {
+                            toggle = Some(name.clone());
+                        }
                     }
-                }
-                ui.separator();
-                if ui.add_enabled(!carried.is_empty(), egui::Button::new("Alle categorieën wissen")).clicked() {
-                    clear = true;
-                    ui.close();
-                }
-                if ui.button("Alle categorieën…").clicked() {
-                    manage = true;
-                    ui.close();
-                }
+                    ui.separator();
+                    if ui.add_enabled(!carried.is_empty(), egui::Button::new("Alle categorieën wissen")).clicked() {
+                        clear = true;
+                        ui.close();
+                    }
+                    if ui.button("Alle categorieën…").clicked() {
+                        manage = true;
+                        ui.close();
+                    }
+                });
             });
-            ui.label(RichText::new("Categorieën").size(11.0).color(t.text_dim));
         });
     });
     if let Some(name) = toggle {

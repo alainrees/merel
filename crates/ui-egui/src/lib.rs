@@ -74,12 +74,12 @@ impl Module {
         }
     }
 
-    fn glyph(self) -> &'static str {
+    fn icon(self) -> helder::Icon {
         match self {
-            Module::Mail => "✉",
-            Module::Calendar => "📅",
-            Module::People => "👥",
-            Module::Tasks => "✔",
+            Module::Mail => helder::Icon::Mail,
+            Module::Calendar => helder::Icon::Calendar,
+            Module::People => helder::Icon::User,
+            Module::Tasks => helder::Icon::CircleCheck,
         }
     }
 }
@@ -360,16 +360,29 @@ impl MailApp {
             backstage::show(self, ui, &t);
             return;
         }
+        // The window's grey ground, which shows between the cards.
+        ui.painter().rect_filled(ui.available_rect_before_wrap(), 0.0, t.window);
         rail(self, ui, &t);
         if self.module == Module::Mail {
             folder_pane(self, ui, &t);
-            let frame = egui::Frame::NONE.fill(t.list).stroke(Stroke::new(1.0, t.border));
+            // The list and the reading pane are cards on the window's ground, a gap between them.
+            let frame = helder::card_frame(&t).outer_margin(Margin { left: 0, right: 6, top: 0, bottom: 12 });
             match self.view.reading_pane {
                 view::ReadingPane::Right => {
-                    egui::Panel::left("messages").default_size(360.0).resizable(true).frame(frame).show(ui, |ui| message_list(self, ui, &t));
+                    egui::Panel::left("messages")
+                        .default_size(360.0)
+                        .resizable(true)
+                        .show_separator_line(false)
+                        .frame(frame)
+                        .show(ui, |ui| message_list(self, ui, &t));
                 }
                 view::ReadingPane::Bottom => {
-                    egui::Panel::top("messages").default_size(320.0).resizable(true).frame(frame).show(ui, |ui| message_list(self, ui, &t));
+                    egui::Panel::top("messages")
+                        .default_size(320.0)
+                        .resizable(true)
+                        .show_separator_line(false)
+                        .frame(frame)
+                        .show(ui, |ui| message_list(self, ui, &t));
                 }
                 view::ReadingPane::Off => {
                     // Outlook's "Leesvenster uit": the list takes the room and a message is read
@@ -378,7 +391,8 @@ impl MailApp {
                 }
             }
             if self.view.reading_pane != view::ReadingPane::Off {
-                egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading).inner_margin(Margin::same(20))).show(ui, |ui| {
+                let frame = helder::card_frame(&t).inner_margin(Margin::same(20)).outer_margin(Margin { left: 6, right: 12, top: 0, bottom: 12 });
+                egui::CentralPanel::default().frame(frame).show(ui, |ui| {
                     reading_pane(self, ui, &t);
                 });
             }
@@ -578,96 +592,111 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
 }
 
 fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
-    egui::Panel::top("tabs").frame(egui::Frame::NONE.fill(t.tab_strip).inner_margin(Margin::symmetric(8, 4))).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            for tab in Tab::ALL {
-                let on = app.tab == tab;
-                let text = RichText::new(tab.label()).color(if on { t.accent_text } else { t.text });
-                let r = ui.add(egui::Button::new(text).frame(false).min_size(vec2(0.0, 26.0)));
-                if on {
-                    let rect = r.rect;
-                    ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(2.0, t.accent));
-                }
-                if r.clicked() {
-                    app.tab = tab;
-                }
-            }
-        });
-    });
-    egui::Panel::top("ribbon")
-        .frame(egui::Frame::NONE.fill(t.ribbon).inner_margin(Margin::symmetric(10, 8)).stroke(Stroke::new(1.0, t.border)))
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = RIBBON_SPACING;
-            ui.horizontal(|ui| match app.tab {
-                Tab::Home if app.module == Module::Calendar => calendar_ribbon(app, ui, t),
-                Tab::Home if app.module == Module::People => contacts::ribbon(app, ui, t),
-                Tab::Home if app.module == Module::Tasks => tasks::ribbon(app, ui, t),
-                Tab::Home => {
-                    let has = app.engine.session.selected_message.is_some();
-                    let mut open: Option<ComposeKind> = None;
-                    view::group(ui, t, "Nieuw", |ui| {
-                        if ribbon_action_hint(ui, t, "✉", "Nieuwe e-mail", true, Some(&key_hint("N"))) {
-                            open = Some(ComposeKind::New);
-                        }
-                    });
-                    ui.separator();
-                    view::group(ui, t, "Reageren", |ui| {
-                        if ribbon_action_hint(ui, t, "↩", "Beantwoorden", has, Some(&key_hint("R"))) {
-                            open = Some(ComposeKind::Reply);
-                        }
-                        if ribbon_action_hint(ui, t, "↞", "Allen beantwoorden", has, Some(&key_hint("Shift+R"))) {
-                            open = Some(ComposeKind::ReplyAll);
-                        }
-                        if ribbon_action_hint(ui, t, "↪", "Doorsturen", has, Some(&key_hint("F"))) {
-                            open = Some(ComposeKind::Forward);
-                        }
-                    });
-                    if let Some(kind) = open {
-                        app.open_compose(kind);
+    egui::Panel::top("tabs").show_separator_line(false).frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin::symmetric(8, 4))).show(
+        ui,
+        |ui| {
+            ui.horizontal(|ui| {
+                for tab in Tab::ALL {
+                    let on = app.tab == tab;
+                    let text = RichText::new(tab.label()).color(if on { t.accent_text } else { t.text });
+                    let r = ui.add(egui::Button::new(text).frame(false).min_size(vec2(0.0, 26.0)));
+                    if on {
+                        let rect = r.rect;
+                        ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(2.0, t.accent));
                     }
-                    ui.separator();
-                    view::group(ui, t, "Opschonen", |ui| {
-                        ribbon_button(app, ui, t, "🗑", "Verwijderen", ("message.delete", Some("Delete")), has);
-                        ribbon_button(
-                            app,
-                            ui,
-                            t,
-                            "🗄",
-                            "Archiveren",
-                            ("message.archive", Some(if cfg!(target_os = "macos") { "Ctrl+E" } else { "Backspace" })),
-                            has,
-                        );
-                        ribbon_button(app, ui, t, "⚠", "Ongewenst", ("message.junk", None), has);
-                    });
-                    ui.separator();
-                    view::group(ui, t, "Ordenen", |ui| {
-                        if ribbon_action_hint(ui, t, "📂", "Verplaatsen", has, Some(&key_hint("Shift+V"))) {
-                            app.move_to = true;
+                    if r.clicked() {
+                        app.tab = tab;
+                    }
+                }
+            });
+        },
+    );
+    // The Helder ribbon: one line of icon buttons on a card over the window's grey ground.
+    egui::Panel::top("ribbon")
+        .show_separator_line(false)
+        .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin { left: 8, right: 12, top: 0, bottom: 8 }))
+        .show(ui, |ui| {
+            helder::card_frame(t).inner_margin(Margin::symmetric(8, 6)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing.x = RIBBON_SPACING;
+                let row = vec2(ui.available_width(), helder::BUTTON_HEIGHT);
+                ui.allocate_ui_with_layout(row, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    helder::quiet(ui, t, |ui| {
+                        // The Beeld tab is full; a roomier padding would push it off a 1280 px window.
+                        ui.spacing_mut().button_padding = vec2(5.0, 4.0);
+                        match app.tab {
+                            Tab::Home if app.module == Module::Calendar => calendar_ribbon(app, ui, t),
+                            Tab::Home if app.module == Module::People => contacts::ribbon(app, ui, t),
+                            Tab::Home if app.module == Module::Tasks => tasks::ribbon(app, ui, t),
+                            Tab::Home => {
+                                let has = app.engine.session.selected_message.is_some();
+                                let mut open: Option<ComposeKind> = None;
+                                view::group(ui, t, "Nieuw", |ui| {
+                                    if ribbon_action_hint(ui, t, "✉", "Nieuwe e-mail", true, Some(&key_hint("N"))) {
+                                        open = Some(ComposeKind::New);
+                                    }
+                                });
+                                ui.separator();
+                                view::group(ui, t, "Reageren", |ui| {
+                                    if ribbon_action_hint(ui, t, "↩", "Beantwoorden", has, Some(&key_hint("R"))) {
+                                        open = Some(ComposeKind::Reply);
+                                    }
+                                    if ribbon_action_hint(ui, t, "↞", "Allen beantwoorden", has, Some(&key_hint("Shift+R"))) {
+                                        open = Some(ComposeKind::ReplyAll);
+                                    }
+                                    if ribbon_action_hint(ui, t, "↪", "Doorsturen", has, Some(&key_hint("F"))) {
+                                        open = Some(ComposeKind::Forward);
+                                    }
+                                });
+                                if let Some(kind) = open {
+                                    app.open_compose(kind);
+                                }
+                                ui.separator();
+                                view::group(ui, t, "Opschonen", |ui| {
+                                    ribbon_button(app, ui, t, "🗑", "Verwijderen", ("message.delete", Some("Delete")), has);
+                                    ribbon_button(
+                                        app,
+                                        ui,
+                                        t,
+                                        "🗄",
+                                        "Archiveren",
+                                        ("message.archive", Some(if cfg!(target_os = "macos") { "Ctrl+E" } else { "Backspace" })),
+                                        has,
+                                    );
+                                    ribbon_button(app, ui, t, "⚠", "Ongewenst", ("message.junk", None), has);
+                                });
+                                ui.separator();
+                                view::group(ui, t, "Ordenen", |ui| {
+                                    if ribbon_action_hint(ui, t, "📂", "Verplaatsen", has, Some(&key_hint("Shift+V"))) {
+                                        app.move_to = true;
+                                    }
+                                    if ribbon_action_hint(ui, t, "⚙", "Regels", true, Some("Mail automatisch verplaatsen of markeren")) {
+                                        app.open_rules(false);
+                                    }
+                                });
+                                ui.separator();
+                                view::group(ui, t, "Labels", |ui| {
+                                    ribbon_button(app, ui, t, "◉", "Gelezen", ("message.mark_read", Some(&key_hint("Q"))), has);
+                                    ribbon_button(app, ui, t, "○", "Ongelezen", ("message.mark_unread", Some(&key_hint("U"))), has);
+                                    ribbon_button(app, ui, t, "⚑", "Vlag", ("message.flag", None), has);
+                                });
+                                categories::menu(app, ui, t);
+                                ui.separator();
+                                quicksteps::ribbon(app, ui, t);
+                            }
+                            Tab::Folder if app.module == Module::Mail => folders::ribbon(app, ui, t),
+                            Tab::View => view::ribbon(app, ui, t),
+                            Tab::Help => help::ribbon(app, ui, t),
+                            Tab::SendReceive => {
+                                let can = !app.engine.session.is_sample() && app.engine.session.selected_folder.is_some();
+                                ribbon_button(app, ui, t, "⟳", "Vernieuwen", ("folder.refresh", Some("F5")), can);
+                            }
+                            _ => {
+                                ui.label(RichText::new("Nog niet beschikbaar").color(t.text_dim));
+                            }
                         }
-                        if ribbon_action_hint(ui, t, "⚙", "Regels", true, Some("Mail automatisch verplaatsen of markeren")) {
-                            app.open_rules(false);
-                        }
-                    });
-                    ui.separator();
-                    view::group(ui, t, "Labels", |ui| {
-                        ribbon_button(app, ui, t, "◉", "Gelezen", ("message.mark_read", Some(&key_hint("Q"))), has);
-                        ribbon_button(app, ui, t, "○", "Ongelezen", ("message.mark_unread", Some(&key_hint("U"))), has);
-                        ribbon_button(app, ui, t, "⚑", "Vlag", ("message.flag", None), has);
-                    });
-                    categories::menu(app, ui, t);
-                    ui.separator();
-                    quicksteps::ribbon(app, ui, t);
-                }
-                Tab::Folder if app.module == Module::Mail => folders::ribbon(app, ui, t),
-                Tab::View => view::ribbon(app, ui, t),
-                Tab::Help => help::ribbon(app, ui, t),
-                Tab::SendReceive => {
-                    let can = !app.engine.session.is_sample() && app.engine.session.selected_folder.is_some();
-                    ribbon_button(app, ui, t, "⟳", "Vernieuwen", ("folder.refresh", Some("F5")), can);
-                }
-                _ => {
-                    ui.label(RichText::new("Nog niet beschikbaar").color(t.text_dim));
-                }
+                    })
+                });
             });
         });
 }
@@ -723,8 +752,10 @@ pub(crate) fn key_hint(key: &str) -> String {
     format!("{modifier}+{key}")
 }
 
-/// The least width of a large ribbon button; a longer label makes its button wider.
-const RIBBON_BUTTON_WIDTH: f32 = 60.0;
+/// The least width of a ribbon button; a longer label makes its button wider.
+const RIBBON_BUTTON_WIDTH: f32 = 36.0;
+/// The space between a ribbon button's icon and its label.
+const RIBBON_ICON_GAP: f32 = 6.0;
 /// The space between ribbon buttons and groups; egui's default of 8 wastes the width of a
 /// 1280 px window.
 const RIBBON_SPACING: f32 = 4.0;
@@ -732,7 +763,7 @@ const RIBBON_SPACING: f32 = 4.0;
 const RIBBON_LABEL_PADDING: f32 = 6.0;
 /// The font of a ribbon button's label.
 fn ribbon_label_font() -> egui::FontId {
-    egui::FontId::proportional(12.0)
+    egui::FontId::proportional(13.0)
 }
 
 /// A large ribbon button: glyph above label, drawn by hand as one widget so a screen reader
@@ -741,29 +772,41 @@ pub(crate) fn ribbon_action(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, e
     ribbon_action_hint(ui, t, glyph, label, enabled, None)
 }
 
-/// [`ribbon_action`] with the keyboard shortcut shown on hover.
+/// [`ribbon_action`] with the keyboard shortcut shown on hover. In the Helder style a ribbon
+/// button is one line: a line icon and its label; a label without an icon keeps its glyph.
 fn ribbon_action_hint(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool, shortcut: Option<&str>) -> bool {
-    let label_width = ui.painter().layout_no_wrap(label.to_owned(), ribbon_label_font(), Color32::WHITE).size().x;
-    let width = (label_width + 2.0 * RIBBON_LABEL_PADDING).max(RIBBON_BUTTON_WIDTH);
-    let (rect, r) = ui.allocate_exact_size(vec2(width, 56.0), if enabled { Sense::click() } else { Sense::hover() });
+    let icon = helder::ribbon_icon(label, glyph);
+    // Like the simplified ribbon of the new Outlook, the everyday actions show only their icon.
+    let icon_only = icon.is_some() && helder::ribbon_icon_only(label);
+    let label_width = if icon_only { 0.0 } else { ui.painter().layout_no_wrap(label.to_owned(), ribbon_label_font(), Color32::WHITE).size().x };
+    let lead =
+        if icon.is_some() { helder::ICON } else { ui.painter().layout_no_wrap(glyph.to_owned(), ribbon_label_font(), Color32::WHITE).size().x };
+    let gap = if icon_only { 0.0 } else { RIBBON_ICON_GAP };
+    let width = (lead + gap + label_width + 2.0 * RIBBON_LABEL_PADDING).max(RIBBON_BUTTON_WIDTH);
+    let (rect, r) = ui.allocate_exact_size(vec2(width, helder::BUTTON_HEIGHT), if enabled { Sense::click() } else { Sense::hover() });
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     let r = match shortcut {
         Some(s) => r.on_hover_text(format!("{label} ({s})")),
+        None if icon_only => r.on_hover_text(label),
         None => r,
     };
     let color = if enabled { t.text } else { t.text_disabled };
-    let p = ui.painter();
     if r.hovered() && enabled {
-        p.rect_filled(rect, CornerRadius::same(4), t.hover.gamma_multiply(0.5));
+        ui.painter().rect_filled(rect, CornerRadius::same(helder::CONTROL_RADIUS), t.hover);
     }
-    p.text(
-        egui::pos2(rect.center().x, rect.top() + 18.0),
-        egui::Align2::CENTER_CENTER,
-        glyph,
-        egui::FontId::proportional(22.0),
-        if enabled { t.accent } else { color },
-    );
-    p.text(egui::pos2(rect.center().x, rect.bottom() - 10.0), egui::Align2::CENTER_CENTER, label, ribbon_label_font(), color);
+    let left = if icon_only { rect.center().x - helder::ICON / 2.0 } else { rect.left() + RIBBON_LABEL_PADDING };
+    let lead_color = if enabled { t.accent_text } else { color };
+    match icon {
+        Some(icon) => icon
+            .image(helder::ICON, lead_color)
+            .paint_at(ui, egui::Rect::from_min_size(egui::pos2(left, rect.center().y - helder::ICON / 2.0), vec2(helder::ICON, helder::ICON))),
+        None => {
+            ui.painter().text(egui::pos2(left, rect.center().y), egui::Align2::LEFT_CENTER, glyph, ribbon_label_font(), lead_color);
+        }
+    }
+    if !icon_only {
+        ui.painter().text(egui::pos2(left + lead + gap, rect.center().y), egui::Align2::LEFT_CENTER, label, ribbon_label_font(), color);
+    }
     enabled && r.clicked()
 }
 
@@ -777,22 +820,43 @@ fn ribbon_button(app: &mut MailApp, ui: &mut Ui, t: &Tokens, glyph: &str, label:
 }
 
 fn rail(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
-    egui::Panel::left("rail").exact_size(56.0).resizable(false).frame(egui::Frame::NONE.fill(t.rail).inner_margin(Margin::symmetric(4, 10))).show(
-        ui,
-        |ui| {
+    egui::Panel::left("rail")
+        .exact_size(60.0)
+        .resizable(false)
+        .show_separator_line(false)
+        .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin::symmetric(6, 4)))
+        .show(ui, |ui| {
             ui.vertical_centered(|ui| {
                 for m in Module::ALL {
                     let on = app.module == m;
-                    let text = RichText::new(m.glyph()).size(20.0).color(if on { t.accent } else { t.text_dim });
-                    let b = egui::Button::new(text).fill(if on { t.checked } else { Color32::TRANSPARENT }).min_size(vec2(44.0, 40.0));
-                    if ui.add(b).on_hover_text(m.label()).clicked() {
+                    let b = egui::Button::image(m.icon().image(22.0, if on { t.accent_text } else { t.text_dim }))
+                        .fill(if on { t.checked } else { Color32::TRANSPARENT })
+                        .frame_when_inactive(on)
+                        .stroke(Stroke::NONE)
+                        .corner_radius(10)
+                        .min_size(vec2(48.0, 48.0));
+                    let r = ui.add(b);
+                    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, m.label()));
+                    if r.on_hover_text(m.label()).clicked() {
                         app.module = m;
                     }
                     ui.add_space(4.0);
                 }
             });
-        },
-    );
+        });
+}
+
+/// The line icon of a folder in the folder pane.
+fn folder_line_icon(kind: FolderKind) -> helder::Icon {
+    match kind {
+        FolderKind::Inbox => helder::Icon::Inbox,
+        FolderKind::Drafts => helder::Icon::FilePen,
+        FolderKind::Sent => helder::Icon::Send,
+        FolderKind::Archive => helder::Icon::Archive,
+        FolderKind::Junk => helder::Icon::ShieldAlert,
+        FolderKind::Deleted => helder::Icon::Trash,
+        FolderKind::Other => helder::Icon::Folder,
+    }
 }
 
 fn folder_icon(kind: FolderKind) -> &'static str {
@@ -812,7 +876,11 @@ fn folder_icon(kind: FolderKind) -> &'static str {
 fn folder_row(ui: &mut Ui, t: &Tokens, f: &mailcraft_model::Folder, on: bool, hint: Option<String>) -> egui::Response {
     let r = ui.add_sized(
         [ui.available_width(), 28.0],
-        egui::Button::new("").fill(if on { t.checked } else { Color32::TRANSPARENT }).frame_when_inactive(on),
+        egui::Button::new("")
+            .fill(if on { t.checked } else { Color32::TRANSPARENT })
+            .frame_when_inactive(on)
+            .stroke(Stroke::NONE)
+            .corner_radius(helder::CONTROL_RADIUS),
     );
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &f.name));
     let r = match hint {
@@ -820,10 +888,11 @@ fn folder_row(ui: &mut Ui, t: &Tokens, f: &mailcraft_model::Folder, on: bool, hi
         None => r,
     };
     let rect = r.rect.shrink2(vec2(8.0, 0.0));
-    let p = ui.painter();
-    let name = format!("{}  {}", folder_icon(f.kind), f.name);
     let font = egui::FontId::proportional(13.5);
-    p.text(rect.left_center(), egui::Align2::LEFT_CENTER, name, font.clone(), t.text);
+    let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + 8.0, rect.center().y), vec2(16.0, 16.0));
+    folder_line_icon(f.kind).image(16.0, if on { t.accent_text } else { t.text_dim }).paint_at(ui, icon);
+    let p = ui.painter();
+    p.text(egui::pos2(rect.left() + 26.0, rect.center().y), egui::Align2::LEFT_CENTER, &f.name, font.clone(), t.text);
     if f.unread > 0 {
         p.text(rect.right_center(), egui::Align2::RIGHT_CENTER, f.unread.to_string(), font, t.accent_text);
     }
@@ -838,7 +907,8 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::Panel::left("folders")
         .default_size(220.0)
         .resizable(true)
-        .frame(egui::Frame::NONE.fill(t.panel).inner_margin(Margin::symmetric(8, 10)).stroke(Stroke::new(1.0, t.border)))
+        .show_separator_line(false)
+        .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin { left: 4, right: 10, top: 4, bottom: 10 }))
         .show(ui, |ui| {
             let mut pick = None;
             let mut pick_drafts = None;
@@ -1853,9 +1923,9 @@ pub(crate) fn size_text(bytes: usize) -> String {
 }
 
 fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
-    egui::Panel::bottom("status")
-        .frame(egui::Frame::NONE.fill(t.status_bar).inner_margin(Margin::symmetric(10, 4)).stroke(Stroke::new(1.0, t.border)))
-        .show(ui, |ui| {
+    egui::Panel::bottom("status").show_separator_line(false).frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin::symmetric(12, 4))).show(
+        ui,
+        |ui| {
             ui.horizontal(|ui| {
                 let list = app.engine.session.visible_messages();
                 let unread = list.iter().filter(|m| !m.flags.seen).count();
@@ -1900,7 +1970,8 @@ fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ui.label(RichText::new(txt).size(12.0).color(col));
                 });
             });
-        });
+        },
+    );
 }
 
 /// `s` cut to `n` characters with an ellipsis.
@@ -3702,7 +3773,7 @@ mod tests {
 
         h.get_by_label("Welkom bij Mailcraft").click();
         h.run();
-        h.get_by_label("⚡ Klaar").click();
+        h.get_by_label("Klaar").click();
         h.run();
         let m0 = h.state().engine.session.message("m0").cloned().expect("m0");
         assert!(m0.folder_id == "archive" && m0.flags.seen, "the step moved and marked the message");
