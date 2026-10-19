@@ -12,6 +12,7 @@ use serde_json::json;
 use mailcraft_engine::{CommandError, tasks::TaskFilter};
 use mailcraft_model::{Appointment, Frequency, Recurrence, ShowAs, Task, describe_recurrence};
 
+use crate::helder::{self, Icon};
 use crate::{MailApp, Module, Tokens};
 
 pub const MONTHS: [&str; 12] =
@@ -1225,28 +1226,26 @@ fn search_results(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
 }
 
-fn field(ui: &mut Ui, t: &Tokens, label: &str, value: &mut String, width: f32) {
-    ui.horizontal(|ui| {
-        ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new(label).color(t.text)));
-        ui.add(egui::TextEdit::singleline(value).desired_width(width));
-    });
-}
+/// The "Herhalen" choices of the window, as Outlook names them.
+const REPEATS: [(Option<Frequency>, &str); 5] = [
+    (None, "Niet herhalen"),
+    (Some(Frequency::Daily), "Elke dag"),
+    (Some(Frequency::Weekly), "Elke week"),
+    (Some(Frequency::Monthly), "Elke maand"),
+    (Some(Frequency::Yearly), "Elk jaar"),
+];
 
-/// The "Herhalen" rows of the window: how often, which days, and when it stops.
+/// The "Herhalen" row of the window and, when it repeats, how often, which days, and when it
+/// stops.
 fn repeat_fields(ui: &mut Ui, t: &Tokens, editor: &mut Editor) {
-    let options: [(Option<Frequency>, &str); 5] = [
-        (None, "Niet"),
-        (Some(Frequency::Daily), "Elke dag"),
-        (Some(Frequency::Weekly), "Elke week"),
-        (Some(Frequency::Monthly), "Elke maand"),
-        (Some(Frequency::Yearly), "Elk jaar"),
-    ];
-    let current = options.iter().find(|(f, _)| *f == editor.repeat).map(|(_, n)| *n).unwrap_or("Niet");
-    ui.horizontal(|ui| {
-        ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Herhalen").color(t.text)));
-        egui::ComboBox::from_id_salt("appointment-repeat").selected_text(current).width(140.0).show_ui(ui, |ui| {
-            for (f, n) in options {
-                ui.selectable_value(&mut editor.repeat, f, n);
+    let current = REPEATS.iter().find(|(f, _)| *f == editor.repeat).map(|(_, n)| *n).unwrap_or("Niet herhalen");
+    helder::icon_row(ui, t, Icon::Repeat, |ui| {
+        helder::select(ui, t, current, 200.0, |ui| {
+            for (f, n) in REPEATS {
+                if ui.selectable_label(editor.repeat == f, n).clicked() {
+                    editor.repeat = f;
+                    ui.close();
+                }
             }
         });
     });
@@ -1258,26 +1257,27 @@ fn repeat_fields(ui: &mut Ui, t: &Tokens, editor: &mut Editor) {
         Frequency::Yearly => "jaar",
     };
     ui.horizontal(|ui| {
-        ui.add_space(94.0);
+        helder::indent(ui);
         ui.label(RichText::new("Om de").color(t.text));
-        ui.add(egui::TextEdit::singleline(&mut editor.interval).desired_width(36.0).hint_text("1"));
+        helder::underline_field(ui, t, &mut editor.interval, "1", 32.0, false);
         ui.label(RichText::new(unit).color(t.text));
     });
     if frequency == Frequency::Weekly {
         ui.horizontal(|ui| {
-            ui.add_space(94.0);
+            helder::indent(ui);
             for (i, name) in WEEKDAYS_SHORT.iter().enumerate() {
                 ui.checkbox(&mut editor.weekdays[i], *name);
             }
         });
     }
     ui.horizontal(|ui| {
-        ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Eindigt").color(t.text)));
+        helder::indent(ui);
+        ui.label(RichText::new("Eindigt").color(t.text));
         ui.radio_value(&mut editor.ends, Ends::Never, "Nooit");
         ui.radio_value(&mut editor.ends, Ends::OnDate, "Op");
-        ui.add_enabled(editor.ends == Ends::OnDate, egui::TextEdit::singleline(&mut editor.until).desired_width(90.0).hint_text("31-12-2026"));
+        ui.add_enabled_ui(editor.ends == Ends::OnDate, |ui| helder::underline_field(ui, t, &mut editor.until, "31-12-2026", 92.0, false));
         ui.radio_value(&mut editor.ends, Ends::AfterCount, "Na");
-        ui.add_enabled(editor.ends == Ends::AfterCount, egui::TextEdit::singleline(&mut editor.count).desired_width(36.0));
+        ui.add_enabled_ui(editor.ends == Ends::AfterCount, |ui| helder::underline_field(ui, t, &mut editor.count, "10", 32.0, false));
         ui.label(RichText::new("keer").color(t.text));
     });
     // What the fields add up to, in words, as long as they parse.
@@ -1288,17 +1288,190 @@ fn repeat_fields(ui: &mut Ui, t: &Tokens, editor: &mut Editor) {
         if let Some(u) = r.until {
             text.push_str(&format!(", tot en met {}", to_local(u).format(DATE_FORMAT)));
         }
-        ui.horizontal(|ui| {
-            ui.add_space(94.0);
-            ui.label(RichText::new(text).size(12.0).color(t.text_dim));
-        });
+        helder::note(ui, t, &text);
     }
 }
 
-/// The appointment window, when one is open.
+/// The times a time field's list offers: every half hour.
+fn half_hours() -> impl Iterator<Item = String> {
+    (0..48).map(|i| format!("{:02}:{:02}", i / 2, (i % 2) * 30))
+}
+
+/// A time field with a chevron that lists the half hours; returns the time picked from the
+/// list, if one was.
+fn time_field(ui: &mut Ui, t: &Tokens, value: &mut String, id: &str) -> Option<String> {
+    helder::underline_field(ui, t, value, "09:00", 48.0, false);
+    let mut picked = None;
+    let button =
+        egui::Button::image(Icon::ChevronDown.image(16.0, t.text_dim)).frame_when_inactive(false).min_size(vec2(24.0, helder::BUTTON_HEIGHT));
+    egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
+        ui.push_id(id, |ui| {
+            egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                for time in half_hours() {
+                    if ui.selectable_label(*value == time, &time).clicked() {
+                        picked = Some(time);
+                        ui.close();
+                    }
+                }
+            });
+        });
+    });
+    picked
+}
+
+impl Editor {
+    /// The start as the fields have it, when they parse.
+    fn start(&self) -> Option<NaiveDateTime> {
+        let date = NaiveDate::parse_from_str(self.start_date.trim(), DATE_FORMAT).ok()?;
+        if self.all_day {
+            return Some(date.and_time(NaiveTime::MIN));
+        }
+        Some(date.and_time(NaiveTime::parse_from_str(self.start_time.trim(), TIME_FORMAT).ok()?))
+    }
+
+    /// The end as the fields have it, when they parse.
+    fn end(&self) -> Option<NaiveDateTime> {
+        let date = NaiveDate::parse_from_str(self.end_date.trim(), DATE_FORMAT).ok()?;
+        if self.all_day {
+            return date.checked_add_days(Days::new(1)).map(|d| d.and_time(NaiveTime::MIN));
+        }
+        Some(date.and_time(NaiveTime::parse_from_str(self.end_time.trim(), TIME_FORMAT).ok()?))
+    }
+
+    /// Moves the start to `time` and the end along with it, so the appointment keeps its
+    /// length, as Outlook does when the start changes.
+    pub fn move_start(&mut self, time: &str) {
+        let before = self.start().zip(self.end()).map(|(s, e)| e - s);
+        self.start_time = time.to_string();
+        if let (Some(start), Some(length)) = (self.start(), before)
+            && length > chrono::TimeDelta::zero()
+            && let Some(end) = start.checked_add_signed(length)
+        {
+            self.end_date = end.format(DATE_FORMAT).to_string();
+            self.end_time = end.format(TIME_FORMAT).to_string();
+        }
+    }
+}
+
+/// An appointment as the day preview of the window draws it.
+struct Busy {
+    title: String,
+    start: NaiveDateTime,
+    end: NaiveDateTime,
+    all_day: bool,
+    color: Color32,
+    show_as: ShowAs,
+}
+
+/// The hours the day preview shows.
+const PREVIEW_HOURS: u32 = 9;
+const PREVIEW_HOUR_HEIGHT: f32 = 40.0;
+
+/// What else is in the shown calendars on the day the window's appointment starts.
+fn day_of(app: &MailApp, editor: &Editor, t: &Tokens) -> Option<(NaiveDate, Vec<Busy>)> {
+    let day = NaiveDate::parse_from_str(editor.start_date.trim(), DATE_FORMAT).ok()?;
+    let from = midnight(day)?;
+    let to = midnight(add_days(day, 1))?;
+    let list = shown(app, app.engine.session.appointments_between(from, to));
+    let busy = list
+        .iter()
+        .filter(|a| Some(&a.id) != editor.id.as_ref())
+        .map(|a| Busy {
+            title: chip_title(a),
+            start: to_local(a.start),
+            end: to_local(a.end),
+            all_day: a.all_day,
+            color: appointment_color(app, a, t),
+            show_as: a.show_as,
+        })
+        .collect();
+    Some((day, busy))
+}
+
+/// The day of the appointment, beside the form: the hours around it with what is already
+/// planned, and the appointment itself in the app colour, so a clash shows before saving.
+fn day_preview(ui: &mut Ui, t: &Tokens, editor: &Editor, day: NaiveDate, busy: &[Busy]) {
+    ui.label(RichText::new(format!("{} {} {}", weekday_name(day), day.day(), month_name(day.month()))).size(15.0).strong().color(t.text));
+    let span = editor.start().zip(editor.end());
+    let clash: Vec<&str> = match span {
+        Some((s, e)) => {
+            busy.iter().filter(|b| !b.all_day && b.show_as != ShowAs::Free && b.start < e && s < b.end).map(|b| b.title.as_str()).collect()
+        }
+        None => Vec::new(),
+    };
+    let status = if clash.is_empty() { "Je hebt dan nog niets gepland.".to_string() } else { format!("Overlapt met {}.", clash.join(", ")) };
+    ui.label(RichText::new(status).size(12.0).color(if clash.is_empty() { t.text_dim } else { t.flag }));
+    for b in busy.iter().filter(|b| b.all_day) {
+        ui.label(helder::dotted(&b.title, b.color, t));
+    }
+    ui.add_space(8.0);
+    let first = span.map(|(s, _)| s.hour().saturating_sub(2)).unwrap_or(7).min(24 - PREVIEW_HOURS);
+    let size = vec2(ui.available_width(), PREVIEW_HOURS as f32 * PREVIEW_HOUR_HEIGHT);
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let p = ui.painter_at(rect.expand(2.0));
+    let gutter = 44.0;
+    let y_of = |dt: NaiveDateTime| {
+        let minutes = if dt.date() < day {
+            0.0
+        } else if dt.date() > day {
+            24.0 * 60.0
+        } else {
+            (dt.hour() * 60 + dt.minute()) as f32
+        };
+        rect.top() + (minutes / 60.0 - first as f32) * PREVIEW_HOUR_HEIGHT
+    };
+    for i in 0..PREVIEW_HOURS {
+        let y = rect.top() + i as f32 * PREVIEW_HOUR_HEIGHT;
+        p.hline(rect.left() + gutter..=rect.right(), y, Stroke::new(1.0, t.card_border));
+        p.text(pos2(rect.left() + gutter - 8.0, y), Align2::RIGHT_TOP, format!("{}:00", first + i), FontId::proportional(12.0), t.text_dim);
+    }
+    // On a clash the planned blocks take the left half and the new one the right half, so
+    // both stay readable.
+    let middle = rect.left() + gutter + (rect.width() - gutter) / 2.0;
+    let (planned_right, new_left) = if clash.is_empty() { (rect.right() - 2.0, rect.left() + gutter + 4.0) } else { (middle - 2.0, middle + 2.0) };
+    let block = |top: f32, bottom: f32, left: f32, right: f32| {
+        let top = top.max(rect.top());
+        let bottom = bottom.min(rect.bottom());
+        (bottom > top + 2.0).then(|| Rect::from_min_max(pos2(left, top + 1.0), pos2(right, bottom - 1.0)))
+    };
+    let label = |r: Rect, text: &str, color: Color32| {
+        let galley = p.layout(text.to_string(), FontId::proportional(12.0), color, r.width() - 12.0);
+        p.with_clip_rect(r.intersect(rect)).galley(r.min + vec2(6.0, 4.0), galley, color);
+    };
+    for b in busy.iter().filter(|b| !b.all_day) {
+        if let Some(r) = block(y_of(b.start), y_of(b.end), rect.left() + gutter + 4.0, planned_right) {
+            let (fill, stroke, text) = chip_paint(b.color, b.show_as, false, t.text);
+            p.rect(r, CornerRadius::same(6), fill, stroke.unwrap_or(Stroke::NONE), egui::StrokeKind::Inside);
+            label(r, &b.title, text);
+        }
+    }
+    if !editor.all_day
+        && let Some((s, e)) = span
+        && let Some(r) = block(y_of(s), y_of(e), new_left, rect.right() - 2.0)
+    {
+        p.rect(r, CornerRadius::same(6), t.accent, Stroke::new(2.0, t.card), egui::StrokeKind::Outside);
+        let title = if editor.title.trim().is_empty() { "Nieuwe afspraak" } else { editor.title.trim() };
+        label(r, &format!("{title}\n{} – {}", s.format(TIME_FORMAT), e.format(TIME_FORMAT)), t.on_accent);
+    }
+}
+
+/// The colour of a "Weergeven als" choice, as the dot before it shows it.
+fn show_as_color(show_as: ShowAs, t: &Tokens) -> Color32 {
+    match show_as {
+        ShowAs::Free => t.control_border,
+        ShowAs::Tentative => crate::theme::over(t.accent, t.card, 0.5),
+        ShowAs::Busy => t.accent,
+        ShowAs::Oof => OOF_COLOR,
+    }
+}
+
+/// The appointment window, when one is open: a command bar on top, the form in a card, and
+/// the day it falls on beside it.
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
-    let calendars: Vec<(String, String)> = app.engine.session.calendars.iter().map(|c| (c.id.clone(), c.name.clone())).collect();
+    let calendars: Vec<(String, String, Color32)> =
+        app.engine.session.calendars.iter().map(|c| (c.id.clone(), c.name.clone(), Color32::from_rgb(c.color[0], c.color[1], c.color[2]))).collect();
     let local_calendars: Vec<String> = app.engine.session.calendars.iter().filter(|c| c.account_id.is_none()).map(|c| c.id.clone()).collect();
+    let preview = app.calendar.editor.as_ref().and_then(|e| day_of(app, e, t));
     let Some(editor) = app.calendar.editor.as_mut() else { return };
     let mut save = false;
     let mut delete = false;
@@ -1310,128 +1483,78 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         (Some(_), Some(_)) => "Herhaalde afspraak",
         (Some(_), None) => "Afspraak",
     };
-    egui::Window::new(title).collapsible(false).resizable(false).default_width(420.0).show(ctx, |ui| {
-        field(ui, t, "Titel", &mut editor.title, 300.0);
-        field(ui, t, "Locatie", &mut editor.location, 300.0);
-        field(ui, t, crate::meeting::FIELD, &mut editor.attendees, 300.0);
-        crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut editor.attendees);
-        if !editor.attendees.trim().is_empty() {
+    egui::Window::new(title).collapsible(false).resizable(false).frame(helder::window_frame(ctx, t)).default_width(940.0).show(ctx, |ui| {
+        helder::quiet(ui, t, |ui| {
             ui.horizontal(|ui| {
-                ui.add_space(94.0);
-                ui.label(
-                    RichText::new("Verzenden slaat de afspraak op en mailt de genodigden een uitnodiging voor hun agenda.")
-                        .size(12.0)
-                        .color(t.text_dim),
-                );
-            });
-        }
-        // Which calendar: a choice for a new appointment when there is one, a fact otherwise.
-        if calendars.len() > 1 {
-            let current = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _)| id.clone()));
-            let name = calendars.iter().find(|(id, _)| Some(id) == current.as_ref()).map(|(_, n)| n.as_str()).unwrap_or("");
-            ui.horizontal(|ui| {
-                ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Agenda").color(t.text)));
-                if editor.id.is_some() {
-                    ui.label(RichText::new(name).color(t.text_dim));
+                let sends = !editor.attendees.trim().is_empty();
+                let main = if sends {
+                    helder::primary_button(ui, t, Icon::Send, "Verzenden")
+                        .on_hover_text("Slaat de afspraak op en mailt de genodigden een uitnodiging voor hun agenda.")
                 } else {
-                    egui::ComboBox::from_id_salt("appointment-calendar").selected_text(name).width(300.0).show_ui(ui, |ui| {
-                        for (id, n) in &calendars {
-                            ui.selectable_value(&mut editor.calendar_id, Some(id.clone()), n);
+                    helder::primary_button(ui, t, Icon::Save, "Opslaan")
+                };
+                save = main.clicked();
+                helder::bar_separator(ui, t);
+                helder::menu_button(ui, t, None, helder::dotted(show_as_label(editor.show_as), show_as_color(editor.show_as, t), t), |ui| {
+                    for (s, label) in SHOW_AS {
+                        if ui.add(egui::Button::new(helder::dotted(label, show_as_color(s, t), t)).selected(editor.show_as == s)).clicked() {
+                            editor.show_as = s;
+                            ui.close();
                         }
-                    });
+                    }
+                })
+                .on_hover_text("Weergeven als");
+                helder::menu_button(ui, t, Some(Icon::Bell), RichText::new(reminder_label(editor.reminder)).size(14.0).color(t.text), |ui| {
+                    for (r, label) in REMINDERS {
+                        if ui.selectable_label(editor.reminder == r, label).clicked() {
+                            editor.reminder = r;
+                            ui.close();
+                        }
+                    }
+                })
+                .on_hover_text("Herinnering");
+                if helder::toggle_button(ui, t, Icon::Lock, PRIVATE, editor.private)
+                    .on_hover_text("Wie je agenda deelt, ziet alleen dat je bezet bent.")
+                    .clicked()
+                {
+                    editor.private = !editor.private;
                 }
-            });
-        }
-        ui.horizontal(|ui| {
-            ui.add_space(94.0);
-            ui.checkbox(&mut editor.all_day, "Hele dag");
-            ui.add_space(12.0);
-            ui.checkbox(&mut editor.private, format!("{PRIVATE_MARK} {PRIVATE}"))
-                .on_hover_text("Wie je agenda deelt, ziet alleen dat je bezet bent.");
-        });
-        ui.horizontal(|ui| {
-            ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Begin").color(t.text)));
-            ui.add(egui::TextEdit::singleline(&mut editor.start_date).desired_width(90.0));
-            if !editor.all_day {
-                ui.add(egui::TextEdit::singleline(&mut editor.start_time).desired_width(50.0));
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Einde").color(t.text)));
-            ui.add(egui::TextEdit::singleline(&mut editor.end_date).desired_width(90.0));
-            if !editor.all_day {
-                ui.add(egui::TextEdit::singleline(&mut editor.end_time).desired_width(50.0));
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Herinnering").color(t.text)));
-            egui::ComboBox::from_id_salt("appointment-reminder").selected_text(reminder_label(editor.reminder)).width(160.0).show_ui(ui, |ui| {
-                for (r, label) in REMINDERS {
-                    ui.selectable_value(&mut editor.reminder, r, label);
-                }
-            });
-        });
-        ui.horizontal(|ui| {
-            ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Weergeven als").color(t.text)));
-            egui::ComboBox::from_id_salt("appointment-show-as").selected_text(show_as_label(editor.show_as)).width(160.0).show_ui(ui, |ui| {
-                for (s, label) in SHOW_AS {
-                    ui.selectable_value(&mut editor.show_as, s, label);
-                }
-            });
-        });
-        // A calendar on this computer keeps a series as its rule. An account's server owns its
-        // own series: a new appointment there can start one, but what comes back is listed and
-        // edited one occurrence at a time.
-        let chosen = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _)| id.clone()));
-        let local = chosen.as_ref().is_some_and(|id| local_calendars.contains(id));
-        if local || editor.id.is_none() {
-            repeat_fields(ui, t, editor);
-            if !local && editor.repeat.is_some() {
-                ui.label(
-                    RichText::new("De reeks wordt in het account aangemaakt; daarna toont Mailcraft elke keer apart en bewerk je ze los van elkaar.")
-                        .size(12.0)
-                        .color(t.text_dim),
-                );
-            }
-            if local && let Some(occurrence) = editor.occurrence {
-                let when = to_local(occurrence);
-                let text = format!(
-                    "Geopend vanaf de keer op {} {} {}. Wijzigingen gelden voor de hele reeks.",
-                    weekday_name(when.date()),
-                    when.day(),
-                    month_name(when.month())
-                );
-                ui.label(RichText::new(text).size(12.0).color(t.text_dim));
-            }
-        } else {
-            editor.repeat = None;
-        }
-        ui.horizontal(|ui| {
-            ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Notities").color(t.text)));
-            ui.add(egui::TextEdit::multiline(&mut editor.notes).desired_width(300.0).desired_rows(4));
-        });
-        if let Some(e) = &editor.error {
-            ui.label(RichText::new(e).color(t.flag));
-        }
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            let label = if editor.attendees.trim().is_empty() { "Opslaan" } else { "Verzenden" };
-            save = ui.add(egui::Button::new(RichText::new(label).color(t.on_accent)).fill(t.accent).min_size(vec2(90.0, 26.0))).clicked();
-            if editor.id.is_some() {
-                if editor.occurrence.is_some() {
-                    skip = ui
-                        .add(egui::Button::new("Deze keer overslaan").min_size(vec2(90.0, 26.0)))
-                        .on_hover_text("Alleen deze keer vervalt; de reeks blijft.")
+                if editor.id.is_some() {
+                    forward = helder::tool_button(ui, t, Icon::Forward, crate::meeting::FORWARD)
+                        .on_hover_text("Opent een nieuw bericht met de afspraak als bijlage, zodat iemand anders hem in zijn agenda kan zetten.")
                         .clicked();
+                    if editor.occurrence.is_some() {
+                        skip = helder::tool_button(ui, t, Icon::CalendarX, "Deze keer overslaan")
+                            .on_hover_text("Alleen deze keer vervalt; de reeks blijft.")
+                            .clicked();
+                    }
                 }
-                let label = if editor.occurrence.is_some() { "Reeks verwijderen" } else { "Verwijderen" };
-                delete = ui.add(egui::Button::new(label).min_size(vec2(90.0, 26.0))).clicked();
-                forward = ui
-                    .add(egui::Button::new(crate::meeting::FORWARD).min_size(vec2(90.0, 26.0)))
-                    .on_hover_text("Opent een nieuw bericht met de afspraak als bijlage, zodat iemand anders hem in zijn agenda kan zetten.")
-                    .clicked();
+                helder::right(ui, |ui| {
+                    close = helder::tool_button(ui, t, Icon::X, "Annuleren").clicked();
+                    if editor.id.is_some() {
+                        let label = if editor.occurrence.is_some() { "Reeks verwijderen" } else { "Verwijderen" };
+                        delete = helder::tool_button(ui, t, Icon::Trash, label).clicked();
+                    }
+                });
+            });
+        });
+        ui.add_space(8.0);
+        ui.horizontal_top(|ui| {
+            helder::card(ui, t, |ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(580.0);
+                    ui.spacing_mut().item_spacing.y = 6.0;
+                    form(ui, t, editor, &app.engine.session, &calendars, &local_calendars);
+                });
+            });
+            if let Some((day, busy)) = &preview {
+                helder::card(ui, t, |ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(250.0);
+                        day_preview(ui, t, editor, *day, busy);
+                    });
+                });
             }
-            close = ui.add(egui::Button::new("Annuleren").min_size(vec2(90.0, 26.0))).clicked();
         });
     });
     if skip && let (Some(id), Some(start)) = (editor.id.clone(), editor.occurrence) {
@@ -1445,7 +1568,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             Ok((mut params, attendees)) => {
                 // An invitation goes out from the calendar's account; without a real one the
                 // appointment is not saved either, so nothing half happens.
-                let calendar = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _)| id.clone()));
+                let calendar = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _, _)| id.clone()));
                 let account = if attendees.is_empty() { None } else { crate::meeting::account_for(&app.engine.session, calendar.as_deref()) };
                 if !attendees.is_empty() && account.is_none() {
                     editor.error = Some(crate::meeting::NO_ACCOUNT.to_string());
@@ -1487,6 +1610,113 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     }
     if close {
         app.calendar.editor = None;
+    }
+}
+
+/// The form of the appointment window, one row per subject with its icon before it.
+fn form(
+    ui: &mut Ui,
+    t: &Tokens,
+    editor: &mut Editor,
+    session: &mailcraft_engine::Session,
+    calendars: &[(String, String, Color32)],
+    local_calendars: &[String],
+) {
+    let wide = ui.available_width() - helder::ROW_ICON - 12.0;
+    // Which calendar: a choice for a new appointment when there is more than one, a fact
+    // otherwise.
+    let current = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _, _)| id.clone()));
+    if let Some((_, name, color)) = calendars.iter().find(|(id, _, _)| Some(id) == current.as_ref()) {
+        helder::dot_row(ui, *color, |ui| {
+            if editor.id.is_none() && calendars.len() > 1 {
+                helder::quiet(ui, t, |ui| {
+                    helder::menu_button(ui, t, None, RichText::new(name).size(14.0).color(t.text), |ui| {
+                        for (id, n, c) in calendars {
+                            if ui.add(egui::Button::new(helder::dotted(n, *c, t)).selected(current.as_ref() == Some(id))).clicked() {
+                                editor.calendar_id = Some(id.clone());
+                                ui.close();
+                            }
+                        }
+                    })
+                    .on_hover_text("Agenda");
+                });
+            } else {
+                ui.label(RichText::new(name).size(14.0).color(t.text));
+            }
+        });
+    }
+    helder::icon_row(ui, t, Icon::Type, |ui| helder::underline_field(ui, t, &mut editor.title, "Titel toevoegen", wide, true));
+    helder::icon_row(ui, t, Icon::Users, |ui| helder::underline_field(ui, t, &mut editor.attendees, "Genodigden toevoegen", wide, false))
+        .on_hover_text(crate::meeting::FIELD);
+    if !editor.attendees.trim().is_empty() {
+        ui.horizontal(|ui| {
+            helder::indent(ui);
+            ui.vertical(|ui| crate::contacts::complete_addresses(ui, t, session, &mut editor.attendees));
+        });
+    }
+    helder::icon_row(ui, t, Icon::Clock, |ui| {
+        helder::underline_field(ui, t, &mut editor.start_date, "19-10-2026", 96.0, false);
+        if !editor.all_day
+            && let Some(time) = time_field(ui, t, &mut editor.start_time, "start")
+        {
+            editor.move_start(&time);
+        }
+        ui.label(RichText::new("tot").color(t.text_dim));
+        helder::underline_field(ui, t, &mut editor.end_date, "19-10-2026", 96.0, false);
+        if !editor.all_day
+            && let Some(time) = time_field(ui, t, &mut editor.end_time, "end")
+        {
+            editor.end_time = time;
+        }
+        helder::right(ui, |ui| helder::toggle(ui, t, &mut editor.all_day, "Hele dag"));
+    });
+    // A calendar on this computer keeps a series as its rule. An account's server owns its
+    // own series: a new appointment there can start one, but what comes back is listed and
+    // edited one occurrence at a time.
+    let local = current.as_ref().is_some_and(|id| local_calendars.contains(id));
+    if local || editor.id.is_none() {
+        repeat_fields(ui, t, editor);
+        if !local && editor.repeat.is_some() {
+            helder::note(ui, t, "De reeks wordt in het account aangemaakt; daarna toont Mailcraft elke keer apart en bewerk je ze los van elkaar.");
+        }
+        if local && let Some(occurrence) = editor.occurrence {
+            let when = to_local(occurrence);
+            let text = format!(
+                "Geopend vanaf de keer op {} {} {}. Wijzigingen gelden voor de hele reeks.",
+                weekday_name(when.date()),
+                when.day(),
+                month_name(when.month())
+            );
+            helder::note(ui, t, &text);
+        }
+    } else {
+        editor.repeat = None;
+    }
+    helder::icon_row(ui, t, Icon::MapPin, |ui| helder::underline_field(ui, t, &mut editor.location, "Locatie toevoegen", wide, false));
+    ui.add_space(4.0);
+    ui.horizontal_top(|ui| {
+        let (rect, _) = ui.allocate_exact_size(vec2(helder::ROW_ICON, helder::BUTTON_HEIGHT), Sense::hover());
+        Icon::Notes.image(helder::ICON, t.text_dim).paint_at(ui, Rect::from_center_size(rect.center(), vec2(helder::ICON, helder::ICON)));
+        egui::Frame::new().fill(t.window).stroke(Stroke::new(1.0, t.card_border)).corner_radius(helder::CONTROL_RADIUS).inner_margin(8).show(
+            ui,
+            |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut editor.notes)
+                        .frame(egui::Frame::NONE)
+                        .hint_text(RichText::new("Notities toevoegen").color(t.text_dim))
+                        .font(FontId::proportional(helder::FIELD_TEXT))
+                        .desired_width(wide - 16.0)
+                        .desired_rows(5),
+                );
+            },
+        );
+    });
+    if let Some(e) = &editor.error {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            helder::indent(ui);
+            ui.add(egui::Label::new(RichText::new(e).color(t.flag)).wrap());
+        });
     }
 }
 
@@ -1613,6 +1843,19 @@ mod tests {
         assert_eq!(chip_paint(blue, ShowAs::Oof, true, Color32::BLACK).0, OOF_COLOR, "out of office is purple, whatever the calendar's colour");
         assert_eq!(chip_title(&Appointment { recurrence: Some(Recurrence::every(Frequency::Weekly)), ..a.clone() }), "🔒 🔁 Dokter");
         assert_eq!(chip_title(&Appointment { private: false, ..a }), "Dokter");
+    }
+
+    #[test]
+    fn moving_the_start_keeps_the_length_and_the_list_offers_half_hours() {
+        let mut e = Editor::new_at(d(2026, 10, 21).and_hms_opt(14, 0, 0).unwrap());
+        e.end_time = "15:30".into();
+        e.move_start("23:00");
+        assert_eq!((e.start_time.as_str(), e.end_date.as_str(), e.end_time.as_str()), ("23:00", "22-10-2026", "00:30"));
+        e.end_time = "nonsense".into();
+        e.move_start("09:00");
+        assert_eq!((e.start_time.as_str(), e.end_time.as_str()), ("09:00", "nonsense"), "an end that does not parse is left alone");
+        let times: Vec<String> = half_hours().collect();
+        assert_eq!((times.len(), times[0].as_str(), times[19].as_str(), times[47].as_str()), (48, "00:00", "09:30", "23:30"));
     }
 
     #[test]
