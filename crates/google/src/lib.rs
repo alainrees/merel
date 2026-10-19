@@ -77,6 +77,12 @@ impl Mailbox for GoogleMailbox {
         Mailbox::move_to(&mut self.imap, folder, id, dest)
     }
 
+    fn mark_junk(&mut self, folder: &str, id: &str, junk: bool) -> Result<()> {
+        // Gmail's filter learns from the move to or from [Gmail]/Spam; the keywords are for
+        // other clients on the same mailbox.
+        Mailbox::mark_junk(&mut self.imap, folder, id, junk)
+    }
+
     fn append(&mut self, folder: &str, message: &[u8]) -> Result<()> {
         Mailbox::append(&mut self.imap, folder, message)
     }

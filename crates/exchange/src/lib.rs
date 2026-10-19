@@ -487,6 +487,16 @@ impl Mailbox for EwsClient {
         response_messages(&parse(&xml)?, false).map(drop)
     }
 
+    fn mark_junk(&mut self, _folder: &str, id: &str, junk: bool) -> Result<()> {
+        // Exchange 2013 and later: the sender joins (or leaves) the mailbox's blocked senders,
+        // which Outlook and the phone see too. The move is a separate step, so the item stays.
+        let xml = self.call(&format!(
+            "<m:MarkAsJunk IsJunk=\"{junk}\" MoveItem=\"false\"><m:ItemIds><t:ItemId Id=\"{id}\"/></m:ItemIds></m:MarkAsJunk>",
+            id = esc(id)
+        ))?;
+        response_messages(&parse(&xml)?, false).map(drop)
+    }
+
     fn create_folder(&mut self, parent: Option<&str>, name: &str) -> Result<()> {
         let parent = match parent {
             Some(id) => format!("<t:FolderId Id=\"{}\"/>", esc(id)),

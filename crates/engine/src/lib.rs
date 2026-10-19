@@ -121,6 +121,14 @@ pub enum Job {
         categories: Vec<String>,
         removed: Vec<String>,
     },
+    /// Tell the store the person called a message junk (or not junk); queued before the move,
+    /// while the message is still where `path` and `id` say.
+    Junk {
+        account_id: String,
+        path: String,
+        id: String,
+        junk: bool,
+    },
     /// Send `draft` (over SMTP, or through the store itself) and file a copy in `sent_path`.
     Send {
         account_id: String,
@@ -175,6 +183,7 @@ impl Job {
             | Job::Delete { account_id, .. }
             | Job::Empty { account_id, .. }
             | Job::Categories { account_id, .. }
+            | Job::Junk { account_id, .. }
             | Job::Send { account_id, .. }
             | Job::Sync { account_id, .. }
             | Job::SaveItem { account_id, .. }
@@ -195,6 +204,7 @@ impl Job {
                 | Job::Delete { .. }
                 | Job::Empty { .. }
                 | Job::Categories { .. }
+                | Job::Junk { .. }
                 | Job::SaveItem { .. }
                 | Job::DeleteItem { .. }
         )

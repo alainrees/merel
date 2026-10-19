@@ -61,7 +61,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "message.move", label: "Move to folder", run: message_move },
     CommandSpec { id: "message.delete", label: "Delete", run: message_delete },
     CommandSpec { id: "message.archive", label: "Archive", run: |s, _| move_selected(s, FolderKind::Archive, "Archive") },
-    CommandSpec { id: "message.junk", label: "Junk", run: |s, _| move_selected(s, FolderKind::Junk, "Junk") },
+    CommandSpec { id: "message.junk", label: "Junk", run: message_junk },
     CommandSpec { id: "junk.block", label: "Block sender", run: crate::junk::block },
     CommandSpec { id: "junk.trust", label: "Trust sender", run: crate::junk::trust },
     CommandSpec { id: "junk.forget", label: "Forget sender", run: crate::junk::forget },
@@ -207,6 +207,17 @@ fn move_selected(s: &mut Session, kind: FolderKind, what: &'static str) -> Resul
     let target = s.folder_of_kind(&account, kind).map(|f| f.id.clone()).ok_or(CommandError::NoFolder(what))?;
     let id = m.id.clone();
     move_message(s, &id, &target)
+}
+
+/// `message.junk`: the selected message goes to the Junk folder, and the server hears that the
+/// person called it junk, so its own filter learns.
+fn message_junk(s: &mut Session, _: &Value) -> Result<(), CommandError> {
+    let m = s.selected().ok_or(CommandError::NoSelection)?;
+    let account = s.folder(&m.folder_id).map(|f| f.account_id.clone()).ok_or(CommandError::NotFound)?;
+    s.folder_of_kind(&account, FolderKind::Junk).ok_or(CommandError::NoFolder("Junk"))?;
+    let id = m.id.clone();
+    crate::junk::report(s, &id, true);
+    move_selected(s, FolderKind::Junk, "Junk")
 }
 
 /// `message.move { folder_id, id? }`: moves the given message (else the selected one) to a
