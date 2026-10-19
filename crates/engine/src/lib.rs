@@ -28,6 +28,7 @@ mod sample;
 pub mod signin;
 pub mod sync;
 pub mod tasks;
+pub mod templates;
 pub mod view;
 pub mod worker;
 
@@ -43,7 +44,7 @@ use mailcraft_mailbox::{Flag, Item};
 pub use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
 use mailcraft_model::{
     Account, Appointment, Auth, Calendar, Category, Contact, ContactGroup, Draft, Flags, Folder, FolderKind, MessageHeader, QuickStep, Rule,
-    StoredDraft, Task, clean_text,
+    StoredDraft, Task, Template, clean_text,
 };
 use mailcraft_secrets::{Secret, SecretStore};
 use serde::{Deserialize, Serialize};
@@ -438,6 +439,10 @@ pub struct Session {
     pub groups: Vec<ContactGroup>,
     groups_dirty: bool,
     next_group_id: u64,
+    /// Text templates ("Mijn sjablonen"), kept on this computer in `templates.json`.
+    pub templates: Vec<Template>,
+    templates_dirty: bool,
+    next_template_id: u64,
     /// Messages the rules changed since the UI last asked.
     rule_hits: usize,
     next_rule_id: u64,
@@ -577,6 +582,8 @@ impl Session {
             fresh.quick_steps_dirty = self.quick_steps_dirty;
             fresh.groups = std::mem::take(&mut self.groups);
             fresh.groups_dirty = self.groups_dirty;
+            fresh.templates = std::mem::take(&mut self.templates);
+            fresh.templates_dirty = self.templates_dirty;
             fresh.ignored_dirty = self.ignored_dirty;
             *self = fresh;
         }
@@ -1072,6 +1079,9 @@ impl Engine {
         engine.session.set_quick_steps(steps.quick_steps);
         let groups = engine.config_path.as_deref().map(|p| config::load_json::<groups::GroupsFile>(&config::groups_path(p))).unwrap_or_default();
         engine.session.set_groups(groups.groups);
+        let templates =
+            engine.config_path.as_deref().map(|p| config::load_json::<templates::TemplatesFile>(&config::templates_path(p))).unwrap_or_default();
+        engine.session.set_templates(templates.templates);
         engine.dispatch();
         engine
     }
@@ -1089,6 +1099,7 @@ impl Engine {
             self.session.take_categories_dirty();
             self.session.take_quick_steps_dirty();
             self.session.take_groups_dirty();
+            self.session.take_templates_dirty();
             return Ok(());
         };
         if self.session.take_calendar_dirty() {
@@ -1120,6 +1131,9 @@ impl Engine {
         }
         if self.session.take_groups_dirty() {
             config::save_json(&config::groups_path(&path), &self.session.groups_data()).map_err(|e| CommandError::Store(e.to_string()))?;
+        }
+        if self.session.take_templates_dirty() {
+            config::save_json(&config::templates_path(&path), &self.session.templates_data()).map_err(|e| CommandError::Store(e.to_string()))?;
         }
         Ok(())
     }

@@ -138,6 +138,11 @@ in one go (move to a folder, mark as read, flag, give categories). Each step is 
 ribbon, and the first nine of an account also answer to Ctrl+Shift+1 to 9. They are kept in
 `quick_steps.json`.
 
+Templates are saved pieces of text, as Outlook's "Mijn sjablonen": the "Sjablonen" menu in the
+compose window drops one into the message above the signature and the quoted text, "Tekst
+opslaan als sjabloon…" keeps what you wrote so far under a name, and "Sjablonen beheren…" opens
+the window to change or remove them. They are kept in `templates.json`.
+
 Categories, the coloured labels Outlook users know, go on a message through "Categoriseren" in
 the ribbon: Outlook's six to begin with, and "Alle categorieën…" adds, recolours or removes
 them (`categories.json`). The list shows a coloured square per category, the open message its
