@@ -39,7 +39,11 @@ mailbox's blocked list); Gmail learns from the move to Spam itself and Microsoft
 Junk Email. The window also sets the level, as Outlook's junk options do: "Standaard" files only the blocked
 senders, "Hoog" also a sender whose header shows signs of phishing (a contact's name with another address, a
 look-alike of a known domain), and "Alleen veilige lijsten" everything that is not from a contact, a safe sender or
-one of your own addresses. The lists live on your computer; nothing about your mail is sent anywhere to be checked. Phishing: a message that shows signs of it
+one of your own addresses. The lists live on your computer; nothing about your mail is sent anywhere to be checked.
+"Gesprek negeren" (in a message's right-click menu, or Ctrl+Delete) is Outlook's Ignore: the messages of
+that conversation (same subject, prefixes aside) in the inbox go to "Verwijderde items", and so does every message
+that arrives in it afterwards; a strip above such a message has "Niet meer negeren", which brings them back. The
+list is `ignored.json`, per account. Phishing: a message that shows signs of it
 gets a warning strip above its text that names them, with "Afzender blokkeren" at hand: a sender who uses a
 contact's name (or an address as a name) with another address, a domain one letter or one look-alike letter away
 from a domain you know (your contacts', your own), failed SPF/DKIM/DMARC checks reported by your mail server in the

@@ -455,6 +455,17 @@ pub fn conversation_key(subject: &str) -> String {
     s.trim().to_lowercase()
 }
 
+/// A conversation the person ignores (Outlook's "Negeren"): new mail with this key in the
+/// account's inbox goes straight to Deleted Items. `subject` is the subject as it was, for
+/// showing.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IgnoredConversation {
+    pub account_id: String,
+    pub key: String,
+    #[serde(default)]
+    pub subject: String,
+}
+
 /// `s` cut to [`MAX_TEXT`] characters with control characters (other than tab) removed, so a
 /// header cannot smuggle line breaks or terminal escapes into the UI or a log.
 pub fn clean_text(s: &str) -> String {

@@ -16,6 +16,7 @@ pub mod config;
 pub mod contacts;
 pub mod drafts;
 pub mod folders;
+pub mod ignore;
 pub mod junk;
 pub mod quicksteps;
 pub mod reminders;
@@ -410,6 +411,9 @@ pub struct Session {
     /// Blocked and safe senders, for every account; `junk.json`.
     pub junk: mailcraft_model::JunkLists,
     junk_dirty: bool,
+    /// Conversations whose mail goes to Deleted Items on arrival; see [`ignore`].
+    pub ignored: Vec<mailcraft_model::IgnoredConversation>,
+    ignored_dirty: bool,
     /// The categories (coloured labels) the person knows, kept in `categories.json`.
     pub categories: Vec<Category>,
     categories_dirty: bool,
@@ -520,6 +524,10 @@ impl Session {
             self.quick_steps.retain(|q| q.account_id != account_id);
             self.quick_steps_dirty = true;
         }
+        if self.ignored.iter().any(|i| i.account_id == account_id) {
+            self.ignored.retain(|i| i.account_id != account_id);
+            self.ignored_dirty = true;
+        }
         self.appointments.retain(|a| !a.id.starts_with(&prefix));
         self.dismissed_reminders.retain(|k| !k.id.starts_with(&prefix));
         self.snoozed_reminders.retain(|k, _| !k.id.starts_with(&prefix));
@@ -540,6 +548,15 @@ impl Session {
             fresh.set_calendar_data(calendar);
             fresh.set_contacts(contacts.contacts);
             fresh.set_tasks(tasks.tasks);
+            // The lists that are not an account's stay, and what the removal changed still
+            // reaches its file.
+            fresh.junk = std::mem::take(&mut self.junk);
+            fresh.categories = std::mem::take(&mut self.categories);
+            fresh.junk_dirty = self.junk_dirty;
+            fresh.categories_dirty = self.categories_dirty;
+            fresh.rules_dirty = self.rules_dirty;
+            fresh.quick_steps_dirty = self.quick_steps_dirty;
+            fresh.ignored_dirty = self.ignored_dirty;
             *self = fresh;
         }
     }
@@ -759,7 +776,7 @@ impl Session {
                 // Mail that arrived since the last listing goes past the blocked senders, then
                 // the rules.
                 for id in fresh {
-                    if !self.apply_junk(&id) {
+                    if !self.apply_junk(&id) && !self.apply_ignored(&id) {
                         self.apply_rules(&id, false);
                     }
                 }
@@ -1004,6 +1021,8 @@ impl Engine {
         engine.session.set_rules(rules.rules);
         let junk = engine.config_path.as_deref().map(|p| config::load_json::<mailcraft_model::JunkLists>(&config::junk_path(p))).unwrap_or_default();
         engine.session.set_junk(junk);
+        let ignored = engine.config_path.as_deref().map(|p| config::load_json::<ignore::IgnoredFile>(&config::ignored_path(p))).unwrap_or_default();
+        engine.session.set_ignored(ignored.ignored);
         let categories =
             engine.config_path.as_deref().map(|p| config::load_json::<categories::CategoriesFile>(&config::categories_path(p))).unwrap_or_default();
         engine.session.set_categories(categories.categories);
@@ -1022,6 +1041,7 @@ impl Engine {
             self.session.take_tasks_dirty();
             self.session.take_rules_dirty();
             self.session.take_junk_dirty();
+            self.session.take_ignored_dirty();
             self.session.take_categories_dirty();
             self.session.take_quick_steps_dirty();
             return Ok(());
@@ -1040,6 +1060,9 @@ impl Engine {
         }
         if self.session.take_junk_dirty() {
             config::save_json(&config::junk_path(&path), &self.session.junk_data()).map_err(|e| CommandError::Store(e.to_string()))?;
+        }
+        if self.session.take_ignored_dirty() {
+            config::save_json(&config::ignored_path(&path), &self.session.ignored_data()).map_err(|e| CommandError::Store(e.to_string()))?;
         }
         if self.session.take_categories_dirty() {
             config::save_json(&config::categories_path(&path), &self.session.categories_data()).map_err(|e| CommandError::Store(e.to_string()))?;

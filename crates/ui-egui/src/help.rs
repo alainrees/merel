@@ -21,6 +21,7 @@ pub fn shortcut_list() -> Vec<(String, &'static str)> {
     vec![
         ("↑ / ↓".to_string(), "Vorig of volgend bericht in de lijst"),
         ("Delete".to_string(), "Geselecteerd bericht verwijderen"),
+        ("Ctrl+Delete".to_string(), "Gesprek negeren: dit en volgende berichten erin naar Verwijderde items"),
         (if cfg!(target_os = "macos") { "Ctrl+E" } else { "Backspace" }.to_string(), "Geselecteerd bericht archiveren"),
         (key_hint("N"), "Nieuwe e-mail"),
         (key_hint("Shift+M"), "Nieuwe e-mail, vanuit elke module"),
@@ -124,7 +125,7 @@ mod tests {
     #[test]
     fn the_shortcut_list_names_every_key_the_mail_module_takes() {
         let list = shortcut_list();
-        assert_eq!(list.len(), 19);
+        assert_eq!(list.len(), 20);
         assert!(list.iter().any(|(k, _)| k.ends_with("+Shift+V")));
         assert!(list.iter().all(|(k, what)| !k.is_empty() && !what.is_empty()));
     }
