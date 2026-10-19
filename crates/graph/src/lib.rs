@@ -250,6 +250,7 @@ fn task_of(t: &Value) -> Option<Task> {
         done: str_of(t, "status") == "completed",
         completed: t.get("completedDateTime").and_then(moment),
         account_id: None,
+        repeat: None,
     }
     .validated()
     .ok()

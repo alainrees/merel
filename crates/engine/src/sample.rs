@@ -128,6 +128,7 @@ fn tasks() -> Vec<Task> {
             done,
             completed: done.then(|| due(0)).flatten(),
             account_id: None,
+            repeat: None,
         }
         .validated()
         .ok()
