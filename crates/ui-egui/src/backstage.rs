@@ -4,7 +4,7 @@ use egui::{Margin, RichText, Stroke, Ui, vec2};
 use zeroize::Zeroize;
 
 use mailcraft_engine::{AccountStatus, signin};
-use mailcraft_model::{Account, Address, Protocol, Server, Tls};
+use mailcraft_model::{Account, Address, Dav, Protocol, Server, Tls};
 use mailcraft_secrets::Secret;
 
 use crate::{MailApp, Tab, Tokens};
@@ -22,6 +22,9 @@ pub struct AccountForm {
     pub smtp_host: String,
     pub smtp_port: String,
     pub smtp_tls: Tls,
+    /// CalDAV and CardDAV servers next to an IMAP account; empty means mail only.
+    pub dav_calendar: String,
+    pub dav_contacts: String,
     /// OAuth registration (Gmail, Microsoft 365).
     pub client_id: String,
     pub client_secret: String,
@@ -44,6 +47,8 @@ impl Default for AccountForm {
             smtp_host: String::new(),
             smtp_port: "465".into(),
             smtp_tls: Tls::Implicit,
+            dav_calendar: String::new(),
+            dav_contacts: String::new(),
             client_id: String::new(),
             client_secret: String::new(),
             error: None,
@@ -84,6 +89,17 @@ impl AccountForm {
             if self.smtp_host.trim().is_empty() {
                 self.smtp_host = format!("smtp.{domain}");
             }
+            if self.dav_calendar.trim().is_empty() {
+                let (calendar, contacts) = match domain.to_ascii_lowercase().as_str() {
+                    "fastmail.com" | "fastmail.fm" => ("https://caldav.fastmail.com/", "https://carddav.fastmail.com/"),
+                    "icloud.com" | "me.com" | "mac.com" => ("https://caldav.icloud.com/", "https://contacts.icloud.com/"),
+                    "posteo.de" | "posteo.net" => ("https://posteo.de:8443/", ""),
+                    "mailbox.org" => ("https://dav.mailbox.org/", ""),
+                    _ => ("", ""),
+                };
+                self.dav_calendar = calendar.to_string();
+                self.dav_contacts = contacts.to_string();
+            }
         }
         if self.username.trim().is_empty() {
             self.username = self.email.trim().to_string();
@@ -115,6 +131,17 @@ impl AccountForm {
                 }),
             )
         };
+        let dav = if protocol == Protocol::ImapSmtp && !self.dav_calendar.trim().is_empty() {
+            Some(
+                Dav::new(&self.dav_calendar, &self.dav_contacts)
+                    .map_err(|_| "Vul voor agenda en adresboek een https-adres in, bijvoorbeeld https://caldav.fastmail.com/.".to_string())?,
+            )
+        } else {
+            if !self.dav_contacts.trim().is_empty() && protocol == Protocol::ImapSmtp {
+                return Err("Vul ook het agenda-adres (CalDAV) in; het adresboek alleen is niet genoeg.".into());
+            }
+            None
+        };
         let id = format!(
             "{}-{}",
             address.email().replace(['@', '.'], "-"),
@@ -129,6 +156,7 @@ impl AccountForm {
             auth: mailcraft_model::Auth::Password,
             incoming: Some(incoming),
             outgoing,
+            dav,
         })
     }
 }
@@ -303,6 +331,15 @@ fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         field(ui, t, "Server", &mut f.smtp_host, false);
         field(ui, t, "Poort", &mut f.smtp_port, false);
         tls_picker(ui, t, "smtp_tls", &mut f.smtp_tls);
+        ui.add_space(8.0);
+        ui.label(RichText::new("Agenda en adresboek (CalDAV/CardDAV), optioneel").strong().color(t.text));
+        field(ui, t, "Agenda", &mut f.dav_calendar, false);
+        field(ui, t, "Adresboek", &mut f.dav_contacts, false);
+        ui.label(
+            RichText::new("Het https-adres van de server, bijvoorbeeld https://caldav.fastmail.com/ of https://cloud.voorbeeld.nl/remote.php/dav/. Laat het adresboek leeg als het op dezelfde server staat.")
+                .size(12.0)
+                .color(t.text_dim),
+        );
     }
     ui.add_space(12.0);
     if let Some(e) = &f.error {
@@ -404,8 +441,10 @@ mod tests {
         f.suggest();
         assert_eq!(f.imap_host, "imap.voorbeeld.nl");
         assert_eq!(f.username, "alain@voorbeeld.nl");
+        assert!(f.dav_calendar.is_empty(), "an unknown domain gets no DAV guess");
         let a = f.account().unwrap();
         assert_eq!(a.incoming.unwrap(), Server { host: "imap.voorbeeld.nl".into(), port: 993, tls: Tls::Implicit });
+        assert!(a.dav.is_none());
         f.imap_port = "0".into();
         assert!(f.account().is_err());
         f.imap_port = "993".into();
@@ -414,6 +453,25 @@ mod tests {
         f.imap_host = "imap.voorbeeld.nl".into();
         f.password.clear();
         assert!(f.account().is_err());
+    }
+
+    #[test]
+    fn dav_servers_are_suggested_and_checked() {
+        let mut f = AccountForm::default();
+        f.email = "alain@fastmail.com".into();
+        f.password = "x".into();
+        f.suggest();
+        assert_eq!(f.dav_calendar, "https://caldav.fastmail.com/");
+        assert_eq!(f.dav_contacts, "https://carddav.fastmail.com/");
+        let a = f.account().unwrap();
+        assert_eq!(a.dav, Some(Dav { calendar: "https://caldav.fastmail.com/".into(), contacts: Some("https://carddav.fastmail.com/".into()) }));
+        f.dav_contacts.clear();
+        assert_eq!(f.account().unwrap().dav.unwrap().contacts, None);
+        f.dav_calendar = "http://caldav.fastmail.com/".into();
+        assert!(f.account().is_err(), "plain http is refused");
+        f.dav_calendar.clear();
+        f.dav_contacts = "https://carddav.fastmail.com/".into();
+        assert!(f.account().is_err(), "an address book without a calendar is refused");
     }
 
     #[test]

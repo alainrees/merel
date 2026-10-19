@@ -11,6 +11,7 @@ mailcraft-mime = { workspace = true }
 mailcraft-imap = { workspace = true }
 mailcraft-exchange = { workspace = true }
 mailcraft-google = { workspace = true }
+mailcraft-dav = { workspace = true }
 mailcraft-graph = { workspace = true }
 mailcraft-mailbox = { workspace = true }
 mailcraft-smtp = { workspace = true }

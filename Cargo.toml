@@ -23,6 +23,7 @@ mailcraft-google = { path = "crates/google" }
 mailcraft-graph = { path = "crates/graph" }
 mailcraft-html = { path = "crates/html" }
 mailcraft-store = { path = "crates/store" }
+mailcraft-dav = { path = "crates/dav" }
 
 # foundation
 thiserror = "2"
@@ -59,6 +60,8 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # the computer's time zone by its IANA name, to tell Exchange which midnight an all-day appointment means
 iana-time-zone = "0.1"
+# IANA time zone rules, to place a CalDAV time with a TZID on the clock.
+chrono-tz = "0.10"
 
 # ui
 egui = "0.36"
