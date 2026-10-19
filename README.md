@@ -39,7 +39,11 @@ shows a month, week or day view with a local calendar: appointments are created,
 deleted in a window and kept in `calendar.json`. An appointment in a calendar on this computer can
 repeat (every so many days, weeks on chosen weekdays, months or years; for ever, until a date or a
 number of times): the file keeps the rule once, the views show every occurrence, and one
-occurrence can be skipped from the window without touching the rest. Every appointment can carry a
+occurrence can be skipped from the window without touching the rest. A new appointment in an
+account's calendar can repeat as well: the rule goes to the server (Exchange and Microsoft 365 as
+their recurrence pattern, Google and CalDAV as an iCalendar `RRULE`, each in this computer's time
+zone), which then owns the series and lists its occurrences, edited one by one as the server has
+them. Every appointment can carry a
 reminder (a quarter of an hour before by default, from "op het moment zelf" to a week ahead); when
 it is due a window lists it with the time left, to open the appointment, close the reminder or put
 it off for a while, and the app asks for attention once. Reminders travel with Exchange, Microsoft

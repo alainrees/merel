@@ -799,12 +799,21 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 }
             });
         });
-        // Only a calendar on this computer takes a series; a server expands its own.
+        // A calendar on this computer keeps a series as its rule. An account's server owns its
+        // own series: a new appointment there can start one, but what comes back is listed and
+        // edited one occurrence at a time.
         let chosen = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _)| id.clone()));
         let local = chosen.as_ref().is_some_and(|id| local_calendars.contains(id));
-        if local {
+        if local || editor.id.is_none() {
             repeat_fields(ui, t, editor);
-            if let Some(occurrence) = editor.occurrence {
+            if !local && editor.repeat.is_some() {
+                ui.label(
+                    RichText::new("De reeks wordt in het account aangemaakt; daarna toont Mailcraft elke keer apart en bewerk je ze los van elkaar.")
+                        .size(12.0)
+                        .color(t.text_dim),
+                );
+            }
+            if local && let Some(occurrence) = editor.occurrence {
                 let when = to_local(occurrence);
                 let text = format!(
                     "Geopend vanaf de keer op {} {} {}. Wijzigingen gelden voor de hele reeks.",

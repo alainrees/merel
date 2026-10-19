@@ -13,6 +13,7 @@ mailcraft-secrets = { workspace = true }
 ureq = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
+iana-time-zone = { workspace = true }
 log = { workspace = true }
 
 [lints]

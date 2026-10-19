@@ -15,10 +15,10 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Utc};
 use mailcraft_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result, kind_from_name};
 use mailcraft_mime::ParsedHeader;
-use mailcraft_model::{Address, Appointment, Contact, FolderKind, Priority, Server, Task, clean_text};
+use mailcraft_model::{Address, Appointment, Contact, FolderKind, Frequency, Priority, Recurrence, Server, Task, clean_text};
 use mailcraft_secrets::Secret;
 use serde_json::{Value, json};
 
@@ -90,6 +90,36 @@ fn utc(ts: i64) -> String {
 /// `ts` as local wall-clock time without an offset, for a `dateTimeTimeZone` naming the zone.
 fn local(ts: i64) -> String {
     Local.timestamp_opt(ts, 0).single().map(|d| d.format("%Y-%m-%dT%H:%M:%S").to_string()).unwrap_or_else(|| utc(ts))
+}
+
+/// A [`Recurrence`] as Graph's `patternedRecurrence`: the pattern (how often) and the range
+/// (from the start's day; for ever, until a day, or so many times).
+fn recurrence_json(r: &Recurrence, start: i64, zone: &str) -> Value {
+    const DAYS: [&str; 7] = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+    let first = Local.timestamp_opt(start, 0).single().unwrap_or_default();
+    let pattern = match r.frequency {
+        Frequency::Daily => json!({ "type": "daily", "interval": r.interval }),
+        Frequency::Weekly => {
+            let days: Vec<&str> = if r.weekdays.is_empty() {
+                vec![DAYS[first.weekday().num_days_from_monday() as usize]]
+            } else {
+                r.weekdays.iter().filter_map(|d| DAYS.get(usize::from(*d))).copied().collect()
+            };
+            json!({ "type": "weekly", "interval": r.interval, "daysOfWeek": days, "firstDayOfWeek": "monday" })
+        }
+        Frequency::Monthly => json!({ "type": "absoluteMonthly", "interval": r.interval, "dayOfMonth": first.day() }),
+        Frequency::Yearly => json!({ "type": "absoluteYearly", "interval": r.interval, "dayOfMonth": first.day(), "month": first.month() }),
+    };
+    let start_date = first.format("%Y-%m-%d").to_string();
+    let range = match (r.until, r.count) {
+        (Some(u), _) => {
+            let end = Local.timestamp_opt(u, 0).single().unwrap_or_default().format("%Y-%m-%d").to_string();
+            json!({ "type": "endDate", "startDate": start_date, "endDate": end, "recurrenceTimeZone": zone })
+        }
+        (None, Some(c)) => json!({ "type": "numbered", "startDate": start_date, "numberOfOccurrences": c, "recurrenceTimeZone": zone }),
+        (None, None) => json!({ "type": "noEnd", "startDate": start_date, "recurrenceTimeZone": zone }),
+    };
+    json!({ "pattern": pattern, "range": range })
 }
 
 fn str_of<'a>(v: &'a Value, key: &str) -> &'a str {
@@ -223,8 +253,9 @@ fn task_of(t: &Value) -> Option<Task> {
 impl GraphClient {
     /// The event as Graph takes it; `zone` is the client's time zone, for all-day ones.
     fn event_json(a: &Appointment, zone: &str) -> Value {
-        let time =
-            |ts| if a.all_day { json!({ "dateTime": local(ts), "timeZone": zone }) } else { json!({ "dateTime": utc(ts), "timeZone": "UTC" }) };
+        // A series repeats in the computer's zone, so its times go as wall-clock time there.
+        let zoned = a.all_day || a.recurrence.is_some();
+        let time = |ts| if zoned { json!({ "dateTime": local(ts), "timeZone": zone }) } else { json!({ "dateTime": utc(ts), "timeZone": "UTC" }) };
         let mut event = json!({
             "subject": a.title,
             "body": text_body(&a.notes),
@@ -236,6 +267,9 @@ impl GraphClient {
         });
         if let Some(m) = a.reminder {
             event["reminderMinutesBeforeStart"] = json!(m);
+        }
+        if let Some(r) = &a.recurrence {
+            event["recurrence"] = recurrence_json(r, a.start, zone);
         }
         event
     }
@@ -687,10 +721,26 @@ mod tests {
         let body = GraphClient::event_json(&a, "Europe/Amsterdam");
         assert_eq!(body["start"], json!({ "dateTime": "2026-10-14T17:46:40", "timeZone": "UTC" }));
         assert_eq!(body["location"]["displayName"], "Studio");
-        let whole = Appointment { all_day: true, ..a };
+        let whole = Appointment { all_day: true, ..a.clone() };
         let body = GraphClient::event_json(&whole, "Europe/Amsterdam");
         assert_eq!(body["start"]["timeZone"], "Europe/Amsterdam");
         assert_eq!(body["start"]["dateTime"], local(1_792_000_000));
+
+        let weekly = Recurrence { interval: 2, weekdays: vec![0, 2], count: Some(10), ..Recurrence::every(Frequency::Weekly) };
+        let series = Appointment { recurrence: Some(weekly), ..a };
+        let body = GraphClient::event_json(&series, "Europe/Amsterdam");
+        assert_eq!(body["start"]["timeZone"], "Europe/Amsterdam", "a series goes as wall-clock time in its zone");
+        assert_eq!(
+            body["recurrence"]["pattern"],
+            json!({ "type": "weekly", "interval": 2, "daysOfWeek": ["monday", "wednesday"], "firstDayOfWeek": "monday" })
+        );
+        assert_eq!(body["recurrence"]["range"]["type"], "numbered");
+        assert_eq!(body["recurrence"]["range"]["numberOfOccurrences"], 10);
+        assert_eq!(body["recurrence"]["range"]["startDate"], local(1_792_000_000)[..10]);
+        let yearly = Appointment { recurrence: Some(Recurrence::every(Frequency::Yearly)), ..series };
+        let body = GraphClient::event_json(&yearly, "Europe/Amsterdam");
+        assert_eq!(body["recurrence"]["pattern"]["type"], "absoluteYearly");
+        assert_eq!(body["recurrence"]["range"]["type"], "noEnd");
     }
 
     #[test]
