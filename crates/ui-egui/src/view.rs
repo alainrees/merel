@@ -17,6 +17,8 @@ pub enum ReadingPane {
     #[default]
     Right,
     Bottom,
+    /// No reading pane: the list takes the width and a message opens in its own window.
+    Off,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,8 +168,10 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
         });
         ui.separator();
         group(ui, t, "Leesvenster", |ui| {
-            for (pane, name) in [(ReadingPane::Right, "Rechts"), (ReadingPane::Bottom, "Onder")] {
-                if ui.selectable_label(app.view.reading_pane == pane, name).clicked() {
+            for (pane, name) in [(ReadingPane::Right, "Rechts"), (ReadingPane::Bottom, "Onder"), (ReadingPane::Off, "Uit")] {
+                let hint =
+                    if pane == ReadingPane::Off { "Geen leesvenster; Enter of een dubbelklik opent het bericht in een eigen venster" } else { "" };
+                if ui.selectable_label(app.view.reading_pane == pane, name).on_hover_text(hint).clicked() {
                     app.view.reading_pane = pane;
                     changed = true;
                 }

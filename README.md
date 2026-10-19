@@ -137,7 +137,8 @@ too; a category another client set shows in grey until you give it a colour here
 
 The "Beeld" tab chooses what the list shows and how: only unread, flagged or mail with
 attachments, or only mail with a chosen category; sorted newest or oldest first, by sender or by subject; the reading pane to the
-right or below the list; compact rows without the preview line; "Gesprekken", which folds the messages on one
+right or below the list, or off, in which case the list takes the width (Enter or a double-click on a message
+opens it in its own window, as in Outlook, with any reading pane setting); compact rows without the preview line; "Gesprekken", which folds the messages on one
 subject (whatever their "Re:" or "Fwd:" prefixes) behind the one that stands first in the list, with an arrow to
 unfold them; and a light, dark or system theme. "Groepen" (on by default) heads the list with "Vandaag", "Gisteren", "Deze week", "Vorige week", "Deze maand", "Vorige maand" and "Ouder" while it is sorted by date, as Outlook does. The choices are kept in `view.json` next to the accounts file.
 

@@ -129,6 +129,9 @@ pub struct MailApp {
     pub cleanup: Option<cleanup::Confirm>,
     /// The picture attachment open in its preview window.
     pub preview: Option<attachments::Preview>,
+    /// The selected message is open in its own window (Enter, a double-click, or always when the
+    /// reading pane is off).
+    pub message_window: bool,
     /// The "Alle categorieën" window, while it is open.
     pub categories: Option<categories::Manager>,
     /// The open help window ("Help" tab), if any.
@@ -225,6 +228,7 @@ impl MailApp {
             unsubscribe: None,
             cleanup: None,
             preview: None,
+            message_window: false,
             shown_message: None,
             remote: remote::RemoteImages::default(),
             drafts_for: None,
@@ -308,6 +312,7 @@ impl MailApp {
         unsubscribe::window(self, &ctx, &t);
         cleanup::window(self, &ctx, &t);
         attachments::preview_window(self, &ctx, &t);
+        message_window(self, &ctx, &t);
         categories::window(self, &ctx, &t);
         help::window(self, &ctx, &t);
         drag_preview(self, &ctx, &t);
@@ -332,10 +337,17 @@ impl MailApp {
                 view::ReadingPane::Bottom => {
                     egui::Panel::top("messages").default_size(320.0).resizable(true).frame(frame).show(ui, |ui| message_list(self, ui, &t));
                 }
+                view::ReadingPane::Off => {
+                    // Outlook's "Leesvenster uit": the list takes the room and a message is read
+                    // in its own window.
+                    egui::CentralPanel::default().frame(frame).show(ui, |ui| message_list(self, ui, &t));
+                }
             }
-            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading).inner_margin(Margin::same(20))).show(ui, |ui| {
-                reading_pane(self, ui, &t);
-            });
+            if self.view.reading_pane != view::ReadingPane::Off {
+                egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading).inner_margin(Margin::same(20))).show(ui, |ui| {
+                    reading_pane(self, ui, &t);
+                });
+            }
         } else if self.module == Module::Calendar {
             calendar::show(self, ui, &t);
         } else if self.module == Module::People {
@@ -458,8 +470,10 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
             step = 1;
         } else if i.consume_key(Modifiers::NONE, Key::ArrowUp) {
             step = -1;
-        } else if i.consume_key(Modifiers::NONE, Key::Escape) && app.engine.session.is_searching() {
-            command = Some("search.clear");
+        } else if i.consume_key(Modifiers::NONE, Key::Enter) {
+            command = Some("message.open_window");
+        } else if i.consume_key(Modifiers::NONE, Key::Escape) && (app.message_window || app.engine.session.is_searching()) {
+            command = Some("escape");
         }
     });
     if let Some(kind) = compose {
@@ -473,7 +487,9 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
         return;
     }
     match command {
-        Some("search.clear") => app.engine.session.search.clear(),
+        Some("escape") if app.message_window => app.message_window = false,
+        Some("escape") => app.engine.session.search.clear(),
+        Some("message.open_window") if has => app.message_window = true,
         Some("folder.refresh") => app.run("folder.refresh", Value::Null),
         Some("message.select_all") => {
             let ids: Vec<String> = app.engine.session.visible_messages().iter().map(|m| m.id.clone()).collect();
@@ -1029,6 +1045,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let row_ids: Vec<String> = rows.iter().map(|r| r.m.id.clone()).collect();
                 let mut toggle: Option<String> = None;
                 let mut menu_pick: Option<(mailcraft_model::MessageHeader, message_menu::Pick)> = None;
+                let mut open_window: Option<String> = None;
                 // Date groups, as Outlook heads the list, while the list is in date order.
                 let grouped =
                     app.view.groups && matches!(app.engine.session.sort, mailcraft_engine::view::Sort::Newest | mailcraft_engine::view::Sort::Oldest);
@@ -1052,6 +1069,9 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     };
                     let r = r.on_hover_text(hover);
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &m.subject));
+                    if r.double_clicked() {
+                        open_window = Some(m.id.clone());
+                    }
                     let known_sender = app.engine.session.contact_with_email(m.from.email()).is_some();
                     let in_junk = app.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk);
                     let ignored = app.engine.session.message_ignored(&m.id);
@@ -1151,6 +1171,12 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 if let Some((m, p)) = menu_pick {
                     app.act_on_message(&m, p);
                 }
+                if let Some(id) = open_window {
+                    if app.engine.session.selected_message.as_deref() != Some(id.as_str()) || !app.engine.session.marked.is_empty() {
+                        app.run("message.select", json!({ "id": id }));
+                    }
+                    app.message_window = true;
+                }
                 let selected = app.engine.session.selected_folder.clone();
                 if !searching && let Some(folder) = selected {
                     if loading && !app.engine.session.visible_messages().is_empty() {
@@ -1227,6 +1253,30 @@ fn select_row(app: &mut MailApp, row_ids: &[String], id: String, mods: egui::Mod
         app.run("message.select_more", json!({ "id": id }));
     } else {
         app.run("message.select", json!({ "id": id }));
+    }
+}
+
+/// The selected message in its own window, as a double-click opens it in Outlook: the same
+/// reading pane in a movable window; Escape or its cross closes it. It closes by itself when
+/// nothing is selected any more.
+fn message_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    if !app.message_window {
+        return;
+    }
+    let Some(subject) = app.engine.session.selected().map(|m| m.subject.clone()) else {
+        app.message_window = false;
+        return;
+    };
+    let mut open = true;
+    egui::Window::new(format!("✉ {subject}"))
+        .id(egui::Id::new("message-window"))
+        .open(&mut open)
+        .default_size(vec2(760.0, 560.0))
+        .resizable(true)
+        .frame(egui::Frame::window(&ctx.global_style()).fill(t.reading).inner_margin(Margin::same(16)))
+        .show(ctx, |ui| reading_pane(app, ui, t));
+    if !open {
+        app.message_window = false;
     }
 }
 
@@ -2805,6 +2855,27 @@ mod tests {
         h.get_by_label("Welkom bij Mailcraft").click();
         h.run();
         assert_eq!(h.state().engine.session.selected_message.as_deref(), Some("m0"), "the list still works under the reading pane");
+        h.get_by_label("Uit").click();
+        h.run();
+        assert_eq!(h.state().view.reading_pane, view::ReadingPane::Off);
+        assert!(h.query_by_label("Selecteer een bericht om het te lezen.").is_none(), "no reading pane");
+        h.get_by_label("Planning voor donderdag").click();
+        h.run();
+        assert!(!h.state().message_window, "a single click only selects");
+        // The keys of the mail module work from the Start tab.
+        h.get_by_label("Start").click();
+        h.run();
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert!(h.state().message_window);
+        h.get_by_label("✉ Planning voor donderdag");
+        h.key_press(egui::Key::Escape);
+        h.run();
+        assert!(!h.state().message_window && h.query_by_label("✉ Planning voor donderdag").is_none());
+        h.get_by_label("Beeld").click();
+        h.run();
+        h.get_by_label("Rechts").click();
+        h.run();
         h.get_by_label("Compact").click();
         h.run();
         assert!(h.state().view.compact);
