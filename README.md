@@ -32,8 +32,11 @@ server's own filter stays the first line, and its Junk folder shows as "Ongewens
 "Afzender blokkeren" in a message's right-click menu (or "Bestand" > "Ongewenste e-mail", for an address or a
 whole domain) keeps a list of blocked senders in `junk.json`; new mail from one of them goes straight to that
 folder, like "Ongewenst" by hand. Safe senders and your contacts are never filed, and "Geen ongewenst" (on a
-message in the Junk folder, or in its menu) brings a message back and trusts its sender. The lists live on
-your computer; nothing about your mail is sent anywhere to be checked. Phishing: a message that shows signs of it
+message in the Junk folder, or in its menu) brings a message back and trusts its sender. "Ongewenst", "Afzender
+blokkeren" and "Geen ongewenst" also tell the server what you decided, so its filter learns and your phone sees the
+same: the `$Junk`/`$NotJunk` keywords over IMAP, `MarkAsJunk` on Exchange (which also keeps the sender in the
+mailbox's blocked list); Gmail learns from the move to Spam itself and Microsoft 365 over Graph from the move to
+Junk Email. The lists live on your computer; nothing about your mail is sent anywhere to be checked. Phishing: a message that shows signs of it
 gets a warning strip above its text that names them, with "Afzender blokkeren" at hand: a sender who uses a
 contact's name (or an address as a name) with another address, a domain one letter or one look-alike letter away
 from a domain you know (your contacts', your own), failed SPF/DKIM/DMARC checks reported by your mail server in the
