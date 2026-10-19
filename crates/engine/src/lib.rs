@@ -14,6 +14,7 @@ mod commands;
 pub mod config;
 pub mod contacts;
 pub mod drafts;
+pub mod reminders;
 mod sample;
 pub mod signin;
 pub mod sync;
@@ -310,6 +311,10 @@ pub struct Session {
     pub calendars: Vec<Calendar>,
     pub appointments: Vec<Appointment>,
     pub selected_appointment: Option<String>,
+    /// Reminders closed for good, by occurrence; saved with the local calendar.
+    pub dismissed_reminders: Vec<reminders::ReminderKey>,
+    /// Reminders put off, by occurrence, until the given moment.
+    pub snoozed_reminders: reminders::Snoozed,
     pub contacts: Vec<Contact>,
     pub selected_contact: Option<String>,
     pub tasks: Vec<Task>,
@@ -409,6 +414,8 @@ impl Session {
         }
         self.calendars.retain(|c| c.account_id.as_deref() != Some(account_id));
         self.appointments.retain(|a| !a.id.starts_with(&prefix));
+        self.dismissed_reminders.retain(|k| !k.id.starts_with(&prefix));
+        self.snoozed_reminders.retain(|k, _| !k.id.starts_with(&prefix));
         if self.selected_appointment.as_deref().is_some_and(|id| id.starts_with(&prefix)) {
             self.selected_appointment = None;
         }
@@ -1282,6 +1289,7 @@ mod tests {
                 location: String::new(),
                 notes: String::new(),
                 recurrence: None,
+                reminder: None,
             }],
             contacts: Vec::new(),
             tasks: Vec::new(),

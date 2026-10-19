@@ -91,7 +91,11 @@ fn build() -> Option<Session> {
         .collect();
 
     let mut session = Session { accounts: vec![account], folders, messages, ..Session::default() };
-    session.set_calendar_data(crate::calendar::CalendarFile { calendars: vec![Calendar::local()], appointments: appointments() });
+    session.set_calendar_data(crate::calendar::CalendarFile {
+        calendars: vec![Calendar::local()],
+        appointments: appointments(),
+        dismissed: Vec::new(),
+    });
     session.set_contacts(contacts());
     session.set_tasks(tasks());
     Some(session)
@@ -178,6 +182,7 @@ fn appointments() -> Vec<Appointment> {
                 location: location.into(),
                 notes: String::new(),
                 recurrence: None,
+                reminder: None,
             })
         })
         .collect();
@@ -195,6 +200,7 @@ fn appointments() -> Vec<Appointment> {
             location: "Studio".into(),
             notes: String::new(),
             recurrence: Some(Recurrence::every(Frequency::Weekly)),
+            reminder: None,
         });
     }
     list

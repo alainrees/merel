@@ -62,6 +62,7 @@ fn appointment_of(node: Node<'_, '_>) -> Option<Appointment> {
         location: text(node, "Location").unwrap_or("").to_string(),
         notes: body_text(node),
         recurrence: None,
+        reminder: (text(node, "ReminderIsSet") == Some("true")).then(|| text(node, "ReminderMinutesBeforeStart")?.trim().parse().ok()).flatten(),
     }
     .validated()
     .ok()
@@ -190,6 +191,10 @@ fn appointment_fields(a: &Appointment) -> Fields {
     let mut f = Fields::new("CalendarItem");
     f.put("item:Subject", format!("<t:Subject>{}</t:Subject>", esc(&a.title)));
     f.put("item:Body", format!("<t:Body BodyType=\"Text\">{}</t:Body>", esc(&a.notes)));
+    f.put("item:ReminderIsSet", format!("<t:ReminderIsSet>{}</t:ReminderIsSet>", a.reminder.is_some()));
+    if let Some(m) = a.reminder {
+        f.put("item:ReminderMinutesBeforeStart", format!("<t:ReminderMinutesBeforeStart>{m}</t:ReminderMinutesBeforeStart>"));
+    }
     f.put("calendar:Start", format!("<t:Start>{}</t:Start>", time(a.start)));
     f.put("calendar:End", format!("<t:End>{}</t:End>", time(a.end)));
     f.put("calendar:IsAllDayEvent", format!("<t:IsAllDayEvent>{}</t:IsAllDayEvent>", a.all_day));
@@ -302,7 +307,16 @@ impl ItemStore for EwsClient {
     fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>> {
         let view = format!("<m:CalendarView MaxEntriesReturned=\"{PAGE}\" StartDate=\"{}\" EndDate=\"{}\"/>", utc(from), utc(to.max(from)));
         let ids = self.list_ids("calendar", &view)?;
-        let props = field_uris(&["item:Subject", "item:Body", "calendar:Start", "calendar:End", "calendar:IsAllDayEvent", "calendar:Location"]);
+        let props = field_uris(&[
+            "item:Subject",
+            "item:Body",
+            "item:ReminderIsSet",
+            "item:ReminderMinutesBeforeStart",
+            "calendar:Start",
+            "calendar:End",
+            "calendar:IsAllDayEvent",
+            "calendar:Location",
+        ]);
         self.fetch(&ids, &props, appointment_of)
     }
 
@@ -476,12 +490,18 @@ mod tests {
     fn calendar_items_become_appointments() {
         let xml = reply(concat!(
             "<t:CalendarItem><t:ItemId Id=\"AAk1\" ChangeKey=\"x\"/><t:Subject>Overleg</t:Subject><t:Body BodyType=\"Text\">Agenda:\n- punt 1</t:Body>",
+            "<t:ReminderIsSet>true</t:ReminderIsSet><t:ReminderMinutesBeforeStart>30</t:ReminderMinutesBeforeStart>",
             "<t:Start>2026-10-14T17:46:40Z</t:Start><t:End>2026-10-14T18:46:40Z</t:End><t:IsAllDayEvent>false</t:IsAllDayEvent>",
             "<t:Location>Studio</t:Location></t:CalendarItem>",
         ));
         let a = first(&xml, appointment_of).unwrap();
         assert_eq!((a.id.as_str(), a.title.as_str(), a.location.as_str(), a.notes.as_str()), ("AAk1", "Overleg", "Studio", "Agenda:\n- punt 1"));
-        assert_eq!((a.start, a.end, a.all_day), (1_792_000_000, 1_792_003_600, false));
+        assert_eq!((a.start, a.end, a.all_day, a.reminder), (1_792_000_000, 1_792_003_600, false, Some(30)));
+        let off = reply(concat!(
+            "<t:CalendarItem><t:ItemId Id=\"A4\"/><t:ReminderIsSet>false</t:ReminderIsSet><t:ReminderMinutesBeforeStart>15</t:ReminderMinutesBeforeStart>",
+            "<t:Start>2026-10-14T17:46:40Z</t:Start><t:End>2026-10-14T18:46:40Z</t:End></t:CalendarItem>"
+        ));
+        assert_eq!(first(&off, appointment_of).unwrap().reminder, None, "minutes without the switch mean no reminder");
 
         let untitled =
             reply("<t:CalendarItem><t:ItemId Id=\"A2\"/><t:Start>2026-10-14T17:46:40Z</t:Start><t:End>2026-10-14T17:46:40Z</t:End></t:CalendarItem>");
@@ -534,12 +554,14 @@ mod tests {
             location: "<Studio>".into(),
             notes: String::new(),
             recurrence: None,
+            reminder: Some(15),
         };
         let xml = appointment_fields(&a).create();
         assert_eq!(
             xml,
             concat!(
-                "<t:CalendarItem><t:Subject>A &amp; B</t:Subject><t:Body BodyType=\"Text\"></t:Body><t:Start>2026-10-14T17:46:40Z</t:Start>",
+                "<t:CalendarItem><t:Subject>A &amp; B</t:Subject><t:Body BodyType=\"Text\"></t:Body>",
+                "<t:ReminderIsSet>true</t:ReminderIsSet><t:ReminderMinutesBeforeStart>15</t:ReminderMinutesBeforeStart><t:Start>2026-10-14T17:46:40Z</t:Start>",
                 "<t:End>2026-10-14T18:46:40Z</t:End><t:IsAllDayEvent>false</t:IsAllDayEvent><t:Location>&lt;Studio&gt;</t:Location></t:CalendarItem>"
             )
         );

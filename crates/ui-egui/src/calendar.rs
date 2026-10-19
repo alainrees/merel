@@ -122,7 +122,31 @@ pub struct Editor {
     pub count: String,
     /// The start of the occurrence the window was opened from, for a recurring appointment.
     pub occurrence: Option<i64>,
+    /// Minutes before the start a reminder comes; `None` for none.
+    pub reminder: Option<u32>,
     pub error: Option<String>,
+}
+
+/// The reminder choices of the window: minutes before the start, and the label.
+const REMINDERS: [(Option<u32>, &str); 10] = [
+    (None, "Geen"),
+    (Some(0), "Op het moment zelf"),
+    (Some(5), "5 minuten ervoor"),
+    (Some(10), "10 minuten ervoor"),
+    (Some(15), "15 minuten ervoor"),
+    (Some(30), "30 minuten ervoor"),
+    (Some(60), "1 uur ervoor"),
+    (Some(120), "2 uur ervoor"),
+    (Some(1440), "1 dag ervoor"),
+    (Some(10_080), "1 week ervoor"),
+];
+
+/// The label of a reminder setting, also one the list does not offer.
+fn reminder_label(reminder: Option<u32>) -> String {
+    match REMINDERS.iter().find(|(r, _)| *r == reminder) {
+        Some((_, label)) => (*label).to_string(),
+        None => format!("{} minuten ervoor", reminder.unwrap_or(0)),
+    }
 }
 
 impl Editor {
@@ -147,6 +171,8 @@ impl Editor {
             until: String::new(),
             count: "10".into(),
             occurrence: None,
+            // Outlook's default: a quarter of an hour before.
+            reminder: Some(15),
             error: None,
         }
     }
@@ -163,6 +189,7 @@ impl Editor {
         e.title = a.title.clone();
         e.location = a.location.clone();
         e.all_day = a.all_day;
+        e.reminder = a.reminder;
         e.end_date = end.format(DATE_FORMAT).to_string();
         e.end_time = end.format(TIME_FORMAT).to_string();
         e.notes = a.notes.clone();
@@ -260,6 +287,7 @@ impl Editor {
             "location": self.location,
             "notes": self.notes,
             "recurrence": recurrence,
+            "reminder": self.reminder,
         });
         if recurrence.is_some() {
             // The engine keeps the occurrences that were skipped; the window never lists them.
@@ -763,6 +791,14 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 ui.add(egui::TextEdit::singleline(&mut editor.end_time).desired_width(50.0));
             }
         });
+        ui.horizontal(|ui| {
+            ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Herinnering").color(t.text)));
+            egui::ComboBox::from_id_salt("appointment-reminder").selected_text(reminder_label(editor.reminder)).width(160.0).show_ui(ui, |ui| {
+                for (r, label) in REMINDERS {
+                    ui.selectable_value(&mut editor.reminder, r, label);
+                }
+            });
+        });
         // Only a calendar on this computer takes a series; a server expands its own.
         let chosen = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _)| id.clone()));
         let local = chosen.as_ref().is_some_and(|id| local_calendars.contains(id));
@@ -893,10 +929,15 @@ mod tests {
             location: String::new(),
             notes: String::new(),
             recurrence: None,
+            reminder: None,
         };
         let back = Editor::from_appointment(&a, None);
         assert_eq!((back.start_date.as_str(), back.end_date.as_str()), ("21-10-2026", "21-10-2026"));
-        assert!(back.repeat.is_none() && back.occurrence.is_none());
+        assert!(back.repeat.is_none() && back.occurrence.is_none() && back.reminder.is_none());
+        assert_eq!(p["reminder"], 15, "a new appointment reminds a quarter of an hour before");
+        assert!(back.params().unwrap()["reminder"].is_null());
+        assert_eq!(reminder_label(Some(1440)), "1 dag ervoor");
+        assert_eq!(reminder_label(Some(45)), "45 minuten ervoor");
     }
 
     #[test]
@@ -937,6 +978,7 @@ mod tests {
             location: String::new(),
             notes: String::new(),
             recurrence: Some(Recurrence { interval: 2, count: Some(8), ..Recurrence::every(Frequency::Monthly) }),
+            reminder: None,
         };
         let back = Editor::from_appointment(&a, Some(a.start + 86_400 * 61));
         assert_eq!((back.repeat, back.interval.as_str(), back.ends, back.count.as_str()), (Some(Frequency::Monthly), "2", Ends::AfterCount, "8"));
