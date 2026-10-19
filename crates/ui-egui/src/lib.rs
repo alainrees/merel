@@ -1088,18 +1088,19 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     };
     ui.label(RichText::new(&m.subject).size(20.0).strong().color(t.text));
     ui.add_space(10.0);
-    if app.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk) {
-        // A message in the Junk folder: a warning, and the way back for a sender who is not junk.
+    let in_junk = app.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk);
+    if in_junk {
+        // A message in the Junk folder: a warning, the links, attachments and pictures switched
+        // off (as Outlook does), and the way back for a sender who is not junk.
         let mut not_junk = false;
         egui::Frame::new().fill(t.flag.gamma_multiply(0.15)).corner_radius(4).inner_margin(8).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    RichText::new("⚠ Dit bericht staat in Ongewenste e-mail. Klik niet op links en open geen bijlagen als je de afzender niet kent.")
-                        .color(t.text),
-                );
+                ui.label(RichText::new(JUNK_NOTICE).color(t.text));
                 not_junk = ui
                     .small_button("Geen ongewenst")
-                    .on_hover_text("Zet het bericht terug in Postvak IN en maakt de afzender een veilige afzender.")
+                    .on_hover_text(
+                        "Zet het bericht terug in Postvak IN en maakt de afzender een veilige afzender; links en bijlagen werken dan weer.",
+                    )
                     .clicked();
             });
         });
@@ -1198,7 +1199,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         egui::Frame::NONE.fill(t.checked).corner_radius(CornerRadius::same(4)).inner_margin(Margin::symmetric(10, 6)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(notice).size(12.0).color(t.text));
-                if blocked > 0 && !allowed {
+                if blocked > 0 && !allowed && !in_junk {
                     load = ui
                         .small_button("Afbeeldingen laden")
                         .on_hover_text("Haalt de afbeeldingen van dit ene bericht op van internet. De afzender kan daaraan zien dat je het bericht hebt geopend.")
@@ -1219,7 +1220,10 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     .fill(t.panel)
                     .stroke(Stroke::new(1.0, t.border))
                     .corner_radius(CornerRadius::same(4));
-                if ui.add(chip).on_hover_text("Opslaan in je map Downloads. Mailcraft opent bijlagen niet zelf.").clicked() {
+                if in_junk {
+                    ui.add_enabled(false, chip)
+                        .on_disabled_hover_text("Uitgeschakeld in Ongewenste e-mail. Klik op Geen ongewenst als je deze afzender vertrouwt.");
+                } else if ui.add(chip).on_hover_text("Opslaan in je map Downloads. Mailcraft opent bijlagen niet zelf.").clicked() {
                     save = Some(a.clone());
                 }
             }
@@ -1240,8 +1244,10 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         && let Some(doc) = b.rich.as_ref()
     {
         let remote = app.remote.snapshot(&message_id);
-        let clicked =
-            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| html::show(ui, t, doc, &b.images, &message_id, remote.as_ref())).inner;
+        let clicked = egui::ScrollArea::vertical()
+            .auto_shrink(false)
+            .show(ui, |ui| html::show(ui, t, doc, &b.images, &message_id, remote.as_ref(), !in_junk))
+            .inner;
         if let Some(html::Clicked::Mailto(address)) = clicked {
             let signature = app.engine.session.current_account().map(|a| a.signature.clone()).unwrap_or_default();
             let mut c = Compose::new(ComposeKind::New, None).with_signature(&signature);
@@ -1263,6 +1269,8 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 
 /// The first line of the strip above a message that shows signs of phishing.
 pub(crate) const PHISHING_TITLE: &str = "⚠ Pas op: dit bericht heeft kenmerken van phishing.";
+/// The strip above a message in the Junk folder.
+pub(crate) const JUNK_NOTICE: &str = "⚠ Dit bericht staat in Ongewenste e-mail. Links, bijlagen en afbeeldingen van internet zijn uitgeschakeld tot je het als Geen ongewenst aanmerkt.";
 
 /// What points to phishing in `m`, from its sender (against the contacts and the person's own
 /// addresses) and, once fetched, its body: the server's authentication results, the links and
@@ -1706,6 +1714,45 @@ mod tests {
         h.state_mut().engine.session.selected_message = Some("m1".into());
         h.run();
         assert!(h.query_by_label(PHISHING_TITLE).is_none());
+    }
+
+    #[test]
+    fn links_attachments_and_pictures_are_switched_off_in_the_junk_folder() {
+        use egui_kittest::kittest::NodeT;
+        let mut h = harness();
+        let body = mailcraft_engine::Body {
+            rich: Some(mailcraft_html::parse(
+                r#"<p><a href="https://example.nl/actie">Klik hier</a> <img src="https://t.example/p.gif" alt="pixel"></p>"#,
+            )),
+            attachments: vec![mailcraft_mime::Attachment {
+                name: "bon.pdf".into(),
+                mime: "application/pdf".into(),
+                size: 3,
+                bytes: std::sync::Arc::from(&b"abc"[..]),
+            }],
+            ..Default::default()
+        };
+        h.state_mut().engine.session.bodies.insert("m3".into(), body);
+        h.state_mut().engine.session.run("junk.block", &json!({ "id": "m3" })).unwrap();
+        h.state_mut().engine.session.selected_message = Some("m3".into());
+        h.run();
+        h.get_by_label(JUNK_NOTICE);
+        assert!(h.get_by_label_contains("bon.pdf").accesskit_node().is_disabled(), "the attachment cannot be saved from here");
+        assert!(h.query_by_label("Afbeeldingen laden").is_none(), "pictures on the internet cannot be asked for");
+        h.get_by_label("Klik hier").hover();
+        h.run();
+        assert!(h.query_by_label_contains(html::LINKS_OFF).is_some(), "the link says why it does nothing");
+
+        // "Geen ongewenst" brings the message back, and everything works again.
+        h.get_by_label("Geen ongewenst").click();
+        h.run();
+        assert_eq!(h.state().engine.session.message("m3").map(|m| m.folder_id.as_str()), Some("inbox"));
+        // The move dropped the selection, as any move does; back on the message everything works.
+        h.state_mut().engine.session.selected_message = Some("m3".into());
+        h.run();
+        assert!(h.query_by_label(JUNK_NOTICE).is_none());
+        assert!(!h.get_by_label_contains("bon.pdf").accesskit_node().is_disabled());
+        assert!(h.query_by_label("Afbeeldingen laden").is_some());
     }
 
     #[test]

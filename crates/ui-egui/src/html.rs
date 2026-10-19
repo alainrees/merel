@@ -2,7 +2,9 @@
 //! headings, lists, quotes, tables, links and pictures, nothing else. There is no browser
 //! here, so nothing in a message can run or load; a link opens in the system browser only
 //! when clicked, and its real target shows on hover. Pictures on the internet get a
-//! placeholder until the person asks for them (see [`crate::remote`]).
+//! placeholder until the person asks for them (see [`crate::remote`]). In the Junk folder the
+//! links are switched off, the way Outlook does it: drawn, with their target on hover, but a
+//! click does nothing.
 
 use egui::{Color32, CornerRadius, Margin, RichText, Sense, Stroke, Ui, vec2};
 
@@ -31,14 +33,20 @@ struct Painter<'a> {
     key: &'a str,
     /// Pictures on the internet the person asked for; `None` keeps them all blocked.
     remote: Option<&'a Loads>,
+    /// Whether a click on a link opens it; off for a message in the Junk folder.
+    links: bool,
     data_images: usize,
     remote_images: usize,
     clicked: Option<Clicked>,
 }
 
-/// Draws `doc`. `key` names the message, so its pictures are cached under their own names.
-pub fn show(ui: &mut Ui, t: &Tokens, doc: &Document, images: &[InlineImage], key: &str, remote: Option<&Loads>) -> Option<Clicked> {
-    let mut p = Painter { t, images, key, remote, data_images: 0, remote_images: 0, clicked: None };
+/// What hovering a switched-off link says, before its target.
+pub const LINKS_OFF: &str = "Uitgeschakeld in Ongewenste e-mail";
+
+/// Draws `doc`. `key` names the message, so its pictures are cached under their own names;
+/// `links` false draws the links but lets no click through.
+pub fn show(ui: &mut Ui, t: &Tokens, doc: &Document, images: &[InlineImage], key: &str, remote: Option<&Loads>, links: bool) -> Option<Clicked> {
+    let mut p = Painter { t, images, key, remote, links, data_images: 0, remote_images: 0, clicked: None };
     p.blocks(ui, &doc.blocks);
     if doc.truncated {
         ui.label(RichText::new("[Bericht afgekapt: te groot om volledig te tonen.]").color(t.text_dim).size(12.0));
@@ -121,6 +129,10 @@ impl Painter<'_> {
                 match inline {
                     Inline::Text { text, style } => {
                         ui.add(egui::Label::new(self.rich(text, *style, size).color(self.t.text)).wrap());
+                    }
+                    Inline::Link { href, text, style } if !self.links => {
+                        let rich = self.rich(text, *style, size).color(self.t.text_dim).underline();
+                        ui.add(egui::Label::new(rich).wrap()).on_hover_text(format!("{LINKS_OFF}: {href}"));
                     }
                     Inline::Link { href, text, style } => {
                         let rich = self.rich(text, *style, size).color(self.t.accent_text).underline();
@@ -231,7 +243,7 @@ mod tests {
         let seen = clicked.clone();
         let t = Tokens::light();
         let mut h = egui_kittest::Harness::builder().with_size(vec2(900.0, 700.0)).build_ui(move |ui| {
-            if let Some(c) = show(ui, &t, &doc, &[], "m1", None) {
+            if let Some(c) = show(ui, &t, &doc, &[], "m1", None, true) {
                 *seen.borrow_mut() = Some(c);
             }
         });
@@ -254,11 +266,28 @@ mod tests {
         loads.insert("https://t.example/b.png".into(), Load::Failed);
         let t = Tokens::light();
         let mut h = egui_kittest::Harness::builder().with_size(vec2(600.0, 300.0)).build_ui(move |ui| {
-            show(ui, &t, &doc, &[], "m2", Some(&loads));
+            show(ui, &t, &doc, &[], "m2", Some(&loads), true);
         });
         h.run();
         assert!(h.query_by_label_contains("laden…: eerste").is_some());
         assert!(h.query_by_label_contains("kon niet worden geladen: tweede").is_some());
         assert!(h.query_by_label_contains("geblokkeerd").is_none());
+    }
+
+    #[test]
+    fn switched_off_links_are_drawn_but_a_click_does_nothing() {
+        let doc = mailcraft_html::parse(r#"<p><a href="mailto:sanne@example.org">mail Sanne</a></p>"#);
+        let clicked = Rc::new(RefCell::new(None));
+        let seen = clicked.clone();
+        let t = Tokens::light();
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(600.0, 300.0)).build_ui(move |ui| {
+            if let Some(c) = show(ui, &t, &doc, &[], "m3", None, false) {
+                *seen.borrow_mut() = Some(c);
+            }
+        });
+        h.run();
+        h.get_by_label("mail Sanne").click();
+        h.run();
+        assert_eq!(*clicked.borrow(), None);
     }
 }
