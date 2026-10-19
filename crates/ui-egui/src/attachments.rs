@@ -1,8 +1,14 @@
-//! Saving an attachment to the Downloads folder. Nothing is opened or run: the file is
-//! written under a name cleaned of paths and control characters, never over an existing one,
-//! and the status bar says where it went.
+//! Saving an attachment to the Downloads folder, and the preview of a picture. Nothing is
+//! opened or run: the file is written under a name cleaned of paths and control characters,
+//! never over an existing one, and the status bar says where it went. A picture attachment
+//! gets a thumbnail under the message and a window with the full picture, decoded by the same
+//! image loader the HTML view uses; other kinds are only saved.
 
 use std::path::{Path, PathBuf};
+
+use mailcraft_mime::Attachment;
+
+use crate::{MailApp, Tokens};
 
 /// Longest file name written, in characters.
 const MAX_NAME: usize = 120;
@@ -89,5 +95,79 @@ mod tests {
         assert_eq!(std::fs::read(&a).unwrap(), b"one");
         assert_eq!(c.parent().unwrap(), dir);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// Largest picture Mailcraft decodes for a preview, in bytes; bigger ones are only saved.
+pub const MAX_PREVIEW: usize = 8 * 1024 * 1024;
+
+/// Whether an attachment is a picture Mailcraft shows a preview of, as Outlook does: one of
+/// the formats the decoder knows, not empty and not too big. Anything else is only saved.
+pub fn previewable(a: &Attachment) -> bool {
+    matches!(a.mime.as_str(), "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/bmp")
+        && !a.bytes.is_empty()
+        && a.bytes.len() <= MAX_PREVIEW
+}
+
+/// The picture open in the preview window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Preview {
+    pub attachment: Attachment,
+    /// The id the image loader caches the decoded picture under.
+    pub uri: String,
+}
+
+/// The loader id of attachment `index` of message `message_id`; the message id keeps two
+/// attachments with the same name apart.
+pub fn preview_uri(message_id: &str, index: usize) -> String {
+    format!("bytes://attachment/{message_id}/{index}")
+}
+
+/// What the thumbnail and the window are called, for the accessibility tree and the hover text.
+pub fn preview_label(name: &str) -> String {
+    format!("Voorbeeld van {name}")
+}
+
+impl MailApp {
+    /// Saves the attachment under Downloads and says in the status bar where it went.
+    pub fn save_attachment(&mut self, a: &Attachment) {
+        self.notice = Some(match downloads_dir() {
+            Some(dir) => match save_to(&dir, &a.name, &a.bytes) {
+                Ok(path) => format!("Bijlage opgeslagen als {}", path.display()),
+                Err(e) => format!("Bijlage niet opgeslagen: {e}"),
+            },
+            None => "Bijlage niet opgeslagen: geen map Downloads gevonden.".into(),
+        });
+    }
+}
+
+/// The preview window, while a picture is open: the picture fitted to the window, with
+/// "Opslaan in Downloads" and "Sluiten".
+pub fn preview_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    let Some(p) = app.preview.clone() else { return };
+    let mut save = false;
+    let mut close = false;
+    let screen = ctx.content_rect().size();
+    let max = egui::vec2((screen.x - 80.0).clamp(200.0, 1000.0), (screen.y - 160.0).clamp(150.0, 700.0));
+    egui::Window::new(preview_label(&p.attachment.name)).collapsible(false).resizable(false).show(ctx, |ui| {
+        let image =
+            egui::Image::from_bytes(p.uri.clone(), egui::load::Bytes::Shared(p.attachment.bytes.clone())).max_size(max).fit_to_original_size(1.0);
+        ui.add(image);
+        ui.label(egui::RichText::new(format!("{}  ({})", p.attachment.name, crate::size_text(p.attachment.size))).size(12.0).color(t.text_dim));
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.button("Opslaan in Downloads").clicked() {
+                save = true;
+            }
+            if ui.button("Sluiten").clicked() {
+                close = true;
+            }
+        });
+    });
+    if save {
+        app.save_attachment(&p.attachment);
+    }
+    if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        app.preview = None;
     }
 }
