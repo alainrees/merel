@@ -104,7 +104,12 @@ pub struct MailApp {
     pub announced_reminders: std::collections::HashSet<(String, i64)>,
     /// The rules window, while it is open.
     pub rules: Option<rules::State>,
+    /// Whether the "Verplaatsen naar" window for the selected message is open.
+    pub move_to: bool,
 }
+
+/// A message being dragged from the list, to drop on a folder.
+struct DraggedMessage(String);
 
 impl MailApp {
     pub fn new(engine: Engine) -> Self {
@@ -123,6 +128,7 @@ impl MailApp {
             drafts_for: None,
             announced_reminders: std::collections::HashSet::new(),
             rules: None,
+            move_to: false,
         }
     }
 
@@ -167,6 +173,8 @@ impl MailApp {
         calendar::window(self, &ctx, &t);
         reminders::window(self, &ctx, &t);
         rules::window(self, &ctx, &t);
+        move_window(self, &ctx, &t);
+        drag_preview(self, &ctx, &t);
         if self.tab == Tab::Home && self.module == Module::Mail {
             shortcuts(self, &ctx);
         }
@@ -224,6 +232,8 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
             compose = Some(ComposeKind::Forward);
         } else if i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace) {
             command = Some("message.delete");
+        } else if i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::V) {
+            command = Some("message.move_window");
         } else if i.consume_key(Modifiers::COMMAND, Key::Q) {
             command = Some("message.mark_read");
         } else if i.consume_key(Modifiers::COMMAND, Key::U) {
@@ -247,6 +257,7 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
     match command {
         Some("search.clear") => app.engine.session.search.clear(),
         Some("folder.refresh") => app.run("folder.refresh", Value::Null),
+        Some("message.move_window") if has => app.move_to = true,
         Some(id) if has => app.run(id, Value::Null),
         _ => {}
     }
@@ -311,6 +322,9 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ribbon_button(app, ui, t, "🗑", "Verwijderen", ("message.delete", Some("Delete")), has);
                     ribbon_button(app, ui, t, "🗄", "Archiveren", ("message.archive", None), has);
                     ribbon_button(app, ui, t, "⚠", "Ongewenst", ("message.junk", None), has);
+                    if ribbon_action_hint(ui, t, "📂", "Verplaatsen", has, Some(&key_hint("Shift+V"))) {
+                        app.move_to = true;
+                    }
                     ui.separator();
                     ribbon_button(app, ui, t, "◉", "Gelezen", ("message.mark_read", Some(&key_hint("Q"))), has);
                     ribbon_button(app, ui, t, "○", "Ongelezen", ("message.mark_unread", Some(&key_hint("U"))), has);
@@ -441,6 +455,7 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .show(ui, |ui| {
             let mut pick = None;
             let mut pick_drafts = None;
+            let mut drop_on: Option<(String, String)> = None;
             let mut open_accounts = false;
             for account in &app.engine.session.accounts {
                 ui.horizontal(|ui| {
@@ -470,6 +485,13 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     p.text(rect.left_center(), egui::Align2::LEFT_CENTER, name, font.clone(), t.text);
                     if f.unread > 0 {
                         p.text(rect.right_center(), egui::Align2::RIGHT_CENTER, f.unread.to_string(), font, t.accent_text);
+                    }
+                    // A message dragged from the list lands here.
+                    if r.dnd_hover_payload::<DraggedMessage>().is_some() {
+                        p.rect_stroke(r.rect, CornerRadius::same(4), Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
+                    }
+                    if let Some(dragged) = r.dnd_release_payload::<DraggedMessage>() {
+                        drop_on = Some((dragged.0.clone(), f.id.clone()));
                     }
                     if r.clicked() {
                         pick = Some(f.id.clone());
@@ -509,7 +531,66 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             if let Some(id) = pick_drafts {
                 app.drafts_for = Some(id);
             }
+            if let Some((message, folder)) = drop_on {
+                app.run("message.move", json!({ "id": message, "folder_id": folder }));
+            }
         });
+}
+
+/// The "Verplaatsen naar" window: the folders of the selected message's account.
+fn move_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    if !app.move_to {
+        return;
+    }
+    let Some(m) = app.engine.session.selected().cloned() else {
+        app.move_to = false;
+        return;
+    };
+    let account = app.engine.session.folder(&m.folder_id).map(|f| f.account_id.clone()).unwrap_or_default();
+    let folders: Vec<(String, String, FolderKind)> = app
+        .engine
+        .session
+        .folders
+        .iter()
+        .filter(|f| f.account_id == account && f.id != m.folder_id)
+        .map(|f| (f.id.clone(), f.name.clone(), f.kind))
+        .collect();
+    let mut target = None;
+    let mut close = false;
+    egui::Window::new("Verplaatsen naar").collapsible(false).resizable(false).default_width(280.0).show(ctx, |ui| {
+        ui.label(RichText::new(clip(&m.subject, 48)).size(12.0).color(t.text_dim));
+        ui.add_space(4.0);
+        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+            for (id, name, kind) in &folders {
+                if ui.add_sized([260.0, 26.0], egui::Button::new(format!("{} {name}", folder_icon(*kind)))).clicked() {
+                    target = Some(id.clone());
+                }
+            }
+        });
+        ui.add_space(6.0);
+        if ui.button("Annuleren").clicked() {
+            close = true;
+        }
+    });
+    if let Some(folder) = target {
+        app.run("message.move", json!({ "folder_id": folder }));
+        close = true;
+    }
+    if close {
+        app.move_to = false;
+    }
+}
+
+/// The subject that follows the pointer while a message is dragged to a folder.
+fn drag_preview(app: &MailApp, ctx: &egui::Context, t: &Tokens) {
+    let Some(dragged) = egui::DragAndDrop::payload::<DraggedMessage>(ctx) else { return };
+    let Some(pos) = ctx.pointer_interact_pos() else { return };
+    let subject = app.engine.session.message(&dragged.0).map(|m| clip(&m.subject, 40)).unwrap_or_default();
+    egui::Area::new(egui::Id::new("drag-preview")).fixed_pos(pos + vec2(12.0, 12.0)).order(egui::Order::Tooltip).show(ctx, |ui| {
+        egui::Frame::popup(ui.style()).fill(t.list).show(ui, |ui| {
+            ui.label(RichText::new(format!("✉ {subject}")).color(t.text));
+        });
+    });
 }
 
 /// The drafts of one account in place of the message list: open one to go on writing, or drop it.
@@ -656,7 +737,8 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let show_folder = searching && app.engine.session.search_all;
                 for m in list {
                     let on = app.engine.session.selected_message.as_deref() == Some(m.id.as_str());
-                    let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 68.0), Sense::click());
+                    let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 68.0), Sense::click_and_drag());
+                    r.dnd_set_drag_payload(DraggedMessage(m.id.clone()));
                     let r = r.on_hover_text(&m.subject);
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &m.subject));
                     let p = ui.painter();
@@ -1316,6 +1398,28 @@ mod tests {
         h.get_by_label("Sluiten").click();
         h.run();
         assert!(h.state().rules.is_none());
+    }
+
+    #[test]
+    fn a_message_is_moved_to_a_chosen_folder_from_the_ribbon() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Welkom bij Mailcraft").click();
+        h.run();
+        let id = h.state().engine.session.selected_message.clone().expect("selected");
+        h.get_by_label("Verplaatsen").click();
+        h.run();
+        assert!(h.state().move_to);
+        assert!(h.query_by_label("📥 Postvak IN").is_none(), "the folder it is in is not offered");
+        h.get_by_label("🗄 Archief").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert_eq!(s.message(&id).unwrap().folder_id, "archive");
+        assert!(s.selected_message.is_none() && !h.state().move_to);
+        assert!(h.query_by_label("Welkom bij Mailcraft").is_none(), "gone from the inbox list");
+        h.get_by_label("Archief").click();
+        h.run();
+        h.get_by_label("Welkom bij Mailcraft");
     }
 
     #[test]

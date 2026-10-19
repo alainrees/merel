@@ -21,7 +21,8 @@ built-in sample mail, and reading mail from an IMAP account: add it under File â
 browse folders, open messages (plain text, or HTML drawn with its headings, lists, tables, links
 and embedded pictures, while pictures on the internet stay blocked until you click "Afbeeldingen
 laden" for that one message; a click on an attachment saves it to your Downloads folder), mark read or unread, flag,
-delete, archive and move to junk; changes go back to the server. A folder shows its newest 200
+delete, archive, move to junk or to any folder of the account ("Verplaatsen" in the ribbon, or drag
+the message onto a folder); changes go back to the server. A folder shows its newest 200
 messages and a button at the bottom of the list fetches the next 200, as often as needed. New mail
 comes in on its own: the inbox of every connected account and the open folder are refreshed every
 two minutes (calendar, contacts and tasks every five), the status bar counts new unread messages
@@ -63,7 +64,7 @@ from the selected message. Rules are kept in `rules.json`.
 
 Keyboard shortcuts in the mail module follow Outlook (Cmd instead of Ctrl on a Mac): arrow keys
 walk the message list, Delete removes the selected message, Ctrl+N starts a new message, Ctrl+R
-replies, Ctrl+Shift+R replies to all, Ctrl+F forwards, Ctrl+Q and Ctrl+U mark read or unread,
+replies, Ctrl+Shift+R replies to all, Ctrl+F forwards, Ctrl+Shift+V moves to a folder, Ctrl+Q and Ctrl+U mark read or unread,
 Ctrl+E puts the cursor in the search box, Esc clears a search and F5 refreshes the folder. None
 of them fires while you are typing in a text field or writing a message. Hovering a ribbon button
 shows its shortcut.
