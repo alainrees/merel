@@ -1,4 +1,7 @@
-//! Dates for the message list and reading pane, in UTC until time zones arrive with the calendar.
+//! Dates for the message list and reading pane, in UTC until time zones arrive with the calendar;
+//! the date groups of the list ("Vandaag", "Gisteren", …) follow the computer's time zone.
+
+use chrono::{DateTime, Datelike, Local, NaiveDate};
 
 const MONTHS: [&str; 12] = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
 
@@ -37,9 +40,56 @@ pub fn long(ts: i64) -> String {
     format!("{d} {} {y} {h:02}:{min:02}", month(m))
 }
 
+/// The group a message of `ts` falls in when the list is grouped by date, seen from `today`:
+/// the headings Outlook puts over the list.
+pub fn date_group(ts: i64, today: NaiveDate) -> &'static str {
+    let Some(day) = DateTime::from_timestamp(ts, 0).map(|t| t.with_timezone(&Local).date_naive()) else { return "Ouder" };
+    let week_start = today - chrono::Duration::days(i64::from(today.weekday().num_days_from_monday()));
+    let month_start = today.with_day(1).unwrap_or(today);
+    let last_month_start = month_start.pred_opt().and_then(|d| d.with_day(1)).unwrap_or(month_start);
+    if day > today {
+        "Later"
+    } else if day == today {
+        "Vandaag"
+    } else if today.pred_opt() == Some(day) {
+        "Gisteren"
+    } else if day >= week_start {
+        "Deze week"
+    } else if day >= week_start - chrono::Duration::days(7) {
+        "Vorige week"
+    } else if day >= month_start {
+        "Deze maand"
+    } else if day >= last_month_start {
+        "Vorige maand"
+    } else {
+        "Ouder"
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use chrono::TimeZone;
+
     use super::*;
+
+    #[test]
+    fn the_date_groups_read_like_outlook_s() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(); // a Wednesday
+        let on = |y, m, d| Local.with_ymd_and_hms(y, m, d, 10, 0, 0).single().unwrap().timestamp();
+        assert_eq!(date_group(on(2026, 10, 22), today), "Later");
+        assert_eq!(date_group(on(2026, 10, 21), today), "Vandaag");
+        assert_eq!(date_group(on(2026, 10, 20), today), "Gisteren");
+        assert_eq!(date_group(on(2026, 10, 19), today), "Deze week", "Monday of this week");
+        assert_eq!(date_group(on(2026, 10, 18), today), "Vorige week", "the Sunday before");
+        assert_eq!(date_group(on(2026, 10, 12), today), "Vorige week");
+        assert_eq!(date_group(on(2026, 10, 11), today), "Deze maand");
+        assert_eq!(date_group(on(2026, 10, 1), today), "Deze maand");
+        assert_eq!(date_group(on(2026, 9, 30), today), "Vorige maand");
+        assert_eq!(date_group(on(2026, 9, 1), today), "Vorige maand");
+        assert_eq!(date_group(on(2026, 8, 31), today), "Ouder");
+        let first = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        assert_eq!(date_group(on(2025, 12, 15), first), "Vorige maand", "across the turn of the year");
+    }
 
     #[test]
     fn formats_known_dates() {
