@@ -1,5 +1,5 @@
-//! Making, renaming, removing, emptying and marking folders read: the "Map" tab in the ribbon,
-//! the right-click menu on a folder row, and one small window for the name or the question
+//! Making, renaming, removing, emptying and marking folders read, and pinning a folder under
+//! "Favorieten": the "Map" tab in the ribbon, the right-click menu on a folder row, and one small window for the name or the question
 //! before something goes for good (a folder, its contents, or a message in the Deleted folder).
 
 use egui::RichText;
@@ -147,9 +147,18 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
         app.empty_folder(id);
     }
     if ribbon_action_hint(ui, t, "◉", "Alles gelezen", has_unread, Some("Alle berichten in de geselecteerde map als gelezen markeren"))
-        && let Some(id) = selected
+        && let Some(id) = selected.clone()
     {
         app.run("folder.mark_all_read", json!({ "id": id }));
+    }
+    ui.separator();
+    let favorite = selected.as_deref().is_some_and(|id| app.is_favorite(id));
+    let hint =
+        if favorite { "De geselecteerde map uit Favorieten halen" } else { "De geselecteerde map bovenin het mappenvenster onder Favorieten zetten" };
+    if ribbon_action_hint(ui, t, if favorite { "★" } else { "☆" }, "Favoriet", selected.is_some(), Some(hint))
+        && let Some(id) = selected
+    {
+        app.toggle_favorite(&id, ui.ctx());
     }
 }
 
@@ -157,7 +166,14 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
 pub fn context_menu(app: &mut MailApp, r: &egui::Response, id: &str, kind: FolderKind) {
     let mut action: Option<Action> = None;
     let mut mark_read = false;
+    let mut favorite = false;
+    let pinned = app.is_favorite(id);
     r.context_menu(|ui| {
+        if ui.button(if pinned { "Uit Favorieten verwijderen" } else { "Toevoegen aan Favorieten" }).clicked() {
+            favorite = true;
+            ui.close();
+        }
+        ui.separator();
         if ui.button("Nieuwe map…").clicked() {
             action = Some(Action::Create { account_id: String::new(), parent: Some(id.to_string()) });
             ui.close();
@@ -182,6 +198,9 @@ pub fn context_menu(app: &mut MailApp, r: &egui::Response, id: &str, kind: Folde
             ui.close();
         }
     });
+    if favorite {
+        app.toggle_favorite(id, &r.ctx);
+    }
     if mark_read {
         app.run("folder.mark_all_read", json!({ "id": id }));
     }

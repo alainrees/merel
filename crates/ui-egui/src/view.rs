@@ -61,6 +61,8 @@ pub struct ViewPrefs {
     /// Headings "Vandaag", "Gisteren", "Deze week", … over the list when it is sorted by date.
     pub groups: bool,
     pub sort: Sort,
+    /// The folders pinned under "Favorieten" at the top of the folder pane, by id, in order.
+    pub favorites: Vec<String>,
 }
 
 impl Default for ViewPrefs {
@@ -72,6 +74,7 @@ impl Default for ViewPrefs {
             conversations: false,
             groups: true,
             sort: Sort::default(),
+            favorites: Vec::new(),
         }
     }
 }
@@ -96,6 +99,21 @@ impl MailApp {
     pub fn save_view(&mut self, ctx: &egui::Context) {
         self.view.save(self.engine.config_path());
         ctx.set_theme(self.view.theme.preference());
+    }
+
+    /// Whether the folder is pinned under "Favorieten".
+    pub fn is_favorite(&self, folder_id: &str) -> bool {
+        self.view.favorites.iter().any(|f| f == folder_id)
+    }
+
+    /// Pins the folder under "Favorieten", or takes it off again, and keeps the choice.
+    pub fn toggle_favorite(&mut self, folder_id: &str, ctx: &egui::Context) {
+        if self.is_favorite(folder_id) {
+            self.view.favorites.retain(|f| f != folder_id);
+        } else {
+            self.view.favorites.push(folder_id.to_string());
+        }
+        self.save_view(ctx);
     }
 }
 

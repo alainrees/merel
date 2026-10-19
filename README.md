@@ -100,7 +100,9 @@ it, after asking; the inbox and the other special folders stay as they are. The 
 the server at once (IMAP `CREATE`/`RENAME`/`DELETE`, Exchange Web Services, Microsoft Graph) and
 the folder pane shows the list the server answers with, so it needs a connection. The same tab
 and menu empty a folder ("Map leegmaken", after asking: everything in it goes for good, on the
-server too) and mark all its mail read. Deleting a message that is already in "Verwijderde
+server too) and mark all its mail read. "Toevoegen aan Favorieten" (same tab and menu) pins a folder
+of any account under "Favorieten" at the top of the folder pane, as Outlook has it; the choice is kept
+in `view.json`. Deleting a message that is already in "Verwijderde
 items" removes it for good, after a question; Exchange and Microsoft 365 keep such mail
 recoverable on the server for a while, as they do for Outlook.
 
