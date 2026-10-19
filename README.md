@@ -256,7 +256,11 @@ included) opens with the account's key and shows the "🔒 Versleuteld bericht" 
 inside the encryption, gets a strip saying whose key made it, a red one when the message changed. Correspondents' keys
 come the Autocrypt way: a message whose `Autocrypt` header carries a key for its sender's own address teaches it, once
 (not from the Junk folder), and it is kept in `pgp_keys.json`; a later, other key for the same address is not taken
-over by itself. Sending signed or encrypted with OpenPGP is the next step.
+over by itself. Mail from an account with an OpenPGP key carries it in an `Autocrypt` header and goes out signed
+(PGP/MIME `multipart/signed`), unless Ondertekenen is off for the message; Versleutelen encrypts it for the recipients
+and the sender (`multipart/encrypted`, signed inside, AES-256), once every recipient's key is known. An account with
+both an S/MIME certificate and an OpenPGP key signs with S/MIME, and encrypts with OpenPGP only when that reaches every
+recipient and S/MIME does not.
 
 A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
 hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the

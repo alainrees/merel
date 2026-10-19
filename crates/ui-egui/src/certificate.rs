@@ -278,7 +278,7 @@ mod tests {
             c.subject = "Contract".into();
         }
         harness.run();
-        let missing = "Van jij@example.org is nog geen certificaat bekend";
+        let missing = "Van jij@example.org is nog geen certificaat of sleutel bekend";
         assert_eq!(harness.query_all_by_label_contains(missing).count(), 1);
         harness.get_by_label("Verzenden").click();
         harness.run();
@@ -317,6 +317,20 @@ mod tests {
         harness.run();
         assert_eq!(harness.state().engine.pgp_key(&id).map(|k| k.name), Some("Alain Tester".into()));
         assert_eq!(harness.query_all_by_label_contains("Sleutel van Alain Tester <alain@voorbeeld.nl>").count(), 1);
+
+        // New mail can be signed and encrypted with the key.
+        harness.state_mut().open_compose(crate::compose::Kind::New);
+        harness.run();
+        harness.get_by_label(crate::compose::SIGN);
+        harness.get_by_label(crate::compose::ENCRYPT).click();
+        if let Some(c) = harness.state_mut().compose.as_mut() {
+            c.to = "jij@example.org".into();
+        }
+        harness.run();
+        assert_eq!(harness.query_all_by_label_contains("Van jij@example.org is nog geen certificaat of sleutel bekend").count(), 1);
+        harness.state_mut().compose = None;
+        harness.run();
+
         harness.get_by_label(PGP_REMOVE).click();
         harness.run();
         assert!(harness.state().engine.pgp_key(&id).is_none());
