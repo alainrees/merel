@@ -1,6 +1,6 @@
-//! The reminders window: the appointments whose reminder is due, each to open, close or put
-//! off. It appears on its own, asks for the window's attention once per reminder, and goes
-//! away when nothing is due.
+//! The reminders window: the appointments whose reminder is due and the flagged messages whose
+//! follow-up day has come, each to open, close or put off. It appears on its own, asks for the
+//! window's attention once per reminder, and goes away when nothing is due.
 
 use std::collections::HashSet;
 
@@ -55,18 +55,37 @@ enum Action {
     Open(String, i64),
     Dismiss(String, i64),
     Snooze(String, i64, u32),
+    /// On a follow-up: the message id.
+    OpenMail(String),
+    Done(String),
+    DismissMail(String),
+    SnoozeMail(String, u32),
     DismissAll,
+}
+
+/// "Vandaag", "Gisteren" or "Verlopen op …" for a follow-up day seen from `today`.
+fn follow_up_due(due: chrono::NaiveDate, today: chrono::NaiveDate) -> String {
+    if due == today {
+        "Vandaag".into()
+    } else if Some(due) == today.pred_opt() {
+        "Gisteren".into()
+    } else {
+        format!("Verlopen op {}", crate::dates::day_name(due))
+    }
 }
 
 /// Draws the window when a reminder is due.
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let now = now();
+    let today = chrono::Local::now().date_naive();
     let due = app.engine.session.due_reminders(now);
-    if due.is_empty() {
+    let follow = app.engine.session.due_follow_ups(today, now);
+    if due.is_empty() && follow.is_empty() {
         app.announced_reminders.clear();
         return;
     }
-    let keys: HashSet<(String, i64)> = due.iter().map(|a| (a.id.clone(), a.start)).collect();
+    let mut keys: HashSet<(String, i64)> = due.iter().map(|a| (a.id.clone(), a.start)).collect();
+    keys.extend(follow.iter().map(|(m, d)| (format!("followup:{}", m.id), i64::from(d.num_days_from_ce()))));
     if keys.iter().any(|k| !app.announced_reminders.contains(k)) {
         ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
     }
@@ -74,7 +93,8 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     // The soonest reminder decides when to look again, so the window shows up on time.
     ctx.request_repaint_after(std::time::Duration::from_secs(5));
     let mut action: Option<Action> = None;
-    let title = if due.len() == 1 { "Herinnering".to_string() } else { format!("Herinneringen ({})", due.len()) };
+    let count = due.len() + follow.len();
+    let title = if count == 1 { "Herinnering".to_string() } else { format!("Herinneringen ({count})") };
     egui::Window::new(title)
         .id(egui::Id::new("reminders"))
         .collapsible(false)
@@ -110,7 +130,37 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 });
                 ui.add_space(4.0);
             }
-            if due.len() > 1 && ui.button("Alles sluiten").clicked() {
+            // Flagged mail whose day has come, as Outlook reminds of flagged items.
+            for (m, day) in &follow {
+                egui::Frame::new().fill(t.list).corner_radius(6).inner_margin(8).show(ui, |ui| {
+                    ui.set_width(340.0);
+                    ui.label(RichText::new(format!("⚑ Opvolgen: {}", m.subject)).strong().color(t.text));
+                    let late = *day < today;
+                    ui.label(RichText::new(follow_up_due(*day, today)).color(if late { t.flag } else { t.accent_text }));
+                    ui.label(RichText::new(format!("van {}", m.from.display())).size(12.0).color(t.text_dim));
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Openen").clicked() {
+                            action = Some(Action::OpenMail(m.id.clone()));
+                        }
+                        if ui.button("Voltooid").on_hover_text("Haalt de vlag en de datum weg.").clicked() {
+                            action = Some(Action::Done(m.id.clone()));
+                        }
+                        if ui.button("Sluiten").on_hover_text("Sluit de herinnering; de vlag en de datum blijven.").clicked() {
+                            action = Some(Action::DismissMail(m.id.clone()));
+                        }
+                        egui::ComboBox::from_id_salt(("snooze-followup", &m.id)).selected_text("Uitstellen…").width(130.0).show_ui(ui, |ui| {
+                            for (minutes, label) in SNOOZES {
+                                if ui.selectable_label(false, label).clicked() {
+                                    action = Some(Action::SnoozeMail(m.id.clone(), minutes));
+                                }
+                            }
+                        });
+                    });
+                });
+                ui.add_space(4.0);
+            }
+            if count > 1 && ui.button("Alles sluiten").clicked() {
                 action = Some(Action::DismissAll);
             }
         });
@@ -122,9 +172,16 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         }
         Some(Action::Dismiss(id, start)) => app.run("reminder.dismiss", json!({ "id": id, "start": start })),
         Some(Action::Snooze(id, start, minutes)) => app.run("reminder.snooze", json!({ "id": id, "start": start, "minutes": minutes })),
+        Some(Action::OpenMail(id)) => app.open_message(&id),
+        Some(Action::Done(id)) => app.run("message.flag", json!({ "id": id })),
+        Some(Action::DismissMail(id)) => app.run("followup.dismiss", json!({ "id": id })),
+        Some(Action::SnoozeMail(id, minutes)) => app.run("followup.snooze", json!({ "id": id, "minutes": minutes })),
         Some(Action::DismissAll) => {
             for a in &due {
                 app.run("reminder.dismiss", json!({ "id": a.id, "start": a.start }));
+            }
+            for (m, _) in &follow {
+                app.run("followup.dismiss", json!({ "id": m.id }));
             }
         }
         None => {}
@@ -144,5 +201,13 @@ mod tests {
         assert_eq!(relative(1000, 1000 + 3 * 86_400), "Begint over 3 dagen");
         assert_eq!(relative(1000, 1000 - 5 * 60), "Begon 5 minuten geleden");
         assert_eq!(relative(1000 + 86_400, 1000), "Begon 1 dag geleden");
+    }
+
+    #[test]
+    fn a_follow_up_day_reads_as_today_yesterday_or_lapsed() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 21).unwrap();
+        assert_eq!(follow_up_due(today, today), "Vandaag");
+        assert_eq!(follow_up_due(today.pred_opt().unwrap(), today), "Gisteren");
+        assert_eq!(follow_up_due(chrono::NaiveDate::from_ymd_opt(2026, 10, 16).unwrap(), today), "Verlopen op vrijdag 16 oktober");
     }
 }

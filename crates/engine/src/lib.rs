@@ -422,6 +422,8 @@ pub struct Session {
     /// The due days of flagged messages, kept in `follow_ups.json`; see [`followup`].
     pub follow_ups: Vec<mailcraft_model::FollowUp>,
     follow_ups_dirty: bool,
+    /// Follow-up reminders put off until a moment, by the follow-up's key; in memory only.
+    pub snoozed_follow_ups: HashMap<String, i64>,
     /// The categories (coloured labels) the person knows, kept in `categories.json`.
     pub categories: Vec<Category>,
     categories_dirty: bool,

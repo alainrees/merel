@@ -476,6 +476,9 @@ pub struct FollowUp {
     pub due: String,
     #[serde(default)]
     pub subject: String,
+    /// Whether the reminder on the due day was closed; a new day opens it again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dismissed: bool,
 }
 
 /// `s` cut to [`MAX_TEXT`] characters with control characters (other than tab) removed, so a

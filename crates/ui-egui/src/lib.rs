@@ -1993,6 +1993,21 @@ mod tests {
     }
 
     #[test]
+    fn a_flagged_message_whose_day_has_come_shows_in_the_reminders_window() {
+        let mut h = harness();
+        h.state_mut().run("message.follow_up", json!({ "when": "today", "id": "m3" }));
+        h.run();
+        h.get_by_label("⚑ Opvolgen: Wat er deze maand speelt");
+        h.get_by_label("Vandaag");
+        assert!(h.state().announced_reminders.iter().any(|(k, _)| k == "followup:m3"), "the window asked for attention once");
+        h.get_by_label("Sluiten").click();
+        h.run();
+        assert!(h.query_by_label("⚑ Opvolgen: Wat er deze maand speelt").is_none(), "closed; the flag stays");
+        assert!(h.state().engine.session.message("m3").unwrap().flags.flagged);
+        assert!(h.state().engine.session.follow_ups.iter().any(|f| f.dismissed));
+    }
+
+    #[test]
     fn a_newsletter_offers_afmelden_and_asks_before_the_mail_goes_out() {
         let mut h = harness();
         {
@@ -2026,7 +2041,8 @@ mod tests {
     #[test]
     fn flagged_mail_shows_in_the_tasks_module_opens_in_mail_and_is_done_from_its_checkbox() {
         let mut h = harness();
-        h.state_mut().run("message.follow_up", json!({ "when": "today", "id": "m1" }));
+        // Tomorrow, not today: a due follow-up would open the reminders window over the list.
+        h.state_mut().run("message.follow_up", json!({ "when": "tomorrow", "id": "m1" }));
         h.state_mut().run("message.flag", json!({ "id": "m3" }));
         h.state_mut().module = Module::Tasks;
         h.run();

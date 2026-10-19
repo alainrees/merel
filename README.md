@@ -70,7 +70,9 @@ zone), which then owns the series and lists its occurrences, edited one by one a
 them. Every appointment can carry a
 reminder (a quarter of an hour before by default, from "op het moment zelf" to a week ahead); when
 it is due a window lists it with the time left, to open the appointment, close the reminder or put
-it off for a while, and the app asks for attention once. Reminders travel with Exchange, Microsoft
+it off for a while, and the app asks for attention once. The same window names a flagged message from its follow-up
+day on (as Outlook reminds of flagged items), to open it, mark it done, close the reminder or put it off; closing is
+kept in `follow_ups.json`, a new follow-up day opens it again. Reminders travel with Exchange, Microsoft
 365, Google and CalDAV appointments as the server's own reminder or alarm. The contacts module keeps a local address
 book (`contacts.json`) with search and a contact card, and the compose window completes
 addresses from it and from the mail you have seen. A sender goes into the address book in one click: "Toevoegen aan
