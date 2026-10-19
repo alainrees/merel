@@ -629,7 +629,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 }
 
 /// "12 kB", "3,4 MB".
-fn size_text(bytes: usize) -> String {
+pub(crate) fn size_text(bytes: usize) -> String {
     if bytes < 1024 {
         format!("{bytes} B")
     } else if bytes < 1024 * 1024 {
