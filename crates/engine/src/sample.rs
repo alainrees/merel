@@ -87,6 +87,7 @@ fn build() -> Option<Session> {
                 has_attachments: att,
                 message_id: Some(format!("<sample-{i}@example.org>")),
                 categories: if i == 1 { vec!["Groene categorie".into()] } else { Vec::new() },
+                importance: if i == 1 { mailcraft_model::Importance::High } else { mailcraft_model::Importance::Normal },
             })
         })
         .collect();

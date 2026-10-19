@@ -280,6 +280,7 @@ mod tests {
             has_attachments: true,
             message_id: None,
             categories: Vec::new(),
+            importance: Default::default(),
         }
     }
 

@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use mail_parser::{MessageParser, MimeHeaders};
 use mailcraft_html::Document;
-use mailcraft_model::{Address, clean_text};
+use mailcraft_model::{Address, Importance, clean_text};
 
 /// Longest message body (bytes) that is parsed; the rest is dropped with a note.
 pub const MAX_BODY: usize = 8 * 1024 * 1024;
@@ -27,6 +27,8 @@ pub struct ParsedHeader {
     pub date: Option<i64>,
     /// The Message-ID, with its angle brackets.
     pub message_id: Option<String>,
+    /// From the `Importance` header, else `X-Priority`.
+    pub importance: Importance,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -80,6 +82,24 @@ pub fn parse_header(bytes: &[u8]) -> ParsedHeader {
         subject: clean_text(m.subject().unwrap_or("")),
         date: m.date().map(|d| d.to_timestamp()),
         message_id: m.message_id().map(|id| format!("<{}>", clean_text(id.trim_matches(['<', '>'])))),
+        importance: importance_of(&m),
+    }
+}
+
+/// `Importance: High|Low` wins; else `X-Priority` 1–2 is high and 4–5 is low, as mail programs
+/// write them.
+fn importance_of(m: &mail_parser::Message<'_>) -> Importance {
+    let header = |name: &str| m.headers_raw().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_ascii_lowercase());
+    match header("Importance").as_deref() {
+        Some(v) if v.starts_with("high") => return Importance::High,
+        Some(v) if v.starts_with("low") => return Importance::Low,
+        Some(v) if v.starts_with("normal") => return Importance::Normal,
+        _ => {}
+    }
+    match header("X-Priority").and_then(|v| v.chars().next()) {
+        Some('1' | '2') => Importance::High,
+        Some('4' | '5') => Importance::Low,
+        _ => Importance::Normal,
     }
 }
 
@@ -194,6 +214,17 @@ mod tests {
         let b = parse_body(raw);
         assert_eq!(b.unsubscribe, ["mailto:leave@example.org?subject=unsubscribe", "https://example.org/u?id=7"], "plain http is left out");
         assert!(parse_body(b"From: a@example.org\r\n\r\nHallo").unsubscribe.is_empty());
+    }
+
+    #[test]
+    fn importance_comes_from_the_importance_or_x_priority_header() {
+        let header = |extra: &str| parse_header(format!("From: a@example.org\r\n{extra}\r\nSubject: x\r\n\r\nHallo").as_bytes()).importance;
+        assert_eq!(header("Importance: high"), Importance::High);
+        assert_eq!(header("Importance: Low"), Importance::Low);
+        assert_eq!(header("X-Priority: 1 (Highest)"), Importance::High);
+        assert_eq!(header("X-Priority: 5 (Lowest)"), Importance::Low);
+        assert_eq!(header("Importance: normal\r\nX-Priority: 1"), Importance::Normal, "the Importance header wins");
+        assert_eq!(parse_header(MSG).importance, Importance::Normal);
     }
 
     #[test]

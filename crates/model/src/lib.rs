@@ -263,6 +263,26 @@ pub struct MessageHeader {
     /// The categories (coloured labels) on the message, by name; see [`Category`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub categories: Vec<String>,
+    /// How urgent the sender said the message is.
+    #[serde(default, skip_serializing_if = "Importance::is_normal")]
+    pub importance: Importance,
+}
+
+/// How urgent a message is, as the sender marked it: Outlook's "Hoge urgentie" and "Lage
+/// urgentie". It travels as the `Importance` and `X-Priority` headers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Importance {
+    Low,
+    #[default]
+    Normal,
+    High,
+}
+
+impl Importance {
+    pub fn is_normal(&self) -> bool {
+        *self == Importance::Normal
+    }
 }
 
 /// A message being written.
@@ -277,6 +297,8 @@ pub struct Draft {
     /// Files going out with the message.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<DraftAttachment>,
+    #[serde(default, skip_serializing_if = "Importance::is_normal")]
+    pub importance: Importance,
 }
 
 impl Draft {
@@ -343,6 +365,8 @@ pub struct StoredDraft {
     /// the way Outlook's "Bezorging uitstellen" keeps a message in the Outbox until then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Importance::is_normal")]
+    pub importance: Importance,
 }
 
 impl StoredDraft {
@@ -360,6 +384,7 @@ impl StoredDraft {
             body: self.body.clone(),
             in_reply_to: self.in_reply_to.clone(),
             attachments: self.attachments.clone(),
+            importance: self.importance,
         })
     }
 

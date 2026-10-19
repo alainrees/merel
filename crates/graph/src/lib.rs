@@ -18,7 +18,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Utc};
 use mailcraft_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result, kind_from_name};
 use mailcraft_mime::ParsedHeader;
-use mailcraft_model::{Address, Appointment, Contact, FolderKind, Frequency, Priority, Recurrence, Server, Task, clean_text};
+use mailcraft_model::{Address, Appointment, Contact, FolderKind, Frequency, Importance, Priority, Recurrence, Server, Task, clean_text};
 use mailcraft_secrets::Secret;
 use serde_json::{Value, json};
 
@@ -174,6 +174,11 @@ fn header_of(m: &Value) -> Option<RemoteHeader> {
             subject: clean_text(str_of(m, "subject")),
             date: Some(date),
             message_id,
+            importance: match str_of(m, "importance") {
+                "high" => Importance::High,
+                "low" => Importance::Low,
+                _ => Importance::Normal,
+            },
         },
         date,
     })
@@ -469,7 +474,7 @@ impl GraphClient {
 }
 
 /// The fields a listing asks for per message.
-const MESSAGE_FIELDS: &str = "id,subject,from,toRecipients,receivedDateTime,isRead,flag,hasAttachments,internetMessageId,categories";
+const MESSAGE_FIELDS: &str = "id,subject,from,toRecipients,receivedDateTime,isRead,flag,hasAttachments,internetMessageId,categories,importance";
 
 /// The request for the messages of `folder` that Graph's `$search` finds for `query`; `None`
 /// for an empty query. Graph takes the query as a quoted string (quotes and backslashes
@@ -675,7 +680,7 @@ mod tests {
     #[test]
     fn messages_become_headers() {
         let m = json!({ "id": "AAMk1", "subject": "Hoi & dag", "receivedDateTime": "2026-10-14T17:46:40Z", "isRead": false,
-            "hasAttachments": true, "flag": { "flagStatus": "flagged" }, "internetMessageId": "<abc@example.org>",
+            "hasAttachments": true, "flag": { "flagStatus": "flagged" }, "internetMessageId": "<abc@example.org>", "importance": "low",
             "from": { "emailAddress": { "name": "Sanne", "address": "sanne@example.org" } },
             "toRecipients": [{ "emailAddress": { "name": "", "address": "jij@example.org" } }] });
         let h = header_of(&m).unwrap();
@@ -684,6 +689,7 @@ mod tests {
         assert_eq!(h.header.from.unwrap().display(), "Sanne");
         assert_eq!(h.header.to[0].email(), "jij@example.org");
         assert_eq!(h.header.message_id.as_deref(), Some("<abc@example.org>"));
+        assert_eq!(h.header.importance, Importance::Low);
         assert!(header_of(&json!({ "subject": "no id" })).is_none());
     }
 

@@ -19,7 +19,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use mailcraft_mailbox::{Credential, Flag, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result, kind_from_name};
-use mailcraft_model::{Address, FolderKind, Server, clean_text};
+use mailcraft_model::{Address, FolderKind, Importance, Server, clean_text};
 use mailcraft_secrets::Secret;
 use roxmltree::{Document, Node};
 
@@ -349,6 +349,15 @@ fn categories_of(item: Node<'_, '_>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The item's `Importance` element: `High`, `Normal` or `Low`.
+fn importance_of(item: Node<'_, '_>) -> Importance {
+    match text(item, "Importance") {
+        Some("High") => Importance::High,
+        Some("Low") => Importance::Low,
+        _ => Importance::Normal,
+    }
+}
+
 fn header_of(item: Node<'_, '_>) -> RemoteHeader {
     let subject = text(item, "Subject").map(clean_text).unwrap_or_default();
     let date = text(item, "DateTimeReceived").and_then(parse_datetime).unwrap_or(0);
@@ -363,7 +372,7 @@ fn header_of(item: Node<'_, '_>) -> RemoteHeader {
         size: text(item, "Size").and_then(|s| s.parse().ok()).unwrap_or(0),
         has_attachments: text(item, "HasAttachments") == Some("true"),
         categories: categories_of(item),
-        header: mailcraft_mime::ParsedHeader { from, to: Vec::new(), subject, date: Some(date), message_id },
+        header: mailcraft_mime::ParsedHeader { from, to: Vec::new(), subject, date: Some(date), message_id, importance: importance_of(item) },
         date,
     }
 }
@@ -377,6 +386,7 @@ fn find_item_request(folder: &str, offset: u32, limit: u32, query: Option<&str>)
             "<m:FindItem Traversal=\"Shallow\"><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape><t:AdditionalProperties>",
             "<t:FieldURI FieldURI=\"item:Subject\"/><t:FieldURI FieldURI=\"item:DateTimeReceived\"/>",
             "<t:FieldURI FieldURI=\"item:HasAttachments\"/><t:FieldURI FieldURI=\"item:Size\"/><t:FieldURI FieldURI=\"item:Categories\"/>",
+            "<t:FieldURI FieldURI=\"item:Importance\"/>",
             "<t:FieldURI FieldURI=\"message:From\"/><t:FieldURI FieldURI=\"message:IsRead\"/>",
             "<t:FieldURI FieldURI=\"message:InternetMessageId\"/>{flag}{verb}",
             "</t:AdditionalProperties></m:ItemShape>",
@@ -640,7 +650,7 @@ mod tests {
             "<t:Message><t:ItemId Id=\"AAMk1\" ChangeKey=\"CQAA\"/><t:Subject>Hoi &amp; dag</t:Subject>",
             "<t:DateTimeReceived>2026-10-14T17:46:40Z</t:DateTimeReceived><t:HasAttachments>true</t:HasAttachments><t:Size>1234</t:Size>",
             "<t:From><t:Mailbox><t:Name>Sanne</t:Name><t:EmailAddress>sanne@example.org</t:EmailAddress></t:Mailbox></t:From>",
-            "<t:IsRead>false</t:IsRead><t:InternetMessageId>&lt;abc@example.org&gt;</t:InternetMessageId>",
+            "<t:IsRead>false</t:IsRead><t:InternetMessageId>&lt;abc@example.org&gt;</t:InternetMessageId><t:Importance>High</t:Importance>",
             "<t:ExtendedProperty><t:ExtendedFieldURI PropertyTag=\"0x1090\" PropertyType=\"Integer\"/><t:Value>2</t:Value></t:ExtendedProperty>",
             "<t:ExtendedProperty><t:ExtendedFieldURI PropertyTag=\"0x1081\" PropertyType=\"Integer\"/><t:Value>102</t:Value></t:ExtendedProperty>",
             "</t:Message></t:Items></m:RootFolder></m:FindItemResponseMessage>"
@@ -657,6 +667,7 @@ mod tests {
         let from = h.header.from.unwrap();
         assert_eq!((from.display(), from.email()), ("Sanne", "sanne@example.org"));
         assert_eq!(h.header.message_id.as_deref(), Some("<abc@example.org>"));
+        assert_eq!(h.header.importance, Importance::High);
     }
 
     #[test]
