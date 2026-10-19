@@ -83,6 +83,7 @@ mod tests {
             incoming: Some(Server { host: "imap.b.nl".into(), port: 993, tls: Tls::Implicit }),
             outgoing: None,
             dav: None,
+            signature: String::new(),
         };
         save(&path, std::slice::from_ref(&a)).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();

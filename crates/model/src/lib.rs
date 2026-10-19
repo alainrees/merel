@@ -112,6 +112,23 @@ pub struct Account {
     /// A CalDAV/CardDAV server next to an IMAP account, for its calendar, contacts and tasks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dav: Option<Dav>,
+    /// Text put under every message written from this account; empty for none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub signature: String,
+}
+
+/// How long a signature may be, in characters.
+pub const MAX_SIGNATURE: usize = 2_000;
+
+/// A signature as it is stored: line breaks and tabs kept, other control characters and
+/// surrounding blank lines gone, bounded.
+pub fn clean_signature(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+        .take(MAX_SIGNATURE)
+        .collect::<String>()
+        .trim_matches(['\n', ' ', '\t'])
+        .to_string()
 }
 
 /// Where an IMAP account's calendars and address books live (CalDAV and CardDAV); the same
