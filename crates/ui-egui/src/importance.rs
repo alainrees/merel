@@ -34,12 +34,13 @@ pub fn strip(ui: &mut Ui, t: &Tokens, importance: Importance) {
 /// The chooser in the compose window: a menu with Hoog, Normaal and Laag, named after the
 /// current choice so an urgent message shows that it is one.
 pub fn chooser(ui: &mut Ui, t: &Tokens, importance: &mut Importance) {
-    let label = match *importance {
-        Importance::High => RichText::new("! Hoge urgentie").color(t.flag),
-        Importance::Low => RichText::new("↓ Lage urgentie").color(t.accent_text),
-        Importance::Normal => RichText::new("Urgentie ▾"),
+    let (text, color) = match *importance {
+        Importance::High => ("Urgentie: hoog", t.flag),
+        Importance::Low => ("Urgentie: laag", t.accent_text),
+        Importance::Normal => ("Urgentie: normaal", t.text),
     };
-    crate::action_menu(ui, label, |ui| {
+    let label = RichText::new(text).size(14.0).color(color);
+    crate::helder::menu_button(ui, t, Some(crate::helder::Icon::CircleAlert), label, |ui| {
         for (value, name, hint) in [
             (Importance::High, "Hoog", "De ontvanger ziet een rood uitroepteken bij het bericht, zoals in Outlook."),
             (Importance::Normal, "Normaal", "Geen teken bij het bericht."),
@@ -51,6 +52,5 @@ pub fn chooser(ui: &mut Ui, t: &Tokens, importance: &mut Importance) {
             }
         }
     })
-    .0
     .on_hover_text("Hoe dringend het bericht is; gaat mee als de kopteksten Importance en X-Priority.");
 }
