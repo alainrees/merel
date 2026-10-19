@@ -2337,6 +2337,7 @@ dependencies = [
  "mailcraft-oauth",
  "mailcraft-secrets",
  "mailcraft-smtp",
+ "mailcraft-store",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -2474,6 +2475,22 @@ dependencies = [
  "mailcraft-model",
  "mailcraft-secrets",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "mailcraft-store"
+version = "0.1.0"
+dependencies = [
+ "aws-lc-rs",
+ "base64 0.23.1",
+ "getrandom 0.4.3",
+ "log",
+ "mailcraft-model",
+ "mailcraft-secrets",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "zeroize",
 ]
 
 [[package]]

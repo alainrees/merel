@@ -212,7 +212,8 @@ fn run(c: &mut dyn Mailbox, account: &Account, job: &Job) -> Result<Option<Event
         Job::Headers { folder_id, path, .. } => Some(Event::Headers { folder_id: folder_id.clone(), headers: c.headers(path, crate::HEADER_LIMIT)? }),
         Job::Body { message_id, path, id, .. } => {
             let raw = c.body(path, id)?;
-            Some(Event::Body { message_id: message_id.clone(), body: mailcraft_mime::parse_body(&raw), header: mailcraft_mime::parse_header(&raw) })
+            let (body, header) = (Box::new(mailcraft_mime::parse_body(&raw)), mailcraft_mime::parse_header(&raw));
+            Some(Event::Body { message_id: message_id.clone(), body, header, raw })
         }
         Job::Flag { path, id, flag, on, .. } => {
             c.set_flag(path, id, *flag, *on)?;
