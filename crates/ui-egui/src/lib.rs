@@ -325,6 +325,7 @@ impl MailApp {
         let ctx = ui.ctx().clone();
         compose::show(self, &ctx, &t);
         calendar::window(self, &ctx, &t);
+        calendar::goto_window(self, &ctx, &t);
         groups::window(self, &ctx, &t);
         reminders::window(self, &ctx, &t);
         rules::window(self, &ctx, &t);
@@ -399,6 +400,10 @@ fn module_shortcuts(app: &mut MailApp, ctx: &egui::Context) {
     }
     if app.module == Module::Calendar && !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::P)) {
         app.print_calendar();
+        return;
+    }
+    if app.module == Module::Calendar && !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::G)) {
+        app.open_goto();
         return;
     }
     let (box_id, query) = match app.module {
@@ -645,6 +650,9 @@ fn calendar_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.separator();
     if ribbon_action(ui, t, "◎", "Vandaag", true) {
         app.calendar.focus = calendar::today();
+    }
+    if ribbon_action_hint(ui, t, "↪", calendar::GOTO, true, Some(&key_hint("G"))) {
+        app.open_goto();
     }
     for (glyph, label, view) in [("▯", "Dag", View::Day), ("▤", "Werkweek", View::WorkWeek), ("▥", "Week", View::Week), ("▦", "Maand", View::Month)]
     {
@@ -2053,6 +2061,34 @@ mod tests {
         h.run();
         assert_eq!(h.state().view.mark_read, view::MarkRead::Now);
         h.get_by_label("Donker");
+    }
+
+    #[test]
+    fn ga_naar_datum_moves_the_calendar_to_a_typed_day() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.run();
+        h.get_all_by_label(calendar::GOTO).next().expect("the ribbon button").click();
+        h.run();
+        assert!(h.state().calendar.goto.is_some());
+        *h.state_mut().calendar.goto.as_mut().expect("the window") = "31-02-2027".into();
+        h.run();
+        h.get_by_label(calendar::GOTO_HINT);
+        h.get_by_label("Ga").click();
+        h.run();
+        assert!(h.state().calendar.goto.is_some(), "a day that does not exist keeps the window open");
+        *h.state_mut().calendar.goto.as_mut().expect("the window") = "1-3-2027".into();
+        h.run();
+        h.get_by_label("Ga").click();
+        h.run();
+        assert_eq!(h.state().calendar.focus, chrono::NaiveDate::from_ymd_opt(2027, 3, 1).unwrap());
+        assert!(h.state().calendar.goto.is_none());
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::G);
+        h.run();
+        assert_eq!(h.state().calendar.goto.as_deref(), Some("01-03-2027"), "Ctrl+G opens it on the shown day");
+        h.get_by_label("Annuleren").click();
+        h.run();
+        assert!(h.state().calendar.goto.is_none());
     }
 
     #[test]
