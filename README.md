@@ -94,10 +94,15 @@ attachments, or only mail with a chosen category; sorted newest or oldest first,
 right or below the list; compact rows without the preview line; and a light, dark or system
 theme. The choices are kept in `view.json` next to the accounts file.
 
+"Afdrukken" under "Bestand" (or Ctrl+P) prints the open message by way of the system browser: Mailcraft writes a
+page of its own (sender, recipients, date, subject, attachment names and the body as it drew it,
+with embedded pictures and without anything from the internet or any script) to one file in the
+temporary folder and opens it, and the browser's print dialog does the rest.
+
 Keyboard shortcuts in the mail module follow Outlook (Cmd instead of Ctrl on a Mac): arrow keys
 walk the message list, Delete removes the selected message, Ctrl+N starts a new message, Ctrl+R
 replies, Ctrl+Shift+R replies to all, Ctrl+F forwards, Ctrl+Shift+V moves to a folder, Ctrl+Q and Ctrl+U mark read or unread,
-Ctrl+E puts the cursor in the search box, Ctrl+Shift+1 to 9 run the account's quick steps, Esc clears a
+Ctrl+E puts the cursor in the search box, Ctrl+P prints, Ctrl+Shift+1 to 9 run the account's quick steps, Esc clears a
 search and F5 refreshes the folder. None
 of them fires while you are typing in a text field or writing a message. Hovering a ribbon button
 shows its shortcut, and the "Help" tab lists them all in one window; the same tab opens the folder
