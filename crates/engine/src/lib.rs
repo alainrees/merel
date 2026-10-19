@@ -11,6 +11,7 @@
 pub mod cache;
 pub mod calendar;
 pub mod categories;
+pub mod cleanup;
 mod commands;
 pub mod config;
 pub mod contacts;
