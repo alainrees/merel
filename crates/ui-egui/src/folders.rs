@@ -151,6 +151,18 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     {
         app.run("folder.mark_all_read", json!({ "id": id }));
     }
+    let deleted = selected.as_deref().and_then(|id| app.engine.session.folder(id)).is_some_and(|f| f.kind == FolderKind::Deleted);
+    if ribbon_action_hint(
+        ui,
+        t,
+        "♻",
+        "Opruimen",
+        has_mail && !deleted,
+        Some("Oudere berichten van elk gesprek in de geselecteerde map naar Verwijderde items"),
+    ) && let Some(id) = selected.clone()
+    {
+        app.ask_cleanup_folder(&id);
+    }
     ui.separator();
     let favorite = selected.as_deref().is_some_and(|id| app.is_favorite(id));
     let hint =
@@ -166,6 +178,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
 pub fn context_menu(app: &mut MailApp, r: &egui::Response, id: &str, kind: FolderKind) {
     let mut action: Option<Action> = None;
     let mut mark_read = false;
+    let mut cleanup = false;
     let mut favorite = false;
     let pinned = app.is_favorite(id);
     r.context_menu(|ui| {
@@ -193,11 +206,18 @@ pub fn context_menu(app: &mut MailApp, r: &egui::Response, id: &str, kind: Folde
             mark_read = true;
             ui.close();
         }
+        if kind != FolderKind::Deleted && ui.button("Map opruimen…").clicked() {
+            cleanup = true;
+            ui.close();
+        }
         if ui.button("Map leegmaken…").clicked() {
             action = Some(Action::Empty { id: id.to_string() });
             ui.close();
         }
     });
+    if cleanup {
+        app.ask_cleanup_folder(id);
+    }
     if favorite {
         app.toggle_favorite(id, &r.ctx);
     }

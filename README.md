@@ -43,7 +43,11 @@ one of your own addresses. The lists live on your computer; nothing about your m
 "Gesprek negeren" (in a message's right-click menu, or Ctrl+Delete) is Outlook's Ignore: the messages of
 that conversation (same subject, prefixes aside) in the inbox go to "Verwijderde items", and so does every message
 that arrives in it afterwards; a strip above such a message has "Niet meer negeren", which brings them back. The
-list is `ignored.json`, per account. Phishing: a message that shows signs of it
+list is `ignored.json`, per account. "Gesprek opruimen…" (same menu) and "Map opruimen…" (a folder's menu, or
+"Opruimen" on the Map tab) are Outlook's Clean Up: of each conversation the older messages go to "Verwijderde
+items" and the newest stays, as do unread, flagged and categorised messages and messages with attachments; Mailcraft
+asks first and says how many would go. It goes by the headers it has, not by whether a later reply quotes the whole
+earlier message. Phishing: a message that shows signs of it
 gets a warning strip above its text that names them, with "Afzender blokkeren" at hand: a sender who uses a
 contact's name (or an address as a name) with another address, a domain one letter or one look-alike letter away
 from a domain you know (your contacts', your own), failed SPF/DKIM/DMARC checks reported by your mail server in the
