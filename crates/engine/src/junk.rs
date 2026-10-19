@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use mailcraft_model::{FolderKind, JunkLists, junk_entry};
 
-use crate::{CommandError, Session, commands::move_message};
+use crate::{CommandError, Job, SAMPLE_ACCOUNT, Session, commands::move_message};
 
 impl Session {
     pub fn set_junk(&mut self, lists: JunkLists) {
@@ -51,6 +51,18 @@ impl Session {
     }
 }
 
+/// Queues the word to the server that `message_id` is junk (or not), for the stores that take
+/// it (IMAP keywords, Exchange's `MarkAsJunk`); before any move, while the message is where
+/// the session says. Sample mail has no server.
+pub(crate) fn report(s: &mut Session, message_id: &str, junk: bool) {
+    let Some(m) = s.message(message_id) else { return };
+    let Some(folder) = s.folder(&m.folder_id) else { return };
+    if folder.account_id == SAMPLE_ACCOUNT {
+        return;
+    }
+    s.pending.push(Job::Junk { account_id: folder.account_id.clone(), path: folder.path.clone(), id: m.remote_id.clone(), junk });
+}
+
 /// The entry a command works on, and the message it came from: `entry` as typed, else the
 /// sender of the given (else the selected) message.
 fn entry_param(s: &Session, params: &Value) -> Result<(String, Option<String>), CommandError> {
@@ -85,7 +97,10 @@ pub fn block(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     }
     s.junk_dirty = true;
     match message {
-        Some(id) => file_as(s, &id, FolderKind::Junk, "Junk"),
+        Some(id) => {
+            report(s, &id, true);
+            file_as(s, &id, FolderKind::Junk, "Junk")
+        }
         None => Ok(()),
     }
 }
@@ -103,6 +118,7 @@ pub fn trust(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     if let Some(id) = message
         && s.message(&id).and_then(|m| s.folder(&m.folder_id)).is_some_and(|f| f.kind == FolderKind::Junk)
     {
+        report(s, &id, false);
         file_as(s, &id, FolderKind::Inbox, "Inbox")?;
     }
     Ok(())
@@ -126,7 +142,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::{Event, HEADER_LIMIT, Job};
+    use crate::{Event, HEADER_LIMIT};
 
     #[test]
     fn a_sender_is_blocked_from_a_message_and_trusted_back() {
@@ -200,5 +216,28 @@ mod tests {
         assert_eq!(s.message("a/INBOX#3").map(|m| m.folder_id.as_str()), Some("a/INBOX"));
         let jobs = s.take_jobs();
         assert!(jobs.iter().any(|j| matches!(j, Job::Move { dest, id, .. } if dest == "Junk" && id == "2")), "{jobs:?}");
+        assert!(!jobs.iter().any(|j| matches!(j, Job::Junk { .. })), "filing by the list is not the person's word");
+
+        // The person's own word goes to the server first, then the move; and back again.
+        s.run("junk.block", &json!({ "id": "a/INBOX#3" })).unwrap();
+        let jobs = s.take_jobs();
+        let junk = |j: &Job| matches!(j, Job::Junk { path, id, junk: true, .. } if path == "INBOX" && id == "3");
+        let moved = |j: &Job| matches!(j, Job::Move { dest, id, .. } if dest == "Junk" && id == "3");
+        assert!(jobs.iter().position(junk) < jobs.iter().position(moved) && jobs.iter().any(moved), "{jobs:?}");
+        s.run("junk.trust", &json!({ "id": "a/INBOX#3" })).unwrap();
+        let jobs = s.take_jobs();
+        assert!(jobs.iter().any(|j| matches!(j, Job::Junk { path, junk: false, .. } if path == "Junk")), "{jobs:?}");
+        assert!(jobs.iter().any(|j| matches!(j, Job::Move { dest, .. } if dest == "INBOX")), "{jobs:?}");
+        assert_eq!(s.message("a/INBOX#3").map(|m| m.folder_id.as_str()), Some("a/INBOX"));
+
+        // "Ongewenst" by hand says the same.
+        s.run("message.select", &json!({ "id": "a/INBOX#1" })).unwrap();
+        s.run("message.junk", &Value::Null).unwrap();
+        let jobs = s.take_jobs();
+        assert!(
+            jobs.iter().position(|j| matches!(j, Job::Junk { junk: true, .. })) < jobs.iter().position(|j| matches!(j, Job::Move { .. })),
+            "{jobs:?}"
+        );
+        assert!(jobs.iter().any(|j| matches!(j, Job::Move { .. })));
     }
 }

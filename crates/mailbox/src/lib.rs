@@ -108,6 +108,12 @@ pub trait Mailbox: Send {
     /// Gives a message the categories `categories` (its whole new set); `removed` names the
     /// ones it had and loses, for stores that take keywords off one by one.
     fn set_categories(&mut self, folder: &str, id: &str, categories: &[String], removed: &[String]) -> Result<()>;
+    /// Tells the store that the person called a message junk (or not junk), so the store's own
+    /// filter can learn; the move to or from the Junk folder is a separate step. A store
+    /// without such a signal does nothing.
+    fn mark_junk(&mut self, _folder: &str, _id: &str, _junk: bool) -> Result<()> {
+        Ok(())
+    }
     /// The store's appointments, contacts and tasks; `None` for a store that keeps only mail.
     fn items(&mut self) -> Option<&mut dyn ItemStore> {
         None
