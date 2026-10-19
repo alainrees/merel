@@ -101,7 +101,8 @@ goes to the server, and a repeating series is changed through its window instead
 (Monday to Friday, as in Outlook), Week and Maand; "Weeknummers" on the Beeld tab puts the ISO week number left of
 each week in the month view and in the time gutter of the week and day views, as Outlook's "Weeknummers weergeven"
 (off by default, kept in `view.json`); "Ga naar datum" in the ribbon (Ctrl+G) asks for a day as dag-maand-jaar and
-shows it in the current view, as Outlook's Ga naar datum. In the week and day views
+shows it in the current view, as Outlook's Ga naar datum; "Werkuren" on the Beeld tab (on by default) shades the hours
+outside 8:00-17:00 and the weekend in the day and week views, as Outlook shades the time outside the working day. In the week and day views
 the bottom edge of an appointment can be dragged too, to make it longer or shorter by the half hour. The calendar's
 side pane lists the open tasks; drag one onto a day or an hour and the appointment window opens for it, with the
 task's title and notes filled in, so planning a task is one drag and "Opslaan". The appointment window also has
