@@ -41,7 +41,9 @@ gets a warning strip above its text that names them, with "Afzender blokkeren" a
 contact's name (or an address as a name) with another address, a domain one letter or one look-alike letter away
 from a domain you know (your contacts', your own), failed SPF/DKIM/DMARC checks reported by your mail server in the
 `Authentication-Results` headers, a link whose text shows one site while it goes to another, and an attachment that
-runs as a program. The checks run on your computer only and never decide for you. A search box above the
+runs as a program. The checks run on your computer only and never decide for you. In the Junk folder itself a
+message is shown with its links, attachments and pictures from the internet switched off, as Outlook does; "Geen
+ongewenst" brings it back with everything working. A search box above the
 message list narrows it by subject, sender, recipient or preview text, in the current folder or
 across every folder of every account (it searches what Mailcraft has fetched so far); "Zoek op de server" asks the mail server itself, which also looks in older mail and in the text of the messages. Sending over SMTP: new mail,
 reply, reply all and forward, with attachments (picked with the file dialog or dropped onto the window, 25 MB together), a copy filed in Sent and the account's signature under the text. Closing a message you were writing puts it aside as a draft ("Concepten (deze computer)" under the account, kept in the encrypted offline cache, never on the server) to open, finish and send later. A password account's name,
