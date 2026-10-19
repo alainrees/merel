@@ -15,6 +15,7 @@ pub mod config;
 pub mod contacts;
 pub mod drafts;
 pub mod reminders;
+pub mod rules;
 mod sample;
 pub mod signin;
 pub mod sync;
@@ -32,7 +33,7 @@ use std::time::{Duration, Instant};
 use mailcraft_mailbox::{Flag, Item};
 pub use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
 use mailcraft_model::{
-    Account, Appointment, Auth, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, StoredDraft, Task, clean_text,
+    Account, Appointment, Auth, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, Rule, StoredDraft, Task, clean_text,
 };
 use mailcraft_secrets::{Secret, SecretStore};
 use serde::{Deserialize, Serialize};
@@ -321,6 +322,12 @@ pub struct Session {
     pub selected_task: Option<String>,
     /// Accounts whose store keeps appointments, contacts and tasks, and so syncs them.
     pub item_accounts: HashSet<String>,
+    /// Rules for incoming mail, every account's together, in the order they run.
+    pub rules: Vec<Rule>,
+    rules_dirty: bool,
+    /// Messages the rules changed since the UI last asked.
+    rule_hits: usize,
+    next_rule_id: u64,
     /// Changes waiting for a connection, per account.
     pub queued: HashMap<String, usize>,
     /// Set when a command changed the calendar, the contacts or the tasks; the engine saves
@@ -413,6 +420,10 @@ impl Session {
             self.selected_message = None;
         }
         self.calendars.retain(|c| c.account_id.as_deref() != Some(account_id));
+        if self.rules.iter().any(|r| r.account_id == account_id) {
+            self.rules.retain(|r| r.account_id != account_id);
+            self.rules_dirty = true;
+        }
         self.appointments.retain(|a| !a.id.starts_with(&prefix));
         self.dismissed_reminders.retain(|k| !k.id.starts_with(&prefix));
         self.snoozed_reminders.retain(|k, _| !k.id.starts_with(&prefix));
@@ -627,17 +638,25 @@ impl Session {
                 if offset == 0 {
                     self.messages.retain(|m| m.folder_id != folder_id);
                 }
+                let mut fresh = Vec::new();
                 for h in headers {
                     let id = format!("{folder_id}#{}", h.id);
                     if offset > 0 && known.contains(&id) {
                         continue;
                     }
-                    if offset == 0 && is_inbox && !h.seen && !known.is_empty() && !known.contains(&id) {
-                        self.arrivals += 1;
+                    if offset == 0 && is_inbox && !known.is_empty() && !known.contains(&id) {
+                        if !h.seen {
+                            self.arrivals += 1;
+                        }
+                        fresh.push(id);
                     }
                     if let Some(m) = message_of(&folder_id, h) {
                         self.messages.push(m);
                     }
+                }
+                // Mail that arrived since the last listing goes past the rules.
+                for id in fresh {
+                    self.apply_rules(&id, false);
                 }
                 self.recount_unread();
             }
@@ -848,6 +867,8 @@ impl Engine {
         if !tasks.tasks.is_empty() {
             engine.session.set_tasks(tasks.tasks);
         }
+        let rules = engine.config_path.as_deref().map(|p| config::load_json::<rules::RulesFile>(&config::rules_path(p))).unwrap_or_default();
+        engine.session.set_rules(rules.rules);
         engine.dispatch();
         engine
     }
@@ -858,6 +879,7 @@ impl Engine {
             self.session.take_calendar_dirty();
             self.session.take_contacts_dirty();
             self.session.take_tasks_dirty();
+            self.session.take_rules_dirty();
             return Ok(());
         };
         if self.session.take_calendar_dirty() {
@@ -868,6 +890,9 @@ impl Engine {
         }
         if self.session.take_tasks_dirty() {
             config::save_json(&config::tasks_path(&path), &self.session.tasks_data()).map_err(|e| CommandError::Store(e.to_string()))?;
+        }
+        if self.session.take_rules_dirty() {
+            config::save_json(&config::rules_path(&path), &self.session.rules_data()).map_err(|e| CommandError::Store(e.to_string()))?;
         }
         Ok(())
     }
