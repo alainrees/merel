@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use egui::{Margin, RichText, Stroke, Ui, vec2};
 
 use mailcraft_engine::SendState;
-use mailcraft_model::{Address, Draft, DraftAttachment, MAX_ATTACHMENTS, MessageHeader, parse_address_list};
+use mailcraft_model::{Address, Draft, DraftAttachment, MAX_ATTACHMENTS, MessageHeader, StoredDraft, parse_address_list};
 
 use crate::{MailApp, Tokens, dates};
 
@@ -26,6 +26,13 @@ pub struct Compose {
     pub in_reply_to: Option<String>,
     /// Files going along, in the order they were added.
     pub attachments: Vec<DraftAttachment>,
+    /// The account the message goes out from.
+    pub account_id: String,
+    /// The draft put aside that this window continues, if any.
+    pub stored: Option<String>,
+    /// The fields as the window opened with them (addresses, subject, signature, quote);
+    /// unchanged means nothing was written.
+    initial: String,
     /// Set once Send is pressed; tracks the draft in the session's outbox.
     pub draft_id: Option<u64>,
     pub error: Option<String>,
@@ -59,6 +66,9 @@ impl Compose {
             body: String::new(),
             in_reply_to: None,
             attachments: Vec::new(),
+            account_id: String::new(),
+            stored: None,
+            initial: String::new(),
             draft_id: None,
             error: None,
         };
@@ -101,6 +111,56 @@ impl Compose {
         }
         self.body = format!("\n\n-- \n{signature}{}", self.body);
         self
+    }
+
+    /// Continues a draft that was put aside.
+    pub fn from_stored(d: &StoredDraft) -> Self {
+        let mut c = Compose::new(Kind::New, None);
+        c.to = d.to.clone();
+        c.cc = d.cc.clone();
+        c.subject = d.subject.clone();
+        c.body = d.body.clone();
+        c.in_reply_to = d.in_reply_to.clone();
+        c.attachments = d.attachments.clone();
+        c.account_id = d.account_id.clone();
+        c.stored = Some(d.id.clone());
+        c
+    }
+
+    /// Remembers what the window opened with, so an untouched window is not kept as a draft.
+    pub fn opened_from(mut self, account_id: &str) -> Self {
+        self.account_id = account_id.to_string();
+        self.initial = self.fingerprint();
+        self
+    }
+
+    fn fingerprint(&self) -> String {
+        format!("{}\n{}\n{}\n{}", self.to, self.cc, self.subject, self.body)
+    }
+
+    /// The window as a draft to put aside; the id is the one it continues, or empty for a new one.
+    pub fn as_stored(&self) -> StoredDraft {
+        StoredDraft {
+            id: self.stored.clone().unwrap_or_default(),
+            account_id: self.account_id.clone(),
+            to: self.to.clone(),
+            cc: self.cc.clone(),
+            subject: self.subject.clone(),
+            body: self.body.clone(),
+            in_reply_to: self.in_reply_to.clone(),
+            attachments: self.attachments.clone(),
+            updated: 0,
+        }
+    }
+
+    /// Whether nothing has been written: no addresses, subject or files, and the text as it
+    /// opened (a signature or a quoted message on its own is not worth keeping).
+    pub fn is_blank(&self) -> bool {
+        if !self.attachments.is_empty() {
+            return false;
+        }
+        let empty = self.to.trim().is_empty() && self.cc.trim().is_empty() && self.subject.trim().is_empty() && self.body.trim().is_empty();
+        empty || self.fingerprint() == self.initial
     }
 
     pub fn draft(&self) -> Result<Draft, String> {
@@ -159,7 +219,43 @@ impl MailApp {
             let text = session.bodies.get(&m.id).map(|b| b.text.as_str()).unwrap_or(m.preview.as_str());
             (m, text, me.as_str())
         });
-        self.compose = Some(Compose::new(kind, original).with_signature(&signature));
+        let account_id = session.current_account().map(|a| a.id.clone()).unwrap_or_default();
+        self.compose = Some(Compose::new(kind, original).with_signature(&signature).opened_from(&account_id));
+    }
+
+    /// Opens a draft that was put aside, to write on or send.
+    pub fn open_draft(&mut self, id: &str) {
+        if let Some(d) = self.engine.session.draft(id) {
+            self.compose = Some(Compose::from_stored(d));
+        }
+    }
+
+    /// Closes the compose window. What was written is put aside as a draft; an untouched
+    /// window, or one emptied on purpose, leaves nothing behind.
+    fn put_aside(&mut self) {
+        let Some(c) = self.compose.take() else { return };
+        if c.is_blank() {
+            self.forget_draft(c.stored.as_deref());
+            return;
+        }
+        match serde_json::to_value(c.as_stored()) {
+            Ok(params) => {
+                self.run("draft.save", params);
+                if self.notice.is_none() {
+                    self.notice = Some("Concept bewaard. Je vindt het onder Concepten bij het account.".into());
+                }
+            }
+            Err(_) => self.notice = Some("Het concept kon niet worden bewaard.".into()),
+        }
+    }
+
+    /// Drops the stored draft a window came from, if any.
+    fn forget_draft(&mut self, id: Option<&str>) {
+        if let Some(id) = id
+            && self.engine.session.draft(id).is_some()
+        {
+            self.run("draft.delete", serde_json::json!({ "id": id }));
+        }
     }
 }
 
@@ -170,7 +266,9 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     if let Some(id) = c.draft_id {
         match app.engine.session.outbox.get(&id) {
             Some(SendState::Sent) => {
+                let stored = c.stored.clone();
                 app.compose = None;
+                app.forget_draft(stored.as_deref());
                 app.notice = Some("Bericht verzonden.".into());
                 return;
             }
@@ -191,9 +289,10 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut open = true;
     let mut send = false;
     let mut discard = false;
+    let mut put_aside = false;
     let mut pick = false;
     let mut remove = None;
-    egui::Window::new("Nieuw bericht")
+    egui::Window::new(if c.stored.is_some() { "Concept" } else { "Nieuw bericht" })
         .open(&mut open)
         .default_size(vec2(680.0, 520.0))
         .min_size(vec2(420.0, 320.0))
@@ -206,7 +305,20 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     if ui.add(b).clicked() {
                         send = true;
                     }
-                    if ui.add(egui::Button::new("Verwijderen").min_size(vec2(100.0, 30.0))).clicked() {
+                    if ui
+                        .add(egui::Button::new("Opslaan als concept").min_size(vec2(140.0, 30.0)))
+                        .on_hover_text(
+                            "Sluit het venster en bewaart het bericht onder Concepten bij het account. Het venster sluiten doet hetzelfde.",
+                        )
+                        .clicked()
+                    {
+                        put_aside = true;
+                    }
+                    if ui
+                        .add(egui::Button::new("Verwijderen").min_size(vec2(100.0, 30.0)))
+                        .on_hover_text("Gooit het bericht weg, ook als concept.")
+                        .clicked()
+                    {
                         discard = true;
                     }
                     if ui
@@ -258,8 +370,14 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 });
             });
         });
-    if discard || !open {
+    if discard {
+        let stored = c.stored.clone();
         app.compose = None;
+        app.forget_draft(stored.as_deref());
+        return;
+    }
+    if (put_aside || !open) && !sending {
+        app.put_aside();
         return;
     }
     if let Some(i) = remove.filter(|i| *i < c.attachments.len()) {
@@ -276,7 +394,11 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     if send {
         match c.draft() {
             Ok(draft) => {
-                let account = app.engine.session.current_account().map(|a| a.id.clone()).unwrap_or_default();
+                let account = if c.account_id.is_empty() {
+                    app.engine.session.current_account().map(|a| a.id.clone()).unwrap_or_default()
+                } else {
+                    c.account_id.clone()
+                };
                 c.error = None;
                 c.draft_id = Some(app.engine.send(&account, draft));
             }
@@ -381,6 +503,29 @@ mod tests {
         let names: Vec<String> = harness.state().compose.as_ref().map(|c| c.attachments.iter().map(|a| a.name.clone()).collect()).unwrap_or_default();
         assert_eq!(names, ["foto.jpg"]);
         assert!(harness.query_by_label("📎 offerte.pdf (2 kB)").is_none());
+    }
+
+    #[test]
+    fn a_window_knows_when_nothing_was_written_and_round_trips_as_a_draft() {
+        let h = header();
+        let untouched = Compose::new(Kind::Reply, Some((&h, "tien uur?", "me@x.nl"))).with_signature("Alain").opened_from("acc");
+        assert!(untouched.is_blank(), "a quote and a signature alone are not a draft");
+        let mut written = Compose::new(Kind::Reply, Some((&h, "tien uur?", "me@x.nl"))).with_signature("Alain").opened_from("acc");
+        written.body = format!("Prima.{}", written.body);
+        assert!(!written.is_blank());
+        written.attachments.push(DraftAttachment::new("a.txt", b"x".to_vec()));
+        let stored = written.as_stored();
+        assert_eq!((stored.id.as_str(), stored.account_id.as_str(), stored.to.as_str()), ("", "acc", "Sanne <sanne@example.org>"));
+        assert_eq!(stored.in_reply_to.as_deref(), Some("<x@example.org>"));
+        let again = Compose::from_stored(&StoredDraft { id: "d-1".into(), ..stored });
+        assert_eq!((again.stored.as_deref(), again.subject.as_str(), again.attachments.len()), (Some("d-1"), "Re: Planning", 1));
+        assert!(again.body.starts_with("Prima."));
+        let mut emptied = again;
+        emptied.to.clear();
+        emptied.subject.clear();
+        emptied.body.clear();
+        emptied.attachments.clear();
+        assert!(emptied.is_blank(), "a draft emptied on purpose is not kept");
     }
 
     #[test]
