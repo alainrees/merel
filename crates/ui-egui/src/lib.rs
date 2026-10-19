@@ -731,21 +731,6 @@ fn calendar_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
 }
 
-/// The height of every button and menu in a window's action row (the compose window's
-/// "Verzenden" row), so the row reads as one line.
-pub(crate) const ACTION_HEIGHT: f32 = 30.0;
-
-/// A menu button of [`ACTION_HEIGHT`], drawn like the buttons next to it rather than as egui's
-/// smaller default menu button. Returns the button's response and the menu's, when open.
-pub(crate) fn action_menu<R>(
-    ui: &mut Ui,
-    text: impl Into<egui::WidgetText>,
-    content: impl FnOnce(&mut Ui) -> R,
-) -> (egui::Response, Option<egui::InnerResponse<R>>) {
-    let button = egui::Button::new(text.into()).min_size(vec2(0.0, ACTION_HEIGHT));
-    egui::containers::menu::MenuButton::from_button(button).ui(ui, content)
-}
-
 /// "Cmd+N" on a Mac, "Ctrl+N" elsewhere.
 pub(crate) fn key_hint(key: &str) -> String {
     let modifier = if cfg!(target_os = "macos") { "Cmd" } else { "Ctrl" };

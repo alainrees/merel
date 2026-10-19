@@ -69,6 +69,11 @@ pub enum Icon {
     ReplyAll,
     Save,
     Send,
+    Paperclip,
+    FileText,
+    CircleAlert,
+    ShieldCheck,
+    SlidersHorizontal,
     Sparkles,
     Star,
     Inbox,
@@ -89,7 +94,7 @@ pub enum Icon {
 
 impl Icon {
     /// Every icon, for the test that each one loads.
-    pub const ALL: [Icon; 56] = [
+    pub const ALL: [Icon; 61] = [
         Icon::Archive,
         Icon::Bell,
         Icon::Calendar,
@@ -130,6 +135,11 @@ impl Icon {
         Icon::ReplyAll,
         Icon::Save,
         Icon::Send,
+        Icon::Paperclip,
+        Icon::FileText,
+        Icon::CircleAlert,
+        Icon::ShieldCheck,
+        Icon::SlidersHorizontal,
         Icon::Sparkles,
         Icon::Star,
         Icon::Inbox,
@@ -196,6 +206,11 @@ impl Icon {
             Icon::ReplyAll => svg!("reply-all"),
             Icon::Save => svg!("save"),
             Icon::Send => svg!("send"),
+            Icon::Paperclip => svg!("paperclip"),
+            Icon::FileText => svg!("file-text"),
+            Icon::CircleAlert => svg!("circle-alert"),
+            Icon::ShieldCheck => svg!("shield-check"),
+            Icon::SlidersHorizontal => svg!("sliders-horizontal"),
             Icon::Sparkles => svg!("sparkles"),
             Icon::Star => svg!("star"),
             Icon::Inbox => svg!("inbox"),
