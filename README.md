@@ -31,13 +31,13 @@ deleted in a window and kept in `calendar.json`. The contacts module keeps a loc
 book (`contacts.json`) with search and a contact card, and the compose window completes
 addresses from it and from the mail you have seen. The tasks module keeps a local to-do list
 (`tasks.json`) with due days, priorities and an open/done filter. An Exchange, Microsoft 365 or Gmail account
-brings its own calendar, contacts and tasks along (Google Calendar, People and Tasks for Gmail): they
+brings its own calendar, contacts and tasks along (Google Calendar, People and Tasks for Gmail), and so
+does an IMAP account with a CalDAV/CardDAV server next to it (Fastmail, iCloud, Nextcloud and the like): they
 appear next to the local ones, changes go straight to the server, and a new item asks whether
 it belongs on this computer or in the account. Everything an account showed is kept in an
 encrypted offline cache, so the window fills at once on the next start and mail you opened
 before can be read without a connection, and changes you make without one (flags, moves,
 appointments, contacts, tasks) wait and reach the server when it is back, even after a restart.
-Next up: CalDAV/CardDAV.
 
 ## Build
 

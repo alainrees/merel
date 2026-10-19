@@ -12,6 +12,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread;
 use std::time::Duration;
 
+use mailcraft_dav::DavMailbox;
 use mailcraft_exchange::EwsClient;
 use mailcraft_google::GoogleMailbox;
 use mailcraft_graph::GraphClient;
@@ -233,6 +234,11 @@ fn connect(account: &Account, server: &Server, credentials: &mut Credentials) ->
         Protocol::Gmail => Box::new(GoogleMailbox::connect(server, &account.username, &credential).map_err(|e| describe(&e))?),
         // A Microsoft 365 account signed in for Graph; one from before that still speaks IMAP.
         Protocol::Microsoft365 if uses_graph(account) => Box::new(GraphClient::connect(server, &credential).map_err(|e| describe(&e))?),
+        // An IMAP account with a CalDAV/CardDAV server named next to it.
+        Protocol::ImapSmtp if account.dav.is_some() => {
+            let dav = account.dav.as_ref().ok_or_else(|| "no DAV server".to_string())?;
+            Box::new(DavMailbox::connect(server, &account.username, &credential, dav).map_err(|e| describe(&e))?)
+        }
         Protocol::ImapSmtp | Protocol::Microsoft365 => {
             Box::new(ImapClient::connect(server, &account.username, &credential).map_err(MailboxError::from).map_err(|e| describe(&e))?)
         }
@@ -319,6 +325,7 @@ mod tests {
             auth: Auth::Password,
             incoming: Some(Server { host: "127.0.0.1".into(), port: 1, tls: Tls::Implicit }),
             outgoing: None,
+            dav: None,
         }
     }
 
