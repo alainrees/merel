@@ -100,7 +100,8 @@ with embedded pictures and without anything from the internet or any script) to 
 temporary folder and opens it, and the browser's print dialog does the rest.
 
 Keyboard shortcuts in the mail module follow Outlook (Cmd instead of Ctrl on a Mac): arrow keys
-walk the message list, Delete removes the selected message, Ctrl+N starts a new message, Ctrl+R
+walk the message list, Delete removes the selected message, Backspace archives it (on a Mac, where Backspace is
+the delete key, Ctrl+E archives, as in Outlook for Mac), Ctrl+N starts a new message, Ctrl+R
 replies, Ctrl+Shift+R replies to all, Ctrl+F forwards, Ctrl+Shift+V moves to a folder, Ctrl+Q and Ctrl+U mark read or unread,
 Ctrl+E puts the cursor in the search box, Ctrl+P prints, Ctrl+Shift+1 to 9 run the account's quick steps, Esc clears a
 search and F5 refreshes the folder. None
