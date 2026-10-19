@@ -49,7 +49,7 @@ impl ThemeChoice {
 }
 
 /// What the person chose on the "Beeld" tab.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ViewPrefs {
     pub reading_pane: ReadingPane,
@@ -58,7 +58,22 @@ pub struct ViewPrefs {
     pub compact: bool,
     /// Messages on one subject folded behind the one that stands first in the list.
     pub conversations: bool,
+    /// Headings "Vandaag", "Gisteren", "Deze week", … over the list when it is sorted by date.
+    pub groups: bool,
     pub sort: Sort,
+}
+
+impl Default for ViewPrefs {
+    fn default() -> Self {
+        ViewPrefs {
+            reading_pane: ReadingPane::default(),
+            theme: ThemeChoice::default(),
+            compact: false,
+            conversations: false,
+            groups: true,
+            sort: Sort::default(),
+        }
+    }
 }
 
 impl ViewPrefs {
@@ -148,6 +163,13 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
             if ui
                 .checkbox(&mut app.view.conversations, "Gesprekken")
                 .on_hover_text("Berichten over hetzelfde onderwerp als één gesprek achter het nieuwste bericht; het pijltje ervoor toont de rest.")
+                .changed()
+            {
+                changed = true;
+            }
+            if ui
+                .checkbox(&mut app.view.groups, "Groepen")
+                .on_hover_text("Kopjes Vandaag, Gisteren, Deze week, Vorige week, Deze maand… boven de berichten, zoals in Outlook; alleen bij sorteren op datum.")
                 .changed()
             {
                 changed = true;
