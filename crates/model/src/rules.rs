@@ -130,6 +130,7 @@ mod tests {
             flags: Flags::default(),
             has_attachments: true,
             message_id: None,
+            categories: Vec::new(),
         }
     }
 

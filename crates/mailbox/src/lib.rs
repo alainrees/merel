@@ -61,6 +61,8 @@ pub struct RemoteHeader {
     pub header: ParsedHeader,
     /// Seconds since the epoch: the Date header, else when the server received it.
     pub date: i64,
+    /// The message's categories by name (IMAP keywords with `_` read as a space).
+    pub categories: Vec<String>,
 }
 
 /// A flag a person can set on a message.
@@ -103,6 +105,9 @@ pub trait Mailbox: Send {
     fn delete_message(&mut self, folder: &str, id: &str) -> Result<()>;
     /// Removes every message in a folder for good; subfolders stay.
     fn empty_folder(&mut self, folder: &str) -> Result<()>;
+    /// Gives a message the categories `categories` (its whole new set); `removed` names the
+    /// ones it had and loses, for stores that take keywords off one by one.
+    fn set_categories(&mut self, folder: &str, id: &str, categories: &[String], removed: &[String]) -> Result<()>;
     /// The store's appointments, contacts and tasks; `None` for a store that keeps only mail.
     fn items(&mut self) -> Option<&mut dyn ItemStore> {
         None

@@ -39,6 +39,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "folder.delete", label: "Delete folder", run: crate::folders::delete },
     CommandSpec { id: "folder.empty", label: "Empty folder", run: crate::folders::empty },
     CommandSpec { id: "folder.mark_all_read", label: "Mark all as read", run: crate::folders::mark_all_read },
+    CommandSpec { id: "message.categorize", label: "Categorize", run: crate::categories::categorize },
+    CommandSpec { id: "message.clear_categories", label: "Clear all categories", run: crate::categories::clear },
+    CommandSpec { id: "category.save", label: "Save category", run: crate::categories::save },
+    CommandSpec { id: "category.delete", label: "Delete category", run: crate::categories::delete },
     CommandSpec { id: "view.filter", label: "Show only…", run: crate::view::filter },
     CommandSpec { id: "view.sort", label: "Sort by…", run: crate::view::sort },
     CommandSpec {
@@ -316,6 +320,7 @@ mod tests {
                 answered: false,
                 size: 10,
                 has_attachments: false,
+                categories: Vec::new(),
                 header,
                 date: 5,
             }],

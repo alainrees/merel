@@ -313,6 +313,10 @@ fn run(c: &mut dyn Mailbox, account: &Account, job: &Job) -> Result<Option<Event
             c.empty_folder(path)?;
             None
         }
+        Job::Categories { path, id, categories, removed, .. } => {
+            c.set_categories(path, id, categories, removed)?;
+            None
+        }
         Job::CreateFolder { account_id, parent, name } => {
             c.create_folder(parent.as_deref(), name)?;
             Some(Event::Folders { account_id: account_id.clone(), folders: c.folders()? })

@@ -241,6 +241,26 @@ impl ImapClient {
         Ok(())
     }
 
+    /// Sets the keywords for `categories` and takes those for `removed` off. A server that
+    /// does not keep custom keywords (`PERMANENTFLAGS` without `\*`) refuses the `STORE`.
+    pub fn set_categories(&mut self, folder: &str, uid: u32, categories: &[String], removed: &[String]) -> Result<()> {
+        if self.selected.as_deref() != Some(folder) {
+            self.select(folder)?;
+        }
+        let uid = uid.to_string();
+        let keywords =
+            |names: &[String]| names.iter().map(|n| mailcraft_model::category_keyword(n)).filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" ");
+        let off = keywords(removed);
+        if !off.is_empty() {
+            self.session.uid_store(&uid, format!("-FLAGS.SILENT ({off})"))?;
+        }
+        let on = keywords(categories);
+        if !on.is_empty() {
+            self.session.uid_store(&uid, format!("+FLAGS.SILENT ({on})"))?;
+        }
+        Ok(())
+    }
+
     /// Removes one message for good: `\Deleted`, then expunged (the whole folder's deleted
     /// messages when the server lacks UIDPLUS).
     pub fn delete_message(&mut self, folder: &str, uid: u32) -> Result<()> {
@@ -361,9 +381,24 @@ fn header_of(f: &imap::types::Fetch) -> Option<RemoteHeader> {
         answered: flags.contains(&imap::types::Flag::Answered),
         size: f.size.unwrap_or(0),
         has_attachments: f.bodystructure().is_some_and(has_attachment),
+        categories: categories_of(flags),
         header,
         date,
     })
+}
+
+/// The keywords (custom flags) that stand for categories: everything a client may set, minus
+/// the `$`-prefixed ones and the junk markers other clients use among themselves.
+fn categories_of(flags: &[imap::types::Flag<'_>]) -> Vec<String> {
+    flags
+        .iter()
+        .filter_map(|f| match f {
+            imap::types::Flag::Custom(k) => Some(k.as_ref()),
+            _ => None,
+        })
+        .filter(|k| !k.starts_with('$') && !["NonJunk", "Junk", "Forwarded", "Redirected"].iter().any(|s| s.eq_ignore_ascii_case(k)))
+        .map(|k| k.replace('_', " "))
+        .collect()
 }
 
 /// The `SEARCH` keys for `words`: a `TEXT` key per word, every word required. Quoted strings
@@ -439,6 +474,10 @@ impl Mailbox for ImapClient {
 
     fn empty_folder(&mut self, folder: &str) -> mailcraft_mailbox::Result<()> {
         Ok(ImapClient::empty_folder(self, folder)?)
+    }
+
+    fn set_categories(&mut self, folder: &str, id: &str, categories: &[String], removed: &[String]) -> mailcraft_mailbox::Result<()> {
+        Ok(ImapClient::set_categories(self, folder, uid_of(id)?, categories, removed)?)
     }
 
     fn logout(self: Box<Self>) {

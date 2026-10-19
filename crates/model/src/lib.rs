@@ -6,6 +6,7 @@
 
 mod address;
 mod calendar;
+mod categories;
 mod contact;
 mod rules;
 mod task;
@@ -14,6 +15,7 @@ pub use address::{Address, AddressError, parse_address_list};
 pub use calendar::{
     Appointment, AppointmentError, Calendar, Frequency, MAX_INTERVAL, MAX_NOTES, MAX_OCCURRENCES, MAX_REMINDER, Recurrence, describe_recurrence,
 };
+pub use categories::{Category, CategoryColor, MAX_CATEGORY_NAME, category_keyword};
 pub use contact::{Contact, ContactError};
 pub use rules::{MAX_RULE_TEXT, Rule, RuleError, RuleField};
 pub use task::{Priority, Task, TaskError};
@@ -252,6 +254,9 @@ pub struct MessageHeader {
     pub has_attachments: bool,
     /// The Message-ID header, for replies.
     pub message_id: Option<String>,
+    /// The categories (coloured labels) on the message, by name; see [`Category`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<String>,
 }
 
 /// A message being written.
