@@ -1435,6 +1435,7 @@ mod tests {
             form.contains = "STUDIO@".into();
             form.move_to = Some("archive".into());
             form.mark_read = true;
+            form.categories = vec!["Rode categorie".into()];
         }
         h.run();
         h.get_by_label("Regel opslaan").click();
@@ -1443,13 +1444,14 @@ mod tests {
         assert_eq!(s.rules.len(), 1);
         assert_eq!((s.rules[0].name.as_str(), s.rules[0].contains.as_str(), s.rules[0].account_id.as_str()), ("Studio", "STUDIO@", "sample"));
         assert!(h.state().rules.as_ref().is_some_and(|r| r.form.is_none()));
-        h.get_by_label_contains("Van bevat “STUDIO@” → naar Archief, markeren als gelezen");
+        h.get_by_label_contains("Van bevat “STUDIO@” → naar Archief, markeren als gelezen, categorie Rode categorie");
         assert_eq!(s.message("m0").unwrap().folder_id, "inbox", "saving a rule moves nothing by itself");
         h.get_by_label("Regels nu uitvoeren op deze map").click();
         h.run();
         let s = &h.state().engine.session;
         assert_eq!(s.message("m0").unwrap().folder_id, "archive");
         assert!(s.message("m0").unwrap().flags.seen);
+        assert_eq!(s.message("m0").unwrap().categories, vec!["Rode categorie".to_string()]);
         assert_eq!(h.state().notice.as_deref(), Some("Regels toegepast op 1 bericht."));
         h.get_by_label("Regel verwijderen").click();
         h.run();
@@ -1582,6 +1584,18 @@ mod tests {
         h.run();
         h.get_by_label("Beeld").click();
         h.run();
+        h.get_by_value("Alle").click();
+        h.run();
+        h.get_by_label("Groene categorie").click();
+        h.run();
+        assert_eq!(h.state().engine.session.category_filter.as_deref(), Some("Groene categorie"));
+        assert!(h.query_all_by_label("Welkom bij Mailcraft").next().is_none(), "only mail with the category is listed");
+        h.get_by_label("Planning voor donderdag");
+        h.get_by_value("Groene categorie").click();
+        h.run();
+        h.get_by_label("Alle").click();
+        h.run();
+        assert!(h.state().engine.session.category_filter.is_none());
         h.get_by_label("Ongelezen").click();
         h.run();
         assert!(h.query_all_by_label("Re: Offerte drukwerk").next().is_none(), "read mail is hidden");
