@@ -63,6 +63,9 @@ pub struct ViewPrefs {
     /// Headings "Vandaag", "Gisteren", "Deze week", … over the list when it is sorted by date.
     pub groups: bool,
     pub sort: Sort,
+    /// The ISO week number left of each week in the calendar's month and week views, as
+    /// Outlook's "Weeknummers weergeven".
+    pub week_numbers: bool,
     /// The folders pinned under "Favorieten" at the top of the folder pane, by id, in order.
     pub favorites: Vec<String>,
     /// The saved searches listed under "Zoekmappen" in the folder pane.
@@ -78,6 +81,7 @@ impl Default for ViewPrefs {
             conversations: false,
             groups: true,
             sort: Sort::default(),
+            week_numbers: false,
             favorites: Vec::new(),
             search_folders: Vec::new(),
         }
@@ -195,6 +199,18 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
             if ui
                 .checkbox(&mut app.view.groups, "Groepen")
                 .on_hover_text("Kopjes Vandaag, Gisteren, Deze week, Vorige week, Deze maand… boven de berichten, zoals in Outlook; alleen bij sorteren op datum.")
+                .changed()
+            {
+                changed = true;
+            }
+        });
+        ui.separator();
+    }
+    if app.module == Module::Calendar {
+        group(ui, t, "Agenda", |ui| {
+            if ui
+                .checkbox(&mut app.view.week_numbers, "Weeknummers")
+                .on_hover_text("Het weeknummer links van elke week in de maand- en weekweergave, zoals in Outlook.")
                 .changed()
             {
                 changed = true;
