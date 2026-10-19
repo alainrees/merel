@@ -356,7 +356,9 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
 }
 
 /// A ribbon group: its controls in a row, its name in small print underneath, like Outlook.
-fn group(ui: &mut egui::Ui, t: &Tokens, name: &str, add: impl FnOnce(&mut egui::Ui)) {
+/// A ribbon group: its buttons in a row with the group's name under them, as Outlook and Word
+/// caption their ribbon groups.
+pub(crate) fn group(ui: &mut egui::Ui, t: &Tokens, name: &str, add: impl FnOnce(&mut egui::Ui)) {
     ui.vertical(|ui| {
         ui.horizontal(add);
         ui.add_space(2.0);
