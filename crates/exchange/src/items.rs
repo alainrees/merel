@@ -10,9 +10,9 @@
 //! header names the computer's zone when [`windows_zone`] knows its Windows name, so a day
 //! saved here is the same day in Outlook; the engine snaps what comes back to local midnight.
 
-use chrono::{DateTime, Local, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Local, TimeZone, Utc};
 use mailcraft_mailbox::{Item, ItemStore, MailboxError, Result};
-use mailcraft_model::{Address, Appointment, Contact, Priority, Task, clean_text};
+use mailcraft_model::{Address, Appointment, Contact, Frequency, Priority, Recurrence, Task, clean_text};
 use roxmltree::Node;
 
 use crate::{EwsClient, child, esc, find, parse, parse_datetime, response_messages, text};
@@ -199,7 +199,60 @@ fn appointment_fields(a: &Appointment) -> Fields {
     f.put("calendar:End", format!("<t:End>{}</t:End>", time(a.end)));
     f.put("calendar:IsAllDayEvent", format!("<t:IsAllDayEvent>{}</t:IsAllDayEvent>", a.all_day));
     f.put("calendar:Location", format!("<t:Location>{}</t:Location>", esc(&a.location)));
+    if let Some(r) = &a.recurrence {
+        f.put("calendar:Recurrence", recurrence_xml(r, a.start));
+    }
     f
+}
+
+/// A [`Recurrence`] as EWS's `Recurrence`: the pattern, then the range from the start's day.
+/// Exchange has no interval for a yearly pattern, so such a series repeats every year.
+fn recurrence_xml(r: &Recurrence, start: i64) -> String {
+    const DAYS: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const MONTHS: [&str; 12] =
+        ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    let first = Local.timestamp_opt(start, 0).single().unwrap_or_default();
+    let date = |ts: i64| Local.timestamp_opt(ts, 0).single().unwrap_or_default().format("%Y-%m-%d").to_string();
+    let pattern = match r.frequency {
+        Frequency::Daily => format!("<t:DailyRecurrence><t:Interval>{}</t:Interval></t:DailyRecurrence>", r.interval),
+        Frequency::Weekly => {
+            let days: Vec<&str> = if r.weekdays.is_empty() {
+                vec![DAYS[first.weekday().num_days_from_monday() as usize]]
+            } else {
+                r.weekdays.iter().filter_map(|d| DAYS.get(usize::from(*d))).copied().collect()
+            };
+            format!(
+                "<t:WeeklyRecurrence><t:Interval>{}</t:Interval><t:DaysOfWeek>{}</t:DaysOfWeek><t:FirstDayOfWeek>Monday</t:FirstDayOfWeek></t:WeeklyRecurrence>",
+                r.interval,
+                days.join(" ")
+            )
+        }
+        Frequency::Monthly => {
+            format!(
+                "<t:AbsoluteMonthlyRecurrence><t:Interval>{}</t:Interval><t:DayOfMonth>{}</t:DayOfMonth></t:AbsoluteMonthlyRecurrence>",
+                r.interval,
+                first.day()
+            )
+        }
+        Frequency::Yearly => format!(
+            "<t:AbsoluteYearlyRecurrence><t:DayOfMonth>{}</t:DayOfMonth><t:Month>{}</t:Month></t:AbsoluteYearlyRecurrence>",
+            first.day(),
+            MONTHS[(first.month0() as usize).min(11)]
+        ),
+    };
+    let range = match (r.until, r.count) {
+        (Some(u), _) => {
+            format!("<t:EndDateRecurrence><t:StartDate>{}</t:StartDate><t:EndDate>{}</t:EndDate></t:EndDateRecurrence>", date(start), date(u))
+        }
+        (None, Some(c)) => {
+            format!(
+                "<t:NumberedRecurrence><t:StartDate>{}</t:StartDate><t:NumberOfOccurrences>{c}</t:NumberOfOccurrences></t:NumberedRecurrence>",
+                date(start)
+            )
+        }
+        (None, None) => format!("<t:NoEndRecurrence><t:StartDate>{}</t:StartDate></t:NoEndRecurrence>", date(start)),
+    };
+    format!("<t:Recurrence>{pattern}{range}</t:Recurrence>")
 }
 
 fn contact_fields(c: &Contact) -> Fields {
@@ -565,11 +618,31 @@ mod tests {
                 "<t:End>2026-10-14T18:46:40Z</t:End><t:IsAllDayEvent>false</t:IsAllDayEvent><t:Location>&lt;Studio&gt;</t:Location></t:CalendarItem>"
             )
         );
-        let whole = Appointment { all_day: true, ..a };
+        let whole = Appointment { all_day: true, ..a.clone() };
         let xml = appointment_fields(&whole).create();
         // An all-day appointment is sent as local wall-clock time with its offset.
         assert!(xml.contains(&format!("<t:Start>{}</t:Start>", local(1_792_000_000))));
         assert!(!xml.contains("<t:Start>2026-10-14T17:46:40Z"));
+
+        // A series carries its pattern and range after the location.
+        let weekly = Recurrence { interval: 2, weekdays: vec![0, 2], count: Some(10), ..Recurrence::every(Frequency::Weekly) };
+        let xml = appointment_fields(&Appointment { recurrence: Some(weekly), ..a.clone() }).create();
+        let day = local(1_792_000_000);
+        assert!(
+            xml.ends_with(&format!(
+                concat!(
+                    "<t:Location>&lt;Studio&gt;</t:Location><t:Recurrence><t:WeeklyRecurrence><t:Interval>2</t:Interval>",
+                    "<t:DaysOfWeek>Monday Wednesday</t:DaysOfWeek><t:FirstDayOfWeek>Monday</t:FirstDayOfWeek></t:WeeklyRecurrence>",
+                    "<t:NumberedRecurrence><t:StartDate>{}</t:StartDate><t:NumberOfOccurrences>10</t:NumberOfOccurrences></t:NumberedRecurrence>",
+                    "</t:Recurrence></t:CalendarItem>"
+                ),
+                &day[..10]
+            )),
+            "{xml}"
+        );
+        let yearly = Recurrence { until: Some(1_892_000_000), ..Recurrence::every(Frequency::Yearly) };
+        let xml = appointment_fields(&Appointment { recurrence: Some(yearly), ..a.clone() }).create();
+        assert!(xml.contains("<t:AbsoluteYearlyRecurrence><t:DayOfMonth>") && xml.contains("<t:EndDateRecurrence>"), "{xml}");
 
         let c = Contact {
             id: String::new(),

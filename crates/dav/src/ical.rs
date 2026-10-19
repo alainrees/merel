@@ -391,7 +391,18 @@ fn duration_seconds(s: &str) -> Option<i64> {
     Some(sign * total)
 }
 
-/// Writes `a` into `event`, keeping what else it holds.
+/// `ts` as a DATE-TIME property in the computer's time zone (`TZID=Europe/Amsterdam`), so a
+/// series keeps its wall-clock time across a daylight-saving change; UTC when the zone is not
+/// known.
+pub fn zoned_prop(name: &str, ts: i64) -> Prop {
+    match local_zone().and_then(|tz| tz.timestamp_opt(ts, 0).single().map(|d| (tz.name().to_string(), d.format("%Y%m%dT%H%M%S").to_string()))) {
+        Some((zone, text)) => Prop { name: name.to_string(), params: vec![("TZID".into(), zone)], raw: text },
+        None => utc_prop(name, ts),
+    }
+}
+
+/// Writes `a` into `event`, keeping what else it holds. A series gets its `RRULE` and, when
+/// timed, a start and end in the computer's time zone rather than UTC.
 pub fn write_appointment(event: &mut Component, a: &Appointment) {
     event.set_text("SUMMARY", &a.title);
     event.set_text("LOCATION", &a.location);
@@ -400,9 +411,15 @@ pub fn write_appointment(event: &mut Component, a: &Appointment) {
     if a.all_day {
         event.set("DTSTART", Some(date_prop("DTSTART", a.start)));
         event.set("DTEND", Some(date_prop("DTEND", a.end.max(a.start + 86_400))));
+    } else if a.recurrence.is_some() {
+        event.set("DTSTART", Some(zoned_prop("DTSTART", a.start)));
+        event.set("DTEND", Some(zoned_prop("DTEND", a.end)));
     } else {
         event.set("DTSTART", Some(utc_prop("DTSTART", a.start)));
         event.set("DTEND", Some(utc_prop("DTEND", a.end)));
+    }
+    if let Some(r) = &a.recurrence {
+        event.set("RRULE", Some(Prop { name: "RRULE".into(), params: Vec::new(), raw: r.rrule(a.all_day) }));
     }
     write_reminder(event, &a.title, a.reminder);
     stamp(event);
@@ -562,6 +579,22 @@ mod tests {
         let again = parse(&text);
         let b = appointment_of(again[0].find("VEVENT").unwrap(), "e:1".into()).unwrap();
         assert!(b.all_day && b.end - b.start == 86_400 * 2);
+
+        // A series carries its rule, with a start in a named zone when the computer has one.
+        let weekly = mailcraft_model::Recurrence {
+            interval: 2,
+            weekdays: vec![0, 2],
+            count: Some(10),
+            ..mailcraft_model::Recurrence::every(mailcraft_model::Frequency::Weekly)
+        };
+        let series = Appointment { all_day: false, recurrence: Some(weekly), ..a.clone() };
+        let mut root = parse(EVENT).remove(0);
+        write_appointment(root.find_mut("VEVENT").unwrap(), &series);
+        let text = root.serialize();
+        assert!(text.contains("RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=10\r\n"), "{text}");
+        let start = parse(&text)[0].find("VEVENT").unwrap().prop("DTSTART").cloned().unwrap();
+        assert!(start.param("TZID").is_some() || start.raw.ends_with('Z'), "{start:?}");
+        assert_eq!(moment(&start).map(|m| m.0), Some(series.start), "the zoned start names the same moment");
     }
 
     #[test]

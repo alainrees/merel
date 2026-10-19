@@ -6,9 +6,9 @@
 //! the command returns.
 //!
 //! A recurring appointment is one entry with a [`Recurrence`]; [`Session::appointments_between`]
-//! expands it into the occurrences of the period asked for, on the computer's clock. Only the
-//! calendars on this computer take a recurrence: an account's server expands its own series and
-//! hands over single occurrences, and Mailcraft does not write series to a server yet.
+//! expands it into the occurrences of the period asked for, on the computer's clock. In an
+//! account's calendar a new appointment can start a series too: the rule goes to the server once,
+//! which then owns the series and hands over single occurrences, edited one by one.
 
 use chrono::Local;
 use serde::{Deserialize, Serialize};
@@ -99,8 +99,9 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 
 /// `appointment.save { id?, calendar_id?, title, start, end, all_day?, location?, notes?, recurrence?, reminder? }`:
 /// creates the appointment, or replaces the one with `id`. Times are Unix seconds. `recurrence`
-/// is a [`Recurrence`] object (or null for a single appointment) and is only accepted for a
-/// calendar on this computer; the occurrences a series had skipped stay skipped unless the
+/// is a [`Recurrence`] object (or null for a single appointment); in an account's calendar only
+/// a new appointment takes one (the server then owns the series and lists its occurrences one
+/// by one), on this computer the occurrences a series had skipped stay skipped unless the
 /// object names its own `skipped` list. `reminder` is minutes before the start, null for none;
 /// left out, an existing appointment keeps its reminder.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
@@ -120,7 +121,7 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let recurrence = match params.get("recurrence") {
         None | Some(Value::Null) => None,
         Some(r) => {
-            if account.is_some() {
+            if account.is_some() && existing.is_some() {
                 return Err(CommandError::Param("recurrence"));
             }
             let mut r: Recurrence = serde_json::from_value(r.clone()).map_err(|_| CommandError::Param("recurrence"))?;
@@ -278,12 +279,22 @@ mod tests {
             Err(CommandError::Param("recurrence"))
         );
         s.calendars.push(Calendar { id: "acc/cal".into(), name: "Werk".into(), account_id: Some("acc".into()), color: [0; 3] });
+        s.take_jobs();
+        s.run(
+            "appointment.save",
+            &json!({ "calendar_id": "acc/cal", "title": "Op de server", "start": start, "end": start + 1, "recurrence": weekly }),
+        )
+        .expect("a new appointment in an account calendar may start a series");
+        let jobs = s.take_jobs();
+        assert!(
+            matches!(&jobs[..], [crate::Job::SaveItem { item: mailcraft_mailbox::Item::Appointment(a), .. }] if a.recurrence.is_some()),
+            "the server gets the rule: {jobs:?}"
+        );
+        let id = s.selected_appointment.clone().expect("selected");
         assert_eq!(
-            s.run(
-                "appointment.save",
-                &json!({ "calendar_id": "acc/cal", "title": "Op de server", "start": start, "end": start + 1, "recurrence": weekly })
-            ),
-            Err(CommandError::Param("recurrence"))
+            s.run("appointment.save", &json!({ "id": id, "title": "Op de server", "start": start, "end": start + 1, "recurrence": weekly })),
+            Err(CommandError::Param("recurrence")),
+            "the server owns the series once it exists"
         );
     }
 }
