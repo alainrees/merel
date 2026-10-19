@@ -31,6 +31,8 @@ pub struct AccountForm {
     pub error: Option<String>,
     /// How a sign-in started from the account list ended.
     pub notice: Option<String>,
+    /// The account whose Remove button was clicked once; the second click removes it.
+    pub confirm_remove: Option<String>,
 }
 
 impl Default for AccountForm {
@@ -53,6 +55,7 @@ impl Default for AccountForm {
             client_secret: String::new(),
             error: None,
             notice: None,
+            confirm_remove: None,
         }
     }
 }
@@ -215,6 +218,8 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 ui.add_space(8.0);
             }
             let mut again = None;
+            let mut remove = None;
+            let confirming = app.form.confirm_remove.clone();
             for (id, name, email, oauth, status) in statuses {
                 if email == "jij@example.org" {
                     continue;
@@ -241,12 +246,43 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                             again = Some(id.clone());
                         }
                     }
+                    ui.add_space(4.0);
+                    if confirming.as_deref() == Some(id.as_str()) {
+                        ui.label(
+                            RichText::new(
+                                "Dit account, het wachtwoord en de offline kopie verdwijnen van deze computer. Je mail blijft op de server.",
+                            )
+                            .size(12.0)
+                            .color(t.text),
+                        );
+                        ui.horizontal(|ui| {
+                            if ui.add(egui::Button::new(RichText::new("Ja, verwijderen").color(t.on_accent)).fill(t.flag)).clicked() {
+                                remove = Some(id.clone());
+                            }
+                            if ui.button("Annuleren").clicked() {
+                                app.form.confirm_remove = None;
+                            }
+                        });
+                    } else if ui
+                        .button("Account verwijderen")
+                        .on_hover_text("Haalt het account van deze computer; vraagt eerst om bevestiging.")
+                        .clicked()
+                    {
+                        app.form.confirm_remove = Some(id.clone());
+                    }
                 });
                 ui.add_space(8.0);
             }
             if let Some(id) = again {
                 app.form.notice = None;
                 app.engine.sign_in_again(&id);
+            }
+            if let Some(id) = remove {
+                app.form.confirm_remove = None;
+                app.form.notice = Some(match app.engine.remove_account(&id) {
+                    Ok(()) => "Het account is verwijderd.".into(),
+                    Err(e) => e,
+                });
             }
             ui.add_space(16.0);
             ui.label(RichText::new("Account toevoegen").size(20.0).color(t.text));
@@ -489,6 +525,35 @@ mod tests {
         assert!(a.outgoing.is_none());
         f.kind = Protocol::ImapSmtp;
         assert!(f.account().is_err(), "a backslash in an IMAP user name is refused");
+    }
+
+    #[test]
+    fn removing_an_account_asks_first_and_then_brings_the_sample_back() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut engine = mailcraft_engine::Engine::sample();
+        let mut f = AccountForm::default();
+        f.email = "alain@voorbeeld.nl".into();
+        f.password = "x".into();
+        f.suggest();
+        engine.add_account(f.account().unwrap(), Secret::new("x")).unwrap();
+        assert!(!engine.session.is_sample());
+        let mut app = MailApp::new(engine);
+        app.tab = Tab::File;
+        let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        harness.run();
+        harness.get_by_label("Account verwijderen").click();
+        harness.run();
+        assert!(!harness.state().engine.session.is_sample(), "one click only asks");
+        harness.get_by_label("Annuleren").click();
+        harness.run();
+        assert!(harness.query_by_label("Ja, verwijderen").is_none());
+        harness.get_by_label("Account verwijderen").click();
+        harness.run();
+        harness.get_by_label("Ja, verwijderen").click();
+        harness.run();
+        assert!(harness.state().engine.session.is_sample(), "the sample mail is back");
+        assert_eq!(harness.state().form.notice.as_deref(), Some("Het account is verwijderd."));
     }
 
     #[test]

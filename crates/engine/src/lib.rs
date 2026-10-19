@@ -271,6 +271,67 @@ impl Session {
         self.accounts.iter().any(|a| a.id == SAMPLE_ACCOUNT)
     }
 
+    /// Forgets an account and everything the session holds of it: folders, messages, bodies,
+    /// status, the calendar and items its store synced, and anything queued for it. Local
+    /// appointments, contacts and tasks stay. When it was the last account, the sample mail
+    /// comes back so the window is not empty.
+    pub fn remove_account(&mut self, account_id: &str) {
+        if !self.accounts.iter().any(|a| a.id == account_id) {
+            return;
+        }
+        let prefix = format!("{account_id}/");
+        self.accounts.retain(|a| a.id != account_id);
+        self.folders.retain(|f| f.account_id != account_id);
+        self.messages.retain(|m| !m.folder_id.starts_with(&prefix));
+        self.bodies.retain(|id, _| !id.starts_with(&prefix));
+        self.loading.retain(|id| !id.starts_with(&prefix) && *id != format!("sync/{account_id}"));
+        self.status.remove(account_id);
+        self.queued.remove(account_id);
+        self.item_accounts.remove(account_id);
+        self.pending.retain(|j| j.account_id() != account_id);
+        if self.selected_folder.as_deref().is_some_and(|f| f.starts_with(&prefix)) {
+            self.selected_folder = self.folders.iter().find(|f| f.kind == FolderKind::Inbox).map(|f| f.id.clone());
+            self.selected_message = None;
+        }
+        self.calendars.retain(|c| c.account_id.as_deref() != Some(account_id));
+        self.appointments.retain(|a| !a.id.starts_with(&prefix));
+        if self.selected_appointment.as_deref().is_some_and(|id| id.starts_with(&prefix)) {
+            self.selected_appointment = None;
+        }
+        self.contacts.retain(|c| c.account_id.as_deref() != Some(account_id));
+        if self.selected_contact.as_deref().is_some_and(|id| id.starts_with(&prefix)) {
+            self.selected_contact = None;
+        }
+        self.tasks.retain(|t| t.account_id.as_deref() != Some(account_id));
+        if self.selected_task.as_deref().is_some_and(|id| id.starts_with(&prefix)) {
+            self.selected_task = None;
+        }
+        if self.accounts.is_empty() {
+            let (calendar, contacts, tasks) = (self.calendar_data(), self.contacts_data(), self.tasks_data());
+            let mut fresh = Session::sample();
+            fresh.set_calendar_data(calendar);
+            fresh.set_contacts(contacts.contacts);
+            fresh.set_tasks(tasks.tasks);
+            *self = fresh;
+        }
+    }
+
+    /// Whether `event` is about something the session still has; a worker that was told to
+    /// stop can report once more, and that report must not bring its account back.
+    pub fn concerns_current(&self, event: &Event) -> bool {
+        match event {
+            Event::Connected { account_id, .. }
+            | Event::Synced { account_id, .. }
+            | Event::ItemSaved { account_id, .. }
+            | Event::Failed { account_id, .. }
+            | Event::Deferred { account_id, .. }
+            | Event::Sent { account_id, .. } => self.accounts.iter().any(|a| &a.id == account_id),
+            Event::Headers { folder_id, .. } => self.folder(folder_id).is_some(),
+            Event::Body { message_id, .. } => self.message(message_id).is_some(),
+            Event::SignedIn { .. } => true,
+        }
+    }
+
     pub fn folder(&self, id: &str) -> Option<&Folder> {
         self.folders.iter().find(|f| f.id == id)
     }
@@ -623,6 +684,34 @@ impl Engine {
         Ok(())
     }
 
+    /// Removes an account for good: its worker stops, its password or sign-in and its
+    /// offline cache are deleted, and the accounts file is rewritten. Mail on the server is
+    /// not touched.
+    pub fn remove_account(&mut self, account_id: &str) -> Result<(), String> {
+        if !self.session.accounts.iter().any(|a| a.id == account_id) || account_id == SAMPLE_ACCOUNT {
+            return Err("Dit account bestaat niet meer.".into());
+        }
+        if let Some(worker) = &mut self.worker {
+            worker.stop_account(account_id);
+        }
+        let mut problems = Vec::new();
+        if let Err(e) = self.secrets.delete(account_id) {
+            problems.push(format!("wachtwoord of aanmelding: {e}"));
+        }
+        if let Err(e) = self.secrets.delete(&signin::client_secret_key(account_id)) {
+            problems.push(format!("app-registratie: {e}"));
+        }
+        self.cache.remove(account_id);
+        self.session.remove_account(account_id);
+        self.save_accounts()?;
+        self.persist().map_err(|e| e.to_string())?;
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("Het account is weg, maar de sleutelhanger gaf een fout bij het {}.", problems.join(" en bij de ")))
+        }
+    }
+
     fn save_accounts(&self) -> Result<(), String> {
         if let Some(path) = &self.config_path {
             config::save(path, &self.session.accounts).map_err(|e| e.to_string())?;
@@ -659,6 +748,9 @@ impl Engine {
                 Event::SignedIn { result: Ok(a) } => Some(a.id.clone()),
                 _ => None,
             };
+            if !self.session.concerns_current(&e) {
+                continue;
+            }
             self.cache.note_event(&self.session, &e);
             // Changes made offline reach the server before anything else does.
             let replay = match &e {
@@ -689,5 +781,76 @@ impl Engine {
                 worker.submit(j);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mailcraft_model::{Address, Protocol, Server, Tls};
+
+    use super::*;
+
+    fn account(id: &str) -> Account {
+        Account {
+            id: id.into(),
+            name: id.into(),
+            address: Address::new(None, &format!("{id}@voorbeeld.nl")).unwrap(),
+            username: id.into(),
+            protocol: Protocol::ImapSmtp,
+            auth: Auth::Password,
+            incoming: Some(Server { host: "127.0.0.1".into(), port: 1, tls: Tls::Implicit }),
+            outgoing: None,
+            dav: None,
+        }
+    }
+
+    #[test]
+    fn removing_an_account_clears_its_traces_and_keeps_local_items() {
+        let mut engine = Engine::sample();
+        engine.add_account(account("a"), Secret::new("pw")).unwrap();
+        engine.add_account(account("b"), Secret::new("pw")).unwrap();
+        engine.session.run("appointment.save", &serde_json::json!({ "title": "Lokaal", "start": 10, "end": 20 })).unwrap();
+        let s = &mut engine.session;
+        s.apply(Event::Connected {
+            account_id: "a".into(),
+            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true }],
+            syncs_items: true,
+        });
+        s.apply(Event::Synced {
+            account_id: "a".into(),
+            appointments: vec![Appointment {
+                id: "x".into(),
+                calendar_id: String::new(),
+                title: "Van a".into(),
+                start: 0,
+                end: 1,
+                all_day: false,
+                location: String::new(),
+                notes: String::new(),
+            }],
+            contacts: Vec::new(),
+            tasks: Vec::new(),
+        });
+        s.selected_folder = Some("a/INBOX".into());
+        assert!(s.appointments.iter().any(|a| a.title == "Van a"));
+        assert!(s.calendars.iter().any(|c| c.account_id.as_deref() == Some("a")));
+
+        engine.remove_account("a").unwrap();
+        let s = &engine.session;
+        assert_eq!(s.accounts.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["b"]);
+        assert!(s.folders.is_empty() && s.selected_folder.is_none());
+        assert!(s.appointments.iter().all(|a| a.title != "Van a") && s.appointments.iter().any(|a| a.title == "Lokaal"));
+        assert!(!s.calendars.iter().any(|c| c.account_id.as_deref() == Some("a")));
+        assert!(!s.item_accounts.contains("a") && !s.status.contains_key("a"));
+        assert!(engine.secrets.get("a").unwrap().is_none(), "the password leaves the keychain");
+        assert!(engine.secrets.get("b").unwrap().is_some());
+        // A late report from the stopped worker changes nothing.
+        let late = Event::Connected { account_id: "a".into(), folders: Vec::new(), syncs_items: false };
+        assert!(!engine.session.concerns_current(&late));
+
+        engine.remove_account("b").unwrap();
+        assert!(engine.session.is_sample(), "the last account gone brings the sample mail back");
+        assert!(engine.session.appointments.iter().any(|a| a.title == "Lokaal"), "local items survive");
+        assert!(engine.remove_account("b").is_err());
     }
 }
