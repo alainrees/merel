@@ -317,6 +317,13 @@ fn run(c: &mut dyn Mailbox, account: &Account, job: &Job) -> Result<Option<Event
             c.set_categories(path, id, categories, removed)?;
             None
         }
+        Job::Junk { path, id, junk, .. } => {
+            // Best effort: a store that keeps no such mark is no reason to retry or to complain.
+            if let Err(e) = c.mark_junk(path, id, *junk) {
+                log::info!("junk mark not taken: {e}");
+            }
+            None
+        }
         Job::CreateFolder { account_id, parent, name } => {
             c.create_folder(parent.as_deref(), name)?;
             Some(Event::Folders { account_id: account_id.clone(), folders: c.folders()? })

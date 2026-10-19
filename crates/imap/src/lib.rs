@@ -261,6 +261,20 @@ impl ImapClient {
         Ok(())
     }
 
+    /// Sets the junk keywords other clients and some servers' filters read (RFC 5788's `$Junk`
+    /// and `$NotJunk`, and Thunderbird's `Junk` and `NonJunk`): the one pair on, the other
+    /// off. A server without custom keywords refuses the `STORE`.
+    pub fn mark_junk(&mut self, folder: &str, uid: u32, junk: bool) -> Result<()> {
+        if self.selected.as_deref() != Some(folder) {
+            self.select(folder)?;
+        }
+        let uid = uid.to_string();
+        let (on, off) = if junk { ("$Junk Junk", "$NotJunk NonJunk") } else { ("$NotJunk NonJunk", "$Junk Junk") };
+        self.session.uid_store(&uid, format!("-FLAGS.SILENT ({off})"))?;
+        self.session.uid_store(&uid, format!("+FLAGS.SILENT ({on})"))?;
+        Ok(())
+    }
+
     /// Removes one message for good: `\Deleted`, then expunged (the whole folder's deleted
     /// messages when the server lacks UIDPLUS).
     pub fn delete_message(&mut self, folder: &str, uid: u32) -> Result<()> {
@@ -446,6 +460,10 @@ impl Mailbox for ImapClient {
 
     fn move_to(&mut self, folder: &str, id: &str, dest: &str) -> mailcraft_mailbox::Result<()> {
         Ok(ImapClient::move_to(self, folder, uid_of(id)?, dest)?)
+    }
+
+    fn mark_junk(&mut self, folder: &str, id: &str, junk: bool) -> mailcraft_mailbox::Result<()> {
+        Ok(ImapClient::mark_junk(self, folder, uid_of(id)?, junk)?)
     }
 
     fn append(&mut self, folder: &str, message: &[u8]) -> mailcraft_mailbox::Result<()> {
