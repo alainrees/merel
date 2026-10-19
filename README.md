@@ -152,7 +152,9 @@ unfold them; and a light, dark or system theme. "Groepen" (on by default) heads 
 "Afdrukken" under "Bestand" (or Ctrl+P) prints the open message by way of the system browser: Mailcraft writes a
 page of its own (sender, recipients, date, subject, attachment names and the body as it drew it,
 with embedded pictures and without anything from the internet or any script) to one file in the
-temporary folder and opens it, and the browser's print dialog does the rest.
+temporary folder and opens it, and the browser's print dialog does the rest. In the calendar the same "Afdrukken"
+(or Ctrl+P) prints the open view, as Outlook does: the day, work week, week or month as a list of days with each
+appointment's time, title and place.
 
 A flag can carry a date, Outlook's "Opvolgen": the right-click menu's "Opvolgen" offers Vandaag, Morgen,
 Deze week (this week's Friday), Volgende week or Geen datum. The flag goes to the server as any flag does; the

@@ -392,7 +392,20 @@ impl MailApp {
 
 /// The title above the view: "oktober 2026", "19 – 25 oktober 2026" (19 – 23 for the work
 /// week), "maandag 19 oktober 2026".
-fn period_title(view: View, focus: NaiveDate) -> String {
+/// The first and last day the view shows: the day, the Monday to Friday or Sunday, or the month.
+pub(crate) fn period(view: View, focus: NaiveDate) -> (NaiveDate, NaiveDate) {
+    match view {
+        View::Day => (focus, focus),
+        View::WorkWeek => (week_start(focus), add_days(week_start(focus), 4)),
+        View::Week => (week_start(focus), add_days(week_start(focus), 6)),
+        View::Month => {
+            let first = focus.with_day(1).unwrap_or(focus);
+            (first, add_days(add_months(first, 1), -1))
+        }
+    }
+}
+
+pub(crate) fn period_title(view: View, focus: NaiveDate) -> String {
     match view {
         View::Month => format!("{} {}", month_name(focus.month()), focus.year()),
         View::Week | View::WorkWeek => {
@@ -1335,6 +1348,11 @@ mod tests {
         assert_eq!(period_title(View::WorkWeek, d(2026, 11, 1)), "26 – 30 oktober 2026", "a Sunday belongs to the work week before it");
         assert_eq!(step(View::WorkWeek, focus, 1), d(2026, 10, 28));
         assert_eq!(period_title(View::Day, focus), "woensdag 21 oktober 2026");
+        assert_eq!(period(View::Day, focus), (focus, focus));
+        assert_eq!(period(View::WorkWeek, focus), (d(2026, 10, 19), d(2026, 10, 23)));
+        assert_eq!(period(View::Week, d(2026, 10, 30)), (d(2026, 10, 26), d(2026, 11, 1)));
+        assert_eq!(period(View::Month, focus), (d(2026, 10, 1), d(2026, 10, 31)));
+        assert_eq!(period(View::Month, d(2026, 2, 10)), (d(2026, 2, 1), d(2026, 2, 28)));
         assert_eq!(step(View::Month, d(2026, 1, 31), 1), d(2026, 2, 28));
         assert_eq!(step(View::Week, focus, -1), d(2026, 10, 14));
         assert_eq!(week_start(d(2026, 10, 25)), d(2026, 10, 19));

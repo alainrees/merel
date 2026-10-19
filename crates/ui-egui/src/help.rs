@@ -35,7 +35,7 @@ pub fn shortcut_list() -> Vec<(String, &'static str)> {
         (key_hint("Shift+R"), "Allen beantwoorden"),
         (key_hint("F"), "Doorsturen"),
         (key_hint("Shift+V"), "Verplaatsen naar een map"),
-        (key_hint("P"), "Afdrukken via de browser"),
+        (key_hint("P"), "Afdrukken via de browser (in de agenda: de open dag, week of maand)"),
         (key_hint("Q"), "Markeren als gelezen"),
         (key_hint("U"), "Markeren als ongelezen"),
         (key_hint("E"), "Naar het zoekveld (ook in agenda, contacten en taken)"),
