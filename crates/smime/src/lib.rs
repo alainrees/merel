@@ -66,8 +66,6 @@ pub enum SmimeError {
     Certificate,
     #[error("Het bericht kan niet worden ondertekend.")]
     Sign,
-    #[error("De handtekening klopt niet.")]
-    BadSignature,
 }
 
 /// What a person sees of a certificate.
@@ -312,14 +310,45 @@ fn common_name(name: &x509_cert::name::Name) -> Option<String> {
     (!s.trim().is_empty()).then(|| s.trim().to_string())
 }
 
-/// Checks a detached signature `p7s` over `content` and returns the signer's certificate.
-/// Only the signature itself is checked here, not whether the certificate is trusted.
-pub fn verify_detached(content: &[u8], p7s: &[u8]) -> Result<CertInfo, SmimeError> {
-    let info = ContentInfo::from_der(p7s).map_err(|_| SmimeError::BadSignature)?;
+/// What a signature on a message says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Signature {
+    /// The signature matches: the message is as the holder of `signer` sent it. Whether the
+    /// issuer of the certificate is to be trusted is not checked yet.
+    Valid {
+        signer: CertInfo,
+        /// The signer's certificate, DER: what an encrypted answer would need.
+        certificate: Vec<u8>,
+    },
+    /// It does not match: the message changed after it was signed, or the signature is false.
+    Broken,
+    /// Signed in a way Mailcraft cannot check; the reason, in Dutch.
+    Unchecked(String),
+}
+
+const ID_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.2");
+const ID_SHA512: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.3");
+const ID_SHA1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.14.3.2.26");
+const SHA384_WITH_RSA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.12");
+const SHA512_WITH_RSA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.13");
+const EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
+const SECP256R1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
+const SECP384R1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34");
+const ECDSA_WITH_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
+const ECDSA_WITH_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3");
+
+fn unchecked(reason: &str) -> Signature {
+    Signature::Unchecked(reason.to_string())
+}
+
+/// Checks a detached signature `p7s` (CMS SignedData, RFC 5652) over `content`. Only the
+/// signature itself is checked, not whether the certificate's issuer is trusted.
+pub fn verify_detached(content: &[u8], p7s: &[u8]) -> Signature {
+    let Ok(info) = ContentInfo::from_der(p7s) else { return unchecked("de handtekening kan niet worden gelezen") };
     if info.content_type != ID_SIGNED_DATA {
-        return Err(SmimeError::BadSignature);
+        return unchecked("de handtekening kan niet worden gelezen");
     }
-    let data: SignedData = info.content.decode_as().map_err(|_| SmimeError::BadSignature)?;
+    let Ok(data) = info.content.decode_as::<SignedData>() else { return unchecked("de handtekening kan niet worden gelezen") };
     let certs: Vec<&Certificate> = data
         .certificates
         .as_ref()
@@ -333,43 +362,164 @@ pub fn verify_detached(content: &[u8], p7s: &[u8]) -> Result<CertInfo, SmimeErro
                 .collect()
         })
         .unwrap_or_default();
-    let signer = data.signer_infos.0.iter().next().ok_or(SmimeError::BadSignature)?;
-    let cert = certs
-        .iter()
-        .find(|c| match &signer.sid {
-            SignerIdentifier::IssuerAndSerialNumber(isn) => {
-                c.tbs_certificate().issuer() == &isn.issuer && c.tbs_certificate().serial_number() == &isn.serial_number
+    let Some(signer) = data.signer_infos.0.iter().next() else { return unchecked("er staat geen ondertekenaar in") };
+    let found = certs.iter().find(|c| match &signer.sid {
+        SignerIdentifier::IssuerAndSerialNumber(isn) => {
+            c.tbs_certificate().issuer() == &isn.issuer && c.tbs_certificate().serial_number() == &isn.serial_number
+        }
+        SignerIdentifier::SubjectKeyIdentifier(ski) => {
+            matches!(c.tbs_certificate().get_extension::<x509_cert::ext::pkix::SubjectKeyIdentifier>(), Ok(Some((_, own))) if own == *ski)
+        }
+    });
+    let Some(cert) = found else { return unchecked("het certificaat van de afzender zit er niet bij") };
+    let (hash, sha) = match signer.digest_alg.oid {
+        o if o == ID_SHA256 => (&digest::SHA256, 256),
+        o if o == ID_SHA384 => (&digest::SHA384, 384),
+        o if o == ID_SHA512 => (&digest::SHA512, 512),
+        o if o == ID_SHA1 => return unchecked("de afzender gebruikt het verouderde SHA-1"),
+        _ => return unchecked("de afzender gebruikt een onbekend algoritme"),
+    };
+    let digest = digest::digest(hash, content);
+    // With signed attributes the signature covers them, and they carry the content's digest;
+    // without, it covers the content itself.
+    let signed = match &signer.signed_attrs {
+        Some(attrs) => {
+            let claimed = attrs
+                .iter()
+                .find(|a| a.oid == ID_MESSAGE_DIGEST)
+                .and_then(|a| a.values.iter().next())
+                .and_then(|v| v.decode_as::<OctetString>().ok());
+            match claimed {
+                Some(c) if c.as_bytes() == digest.as_ref() => {}
+                Some(_) => return Signature::Broken,
+                None => return unchecked("de handtekening kan niet worden gelezen"),
             }
-            SignerIdentifier::SubjectKeyIdentifier(ski) => {
-                matches!(c.tbs_certificate().get_extension::<x509_cert::ext::pkix::SubjectKeyIdentifier>(), Ok(Some((_, own))) if own == *ski)
+            match attrs.to_der() {
+                Ok(der) => der,
+                Err(_) => return unchecked("de handtekening kan niet worden gelezen"),
             }
-        })
-        .ok_or(SmimeError::BadSignature)?;
-    if signer.digest_alg.oid != ID_SHA256 {
-        return Err(SmimeError::BadSignature);
-    }
-    let attrs = signer.signed_attrs.as_ref().ok_or(SmimeError::BadSignature)?;
-    let digest = digest::digest(&digest::SHA256, content);
-    let claimed = attrs
-        .iter()
-        .find(|a| a.oid == ID_MESSAGE_DIGEST)
-        .and_then(|a| a.values.iter().next())
-        .and_then(|v| v.decode_as::<OctetString>().ok())
-        .ok_or(SmimeError::BadSignature)?;
-    if claimed.as_bytes() != digest.as_ref() {
-        return Err(SmimeError::BadSignature);
-    }
-    let signed = attrs.to_der().map_err(|_| SmimeError::BadSignature)?;
+        }
+        None => content.to_vec(),
+    };
     let spki = cert.tbs_certificate().subject_public_key_info();
-    if spki.algorithm.oid != RSA_ENCRYPTION
-        || !(signer.signature_algorithm.oid == RSA_ENCRYPTION || signer.signature_algorithm.oid == SHA256_WITH_RSA)
-    {
-        return Err(SmimeError::BadSignature);
+    let key = spki.subject_public_key.raw_bytes();
+    let sig_alg = signer.signature_algorithm.oid;
+    let ok = if spki.algorithm.oid == RSA_ENCRYPTION {
+        let algorithm: &dyn signature::VerificationAlgorithm = match sha {
+            256 => &signature::RSA_PKCS1_2048_8192_SHA256,
+            384 => &signature::RSA_PKCS1_2048_8192_SHA384,
+            _ => &signature::RSA_PKCS1_2048_8192_SHA512,
+        };
+        if ![RSA_ENCRYPTION, SHA256_WITH_RSA, SHA384_WITH_RSA, SHA512_WITH_RSA].contains(&sig_alg) {
+            return unchecked("de afzender gebruikt een onbekend algoritme");
+        }
+        UnparsedPublicKey::new(algorithm, key).verify(&signed, signer.signature.as_bytes()).is_ok()
+    } else if spki.algorithm.oid == EC_PUBLIC_KEY {
+        let curve = spki.algorithm.parameters.as_ref().and_then(|p| p.decode_as::<ObjectIdentifier>().ok());
+        let algorithm: &dyn signature::VerificationAlgorithm = match (curve, sha) {
+            (Some(c), 256) if c == SECP256R1 => &signature::ECDSA_P256_SHA256_ASN1,
+            (Some(c), 384) if c == SECP256R1 => &signature::ECDSA_P256_SHA384_ASN1,
+            (Some(c), 256) if c == SECP384R1 => &signature::ECDSA_P384_SHA256_ASN1,
+            (Some(c), 384) if c == SECP384R1 => &signature::ECDSA_P384_SHA384_ASN1,
+            _ => return unchecked("de afzender gebruikt een onbekend algoritme"),
+        };
+        if ![EC_PUBLIC_KEY, ECDSA_WITH_SHA256, ECDSA_WITH_SHA384].contains(&sig_alg) {
+            return unchecked("de afzender gebruikt een onbekend algoritme");
+        }
+        UnparsedPublicKey::new(algorithm, key).verify(&signed, signer.signature.as_bytes()).is_ok()
+    } else {
+        return unchecked("de afzender gebruikt een onbekend soort sleutel");
+    };
+    if !ok {
+        return Signature::Broken;
     }
-    UnparsedPublicKey::new(&signature::RSA_PKCS1_2048_8192_SHA256, spki.subject_public_key.raw_bytes())
-        .verify(&signed, signer.signature.as_bytes())
-        .map_err(|_| SmimeError::BadSignature)?;
-    cert_info(cert)
+    match (cert_info(cert), cert.to_der()) {
+        (Ok(signer), Ok(certificate)) => Signature::Valid { signer, certificate },
+        _ => unchecked("het certificaat van de afzender kan niet worden gelezen"),
+    }
+}
+
+/// The signature on `raw`, when the message is signed the usual way (RFC 8551 section 3.5,
+/// `multipart/signed` at the top); `None` for a message that is not.
+pub fn check_message(raw: &[u8]) -> Option<Signature> {
+    let raw = crlf(raw);
+    let (head, body) = split_entity(&raw);
+    let kind = header(head, b"content-type")?;
+    let lower = kind.to_ascii_lowercase();
+    if !lower.starts_with("multipart/signed") {
+        return None;
+    }
+    if !lower.contains("pkcs7-signature") {
+        return Some(unchecked("het is geen S/MIME-handtekening"));
+    }
+    let Some(boundary) = parameter(&kind, "boundary") else { return Some(unchecked("het bericht is niet goed opgebouwd")) };
+    let Some((content, p7s)) = signed_parts(body, boundary.as_bytes()) else { return Some(unchecked("het bericht is niet goed opgebouwd")) };
+    Some(verify_detached(content, &p7s))
+}
+
+/// The header block (with its final CRLF) and the body of a MIME entity in CRLF form.
+fn split_entity(raw: &[u8]) -> (&[u8], &[u8]) {
+    if raw.starts_with(b"\r\n") {
+        return (&[], &raw[2..]);
+    }
+    match find(raw, b"\r\n\r\n") {
+        Some(i) => (&raw[..i + 2], &raw[i + 4..]),
+        None => (raw, &[]),
+    }
+}
+
+/// The unfolded value of the first header field called `name` (lower case).
+fn header(head: &[u8], name: &[u8]) -> Option<String> {
+    fields(head).into_iter().find_map(|f| {
+        let colon = f.iter().position(|b| *b == b':')?;
+        if !f[..colon].trim_ascii().eq_ignore_ascii_case(name) {
+            return None;
+        }
+        let value = String::from_utf8_lossy(&f[colon + 1..]).replace("\r\n", "");
+        Some(value.trim().to_string())
+    })
+}
+
+/// A parameter of a header value such as `boundary="abc"`.
+fn parameter(value: &str, name: &str) -> Option<String> {
+    for part in value.split(';').skip(1) {
+        let (key, v) = part.split_once('=')?;
+        if key.trim().eq_ignore_ascii_case(name) {
+            let v = v.trim();
+            let v = v.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(v);
+            return (!v.is_empty() && v.len() <= 200).then(|| v.to_string());
+        }
+    }
+    None
+}
+
+/// The signed first part, byte for byte, and the decoded signature from the second part of a
+/// `multipart/signed` body.
+fn signed_parts<'a>(body: &'a [u8], boundary: &[u8]) -> Option<(&'a [u8], Vec<u8>)> {
+    let mut delimiter = b"\r\n--".to_vec();
+    delimiter.extend_from_slice(boundary);
+    // The first delimiter may open the body, without a line break before it.
+    let first = if body.starts_with(&delimiter[2..]) { 0 } else { find(body, &delimiter)? + 2 };
+    let after = first + delimiter.len() - 2;
+    let start = after + find(&body[after..], b"\r\n")? + 2;
+    let end = start + find(&body[start..], &delimiter)?;
+    let content = &body[start..end];
+    let next = end + delimiter.len();
+    let second = next + find(&body[next..], b"\r\n")? + 2;
+    let close = second + find(&body[second..], &delimiter)?;
+    let (head, data) = split_entity(&body[second..close]);
+    let kind = header(head, b"content-type")?.to_ascii_lowercase();
+    if !kind.contains("pkcs7-signature") {
+        return None;
+    }
+    let encoding = header(head, b"content-transfer-encoding").unwrap_or_default().to_ascii_lowercase();
+    let p7s = if encoding == "base64" {
+        let text: Vec<u8> = data.iter().copied().filter(|b| !b.is_ascii_whitespace()).collect();
+        base64::engine::general_purpose::STANDARD.decode(text).ok()?
+    } else {
+        data.to_vec()
+    };
+    Some((content, p7s))
 }
 
 /// Turns the RFC 5322 message `raw` into a signed one (RFC 8551 section 3.5,
@@ -526,12 +676,19 @@ mod tests {
         let id = identity();
         let content = b"Content-Type: text/plain\r\n\r\nHallo\r\n";
         let p7s = id.sign_detached(content, NOW).unwrap();
-        assert_eq!(verify_detached(content, &p7s).unwrap(), *id.info());
-        assert_eq!(verify_detached(b"Content-Type: text/plain\r\n\r\nHallo!\r\n", &p7s).unwrap_err(), SmimeError::BadSignature);
+        match verify_detached(content, &p7s) {
+            Signature::Valid { signer, certificate } => {
+                assert_eq!(signer, *id.info());
+                assert_eq!(certificate, id.certs[0]);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(verify_detached(b"Content-Type: text/plain\r\n\r\nHallo!\r\n", &p7s), Signature::Broken);
         let mut broken = p7s.clone();
         let n = broken.len() - 10;
         broken[n] ^= 1;
-        assert!(verify_detached(content, &broken).is_err());
+        assert_eq!(verify_detached(content, &broken), Signature::Broken);
+        assert!(matches!(verify_detached(content, b"rommel"), Signature::Unchecked(_)));
     }
 
     #[test]
@@ -550,9 +707,32 @@ mod tests {
         assert_eq!(part, "Content-Type: text/plain;\r\n charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nHallo Sanne");
         let (_, sig) = parts[2].split_once("\r\n\r\n").unwrap();
         let p7s = base64::engine::general_purpose::STANDARD.decode(sig.replace("\r\n", "")).unwrap();
-        assert_eq!(verify_detached(part.as_bytes(), &p7s).unwrap().name, "Jij Tester");
+        assert!(matches!(verify_detached(part.as_bytes(), &p7s), Signature::Valid { signer, .. } if signer.name == "Jij Tester"));
+        assert!(matches!(check_message(&signed), Some(Signature::Valid { .. })));
         // Bare line feeds are made canonical before signing.
         let lf = String::from_utf8(raw.to_vec()).unwrap().replace("\r\n", "\n");
         assert!(sign_message(&identity(), lf.as_bytes(), NOW).unwrap().windows(2).all(|w| w[1] != b'\n' || w[0] == b'\r'));
+    }
+
+    #[test]
+    fn checks_mail_signed_elsewhere() {
+        // Signed by OpenSSL with RSA, with ECDSA, and the first one changed afterwards.
+        match check_message(include_bytes!("../testdata/signed-openssl.eml")) {
+            Some(Signature::Valid { signer, .. }) => assert_eq!(signer.emails, vec!["jij@example.org".to_string()]),
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            matches!(check_message(include_bytes!("../testdata/signed-ec.eml")), Some(Signature::Valid { signer, .. }) if signer.name == "Ec Tester")
+        );
+        assert_eq!(check_message(include_bytes!("../testdata/signed-tampered.eml")), Some(Signature::Broken));
+        assert_eq!(check_message(b"From: a@b.nl\r\nContent-Type: text/plain\r\n\r\nHoi\r\n"), None);
+        assert!(matches!(
+            check_message(b"Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"\r\n\r\nrommel\r\n"),
+            Some(Signature::Unchecked(_))
+        ));
+        assert!(matches!(
+            check_message(b"Content-Type: multipart/signed; protocol=\"application/pgp-signature\"; boundary=x\r\n\r\n--x\r\n"),
+            Some(Signature::Unchecked(_))
+        ));
     }
 }
