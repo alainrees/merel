@@ -160,6 +160,15 @@ struct Fold {
     open: bool,
 }
 
+/// A heading over the messages of one date group, in the band Outlook uses.
+fn group_heading(ui: &mut Ui, t: &Tokens, group: &str) {
+    let (_, rect) = ui.allocate_space(vec2(ui.available_width(), 24.0));
+    ui.painter().rect_filled(rect, CornerRadius::ZERO, t.panel);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(14.0, 0.0))).layout(Layout::left_to_right(Align::Center)), |ui| {
+        ui.label(RichText::new(group).size(12.0).strong().color(t.text_dim));
+    });
+}
+
 /// The rows of the list: every message on its own when the conversation view is off; else one
 /// row per conversation, followed by its other messages when it is unfolded. A conversation that
 /// holds the selected message is shown unfolded for as long as it does, so a message reached
@@ -962,8 +971,20 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let rows = list_rows(list, app.view.conversations, &app.expanded, selected.as_deref());
                 let mut toggle: Option<String> = None;
                 let mut menu_pick: Option<(mailcraft_model::MessageHeader, message_menu::Pick)> = None;
+                // Date groups, as Outlook heads the list, while the list is in date order.
+                let grouped =
+                    app.view.groups && matches!(app.engine.session.sort, mailcraft_engine::view::Sort::Newest | mailcraft_engine::view::Sort::Oldest);
+                let today = chrono::Local::now().date_naive();
+                let mut last_group: Option<&str> = None;
                 for row in rows {
                     let m = row.m;
+                    if grouped && !row.indent {
+                        let group = dates::date_group(m.date, today);
+                        if last_group != Some(group) {
+                            last_group = Some(group);
+                            group_heading(ui, t, group);
+                        }
+                    }
                     let on = selected.as_deref() == Some(m.id.as_str());
                     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click_and_drag());
                     r.dnd_set_drag_payload(DraggedMessage(m.id.clone()));
@@ -1787,6 +1808,29 @@ mod tests {
         assert!(h.query_by_label(JUNK_NOTICE).is_none());
         assert!(!h.get_by_label_contains("bon.pdf").accesskit_node().is_disabled());
         assert!(h.query_by_label("Afbeeldingen laden").is_some());
+    }
+
+    #[test]
+    fn the_list_is_headed_by_date_groups_until_the_view_turns_them_off() {
+        let mut h = harness();
+        let mut today = h.state().engine.session.message("m1").expect("sample mail").clone();
+        today.id = "inbox#today".into();
+        today.date = chrono::Local::now().timestamp();
+        h.state_mut().engine.session.messages.push(today);
+        h.run();
+        h.get_by_label("Vandaag");
+        assert!(h.query_by_label("Later").is_none());
+        let headings = ["Gisteren", "Deze week", "Vorige week", "Deze maand", "Vorige maand", "Ouder"];
+        assert_eq!(headings.iter().filter(|g| h.query_by_label(g).is_some()).count(), 1, "the sample mail of one afternoon makes one more group");
+
+        h.get_by_label("Beeld").click();
+        h.run();
+        h.get_by_label("Groepen").click();
+        h.run();
+        assert!(!h.state().view.groups);
+        h.get_by_label("Start").click();
+        h.run();
+        assert!(h.query_by_label("Vandaag").is_none());
     }
 
     #[test]
