@@ -40,6 +40,7 @@ pub fn describe(f: &SearchFolder) -> String {
         Filter::Unread => ", alleen ongelezen",
         Filter::Flagged => ", alleen gevlagd",
         Filter::Attachments => ", alleen met bijlagen",
+        Filter::Snoozed => ", alleen gesluimerd",
     };
     format!("Zoekt “{}” in {where_}{only}", f.query)
 }

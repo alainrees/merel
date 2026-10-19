@@ -22,10 +22,12 @@ pub enum Filter {
     Unread,
     Flagged,
     Attachments,
+    /// Only the messages put off with "Sluimeren"; every other filter leaves them out.
+    Snoozed,
 }
 
 impl Filter {
-    pub const ALL: [Filter; 4] = [Filter::All, Filter::Unread, Filter::Flagged, Filter::Attachments];
+    pub const ALL: [Filter; 5] = [Filter::All, Filter::Unread, Filter::Flagged, Filter::Attachments, Filter::Snoozed];
 
     pub fn dutch_name(self) -> &'static str {
         match self {
@@ -33,6 +35,7 @@ impl Filter {
             Filter::Unread => "Ongelezen",
             Filter::Flagged => "Gemarkeerd",
             Filter::Attachments => "Met bijlage",
+            Filter::Snoozed => "Gesluimerd",
         }
     }
 
@@ -42,6 +45,8 @@ impl Filter {
             Filter::Unread => !m.flags.seen,
             Filter::Flagged => m.flags.flagged,
             Filter::Attachments => m.has_attachments,
+            // Snoozed or not is the session's to know; see `Session::visible_messages`.
+            Filter::Snoozed => true,
         }
     }
 }
