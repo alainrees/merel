@@ -5,6 +5,7 @@
 //! Every button runs a command id through [`mailcraft_engine::Session::run`]; nothing here
 //! changes the session directly.
 
+mod attachments;
 mod backstage;
 pub mod calendar;
 mod compose;
@@ -571,18 +572,27 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         ui.add_space(8.0);
     }
     if let Some(b) = body.as_ref().filter(|b| !b.attachments.is_empty()) {
+        let mut save = None;
         ui.horizontal_wrapped(|ui| {
             for a in &b.attachments {
-                egui::Frame::NONE
+                let chip = egui::Button::new(RichText::new(format!("📎 {}  ({})", a.name, size_text(a.size))).size(12.0).color(t.text))
                     .fill(t.panel)
                     .stroke(Stroke::new(1.0, t.border))
-                    .corner_radius(CornerRadius::same(4))
-                    .inner_margin(Margin::symmetric(8, 4))
-                    .show(ui, |ui| {
-                        ui.label(RichText::new(format!("📎 {}  ({})", a.name, size_text(a.size))).size(12.0).color(t.text));
-                    });
+                    .corner_radius(CornerRadius::same(4));
+                if ui.add(chip).on_hover_text("Opslaan in je map Downloads. Mailcraft opent bijlagen niet zelf.").clicked() {
+                    save = Some(a.clone());
+                }
             }
         });
+        if let Some(a) = save {
+            app.notice = Some(match attachments::downloads_dir() {
+                Some(dir) => match attachments::save_to(&dir, &a.name, &a.bytes) {
+                    Ok(path) => format!("Bijlage opgeslagen als {}", path.display()),
+                    Err(e) => format!("Bijlage niet opgeslagen: {e}"),
+                },
+                None => "Bijlage niet opgeslagen: geen map Downloads gevonden.".into(),
+            });
+        }
         ui.add_space(8.0);
     }
     ui.add_space(6.0);
