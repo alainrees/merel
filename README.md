@@ -87,7 +87,9 @@ book (`contacts.json`) with search and a contact card, and the compose window co
 addresses from it and from the mail you have seen. A sender goes into the address book in one click: "Toevoegen aan
 contacten" next to the sender in the reading pane (and "Afzender toevoegen aan contacten" in the message's right-click
 menu) opens the contact form with the name and address filled in; when the address is already known the button reads
-"Contact openen" and shows that card. The tasks module keeps a local to-do list
+"Contact openen" and shows that card. Contacts travel as vCard files, as with Outlook and phones: "Opslaan als vCard" on a
+card writes a `.vcf` to your Downloads folder, and "Importeren…" on the ribbon reads one or more `.vcf` files into the
+local address book, skipping a card whose address is known already. The tasks module keeps a local to-do list
 (`tasks.json`) with due days, priorities, an open/done filter and a search box; under the tasks it lists the flagged
 mail with its follow-up day, as Outlook's To-Do list does (a click opens the message, the flag icon takes the flag off). The calendar has a search box
 too: while it holds words, a list of the matching appointments of the past year and the two years ahead
