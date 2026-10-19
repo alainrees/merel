@@ -300,7 +300,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let has = app.engine.session.selected_contact.is_some();
     let has_mail = app.engine.session.selected_contact().is_some_and(|c| !c.emails.is_empty());
-    if crate::ribbon_action(ui, t, "👤", "Nieuw contact", true) {
+    if crate::ribbon_action_hint(ui, t, "👤", "Nieuw contact", true, Some(&crate::key_hint("Shift+C"))) {
         app.new_contact();
     }
     ui.separator();
