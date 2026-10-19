@@ -23,6 +23,7 @@ ureq = { workspace = true }
 directories = { workspace = true }
 rfd = { workspace = true }
 open = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 egui_kittest = { workspace = true }
