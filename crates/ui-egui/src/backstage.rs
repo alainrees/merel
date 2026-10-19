@@ -35,6 +35,11 @@ pub struct AccountForm {
     pub confirm_remove: Option<String>,
     /// The account whose signature is being edited, with the text so far.
     pub signature_edit: Option<(String, String)>,
+    /// The account the form is changing, when it is not adding one. The password may then stay
+    /// empty, which keeps the one in the keychain.
+    pub editing: Option<String>,
+    /// Brings the form into view once, after Edit was clicked on an account further up.
+    pub scroll_to_form: bool,
 }
 
 impl Default for AccountForm {
@@ -59,6 +64,8 @@ impl Default for AccountForm {
             notice: None,
             confirm_remove: None,
             signature_edit: None,
+            editing: None,
+            scroll_to_form: false,
         }
     }
 }
@@ -85,6 +92,32 @@ fn host(s: &str, what: &str) -> Result<String, String> {
 }
 
 impl AccountForm {
+    /// The form filled with a password account, ready to change it; the password stays empty.
+    pub fn editing(account: &Account) -> Self {
+        let mut f = AccountForm::default();
+        f.kind = account.protocol;
+        f.editing = Some(account.id.clone());
+        f.scroll_to_form = true;
+        f.name = account.name.clone();
+        f.email = account.address.email().to_string();
+        f.username = account.username.clone();
+        if let Some(incoming) = &account.incoming {
+            f.imap_host = incoming.host.clone();
+            f.imap_port = incoming.port.to_string();
+            f.imap_tls = incoming.tls;
+        }
+        if let Some(outgoing) = &account.outgoing {
+            f.smtp_host = outgoing.host.clone();
+            f.smtp_port = outgoing.port.to_string();
+            f.smtp_tls = outgoing.tls;
+        }
+        if let Some(dav) = &account.dav {
+            f.dav_calendar = dav.calendar.clone();
+            f.dav_contacts = dav.contacts.clone().unwrap_or_default();
+        }
+        f
+    }
+
     /// Guesses the usual server names from the address's domain.
     pub fn suggest(&mut self) {
         if let Some((_, domain)) = self.email.trim().split_once('@') {
@@ -121,7 +154,7 @@ impl AccountForm {
         if username.chars().any(|c| c.is_control() || c == '"' || (c == '\\' && !backslash_ok)) {
             return Err("De gebruikersnaam bevat tekens die niet zijn toegestaan.".into());
         }
-        if self.password.is_empty() {
+        if self.password.is_empty() && self.editing.is_none() {
             return Err("Vul het wachtwoord in.".into());
         }
         let (protocol, incoming, outgoing) = if self.kind == Protocol::Exchange {
@@ -148,11 +181,14 @@ impl AccountForm {
             }
             None
         };
-        let id = format!(
-            "{}-{}",
-            address.email().replace(['@', '.'], "-"),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-        );
+        let id = match &self.editing {
+            Some(id) => id.clone(),
+            None => format!(
+                "{}-{}",
+                address.email().replace(['@', '.'], "-"),
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+            ),
+        };
         Ok(Account {
             id,
             name: if self.name.trim().is_empty() { address.email().to_string() } else { self.name.trim().to_string() },
@@ -223,6 +259,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 ui.add_space(8.0);
             }
             let mut again = None;
+            let mut edit = None;
             let mut remove = None;
             let confirming = app.form.confirm_remove.clone();
             let mut save_signature = None;
@@ -241,8 +278,8 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         AccountStatus::Error(e) => (e, t.flag),
                     };
                     ui.label(RichText::new(txt).size(12.0).color(col));
+                    ui.add_space(4.0);
                     if oauth {
-                        ui.add_space(4.0);
                         let label = if busy { "Wacht op de browser…" } else { "Opnieuw aanmelden" };
                         if ui
                             .add_enabled(!busy, egui::Button::new(label))
@@ -251,6 +288,12 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         {
                             again = Some(id.clone());
                         }
+                    } else if ui
+                        .add_enabled(app.form.editing.as_deref() != Some(id.as_str()), egui::Button::new("Account bewerken"))
+                        .on_hover_text("Verander de naam, de servers, de gebruikersnaam of het wachtwoord; het account verbindt daarna opnieuw.")
+                        .clicked()
+                    {
+                        edit = Some(id.clone());
                     }
                     ui.add_space(6.0);
                     let editing = app.form.signature_edit.as_ref().is_some_and(|(e, _)| *e == id);
@@ -313,6 +356,9 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 app.form.notice = None;
                 app.engine.sign_in_again(&id);
             }
+            if let Some(account) = edit.and_then(|id| app.engine.session.accounts.iter().find(|a| a.id == id)) {
+                app.form = AccountForm::editing(account);
+            }
             if let Some((id, text)) = save_signature {
                 app.form.notice = match app.engine.set_signature(&id, &text) {
                     Ok(()) => Some("De handtekening is opgeslagen.".into()),
@@ -320,6 +366,9 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 };
             }
             if let Some(id) = remove {
+                if app.form.editing.as_deref() == Some(id.as_str()) {
+                    app.form = AccountForm::default();
+                }
                 app.form.confirm_remove = None;
                 app.form.notice = Some(match app.engine.remove_account(&id) {
                     Ok(()) => "Het account is verwijderd.".into(),
@@ -327,12 +376,19 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 });
             }
             ui.add_space(16.0);
-            ui.label(RichText::new("Account toevoegen").size(20.0).color(t.text));
-            ui.label(
-                RichText::new("IMAP en SMTP. Je wachtwoord gaat in de sleutelhanger van je computer, niet in een bestand.")
-                    .size(12.0)
-                    .color(t.text_dim),
-            );
+            let (heading, help) = if app.form.editing.is_some() {
+                (
+                    format!("Account bewerken: {}", app.form.email),
+                    "Verander wat nodig is en sla op; het account verbindt daarna opnieuw met de nieuwe gegevens.",
+                )
+            } else {
+                ("Account toevoegen".to_string(), "IMAP en SMTP. Je wachtwoord gaat in de sleutelhanger van je computer, niet in een bestand.")
+            };
+            let heading = ui.label(RichText::new(heading).size(20.0).color(t.text));
+            if std::mem::take(&mut app.form.scroll_to_form) {
+                heading.scroll_to_me(Some(egui::Align::TOP));
+            }
+            ui.label(RichText::new(help).size(12.0).color(t.text_dim));
             ui.add_space(8.0);
             form(app, ui, t);
         });
@@ -359,10 +415,15 @@ fn tls_picker(ui: &mut Ui, t: &Tokens, id: &str, tls: &mut Tls) {
 fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.horizontal(|ui| {
         ui.add_sized([150.0, 24.0], egui::Label::new(RichText::new("Soort account").color(t.text)));
-        ui.radio_value(&mut app.form.kind, Protocol::ImapSmtp, "IMAP/SMTP");
-        ui.radio_value(&mut app.form.kind, Protocol::Gmail, "Gmail");
-        ui.radio_value(&mut app.form.kind, Protocol::Microsoft365, "Microsoft 365");
-        ui.radio_value(&mut app.form.kind, Protocol::Exchange, "Exchange");
+        if app.form.editing.is_some() {
+            // The kind of an account is fixed; its servers and sign-in are what change.
+            ui.label(RichText::new(if app.form.kind == Protocol::Exchange { "Exchange" } else { "IMAP/SMTP" }).color(t.text));
+        } else {
+            ui.radio_value(&mut app.form.kind, Protocol::ImapSmtp, "IMAP/SMTP");
+            ui.radio_value(&mut app.form.kind, Protocol::Gmail, "Gmail");
+            ui.radio_value(&mut app.form.kind, Protocol::Microsoft365, "Microsoft 365");
+            ui.radio_value(&mut app.form.kind, Protocol::Exchange, "Exchange");
+        }
     });
     ui.add_space(6.0);
     match app.form.kind {
@@ -394,6 +455,12 @@ fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     field(ui, t, "Gebruikersnaam", &mut f.username, false);
     field(ui, t, "Wachtwoord", &mut f.password, true);
+    if f.editing.is_some() {
+        ui.horizontal(|ui| {
+            ui.add_space(154.0);
+            ui.label(RichText::new("Laat leeg om het huidige wachtwoord te houden.").size(12.0).color(t.text_dim));
+        });
+    }
     ui.add_space(8.0);
     if exchange {
         ui.label(RichText::new("Exchange-server").strong().color(t.text));
@@ -423,11 +490,34 @@ fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if let Some(e) = &f.error {
         ui.label(RichText::new(e).color(t.flag));
     }
-    let add = ui.add_sized([220.0, 30.0], egui::Button::new(RichText::new("Toevoegen en verbinden").color(t.on_accent)).fill(t.accent)).clicked();
+    let editing = f.editing.is_some();
+    let label = if editing { "Opslaan en opnieuw verbinden" } else { "Toevoegen en verbinden" };
+    let mut save = false;
+    let mut cancel = false;
+    ui.horizontal(|ui| {
+        save = ui.add_sized([220.0, 30.0], egui::Button::new(RichText::new(label).color(t.on_accent)).fill(t.accent)).clicked();
+        if editing {
+            cancel = ui.add_sized([110.0, 30.0], egui::Button::new("Annuleren")).clicked();
+        }
+    });
     ui.add_space(4.0);
     ui.allocate_space(vec2(0.0, 0.0));
-    if add {
+    if cancel {
+        app.form = AccountForm::default();
+        return;
+    }
+    if save {
         match app.form.account() {
+            Ok(account) if editing => {
+                let password = (!app.form.password.is_empty()).then(|| Secret::new(app.form.password.as_str()));
+                match app.engine.update_account(account, password) {
+                    Ok(()) => {
+                        app.form = AccountForm::default();
+                        app.form.notice = Some("Het account is opgeslagen en verbindt opnieuw.".into());
+                    }
+                    Err(e) => app.form.error = Some(e),
+                }
+            }
             Ok(account) => {
                 let password = Secret::new(app.form.password.as_str());
                 match app.engine.add_account(account, password) {
@@ -624,6 +714,59 @@ mod tests {
         harness.run();
         assert!(harness.state().engine.session.is_sample(), "the sample mail is back");
         assert_eq!(harness.state().form.notice.as_deref(), Some("Het account is verwijderd."));
+    }
+
+    #[test]
+    fn an_account_is_edited_from_the_list_and_keeps_its_mail() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut engine = mailcraft_engine::Engine::sample();
+        let mut f = AccountForm::default();
+        f.email = "alain@fastmail.com".into();
+        f.password = "x".into();
+        f.suggest();
+        engine.add_account(f.account().unwrap(), Secret::new("x")).unwrap();
+        engine.set_signature(&engine.session.accounts[0].id.clone(), "Groet").unwrap();
+        let mut app = MailApp::new(engine);
+        app.tab = Tab::File;
+        let mut harness = Harness::builder().with_size(vec2(1100.0, 1200.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        harness.run();
+        harness.get_by_label("Account bewerken").click();
+        harness.run();
+        {
+            let f = &harness.state().form;
+            assert!(f.editing.is_some() && f.password.is_empty());
+            assert_eq!(
+                (f.imap_host.as_str(), f.imap_port.as_str(), f.dav_calendar.as_str()),
+                ("imap.fastmail.com", "993", "https://caldav.fastmail.com/")
+            );
+            assert_eq!(f.dav_contacts, "https://carddav.fastmail.com/");
+        }
+        harness.get_by_label("Account bewerken: alain@fastmail.com");
+        assert!(harness.query_by_label("Gmail").is_none(), "the kind cannot change");
+        harness.get_by_label("Annuleren").click();
+        harness.run();
+        assert!(harness.state().form.editing.is_none());
+        harness.get_by_label("Account bewerken").click();
+        harness.run();
+        {
+            let f = &mut harness.state_mut().form;
+            f.name = "Alain".into();
+            f.imap_port = "143".into();
+            f.imap_tls = Tls::StartTls;
+            f.dav_calendar.clear();
+            f.dav_contacts.clear();
+        }
+        harness.get_by_label("Opslaan en opnieuw verbinden").click();
+        harness.run();
+        let s = &harness.state().engine.session;
+        assert_eq!(s.accounts.len(), 1);
+        let a = &s.accounts[0];
+        assert_eq!((a.name.as_str(), a.signature.as_str()), ("Alain", "Groet"));
+        assert_eq!(a.incoming.clone().unwrap(), Server { host: "imap.fastmail.com".into(), port: 143, tls: Tls::StartTls });
+        assert!(a.dav.is_none(), "cleared DAV servers mean mail only");
+        assert_eq!(harness.state().form.notice.as_deref(), Some("Het account is opgeslagen en verbindt opnieuw."));
+        assert!(harness.state().form.editing.is_none());
     }
 
     #[test]
