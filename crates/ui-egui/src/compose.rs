@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use egui::{Margin, RichText, Stroke, Ui, vec2};
 
 use mailcraft_engine::SendState;
-use mailcraft_model::{Address, Draft, DraftAttachment, Importance, MAX_ATTACHMENTS, MessageHeader, StoredDraft};
+use mailcraft_model::{Address, Draft, DraftAttachment, FolderKind, Importance, MAX_ATTACHMENTS, MessageHeader, StoredDraft};
 
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 
@@ -230,6 +230,17 @@ impl Compose {
         Ok(())
     }
 
+    /// Adds an attachment that is already in memory (one taken from a forwarded message), within
+    /// the same size limit. The media type follows the name, not what the original claimed.
+    pub fn add_attachment(&mut self, name: &str, bytes: Vec<u8>) -> Result<(), String> {
+        let room = MAX_ATTACHMENTS.saturating_sub(self.attachments.iter().map(|a| a.bytes.len()).sum());
+        if bytes.len() > room {
+            return Err(format!("{name} past er niet meer bij: bijlagen mogen samen {} MB zijn.", MAX_ATTACHMENTS / (1024 * 1024)));
+        }
+        self.attachments.push(DraftAttachment::new(name, bytes));
+        Ok(())
+    }
+
     /// Adds every file it can; the first problem shows in the window.
     pub fn add_files(&mut self, paths: impl IntoIterator<Item = PathBuf>) {
         for path in paths {
@@ -250,7 +261,21 @@ impl MailApp {
             (m, text, me.as_str())
         });
         let account_id = session.current_account().map(|a| a.id.clone()).unwrap_or_default();
-        self.compose = Some(Compose::new(kind, original).with_signature(&signature).opened_from(&account_id));
+        // Forwarding takes the attachments along, as Outlook does; not from the Junk folder,
+        // where they are not to be trusted or passed on.
+        let forwarded: Vec<(String, Vec<u8>)> = match (kind, session.selected()) {
+            (Kind::Forward, Some(m)) if !session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk) => {
+                session.bodies.get(&m.id).map(|b| b.attachments.iter().map(|a| (a.name.clone(), a.bytes.to_vec())).collect()).unwrap_or_default()
+            }
+            _ => Vec::new(),
+        };
+        let mut c = Compose::new(kind, original).with_signature(&signature).opened_from(&account_id);
+        for (name, bytes) in forwarded {
+            if let Err(e) = c.add_attachment(&name, bytes) {
+                c.error = Some(e);
+            }
+        }
+        self.compose = Some(c);
     }
 
     /// Opens a draft that was put aside, to write on or send.
@@ -685,6 +710,48 @@ mod tests {
         emptied.body.clear();
         emptied.attachments.clear();
         assert!(emptied.is_blank(), "a draft emptied on purpose is not kept");
+    }
+
+    #[test]
+    fn forwarding_takes_the_attachments_along_except_from_the_junk_folder() {
+        use mailcraft_model::Folder;
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let attachment = |name: &str, bytes: &[u8]| mailcraft_mime::Attachment {
+            name: name.into(),
+            mime: "application/octet-stream".into(),
+            size: bytes.len(),
+            bytes: std::sync::Arc::from(bytes),
+        };
+        let body =
+            mailcraft_engine::Body { attachments: vec![attachment("offerte.pdf", b"%PDF"), attachment("foto.jpg", b"jpg")], ..Default::default() };
+        app.engine.session.bodies.insert("m2".into(), body);
+        app.engine.session.selected_message = Some("m2".into());
+        app.open_compose(Kind::Forward);
+        let c = app.compose.as_ref().expect("the window");
+        let names: Vec<(&str, &str)> = c.attachments.iter().map(|a| (a.name.as_str(), a.mime.as_str())).collect();
+        assert_eq!(names, [("offerte.pdf", "application/pdf"), ("foto.jpg", "image/jpeg")], "the type follows the name");
+        assert!(c.subject.starts_with("Fw:") && c.error.is_none());
+        app.open_compose(Kind::Reply);
+        assert!(app.compose.as_ref().expect("the window").attachments.is_empty(), "a reply does not carry them");
+
+        let junk = Folder {
+            id: "junk".into(),
+            account_id: "sample".into(),
+            name: "Ongewenst".into(),
+            path: "Junk".into(),
+            kind: FolderKind::Junk,
+            unread: 0,
+        };
+        app.engine.session.folders.push(junk);
+        if let Some(m) = app.engine.session.messages.iter_mut().find(|m| m.id == "m2") {
+            m.folder_id = "junk".into();
+        }
+        app.open_compose(Kind::Forward);
+        assert!(app.compose.as_ref().expect("the window").attachments.is_empty(), "nothing leaves the Junk folder");
+
+        let mut c = Compose::new(Kind::New, None);
+        assert!(c.add_attachment("groot.bin", vec![0; MAX_ATTACHMENTS + 1]).unwrap_err().contains("past er niet meer bij"));
+        assert!(c.attachments.is_empty());
     }
 
     #[test]
