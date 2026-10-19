@@ -86,6 +86,17 @@ impl Compose {
         c
     }
 
+    /// Puts `signature` under the text, above any quoted or forwarded message, with the usual
+    /// `-- ` marker so mail programs recognise it. Nothing changes for an empty signature.
+    pub fn with_signature(mut self, signature: &str) -> Self {
+        let signature = signature.trim_matches(['\n', ' ', '\t']);
+        if signature.is_empty() {
+            return self;
+        }
+        self.body = format!("\n\n-- \n{signature}{}", self.body);
+        self
+    }
+
     pub fn draft(&self) -> Result<Draft, String> {
         let to = parse_address_list(&self.to).map_err(|_| "Controleer de adressen bij Aan.".to_string())?;
         let cc = parse_address_list(&self.cc).map_err(|_| "Controleer de adressen bij CC.".to_string())?;
@@ -100,11 +111,12 @@ impl MailApp {
     pub fn open_compose(&mut self, kind: Kind) {
         let session = &self.engine.session;
         let me = session.current_account().map(|a| a.address.email().to_string()).unwrap_or_default();
+        let signature = session.current_account().map(|a| a.signature.clone()).unwrap_or_default();
         let original = session.selected().map(|m| {
             let text = session.bodies.get(&m.id).map(|b| b.text.as_str()).unwrap_or(m.preview.as_str());
             (m, text, me.as_str())
         });
-        self.compose = Some(Compose::new(kind, original));
+        self.compose = Some(Compose::new(kind, original).with_signature(&signature));
     }
 }
 
@@ -224,6 +236,17 @@ mod tests {
         let d = c.draft().unwrap();
         assert_eq!(d.to[0].email(), "sanne@example.org");
         assert_eq!(d.cc.len(), 1);
+    }
+
+    #[test]
+    fn the_signature_sits_under_the_text_and_above_the_quote() {
+        let h = header();
+        let new = Compose::new(Kind::New, None).with_signature("Groet,\nAlain\n");
+        assert_eq!(new.body, "\n\n-- \nGroet,\nAlain");
+        let reply = Compose::new(Kind::Reply, Some((&h, "tien uur?", "me@x.nl"))).with_signature("Alain");
+        let (sig, quote) = (reply.body.find("-- \nAlain").unwrap(), reply.body.find("> tien uur?").unwrap());
+        assert!(sig < quote, "{}", reply.body);
+        assert_eq!(Compose::new(Kind::New, None).with_signature("  \n").body, "");
     }
 
     #[test]

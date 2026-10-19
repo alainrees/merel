@@ -27,6 +27,7 @@ fn build() -> Option<Session> {
         incoming: Some(Server { host: "imap.example.org".into(), port: 993, tls: Tls::Implicit }),
         outgoing: Some(Server { host: "smtp.example.org".into(), port: 465, tls: Tls::Implicit }),
         dav: None,
+        signature: String::new(),
     };
     let folders = [
         ("inbox", "Postvak IN", FolderKind::Inbox),

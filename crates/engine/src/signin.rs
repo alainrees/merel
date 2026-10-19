@@ -132,6 +132,7 @@ pub fn account(protocol: Protocol, name: &str, email: &str, client_id: &str) -> 
         incoming: Some(preset.incoming),
         outgoing: preset.outgoing,
         dav: None,
+        signature: String::new(),
     })
 }
 

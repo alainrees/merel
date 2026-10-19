@@ -593,7 +593,8 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         let clicked =
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| html::show(ui, t, doc, &b.images, &message_id, remote.as_ref())).inner;
         if let Some(html::Clicked::Mailto(address)) = clicked {
-            let mut c = Compose::new(ComposeKind::New, None);
+            let signature = app.engine.session.current_account().map(|a| a.signature.clone()).unwrap_or_default();
+            let mut c = Compose::new(ComposeKind::New, None).with_signature(&signature);
             c.to = address;
             app.compose = Some(c);
         }

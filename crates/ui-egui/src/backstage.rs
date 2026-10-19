@@ -33,6 +33,8 @@ pub struct AccountForm {
     pub notice: Option<String>,
     /// The account whose Remove button was clicked once; the second click removes it.
     pub confirm_remove: Option<String>,
+    /// The account whose signature is being edited, with the text so far.
+    pub signature_edit: Option<(String, String)>,
 }
 
 impl Default for AccountForm {
@@ -56,6 +58,7 @@ impl Default for AccountForm {
             error: None,
             notice: None,
             confirm_remove: None,
+            signature_edit: None,
         }
     }
 }
@@ -160,6 +163,7 @@ impl AccountForm {
             incoming: Some(incoming),
             outgoing,
             dav,
+            signature: String::new(),
         })
     }
 }
@@ -195,7 +199,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 }
             }
             let busy = app.engine.session.sign_in.is_some();
-            let statuses: Vec<(String, String, String, bool, AccountStatus)> = app
+            let statuses: Vec<(String, String, String, bool, AccountStatus, String)> = app
                 .engine
                 .session
                 .accounts
@@ -207,6 +211,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         a.address.email().to_string(),
                         matches!(a.auth, mailcraft_model::Auth::OAuth2 { .. }),
                         app.engine.session.status.get(&a.id).cloned().unwrap_or(AccountStatus::Offline),
+                        a.signature.clone(),
                     )
                 })
                 .collect();
@@ -220,7 +225,8 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let mut again = None;
             let mut remove = None;
             let confirming = app.form.confirm_remove.clone();
-            for (id, name, email, oauth, status) in statuses {
+            let mut save_signature = None;
+            for (id, name, email, oauth, status, signature) in statuses {
                 if email == "jij@example.org" {
                     continue;
                 }
@@ -244,6 +250,36 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                             .clicked()
                         {
                             again = Some(id.clone());
+                        }
+                    }
+                    ui.add_space(6.0);
+                    let editing = app.form.signature_edit.as_ref().is_some_and(|(e, _)| *e == id);
+                    if editing {
+                        ui.label(RichText::new("Handtekening").strong().color(t.text));
+                        if let Some((_, text)) = app.form.signature_edit.as_mut() {
+                            ui.add(
+                                egui::TextEdit::multiline(text).desired_rows(4).desired_width(f32::INFINITY).hint_text("Met vriendelijke groet,\n…"),
+                            );
+                        }
+                        ui.label(
+                            RichText::new("Komt onder elk nieuw bericht, antwoord en doorgestuurd bericht van dit account.")
+                                .size(12.0)
+                                .color(t.text_dim),
+                        );
+                        ui.horizontal(|ui| {
+                            if ui.button("Handtekening opslaan").clicked() {
+                                save_signature = app.form.signature_edit.take();
+                            }
+                            if ui.button("Annuleren").clicked() {
+                                app.form.signature_edit = None;
+                            }
+                        });
+                    } else {
+                        if !signature.is_empty() {
+                            ui.label(RichText::new(format!("Handtekening: {}", signature.lines().next().unwrap_or(""))).size(12.0).color(t.text_dim));
+                        }
+                        if ui.button(if signature.is_empty() { "Handtekening instellen" } else { "Handtekening bewerken" }).clicked() {
+                            app.form.signature_edit = Some((id.clone(), signature.clone()));
                         }
                     }
                     ui.add_space(4.0);
@@ -276,6 +312,12 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             if let Some(id) = again {
                 app.form.notice = None;
                 app.engine.sign_in_again(&id);
+            }
+            if let Some((id, text)) = save_signature {
+                app.form.notice = match app.engine.set_signature(&id, &text) {
+                    Ok(()) => Some("De handtekening is opgeslagen.".into()),
+                    Err(e) => Some(e),
+                };
             }
             if let Some(id) = remove {
                 app.form.confirm_remove = None;
@@ -525,6 +567,34 @@ mod tests {
         assert!(a.outgoing.is_none());
         f.kind = Protocol::ImapSmtp;
         assert!(f.account().is_err(), "a backslash in an IMAP user name is refused");
+    }
+
+    #[test]
+    fn a_signature_is_set_from_the_account_list_and_lands_in_new_mail() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut engine = mailcraft_engine::Engine::sample();
+        let mut f = AccountForm::default();
+        f.email = "alain@voorbeeld.nl".into();
+        f.password = "x".into();
+        f.suggest();
+        engine.add_account(f.account().unwrap(), Secret::new("x")).unwrap();
+        let mut app = MailApp::new(engine);
+        app.tab = Tab::File;
+        let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        harness.run();
+        harness.get_by_label("Handtekening instellen").click();
+        harness.run();
+        if let Some((_, text)) = harness.state_mut().form.signature_edit.as_mut() {
+            *text = "Groet,\nAlain\u{7}\n\n".into();
+        }
+        harness.get_by_label("Handtekening opslaan").click();
+        harness.run();
+        let account = harness.state().engine.session.accounts[0].clone();
+        assert_eq!(account.signature, "Groet,\nAlain", "control characters and trailing blank lines go");
+        assert!(harness.query_by_label("Handtekening bewerken").is_some());
+        harness.state_mut().open_compose(crate::compose::Kind::New);
+        assert_eq!(harness.state().compose.as_ref().map(|c| c.body.as_str()), Some("\n\n-- \nGroet,\nAlain"));
     }
 
     #[test]
