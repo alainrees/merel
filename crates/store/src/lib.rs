@@ -177,46 +177,68 @@ impl Store {
         write_private(&path, &out)
     }
 
-    /// Forgets an account, its S/MIME certificate included.
+    /// Forgets an account, its S/MIME certificate and OpenPGP key included.
     pub fn remove(&self, account_id: &str) {
         let _ = std::fs::remove_file(self.path(account_id));
-        self.remove_identity(account_id);
+        self.remove_identity(account_id, KeyKind::Certificate);
+        self.remove_identity(account_id, KeyKind::OpenPgp);
     }
 
-    fn identity_path(&self, account_id: &str) -> PathBuf {
-        self.path(account_id).with_extension("identity")
+    fn identity_path(&self, account_id: &str, kind: KeyKind) -> PathBuf {
+        self.path(account_id).with_extension(kind.extension())
     }
 
-    /// Keeps the S/MIME certificate and private key of `account_id`, sealed like the cache and
-    /// bound to the account, in a file of its own: the cache is rewritten all the time, the
-    /// key only when it changes.
-    pub fn save_identity(&self, account_id: &str, plain: &[u8]) -> Result<(), StoreError> {
+    /// Keeps a private key of `account_id` (its S/MIME certificate, or its OpenPGP key),
+    /// sealed like the cache and bound to the account and the kind, in a file of its own: the
+    /// cache is rewritten all the time, the key only when it changes.
+    pub fn save_identity(&self, account_id: &str, kind: KeyKind, plain: &[u8]) -> Result<(), StoreError> {
         std::fs::create_dir_all(&self.dir)?;
-        let out = self.seal(IDENTITY_MAGIC, &identity_aad(account_id), plain.to_vec())?;
-        write_private(&self.identity_path(account_id), &out)
+        let out = self.seal(IDENTITY_MAGIC, &identity_aad(account_id, kind), plain.to_vec())?;
+        write_private(&self.identity_path(account_id, kind), &out)
     }
 
     /// What [`Store::save_identity`] kept for `account_id`; `None` when there is nothing, or
     /// the file does not open.
-    pub fn load_identity(&self, account_id: &str) -> Option<Zeroizing<Vec<u8>>> {
-        let path = self.identity_path(account_id);
+    pub fn load_identity(&self, account_id: &str, kind: KeyKind) -> Option<Zeroizing<Vec<u8>>> {
+        let path = self.identity_path(account_id, kind);
         let bytes = std::fs::read(&path).ok()?;
-        let plain = self.unseal(IDENTITY_MAGIC, &identity_aad(account_id), bytes);
+        let plain = self.unseal(IDENTITY_MAGIC, &identity_aad(account_id, kind), bytes);
         if plain.is_none() {
-            log::warn!("{}: certificate unreadable, ignored", path.display());
+            log::warn!("{}: key unreadable, ignored", path.display());
         }
         plain
     }
 
-    pub fn remove_identity(&self, account_id: &str) {
-        let _ = std::fs::remove_file(self.identity_path(account_id));
+    pub fn remove_identity(&self, account_id: &str, kind: KeyKind) {
+        let _ = std::fs::remove_file(self.identity_path(account_id, kind));
     }
 }
 
-/// Associated data of an identity file: not the bare account id, so a cache file renamed to
-/// an identity (or the other way round) does not open.
-fn identity_aad(account_id: &str) -> Vec<u8> {
-    format!("identity\0{account_id}").into_bytes()
+/// Which private key of an account a sealed file holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyKind {
+    /// The S/MIME certificate with its key.
+    Certificate,
+    /// The OpenPGP key.
+    OpenPgp,
+}
+
+impl KeyKind {
+    fn extension(self) -> &'static str {
+        match self {
+            KeyKind::Certificate => "identity",
+            KeyKind::OpenPgp => "pgpkey",
+        }
+    }
+}
+
+/// Associated data of a key file: not the bare account id, so a cache file renamed to a key
+/// file, or one kind of key file to the other, does not open.
+fn identity_aad(account_id: &str, kind: KeyKind) -> Vec<u8> {
+    match kind {
+        KeyKind::Certificate => format!("identity\0{account_id}").into_bytes(),
+        KeyKind::OpenPgp => format!("openpgp\0{account_id}").into_bytes(),
+    }
 }
 
 fn decode_key(encoded: &str) -> Option<Zeroizing<[u8; KEY_LEN]>> {
@@ -338,22 +360,27 @@ mod tests {
         let secrets = MemoryStore::default();
         let d = dir("identity");
         let store = Store::open(d.clone(), &secrets).unwrap();
-        assert!(store.load_identity("a1").is_none());
-        store.save_identity("a1", b"PRIVATE KEY").unwrap();
-        assert_eq!(store.load_identity("a1").as_deref().map(Vec::as_slice), Some(&b"PRIVATE KEY"[..]));
-        let bytes = std::fs::read(store.identity_path("a1")).unwrap();
+        assert!(store.load_identity("a1", KeyKind::Certificate).is_none());
+        store.save_identity("a1", KeyKind::Certificate, b"PRIVATE KEY").unwrap();
+        assert_eq!(store.load_identity("a1", KeyKind::Certificate).as_deref().map(Vec::as_slice), Some(&b"PRIVATE KEY"[..]));
+        let bytes = std::fs::read(store.identity_path("a1", KeyKind::Certificate)).unwrap();
         assert!(!bytes.windows(7).any(|w| w == b"PRIVATE"), "nothing readable on disk");
         // Under another account's name, or as a cache file, it does not open.
-        std::fs::write(store.identity_path("a2"), &bytes).unwrap();
-        assert!(store.load_identity("a2").is_none());
+        std::fs::write(store.identity_path("a2", KeyKind::Certificate), &bytes).unwrap();
+        assert!(store.load_identity("a2", KeyKind::Certificate).is_none());
         std::fs::write(store.path("a1"), &bytes).unwrap();
         assert!(store.load("a1").is_none());
         store.save(&cache()).unwrap();
-        std::fs::write(store.identity_path("a1"), std::fs::read(store.path("a1")).unwrap()).unwrap();
-        assert!(store.load_identity("a1").is_none());
-        store.save_identity("a1", b"PRIVATE KEY").unwrap();
+        std::fs::write(store.identity_path("a1", KeyKind::Certificate), std::fs::read(store.path("a1")).unwrap()).unwrap();
+        assert!(store.load_identity("a1", KeyKind::Certificate).is_none());
+        store.save_identity("a1", KeyKind::Certificate, b"PRIVATE KEY").unwrap();
+        // The OpenPGP key has a file of its own, and one kind does not open as the other.
+        store.save_identity("a1", KeyKind::OpenPgp, b"PGP KEY").unwrap();
+        assert_eq!(store.load_identity("a1", KeyKind::OpenPgp).as_deref().map(Vec::as_slice), Some(&b"PGP KEY"[..]));
+        std::fs::copy(store.identity_path("a1", KeyKind::OpenPgp), store.identity_path("a1", KeyKind::Certificate)).unwrap();
+        assert!(store.load_identity("a1", KeyKind::Certificate).is_none());
         store.remove("a1");
-        assert!(store.load_identity("a1").is_none() && store.load("a1").is_none());
+        assert!(store.load_identity("a1", KeyKind::OpenPgp).is_none() && store.load("a1").is_none());
         let _ = std::fs::remove_dir_all(d);
     }
 

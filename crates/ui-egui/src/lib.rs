@@ -1693,6 +1693,9 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if let Some(e) = body.as_ref().and_then(|b| b.encrypted.as_ref()) {
         signature::encryption_strip(ui, t, e);
     }
+    if let Some(v) = body.as_ref().and_then(|b| b.pgp_signature.as_ref()) {
+        signature::pgp_strip(ui, t, v, m.from.email());
+    }
     if let Some(sig) = body.as_ref().and_then(|b| b.signature.as_ref())
         && signature::strip(ui, t, sig, m.from.email(), !in_junk)
     {

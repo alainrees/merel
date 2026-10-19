@@ -27,6 +27,59 @@ pub fn encryption_strip(ui: &mut Ui, t: &Tokens, encryption: &Encryption) {
     ui.add_space(8.0);
 }
 
+pub const PGP_BROKEN: &str = "⚠ De OpenPGP-handtekening klopt niet. Het bericht is na het ondertekenen veranderd, of de handtekening is vervalst.";
+
+/// What the strip over an OpenPGP-signed message says, and whether it is a warning.
+pub fn pgp_text(verdict: &mailcraft_pgp::Verdict, from: &str) -> (String, bool) {
+    use mailcraft_pgp::Verdict;
+    match verdict {
+        Verdict::Valid { signer } if signer.covers(from) => (
+            format!(
+                "✔ Ondertekend met de OpenPGP-sleutel van {} <{}> ({}). Het bericht is onderweg niet veranderd.",
+                signer.name,
+                from.to_lowercase(),
+                signer.grouped().rsplit(' ').take(2).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" ")
+            ),
+            false,
+        ),
+        Verdict::Valid { signer } => (
+            format!(
+                "⚠ Ondertekend met de OpenPGP-sleutel van {}, niet van de afzender {}. Wees voorzichtig.",
+                if signer.emails.is_empty() { signer.name.clone() } else { signer.emails.join(", ") },
+                from
+            ),
+            true,
+        ),
+        Verdict::Broken => (PGP_BROKEN.to_string(), true),
+        Verdict::UnknownKey(_) => (
+            "Dit bericht is met OpenPGP ondertekend, maar de sleutel van de afzender is nog niet bekend, dus Mailcraft kan de handtekening niet controleren.".to_string(),
+            false,
+        ),
+        Verdict::Unchecked(reason) => (format!("Dit bericht is met OpenPGP ondertekend, maar Mailcraft kan de handtekening niet controleren: {reason}."), false),
+    }
+}
+
+pub fn pgp_strip(ui: &mut Ui, t: &Tokens, verdict: &mailcraft_pgp::Verdict, from: &str) {
+    let (line, warning) = pgp_text(verdict, from);
+    let fill = if warning { t.flag.gamma_multiply(0.18) } else { t.checked };
+    let response = egui::Frame::NONE
+        .fill(fill)
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(line).size(12.0).color(t.text));
+        })
+        .response;
+    if let mailcraft_pgp::Verdict::Valid { signer } = verdict {
+        response.on_hover_text(format!(
+            "Vingerafdruk {}. Mailcraft kreeg deze sleutel met eerdere mail van dit adres (Autocrypt); vergelijk de vingerafdruk met de afzender als je zeker wilt zijn.",
+            signer.grouped()
+        ));
+    }
+    ui.add_space(8.0);
+}
+
 /// What the strip says, and whether it is a warning.
 pub fn text(signature: &Signature, from: &str) -> (String, bool) {
     match signature {
@@ -124,5 +177,22 @@ mod tests {
         let unknown = Signature::Valid { signer, certificate, issuers, trusted: false };
         let (line, warning) = text(&unknown, "sanne@example.org");
         assert!(warning && line.contains("de uitgever (CA) is niet bekend als betrouwbaar"), "{line}");
+    }
+
+    #[test]
+    fn says_whose_openpgp_key_signed() {
+        use mailcraft_pgp::{KeyInfo, Verdict};
+        let signer = KeyInfo {
+            fingerprint: "0123456789ABCDEF0123456789ABCDEF01234567".into(),
+            name: "Jij".into(),
+            emails: vec!["jij@example.org".into()],
+            created: 0,
+        };
+        let (line, warning) = pgp_text(&Verdict::Valid { signer: signer.clone() }, "Jij@example.org");
+        assert_eq!(line, "✔ Ondertekend met de OpenPGP-sleutel van Jij <jij@example.org> (0123 4567). Het bericht is onderweg niet veranderd.");
+        assert!(!warning);
+        assert!(pgp_text(&Verdict::Valid { signer }, "bank@example.org").1);
+        assert_eq!(pgp_text(&Verdict::Broken, "x@y.nl"), (PGP_BROKEN.to_string(), true));
+        assert!(!pgp_text(&Verdict::UnknownKey("AB".into()), "x@y.nl").1);
     }
 }

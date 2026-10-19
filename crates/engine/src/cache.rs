@@ -13,7 +13,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use mailcraft_secrets::SecretStore;
-use mailcraft_store::{AccountCache, Store};
+use mailcraft_store::{AccountCache, KeyKind, Store};
 
 use crate::{Event, Job, SAMPLE_ACCOUNT, Session};
 
@@ -54,21 +54,21 @@ impl Cache {
         self.store.is_some()
     }
 
-    /// Keeps the S/MIME certificate and key of `account_id` sealed on disk.
-    pub fn save_identity(&self, account_id: &str, plain: &[u8]) -> Result<(), String> {
+    /// Keeps a private key of `account_id` (S/MIME certificate or OpenPGP key) sealed on disk.
+    pub fn save_identity(&self, account_id: &str, kind: KeyKind, plain: &[u8]) -> Result<(), String> {
         match &self.store {
-            Some(store) => store.save_identity(account_id, plain).map_err(|e| e.to_string()),
+            Some(store) => store.save_identity(account_id, kind, plain).map_err(|e| e.to_string()),
             None => Ok(()),
         }
     }
 
-    pub fn load_identity(&self, account_id: &str) -> Option<zeroize::Zeroizing<Vec<u8>>> {
-        self.store.as_ref()?.load_identity(account_id)
+    pub fn load_identity(&self, account_id: &str, kind: KeyKind) -> Option<zeroize::Zeroizing<Vec<u8>>> {
+        self.store.as_ref()?.load_identity(account_id, kind)
     }
 
-    pub fn remove_identity(&self, account_id: &str) {
+    pub fn remove_identity(&self, account_id: &str, kind: KeyKind) {
         if let Some(store) = &self.store {
-            store.remove_identity(account_id);
+            store.remove_identity(account_id, kind);
         }
     }
 
