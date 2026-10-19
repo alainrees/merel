@@ -6,6 +6,7 @@ use egui::{RichText, Ui};
 use serde_json::json;
 
 use mailcraft_engine::CommandError;
+use mailcraft_model::JunkLevel;
 
 use crate::{MailApp, Tokens};
 
@@ -20,6 +21,22 @@ enum Action {
     Block,
     Trust,
     Forget(String),
+    Level(JunkLevel),
+}
+
+/// The name and the explanation of a level, as the window shows them.
+pub fn level_text(level: JunkLevel) -> (&'static str, &'static str) {
+    match level {
+        JunkLevel::Standard => ("Standaard", "Alleen mail van geblokkeerde afzenders gaat naar Ongewenste e-mail; je mailprovider filtert de rest."),
+        JunkLevel::High => (
+            "Hoog",
+            "Ook mail van een afzender met kenmerken van phishing: de naam van een contact met een ander adres, of een domein dat op een bekend domein lijkt.",
+        ),
+        JunkLevel::SafeOnly => (
+            "Alleen veilige lijsten",
+            "Alles wat niet van een contact, een veilige afzender of jezelf komt, gaat naar Ongewenste e-mail. Kijk daar dan regelmatig.",
+        ),
+    }
 }
 
 fn describe(e: &CommandError) -> String {
@@ -80,6 +97,16 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             list(&mut cols[1], t, "Veilige afzenders", &lists.safe, "Je contacten zijn altijd veilig.", &mut action);
         });
         ui.add_space(10.0);
+        ui.label(RichText::new("Niveau").strong().color(t.text));
+        ui.add_space(4.0);
+        for level in JunkLevel::ALL {
+            let (name, explanation) = level_text(level);
+            if ui.radio(lists.level == level, name).on_hover_text(explanation).clicked() && lists.level != level {
+                action = Some(Action::Level(level));
+            }
+            ui.label(RichText::new(explanation).size(12.0).color(t.text_dim));
+        }
+        ui.add_space(10.0);
         if ui.button("Sluiten").clicked() {
             close = true;
         }
@@ -96,6 +123,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             }
         }
         Some(Action::Forget(e)) => app.run("junk.forget", json!({ "entry": e })),
+        Some(Action::Level(level)) => app.run("junk.level", json!({ "level": level.id() })),
         None => {}
     }
     if close {

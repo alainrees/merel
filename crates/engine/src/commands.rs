@@ -65,6 +65,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "junk.block", label: "Block sender", run: crate::junk::block },
     CommandSpec { id: "junk.trust", label: "Trust sender", run: crate::junk::trust },
     CommandSpec { id: "junk.forget", label: "Forget sender", run: crate::junk::forget },
+    CommandSpec { id: "junk.level", label: "Junk filter level", run: crate::junk::level },
     CommandSpec { id: "appointment.select", label: "Open appointment", run: crate::calendar::select },
     CommandSpec { id: "appointment.save", label: "Save appointment", run: crate::calendar::save },
     CommandSpec { id: "appointment.skip", label: "Skip one occurrence", run: crate::calendar::skip },
