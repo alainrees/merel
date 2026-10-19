@@ -259,6 +259,97 @@ pub struct Draft {
     pub body: String,
     /// The Message-ID this answers, if any.
     pub in_reply_to: Option<String>,
+    /// Files going out with the message.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<DraftAttachment>,
+}
+
+impl Draft {
+    /// The size of the attachments together, before encoding.
+    pub fn attachment_bytes(&self) -> usize {
+        self.attachments.iter().map(|a| a.bytes.len()).sum()
+    }
+}
+
+/// How much a message may carry in attachments, all together, before encoding. Most mail
+/// servers refuse more.
+pub const MAX_ATTACHMENTS: usize = 25 * 1024 * 1024;
+
+/// A file going out with a draft.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DraftAttachment {
+    /// The file name the recipient sees: no directories, no control characters.
+    pub name: String,
+    /// The media type, from the file's extension; `application/octet-stream` for the rest.
+    pub mime: String,
+    #[serde(with = "base64_bytes")]
+    pub bytes: Vec<u8>,
+}
+
+impl DraftAttachment {
+    /// From a file name (a path is cut down to its last part) and the file's contents.
+    pub fn new(name: &str, bytes: Vec<u8>) -> Self {
+        let name = clean_text(name.rsplit(['/', '\\']).next().unwrap_or("").trim()).replace(['"', '\\', '/'], "_");
+        let name = if name.is_empty() || name == "." || name == ".." { "bijlage".to_string() } else { name };
+        let mime = mime_of(&name).to_string();
+        DraftAttachment { name, mime, bytes }
+    }
+}
+
+/// The media type that goes with a file name's extension.
+pub fn mime_of(name: &str) -> &'static str {
+    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    match ext.as_str() {
+        "pdf" => "application/pdf",
+        "txt" | "md" | "log" => "text/plain",
+        "csv" => "text/csv",
+        "html" | "htm" => "text/html",
+        "ics" => "text/calendar",
+        "vcf" => "text/vcard",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "zip" => "application/zip",
+        "gz" | "tgz" => "application/gzip",
+        "7z" => "application/x-7z-compressed",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "heic" => "image/heic",
+        "mp3" => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "wav" => "audio/wav",
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "odt" => "application/vnd.oasis.opendocument.text",
+        "ods" => "application/vnd.oasis.opendocument.spreadsheet",
+        "odp" => "application/vnd.oasis.opendocument.presentation",
+        "rtf" => "application/rtf",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Attachment contents as base64 in JSON, a quarter the size of a list of numbers.
+mod base64_bytes {
+    use base64::Engine;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(d)?;
+        base64::engine::general_purpose::STANDARD.decode(text).map_err(serde::de::Error::custom)
+    }
 }
 
 /// `s` cut to [`MAX_TEXT`] characters with control characters (other than tab) removed, so a

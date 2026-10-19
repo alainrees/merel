@@ -1,9 +1,12 @@
-//! The compose window: new mail, reply, reply all and forward.
+//! The compose window: new mail, reply, reply all and forward, with attachments picked from
+//! the computer's file dialog or dropped onto the window.
+
+use std::path::{Path, PathBuf};
 
 use egui::{Margin, RichText, Stroke, Ui, vec2};
 
 use mailcraft_engine::SendState;
-use mailcraft_model::{Address, Draft, MessageHeader, parse_address_list};
+use mailcraft_model::{Address, Draft, DraftAttachment, MAX_ATTACHMENTS, MessageHeader, parse_address_list};
 
 use crate::{MailApp, Tokens, dates};
 
@@ -21,6 +24,8 @@ pub struct Compose {
     pub subject: String,
     pub body: String,
     pub in_reply_to: Option<String>,
+    /// Files going along, in the order they were added.
+    pub attachments: Vec<DraftAttachment>,
     /// Set once Send is pressed; tracks the draft in the session's outbox.
     pub draft_id: Option<u64>,
     pub error: Option<String>,
@@ -53,6 +58,7 @@ impl Compose {
             subject: String::new(),
             body: String::new(),
             in_reply_to: None,
+            attachments: Vec::new(),
             draft_id: None,
             error: None,
         };
@@ -103,7 +109,44 @@ impl Compose {
         if to.is_empty() {
             return Err("Vul ten minste één ontvanger in bij Aan.".into());
         }
-        Ok(Draft { to, cc, subject: self.subject.clone(), body: self.body.clone(), in_reply_to: self.in_reply_to.clone() })
+        Ok(Draft {
+            to,
+            cc,
+            subject: self.subject.clone(),
+            body: self.body.clone(),
+            in_reply_to: self.in_reply_to.clone(),
+            attachments: self.attachments.clone(),
+        })
+    }
+
+    /// Reads a file from disk and adds it, or says why it cannot go along. The size is checked
+    /// before and after reading, so a file that grows under us cannot slip past the limit.
+    pub fn add_file(&mut self, path: &Path) -> Result<(), String> {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("bijlage");
+        let room = MAX_ATTACHMENTS.saturating_sub(self.attachments.iter().map(|a| a.bytes.len()).sum());
+        let too_big = || format!("{name} past er niet meer bij: bijlagen mogen samen {} MB zijn.", MAX_ATTACHMENTS / (1024 * 1024));
+        let meta = std::fs::metadata(path).map_err(|_| format!("Kan {name} niet lezen."))?;
+        if !meta.is_file() {
+            return Err(format!("{name} is geen bestand."));
+        }
+        if usize::try_from(meta.len()).map_or(true, |len| len > room) {
+            return Err(too_big());
+        }
+        let bytes = std::fs::read(path).map_err(|_| format!("Kan {name} niet lezen."))?;
+        if bytes.len() > room {
+            return Err(too_big());
+        }
+        self.attachments.push(DraftAttachment::new(name, bytes));
+        Ok(())
+    }
+
+    /// Adds every file it can; the first problem shows in the window.
+    pub fn add_files(&mut self, paths: impl IntoIterator<Item = PathBuf>) {
+        for path in paths {
+            if let Err(e) = self.add_file(&path) {
+                self.error = Some(e);
+            }
+        }
     }
 }
 
@@ -139,9 +182,17 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         }
     }
     let sending = c.draft_id.is_some();
+    // Files dropped onto the window become attachments; files hovering over it get a hint.
+    if !sending {
+        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
+        c.add_files(dropped);
+    }
+    let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
     let mut open = true;
     let mut send = false;
     let mut discard = false;
+    let mut pick = false;
+    let mut remove = None;
     egui::Window::new("Nieuw bericht")
         .open(&mut open)
         .default_size(vec2(680.0, 520.0))
@@ -158,8 +209,17 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     if ui.add(egui::Button::new("Verwijderen").min_size(vec2(100.0, 30.0))).clicked() {
                         discard = true;
                     }
+                    if ui
+                        .add(egui::Button::new("📎 Bijlage toevoegen").min_size(vec2(150.0, 30.0)))
+                        .on_hover_text("Kies een of meer bestanden. Je kunt ze ook naar dit venster slepen.")
+                        .clicked()
+                    {
+                        pick = true;
+                    }
                     if sending {
                         ui.label(RichText::new("Verzenden…").color(t.text_dim));
+                    } else if hovering {
+                        ui.label(RichText::new("Laat los om toe te voegen").color(t.accent_text));
                     }
                 });
                 ui.add_space(8.0);
@@ -168,6 +228,24 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 field(ui, t, "CC", &mut c.cc);
                 crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut c.cc);
                 field(ui, t, "Onderwerp", &mut c.subject);
+                if !c.attachments.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add_sized([80.0, 24.0], egui::Label::new(RichText::new("Bijlagen").color(t.text_dim)));
+                        for (i, a) in c.attachments.iter().enumerate() {
+                            egui::Frame::NONE
+                                .fill(t.panel)
+                                .stroke(Stroke::new(1.0, t.border))
+                                .corner_radius(6.0)
+                                .inner_margin(Margin::symmetric(8, 3))
+                                .show(ui, |ui| {
+                                    ui.label(RichText::new(format!("📎 {} ({})", a.name, crate::size_text(a.bytes.len()))).size(12.0).color(t.text));
+                                    if ui.small_button("✕").on_hover_text("Bijlage weghalen").clicked() {
+                                        remove = Some(i);
+                                    }
+                                });
+                        }
+                    });
+                }
                 if let Some(e) = &c.error {
                     ui.label(RichText::new(e).color(t.flag));
                 }
@@ -183,6 +261,17 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     if discard || !open {
         app.compose = None;
         return;
+    }
+    if let Some(i) = remove.filter(|i| *i < c.attachments.len()) {
+        c.attachments.remove(i);
+        c.error = None;
+    }
+    if pick {
+        // The computer's own dialog; it blocks until the person has chosen or cancelled.
+        if let Some(paths) = rfd::FileDialog::new().set_title("Bijlagen kiezen").pick_files() {
+            c.error = None;
+            c.add_files(paths);
+        }
     }
     if send {
         match c.draft() {
@@ -247,6 +336,51 @@ mod tests {
         let (sig, quote) = (reply.body.find("-- \nAlain").unwrap(), reply.body.find("> tien uur?").unwrap());
         assert!(sig < quote, "{}", reply.body);
         assert_eq!(Compose::new(Kind::New, None).with_signature("  \n").body, "");
+    }
+
+    #[test]
+    fn files_become_attachments_within_the_size_limit() {
+        let dir = std::env::temp_dir().join(format!("mailcraft-compose-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("offerte.pdf");
+        std::fs::write(&file, b"%PDF-1.4").unwrap();
+        let mut c = Compose::new(Kind::New, None);
+        c.add_file(&file).unwrap();
+        assert_eq!(
+            (c.attachments[0].name.as_str(), c.attachments[0].mime.as_str(), c.attachments[0].bytes.as_slice()),
+            ("offerte.pdf", "application/pdf", &b"%PDF-1.4"[..])
+        );
+        assert!(c.add_file(&dir.join("bestaat-niet.txt")).is_err());
+        assert!(c.add_file(&dir).is_err(), "a folder is not a file");
+        c.attachments.push(DraftAttachment::new("groot.bin", vec![0; MAX_ATTACHMENTS - 4]));
+        let e = c.add_file(&file).unwrap_err();
+        assert!(e.contains("25 MB"), "{e}");
+        assert_eq!(c.attachments.len(), 2);
+        c.to = "sanne@example.org".into();
+        assert_eq!(c.draft().unwrap().attachments.len(), 2, "attachments travel with the draft");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_window_lists_attachments_and_removes_one_on_click() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        app.open_compose(Kind::New);
+        if let Some(c) = app.compose.as_mut() {
+            c.attachments.push(DraftAttachment::new("offerte.pdf", vec![0; 2048]));
+            c.attachments.push(DraftAttachment::new("foto.jpg", vec![0; 10]));
+        }
+        let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        harness.run();
+        harness.get_by_label("📎 Bijlage toevoegen");
+        harness.get_by_label("📎 offerte.pdf (2 kB)");
+        harness.get_by_label("📎 foto.jpg (10 B)");
+        harness.get_all_by_label("✕").next().expect("a remove button").click();
+        harness.run();
+        let names: Vec<String> = harness.state().compose.as_ref().map(|c| c.attachments.iter().map(|a| a.name.clone()).collect()).unwrap_or_default();
+        assert_eq!(names, ["foto.jpg"]);
+        assert!(harness.query_by_label("📎 offerte.pdf (2 kB)").is_none());
     }
 
     #[test]

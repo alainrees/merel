@@ -3,11 +3,11 @@
 
 use std::time::Duration;
 
-use lettre::message::{Mailbox, header::ContentType};
+use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart, header::ContentType};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::transport::smtp::client::{Tls as SmtpTls, TlsParameters};
 use lettre::{Message, SmtpTransport, Transport};
-use mailcraft_model::{Address, Draft, Server, Tls};
+use mailcraft_model::{Address, Draft, MAX_ATTACHMENTS, Server, Tls};
 use mailcraft_secrets::Secret;
 
 /// How to log in.
@@ -53,12 +53,10 @@ pub fn build(from: &Address, draft: &Draft) -> Result<Message, SmtpError> {
     if draft.to.is_empty() {
         return Err(SmtpError::Build("Vul ten minste één ontvanger in.".into()));
     }
-    let mut b = Message::builder()
-        .from(mailbox(from)?)
-        .subject(draft.subject.trim())
-        .header(ContentType::TEXT_PLAIN)
-        .date_now()
-        .message_id(Some(message_id(from)));
+    if draft.attachment_bytes() > MAX_ATTACHMENTS {
+        return Err(SmtpError::Build(format!("De bijlagen zijn samen te groot; maximaal {} MB.", MAX_ATTACHMENTS / (1024 * 1024))));
+    }
+    let mut b = Message::builder().from(mailbox(from)?).subject(draft.subject.trim()).date_now().message_id(Some(message_id(from)));
     for a in &draft.to {
         b = b.to(mailbox(a)?);
     }
@@ -68,7 +66,16 @@ pub fn build(from: &Address, draft: &Draft) -> Result<Message, SmtpError> {
     if let Some(id) = &draft.in_reply_to {
         b = b.in_reply_to(id.clone()).references(id.clone());
     }
-    b.body(draft.body.clone()).map_err(|e| SmtpError::Build(e.to_string()))
+    if draft.attachments.is_empty() {
+        return b.header(ContentType::TEXT_PLAIN).body(draft.body.clone()).map_err(|e| SmtpError::Build(e.to_string()));
+    }
+    let mut parts = MultiPart::mixed().singlepart(SinglePart::builder().header(ContentType::TEXT_PLAIN).body(draft.body.clone()));
+    for a in &draft.attachments {
+        let kind =
+            ContentType::parse(&a.mime).or_else(|_| ContentType::parse("application/octet-stream")).map_err(|e| SmtpError::Build(e.to_string()))?;
+        parts = parts.singlepart(Attachment::new(a.name.clone()).body(a.bytes.clone(), kind));
+    }
+    b.multipart(parts).map_err(|e| SmtpError::Build(e.to_string()))
 }
 
 /// Sends `message` through `server` as `username`.
@@ -110,6 +117,7 @@ mod tests {
             subject: "Re: Planning".into(),
             body: "Prima, tien uur.\n".into(),
             in_reply_to: Some("<abc@example.org>".into()),
+            attachments: Vec::new(),
         };
         let m = build(&from, &draft).unwrap();
         let text = String::from_utf8(m.formatted()).unwrap();
@@ -119,6 +127,34 @@ mod tests {
         assert!(text.contains("Message-ID: <") && text.contains("@example.org>"));
         assert_ne!(message_id(&from), message_id(&from));
         assert!(text.contains("Prima, tien uur."));
+    }
+
+    #[test]
+    fn attachments_make_a_mixed_message_with_the_file_type_and_name() {
+        use mailcraft_model::DraftAttachment;
+        let from = Address::new(None, "jij@example.org").unwrap();
+        let draft = Draft {
+            to: vec![Address::new(None, "sanne@example.org").unwrap()],
+            body: "Zie bijlage.".into(),
+            attachments: vec![
+                DraftAttachment::new("/Users/alain/Documents/offerte.pdf", b"%PDF-1.4".to_vec()),
+                DraftAttachment::new("x.unknown", vec![1, 2]),
+            ],
+            ..Draft::default()
+        };
+        let text = String::from_utf8(build(&from, &draft).unwrap().formatted()).unwrap();
+        assert!(text.contains("Content-Type: multipart/mixed"));
+        assert!(text.contains("Zie bijlage."));
+        assert!(text.contains("Content-Type: application/pdf"), "{text}");
+        assert!(text.contains("filename=\"offerte.pdf\""), "{text}");
+        assert!(text.contains("Content-Type: application/octet-stream"));
+        assert!(!text.contains("/Users/"), "the path stays private");
+        let parsed = mailcraft_mime::parse_body(text.as_bytes());
+        assert_eq!(parsed.attachments.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["offerte.pdf", "x.unknown"]);
+        assert_eq!(parsed.text.trim(), "Zie bijlage.");
+
+        let huge = Draft { attachments: vec![DraftAttachment::new("a.bin", vec![0; MAX_ATTACHMENTS + 1])], ..draft };
+        assert!(build(&from, &huge).is_err());
     }
 
     #[test]
