@@ -1,7 +1,8 @@
 //! Built-in sample mail so the app has something to show before an account is added.
 
 use mailcraft_model::{
-    Account, Address, Appointment, Calendar, Contact, Flags, Folder, FolderKind, MessageHeader, Priority, Protocol, Server, Task, Tls,
+    Account, Address, Appointment, Calendar, Contact, Flags, Folder, FolderKind, Frequency, MessageHeader, Priority, Protocol, Recurrence, Server,
+    Task, Tls,
 };
 
 use crate::Session;
@@ -152,9 +153,9 @@ fn contacts() -> Vec<Contact> {
     .collect()
 }
 
-/// Three appointments around today, so the calendar has something to show.
+/// Three appointments around today and a weekly one, so the calendar has something to show.
 fn appointments() -> Vec<Appointment> {
-    use chrono::{Days, Local, TimeZone};
+    use chrono::{Datelike, Days, Local, TimeZone};
     let today = Local::now().date_naive();
     let at = |days: u64, hour: u32| {
         let date = today.checked_add_days(Days::new(days))?;
@@ -163,7 +164,8 @@ fn appointments() -> Vec<Appointment> {
     };
     let plan =
         [("Overleg ontwerp", "Studio", 0, 10, 11, false), ("Lunch met Sanne", "De Kantine", 1, 12, 13, false), ("Studiodag", "", 2, 0, 24, true)];
-    plan.into_iter()
+    let mut list: Vec<Appointment> = plan
+        .into_iter()
         .enumerate()
         .filter_map(|(i, (title, location, day, from, to, all_day))| {
             Some(Appointment {
@@ -175,7 +177,25 @@ fn appointments() -> Vec<Appointment> {
                 all_day,
                 location: location.into(),
                 notes: String::new(),
+                recurrence: None,
             })
         })
-        .collect()
+        .collect();
+    // Every Monday at nine, from the Monday of this week on.
+    let monday = today.checked_sub_days(Days::new(u64::from(today.weekday().num_days_from_monday())));
+    let week_start = monday.and_then(|d| d.and_hms_opt(9, 0, 0)).and_then(|t| Local.from_local_datetime(&t).earliest()).map(|d| d.timestamp());
+    if let Some(start) = week_start {
+        list.push(Appointment {
+            id: "sample-weekly".into(),
+            calendar_id: "local".into(),
+            title: "Weekstart".into(),
+            start,
+            end: start + 1800,
+            all_day: false,
+            location: "Studio".into(),
+            notes: String::new(),
+            recurrence: Some(Recurrence::every(Frequency::Weekly)),
+        });
+    }
+    list
 }

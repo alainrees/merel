@@ -61,6 +61,7 @@ fn appointment_of(node: Node<'_, '_>) -> Option<Appointment> {
         all_day: text(node, "IsAllDayEvent") == Some("true"),
         location: text(node, "Location").unwrap_or("").to_string(),
         notes: body_text(node),
+        recurrence: None,
     }
     .validated()
     .ok()
@@ -532,6 +533,7 @@ mod tests {
             all_day: false,
             location: "<Studio>".into(),
             notes: String::new(),
+            recurrence: None,
         };
         let xml = appointment_fields(&a).create();
         assert_eq!(

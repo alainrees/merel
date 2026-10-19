@@ -226,6 +226,7 @@ mod tests {
             all_day,
             location: String::new(),
             notes: String::new(),
+            recurrence: None,
         }
     }
 

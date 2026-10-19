@@ -4,12 +4,18 @@
 //! its store and are mirrored here (see [`crate::sync`]). Every change goes through a command,
 //! which marks the session dirty or leaves a job for the store; the engine saves right after
 //! the command returns.
+//!
+//! A recurring appointment is one entry with a [`Recurrence`]; [`Session::appointments_between`]
+//! expands it into the occurrences of the period asked for, on the computer's clock. Only the
+//! calendars on this computer take a recurrence: an account's server expands its own series and
+//! hands over single occurrences, and Mailcraft does not write series to a server yet.
 
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use mailcraft_mailbox::Item;
-use mailcraft_model::{Appointment, AppointmentError, Calendar};
+use mailcraft_model::{Appointment, AppointmentError, Calendar, Recurrence};
 
 use crate::{CommandError, Session};
 
@@ -50,10 +56,12 @@ impl Session {
         self.selected_appointment.as_deref().and_then(|id| self.appointment(id))
     }
 
-    /// The appointments touching `[from, to)`, earliest first.
-    pub fn appointments_between(&self, from: i64, to: i64) -> Vec<&Appointment> {
-        let mut list: Vec<&Appointment> = self.appointments.iter().filter(|a| a.overlaps(from, to)).collect();
-        list.sort_by_key(|a| (a.start, a.end));
+    /// The appointments touching `[from, to)`, earliest first. A recurring appointment appears
+    /// once per occurrence in the period, each a copy with that occurrence's `start` and `end`
+    /// and the series' id.
+    pub fn appointments_between(&self, from: i64, to: i64) -> Vec<Appointment> {
+        let mut list: Vec<Appointment> = self.appointments.iter().flat_map(|a| a.occurrences(from, to, &Local)).collect();
+        list.sort_by(|a, b| (a.start, a.end, &a.id).cmp(&(b.start, b.end, &b.id)));
         list
     }
 
@@ -85,8 +93,11 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// `appointment.save { id?, calendar_id?, title, start, end, all_day?, location?, notes? }`:
-/// creates the appointment, or replaces the one with `id`. Times are Unix seconds.
+/// `appointment.save { id?, calendar_id?, title, start, end, all_day?, location?, notes?, recurrence? }`:
+/// creates the appointment, or replaces the one with `id`. Times are Unix seconds. `recurrence`
+/// is a [`Recurrence`] object (or null for a single appointment) and is only accepted for a
+/// calendar on this computer; the occurrences a series had skipped stay skipped unless the
+/// object names its own `skipped` list.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
         Some(id) => Some(s.appointment(id).ok_or(CommandError::NotFound)?.clone()),
@@ -101,6 +112,19 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
             .ok_or(CommandError::Param("calendar_id"))?,
     };
     let account = s.appointment_account(&calendar_id);
+    let recurrence = match params.get("recurrence") {
+        None | Some(Value::Null) => None,
+        Some(r) => {
+            if account.is_some() {
+                return Err(CommandError::Param("recurrence"));
+            }
+            let mut r: Recurrence = serde_json::from_value(r.clone()).map_err(|_| CommandError::Param("recurrence"))?;
+            if r.skipped.is_empty() && params.get("recurrence").and_then(|r| r.get("skipped")).is_none() {
+                r.skipped = existing.as_ref().and_then(|a| a.recurrence.as_ref()).map(|old| old.skipped.clone()).unwrap_or_default();
+            }
+            Some(r)
+        }
+    };
     let id = match (&existing, &account) {
         (Some(a), _) => a.id.clone(),
         (None, Some(account)) => s.pending_id(account),
@@ -115,11 +139,13 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         all_day: params.get("all_day").and_then(Value::as_bool).unwrap_or(false),
         location: str_param(params, "location").unwrap_or("").to_string(),
         notes: str_param(params, "notes").unwrap_or("").to_string(),
+        recurrence,
     }
     .validated()
     .map_err(|e| match e {
         AppointmentError::NoTitle => CommandError::Param("title"),
         AppointmentError::EndsBeforeStart => CommandError::Param("end"),
+        AppointmentError::LongerThanInterval => CommandError::Param("recurrence"),
     })?;
     match &account {
         Some(account) => s.save_remote(account, existing.is_none(), Item::Appointment(appointment.clone()))?,
@@ -131,7 +157,22 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// `appointment.delete { id? }`: the given appointment, else the selected one.
+/// `appointment.skip { id?, start }`: takes one occurrence, the one starting at `start`, out of
+/// a recurring appointment (the given one, else the selected one). The series stays.
+pub fn skip(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let id = str_param(params, "id").map(str::to_string).or_else(|| s.selected_appointment.clone()).ok_or(CommandError::NoSelection)?;
+    let start = i64_param(params, "start")?;
+    let a = s.appointments.iter_mut().find(|a| a.id == id).ok_or(CommandError::NotFound)?;
+    if a.recurrence.is_none() {
+        return Err(CommandError::Param("id"));
+    }
+    a.skip(start);
+    s.calendar_dirty = true;
+    Ok(())
+}
+
+/// `appointment.delete { id? }`: the given appointment, else the selected one; a recurring
+/// appointment goes with all its occurrences.
 pub fn delete(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let id = str_param(params, "id").map(str::to_string).or_else(|| s.selected_appointment.clone()).ok_or(CommandError::NoSelection)?;
     let calendar_id = s.appointment(&id).ok_or(CommandError::NotFound)?.calendar_id.clone();
@@ -178,5 +219,52 @@ mod tests {
         assert_eq!(s.run("appointment.delete", &Value::Null), Err(CommandError::NoSelection));
         let data = s.calendar_data();
         assert_eq!(data.calendars.len(), 1);
+    }
+
+    #[test]
+    fn a_recurring_appointment_is_expanded_skipped_and_kept_off_account_calendars() {
+        let mut s = Session::default();
+        s.set_calendar_data(CalendarFile::default());
+        let day = 86_400;
+        let start = 1_792_404_000; // Monday 2026-10-19 10:00 UTC
+        let weekly = json!({ "frequency": "weekly", "weekdays": [0, 3] });
+        s.run("appointment.save", &json!({ "title": "Weekstart", "start": start, "end": start + 1800, "recurrence": weekly })).unwrap();
+        let id = s.selected_appointment().unwrap().id.clone();
+        assert_eq!(s.appointments.len(), 1, "a series is one entry");
+        let shown = s.appointments_between(start - day, start + 14 * day);
+        assert_eq!(shown.len(), 4);
+        assert!(shown.iter().all(|a| a.id == id && a.recurrence.is_some() && a.end - a.start == 1800));
+        assert_eq!(shown[1].start - shown[0].start, 3 * day);
+        assert!(s.calendar_data().appointments[0].recurrence.is_some(), "the file keeps the rule, not the occurrences");
+
+        s.run("appointment.skip", &json!({ "id": id, "start": shown[1].start })).unwrap();
+        assert!(s.take_calendar_dirty());
+        assert_eq!(s.appointments_between(start - day, start + 14 * day).len(), 3);
+        // Saving the series again without a skipped list keeps the skip; naming one replaces it.
+        s.run("appointment.save", &json!({ "id": id, "title": "Weekstart", "start": start, "end": start + 1800, "recurrence": weekly })).unwrap();
+        assert_eq!(s.appointment(&id).unwrap().recurrence.as_ref().unwrap().skipped, vec![shown[1].start]);
+        s.run("appointment.save", &json!({ "id": id, "title": "Weekstart", "start": start, "end": start + 1800, "recurrence": { "frequency": "weekly", "weekdays": [0, 3], "skipped": [] } })).unwrap();
+        assert!(s.appointment(&id).unwrap().recurrence.as_ref().unwrap().skipped.is_empty());
+        // Dropping the rule makes it a single appointment again.
+        s.run("appointment.save", &json!({ "id": id, "title": "Weekstart", "start": start, "end": start + 1800, "recurrence": null })).unwrap();
+        assert!(s.appointment(&id).unwrap().recurrence.is_none());
+        assert_eq!(s.run("appointment.skip", &json!({ "id": id, "start": start })), Err(CommandError::Param("id")));
+
+        assert_eq!(
+            s.run("appointment.save", &json!({ "title": "Lang", "start": start, "end": start + 2 * day, "recurrence": { "frequency": "daily" } })),
+            Err(CommandError::Param("recurrence"))
+        );
+        assert_eq!(
+            s.run("appointment.save", &json!({ "title": "Raar", "start": start, "end": start + 1, "recurrence": { "frequency": "fortnightly" } })),
+            Err(CommandError::Param("recurrence"))
+        );
+        s.calendars.push(Calendar { id: "acc/cal".into(), name: "Werk".into(), account_id: Some("acc".into()), color: [0; 3] });
+        assert_eq!(
+            s.run(
+                "appointment.save",
+                &json!({ "calendar_id": "acc/cal", "title": "Op de server", "start": start, "end": start + 1, "recurrence": weekly })
+            ),
+            Err(CommandError::Param("recurrence"))
+        );
     }
 }

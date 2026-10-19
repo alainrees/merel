@@ -1,12 +1,13 @@
 //! The calendar module: month, week and day views over the session's appointments, and the
-//! appointment window. Times are shown in the computer's time zone.
+//! appointment window. Times are shown in the computer's time zone. A recurring appointment
+//! shows every occurrence; opening one opens the series, with a button to skip just that time.
 
 use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
 use egui::{Align2, Color32, CornerRadius, FontId, Margin, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
 use mailcraft_engine::CommandError;
-use mailcraft_model::Appointment;
+use mailcraft_model::{Appointment, Frequency, Recurrence, describe_recurrence};
 
 use crate::{MailApp, Tokens};
 
@@ -14,6 +15,8 @@ pub const MONTHS: [&str; 12] =
     ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"];
 pub const WEEKDAYS: [&str; 7] = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"];
 const WEEKDAYS_SHORT: [&str; 7] = ["ma", "di", "wo", "do", "vr", "za", "zo"];
+/// Marks an occurrence of a recurring appointment in the views.
+const REPEAT_MARK: &str = "🔁";
 
 /// Pixels per hour in the week and day views.
 const HOUR_HEIGHT: f32 = 44.0;
@@ -86,6 +89,16 @@ fn hm(ts: i64) -> String {
     to_local(ts).format(TIME_FORMAT).to_string()
 }
 
+/// How a series ends, as the window asks it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ends {
+    Never,
+    /// On the date in `Editor::until`.
+    OnDate,
+    /// After the number of times in `Editor::count`.
+    AfterCount,
+}
+
 /// The appointment window's fields, as text the person edits.
 pub struct Editor {
     pub id: Option<String>,
@@ -99,6 +112,16 @@ pub struct Editor {
     pub end_date: String,
     pub end_time: String,
     pub notes: String,
+    /// `None` for a single appointment.
+    pub repeat: Option<Frequency>,
+    pub interval: String,
+    /// Weekly: Monday to Sunday.
+    pub weekdays: [bool; 7],
+    pub ends: Ends,
+    pub until: String,
+    pub count: String,
+    /// The start of the occurrence the window was opened from, for a recurring appointment.
+    pub occurrence: Option<i64>,
     pub error: Option<String>,
 }
 
@@ -117,27 +140,91 @@ impl Editor {
             end_date: end.format(DATE_FORMAT).to_string(),
             end_time: end.format(TIME_FORMAT).to_string(),
             notes: String::new(),
+            repeat: None,
+            interval: "1".into(),
+            weekdays: [false; 7],
+            ends: Ends::Never,
+            until: String::new(),
+            count: "10".into(),
+            occurrence: None,
             error: None,
         }
     }
 
-    pub fn from_appointment(a: &Appointment) -> Self {
+    /// The window for `a`; `occurrence` is the start of the occurrence that was clicked, when
+    /// `a` repeats. The fields show the series itself, so its first occurrence.
+    pub fn from_appointment(a: &Appointment, occurrence: Option<i64>) -> Self {
         let start = to_local(a.start);
         // An all-day appointment ends at the next midnight; show its last day instead.
         let end = if a.all_day { to_local(a.end - 1) } else { to_local(a.end) };
-        Editor {
-            id: Some(a.id.clone()),
-            calendar_id: Some(a.calendar_id.clone()),
-            title: a.title.clone(),
-            location: a.location.clone(),
-            all_day: a.all_day,
-            start_date: start.format(DATE_FORMAT).to_string(),
-            start_time: start.format(TIME_FORMAT).to_string(),
-            end_date: end.format(DATE_FORMAT).to_string(),
-            end_time: end.format(TIME_FORMAT).to_string(),
-            notes: a.notes.clone(),
-            error: None,
+        let mut e = Editor::new_at(start);
+        e.id = Some(a.id.clone());
+        e.calendar_id = Some(a.calendar_id.clone());
+        e.title = a.title.clone();
+        e.location = a.location.clone();
+        e.all_day = a.all_day;
+        e.end_date = end.format(DATE_FORMAT).to_string();
+        e.end_time = end.format(TIME_FORMAT).to_string();
+        e.notes = a.notes.clone();
+        if let Some(r) = &a.recurrence {
+            e.repeat = Some(r.frequency);
+            e.interval = r.interval.to_string();
+            for d in &r.weekdays {
+                if let Some(w) = e.weekdays.get_mut(*d as usize) {
+                    *w = true;
+                }
+            }
+            if r.weekdays.is_empty() {
+                e.weekdays[start.weekday().num_days_from_monday() as usize] = true;
+            }
+            match (r.until, r.count) {
+                (Some(u), _) => {
+                    e.ends = Ends::OnDate;
+                    e.until = to_local(u).format(DATE_FORMAT).to_string();
+                }
+                (None, Some(c)) => {
+                    e.ends = Ends::AfterCount;
+                    e.count = c.to_string();
+                }
+                (None, None) => e.ends = Ends::Never,
+            }
+            e.occurrence = occurrence;
         }
+        e
+    }
+
+    /// The recurrence the fields describe, or what is wrong with them.
+    fn recurrence(&self, start_date: NaiveDate) -> Result<Option<Recurrence>, String> {
+        let Some(frequency) = self.repeat else { return Ok(None) };
+        let interval: u32 = self
+            .interval
+            .trim()
+            .parse()
+            .ok()
+            .filter(|n| (1..=mailcraft_model::MAX_INTERVAL).contains(n))
+            .ok_or("Vul in om de hoeveel keer de afspraak terugkomt, van 1 tot 999.")?;
+        let mut weekdays: Vec<u8> = self.weekdays.iter().enumerate().filter(|(_, on)| **on).map(|(i, _)| i as u8).collect();
+        if frequency == Frequency::Weekly && weekdays.is_empty() {
+            weekdays.push(start_date.weekday().num_days_from_monday() as u8);
+        }
+        let (until, count) = match self.ends {
+            Ends::Never => (None, None),
+            Ends::OnDate => {
+                let date = NaiveDate::parse_from_str(self.until.trim(), DATE_FORMAT)
+                    .map_err(|_| "Vul een geldige einddatum voor de herhaling in, bijvoorbeeld 31-12-2026.".to_string())?;
+                let next = date.checked_add_days(Days::new(1)).ok_or("De einddatum van de herhaling ligt te ver weg.")?;
+                let last = midnight(next).ok_or("De einddatum van de herhaling bestaat niet in deze tijdzone.")? - 1;
+                if date < start_date {
+                    return Err("De herhaling eindigt voor de eerste keer.".into());
+                }
+                (Some(last), None)
+            }
+            Ends::AfterCount => {
+                let n: u32 = self.count.trim().parse().ok().filter(|n| *n >= 1).ok_or("Vul in na hoeveel keer de herhaling stopt, minstens 1.")?;
+                (None, Some(n))
+            }
+        };
+        Ok(Some(Recurrence { frequency, interval, weekdays, until, count, skipped: Vec::new() }))
     }
 
     /// The `appointment.save` parameters, or what is wrong with the fields.
@@ -164,6 +251,7 @@ impl Editor {
         if end <= start {
             return Err("Het einde ligt voor het begin.".into());
         }
+        let recurrence = self.recurrence(start_date)?;
         let mut p = json!({
             "title": self.title,
             "start": start,
@@ -171,7 +259,14 @@ impl Editor {
             "all_day": self.all_day,
             "location": self.location,
             "notes": self.notes,
+            "recurrence": recurrence,
         });
+        if recurrence.is_some() {
+            // The engine keeps the occurrences that were skipped; the window never lists them.
+            if let Some(r) = p.get_mut("recurrence").and_then(|r| r.as_object_mut()) {
+                r.remove("skipped");
+            }
+        }
         if let Some(id) = &self.id {
             p["id"] = json!(id);
         }
@@ -189,11 +284,12 @@ impl MailApp {
         self.calendar.editor = Some(Editor::new_at(start));
     }
 
-    /// Selects an appointment and opens it in the window.
-    pub fn open_appointment(&mut self, id: &str) {
+    /// Selects an appointment and opens it in the window; `start` is the occurrence that was
+    /// clicked, which matters for a recurring one.
+    pub fn open_appointment(&mut self, id: &str, start: i64) {
         self.run("appointment.select", json!({ "id": id }));
         if let Some(a) = self.engine.session.appointment(id) {
-            self.calendar.editor = Some(Editor::from_appointment(a));
+            self.calendar.editor = Some(Editor::from_appointment(a, Some(start)));
         }
     }
 }
@@ -318,6 +414,11 @@ fn appointment_color(app: &MailApp, a: &Appointment, t: &Tokens) -> Color32 {
     app.engine.session.calendar(&a.calendar_id).map(|c| Color32::from_rgb(c.color[0], c.color[1], c.color[2])).unwrap_or(t.accent)
 }
 
+/// The chip text for an occurrence: the title, marked when it repeats.
+fn chip_title(a: &Appointment) -> String {
+    if a.recurrence.is_some() { format!("{REPEAT_MARK} {}", a.title) } else { a.title.clone() }
+}
+
 /// A clickable block for one appointment. Returns true when clicked.
 fn chip(ui: &mut Ui, rect: Rect, label: &str, fill: Color32, selected: bool, t: &Tokens) -> bool {
     let r = ui.interact(rect, ui.make_persistent_id(("chip", rect.min.x as i32, rect.min.y as i32, label)), Sense::click());
@@ -351,7 +452,7 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let avail = ui.available_size();
     let w = avail.x / 7.0;
     let h = (avail.y / 6.0).max(60.0);
-    let mut open: Option<String> = None;
+    let mut open: Option<(String, i64)> = None;
     let mut pick_day: Option<NaiveDate> = None;
     let mut day = start;
     for _ in 0..6 {
@@ -386,15 +487,15 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     pick_day = Some(day);
                 }
                 if let (Some(from), Some(to)) = (midnight(day), midnight(add_days(day, 1))) {
-                    let items: Vec<Appointment> = app.engine.session.appointments_between(from, to).into_iter().cloned().collect();
+                    let items = app.engine.session.appointments_between(from, to);
                     let room = ((rect.height() - 26.0) / 20.0).floor().max(0.0) as usize;
                     let shown = if items.len() > room { room.saturating_sub(1) } else { items.len() };
                     for (i, a) in items.iter().take(shown).enumerate() {
                         let y = rect.top() + 24.0 + i as f32 * 20.0;
                         let chip_rect = Rect::from_min_size(pos2(rect.left() + 3.0, y), vec2(rect.width() - 6.0, 18.0));
-                        let label = if a.all_day { a.title.clone() } else { format!("{} {}", hm(a.start), a.title) };
+                        let label = if a.all_day { chip_title(a) } else { format!("{} {}", hm(a.start), chip_title(a)) };
                         if chip(ui, chip_rect, &label, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), t) {
-                            open = Some(a.id.clone());
+                            open = Some((a.id.clone(), a.start));
                         }
                     }
                     if items.len() > shown {
@@ -412,8 +513,8 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
         });
     }
-    if let Some(id) = open {
-        app.open_appointment(&id);
+    if let Some((id, start)) = open {
+        app.open_appointment(&id, start);
     } else if let Some(d) = pick_day {
         app.calendar.focus = d;
         app.calendar.view = View::Day;
@@ -426,7 +527,7 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
     let today = today();
     let selected = app.engine.session.selected_appointment.clone();
     let gutter = 48.0;
-    let mut open: Option<String> = None;
+    let mut open: Option<(String, i64)> = None;
     let mut new_at: Option<(NaiveDate, u32)> = None;
     let col_w = ((ui.available_width() - gutter) / days as f32).max(40.0);
     // Day headers.
@@ -456,12 +557,12 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
             let (rect, _) = ui.allocate_exact_size(vec2(col_w, strip_h), Sense::hover());
             ui.painter().rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
             if let (Some(from), Some(to)) = (midnight(d), midnight(add_days(d, 1))) {
-                let items: Vec<Appointment> = app.engine.session.appointments_between(from, to).into_iter().filter(|a| a.all_day).cloned().collect();
+                let items: Vec<Appointment> = app.engine.session.appointments_between(from, to).into_iter().filter(|a| a.all_day).collect();
                 if let Some(a) = items.first() {
-                    let label = if items.len() > 1 { format!("{} (+{})", a.title, items.len() - 1) } else { a.title.clone() };
+                    let label = if items.len() > 1 { format!("{} (+{})", chip_title(a), items.len() - 1) } else { chip_title(a) };
                     let chip_rect = rect.shrink2(vec2(2.0, 3.0));
                     if chip(ui, chip_rect, &label, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), t) {
-                        open = Some(a.id.clone());
+                        open = Some((a.id.clone(), a.start));
                     }
                 }
             }
@@ -491,15 +592,15 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                 new_at = Some((d, hour));
             }
             let (Some(from), Some(to)) = (midnight(d), midnight(add_days(d, 1))) else { continue };
-            let items: Vec<Appointment> = app.engine.session.appointments_between(from, to).into_iter().filter(|a| !a.all_day).cloned().collect();
+            let items: Vec<Appointment> = app.engine.session.appointments_between(from, to).into_iter().filter(|a| !a.all_day).collect();
             for a in &items {
                 let top = ((a.start.max(from) - from) as f32 / 3600.0) * HOUR_HEIGHT;
                 let bottom = ((a.end.min(to) - from) as f32 / 3600.0) * HOUR_HEIGHT;
                 let block =
                     Rect::from_min_max(pos2(x + 2.0, grid.top() + top + 1.0), pos2(x + col_w - 2.0, grid.top() + bottom.max(top + 18.0) - 1.0));
-                let label = format!("{} {}\n{}", hm(a.start), hm(a.end), a.title);
+                let label = format!("{} {}\n{}", hm(a.start), hm(a.end), chip_title(a));
                 if chip(ui, block, &label, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), t) {
-                    open = Some(a.id.clone());
+                    open = Some((a.id.clone(), a.start));
                 }
             }
             if d == today {
@@ -509,8 +610,8 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
             }
         }
     });
-    if let Some(id) = open {
-        app.open_appointment(&id);
+    if let Some((id, start)) = open {
+        app.open_appointment(&id, start);
     } else if let Some((d, hour)) = new_at {
         app.calendar.focus = d;
         app.new_appointment(d, hour);
@@ -547,14 +648,83 @@ fn field(ui: &mut Ui, t: &Tokens, label: &str, value: &mut String, width: f32) {
     });
 }
 
+/// The "Herhalen" rows of the window: how often, which days, and when it stops.
+fn repeat_fields(ui: &mut Ui, t: &Tokens, editor: &mut Editor) {
+    let options: [(Option<Frequency>, &str); 5] = [
+        (None, "Niet"),
+        (Some(Frequency::Daily), "Elke dag"),
+        (Some(Frequency::Weekly), "Elke week"),
+        (Some(Frequency::Monthly), "Elke maand"),
+        (Some(Frequency::Yearly), "Elk jaar"),
+    ];
+    let current = options.iter().find(|(f, _)| *f == editor.repeat).map(|(_, n)| *n).unwrap_or("Niet");
+    ui.horizontal(|ui| {
+        ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Herhalen").color(t.text)));
+        egui::ComboBox::from_id_salt("appointment-repeat").selected_text(current).width(140.0).show_ui(ui, |ui| {
+            for (f, n) in options {
+                ui.selectable_value(&mut editor.repeat, f, n);
+            }
+        });
+    });
+    let Some(frequency) = editor.repeat else { return };
+    let unit = match frequency {
+        Frequency::Daily => "dagen",
+        Frequency::Weekly => "weken",
+        Frequency::Monthly => "maanden",
+        Frequency::Yearly => "jaar",
+    };
+    ui.horizontal(|ui| {
+        ui.add_space(94.0);
+        ui.label(RichText::new("Om de").color(t.text));
+        ui.add(egui::TextEdit::singleline(&mut editor.interval).desired_width(36.0).hint_text("1"));
+        ui.label(RichText::new(unit).color(t.text));
+    });
+    if frequency == Frequency::Weekly {
+        ui.horizontal(|ui| {
+            ui.add_space(94.0);
+            for (i, name) in WEEKDAYS_SHORT.iter().enumerate() {
+                ui.checkbox(&mut editor.weekdays[i], *name);
+            }
+        });
+    }
+    ui.horizontal(|ui| {
+        ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Eindigt").color(t.text)));
+        ui.radio_value(&mut editor.ends, Ends::Never, "Nooit");
+        ui.radio_value(&mut editor.ends, Ends::OnDate, "Op");
+        ui.add_enabled(editor.ends == Ends::OnDate, egui::TextEdit::singleline(&mut editor.until).desired_width(90.0).hint_text("31-12-2026"));
+        ui.radio_value(&mut editor.ends, Ends::AfterCount, "Na");
+        ui.add_enabled(editor.ends == Ends::AfterCount, egui::TextEdit::singleline(&mut editor.count).desired_width(36.0));
+        ui.label(RichText::new("keer").color(t.text));
+    });
+    // What the fields add up to, in words, as long as they parse.
+    if let Ok(start) = NaiveDate::parse_from_str(editor.start_date.trim(), DATE_FORMAT)
+        && let Ok(Some(r)) = editor.recurrence(start)
+    {
+        let mut text = describe_recurrence(&r);
+        if let Some(u) = r.until {
+            text.push_str(&format!(", tot en met {}", to_local(u).format(DATE_FORMAT)));
+        }
+        ui.horizontal(|ui| {
+            ui.add_space(94.0);
+            ui.label(RichText::new(text).size(12.0).color(t.text_dim));
+        });
+    }
+}
+
 /// The appointment window, when one is open.
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let calendars: Vec<(String, String)> = app.engine.session.calendars.iter().map(|c| (c.id.clone(), c.name.clone())).collect();
+    let local_calendars: Vec<String> = app.engine.session.calendars.iter().filter(|c| c.account_id.is_none()).map(|c| c.id.clone()).collect();
     let Some(editor) = app.calendar.editor.as_mut() else { return };
     let mut save = false;
     let mut delete = false;
+    let mut skip = false;
     let mut close = false;
-    let title = if editor.id.is_some() { "Afspraak" } else { "Nieuwe afspraak" };
+    let title = match (&editor.id, editor.repeat) {
+        (None, _) => "Nieuwe afspraak",
+        (Some(_), Some(_)) => "Herhaalde afspraak",
+        (Some(_), None) => "Afspraak",
+    };
     egui::Window::new(title).collapsible(false).resizable(false).default_width(420.0).show(ctx, |ui| {
         field(ui, t, "Titel", &mut editor.title, 300.0);
         field(ui, t, "Locatie", &mut editor.location, 300.0);
@@ -593,6 +763,24 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 ui.add(egui::TextEdit::singleline(&mut editor.end_time).desired_width(50.0));
             }
         });
+        // Only a calendar on this computer takes a series; a server expands its own.
+        let chosen = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _)| id.clone()));
+        let local = chosen.as_ref().is_some_and(|id| local_calendars.contains(id));
+        if local {
+            repeat_fields(ui, t, editor);
+            if let Some(occurrence) = editor.occurrence {
+                let when = to_local(occurrence);
+                let text = format!(
+                    "Geopend vanaf de keer op {} {} {}. Wijzigingen gelden voor de hele reeks.",
+                    weekday_name(when.date()),
+                    when.day(),
+                    month_name(when.month())
+                );
+                ui.label(RichText::new(text).size(12.0).color(t.text_dim));
+            }
+        } else {
+            editor.repeat = None;
+        }
         ui.horizontal(|ui| {
             ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Notities").color(t.text)));
             ui.add(egui::TextEdit::multiline(&mut editor.notes).desired_width(300.0).desired_rows(4));
@@ -604,11 +792,24 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         ui.horizontal(|ui| {
             save = ui.add(egui::Button::new(RichText::new("Opslaan").color(t.on_accent)).fill(t.accent).min_size(vec2(90.0, 26.0))).clicked();
             if editor.id.is_some() {
-                delete = ui.add(egui::Button::new("Verwijderen").min_size(vec2(90.0, 26.0))).clicked();
+                if editor.occurrence.is_some() {
+                    skip = ui
+                        .add(egui::Button::new("Deze keer overslaan").min_size(vec2(90.0, 26.0)))
+                        .on_hover_text("Alleen deze keer vervalt; de reeks blijft.")
+                        .clicked();
+                }
+                let label = if editor.occurrence.is_some() { "Reeks verwijderen" } else { "Verwijderen" };
+                delete = ui.add(egui::Button::new(label).min_size(vec2(90.0, 26.0))).clicked();
             }
             close = ui.add(egui::Button::new("Annuleren").min_size(vec2(90.0, 26.0))).clicked();
         });
     });
+    if skip && let (Some(id), Some(start)) = (editor.id.clone(), editor.occurrence) {
+        match app.engine.run("appointment.skip", &json!({ "id": id, "start": start })) {
+            Ok(()) => close = true,
+            Err(e) => editor.error = Some(describe(&e)),
+        }
+    }
     if save {
         match editor.params() {
             Ok(params) => match app.engine.run("appointment.save", &params) {
@@ -633,6 +834,9 @@ fn describe(e: &CommandError) -> String {
     match e {
         CommandError::Param("title") => "Vul een titel in.".into(),
         CommandError::Param("end") => "Het einde ligt voor het begin.".into(),
+        CommandError::Param("recurrence") => {
+            "De herhaling kan zo niet: een afspraak moet korter zijn dan de tijd tussen twee keren, en herhalen kan alleen in een agenda op deze computer.".into()
+        }
         CommandError::Store(m) => format!("Opslaan is mislukt: {m}"),
         CommandError::NotFound => "Deze afspraak bestaat niet meer.".into(),
         e => e.to_string(),
@@ -688,8 +892,57 @@ mod tests {
             all_day: true,
             location: String::new(),
             notes: String::new(),
+            recurrence: None,
         };
-        let back = Editor::from_appointment(&a);
+        let back = Editor::from_appointment(&a, None);
         assert_eq!((back.start_date.as_str(), back.end_date.as_str()), ("21-10-2026", "21-10-2026"));
+        assert!(back.repeat.is_none() && back.occurrence.is_none());
+    }
+
+    #[test]
+    fn repeat_fields_become_a_recurrence_and_back() {
+        let mut e = Editor::new_at(d(2026, 10, 21).and_hms_opt(14, 0, 0).unwrap());
+        e.title = "Pianoles".into();
+        assert!(e.params().unwrap()["recurrence"].is_null());
+        e.repeat = Some(Frequency::Weekly);
+        e.weekdays[4] = true;
+        e.ends = Ends::OnDate;
+        e.until = "31-12-2026".into();
+        let p = e.params().unwrap();
+        let r: Recurrence = serde_json::from_value(p["recurrence"].clone()).unwrap();
+        assert_eq!((r.frequency, r.interval, r.weekdays.as_slice(), r.count), (Frequency::Weekly, 1, &[4][..], None));
+        assert_eq!(to_local(r.until.unwrap()).date(), d(2026, 12, 31), "until is the end of that day");
+        assert!(p["recurrence"].get("skipped").is_none(), "the window never sends the skipped list");
+        e.weekdays = [false; 7];
+        let r: Recurrence = serde_json::from_value(e.params().unwrap()["recurrence"].clone()).unwrap();
+        assert_eq!(r.weekdays, vec![2], "no day ticked means the start's day");
+        e.ends = Ends::AfterCount;
+        e.count = "0".into();
+        assert!(e.params().unwrap_err().contains("hoeveel keer"));
+        e.count = "5".into();
+        e.interval = "1000".into();
+        assert!(e.params().unwrap_err().contains("1 tot 999"));
+        e.interval = "2".into();
+        e.until = "01-01-2020".into();
+        e.ends = Ends::OnDate;
+        assert_eq!(e.params().unwrap_err(), "De herhaling eindigt voor de eerste keer.");
+
+        let a = Appointment {
+            id: "x".into(),
+            calendar_id: "local".into(),
+            title: "Pianoles".into(),
+            start: to_timestamp(d(2026, 10, 21).and_hms_opt(14, 0, 0).unwrap()).unwrap(),
+            end: to_timestamp(d(2026, 10, 21).and_hms_opt(15, 0, 0).unwrap()).unwrap(),
+            all_day: false,
+            location: String::new(),
+            notes: String::new(),
+            recurrence: Some(Recurrence { interval: 2, count: Some(8), ..Recurrence::every(Frequency::Monthly) }),
+        };
+        let back = Editor::from_appointment(&a, Some(a.start + 86_400 * 61));
+        assert_eq!((back.repeat, back.interval.as_str(), back.ends, back.count.as_str()), (Some(Frequency::Monthly), "2", Ends::AfterCount, "8"));
+        assert_eq!(back.occurrence, Some(a.start + 86_400 * 61));
+        let p = back.params().unwrap();
+        assert_eq!(p["recurrence"]["count"], 8);
+        assert_eq!(p["id"], "x");
     }
 }

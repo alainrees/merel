@@ -1,12 +1,22 @@
 //! Calendars and appointments. Times are seconds since the Unix epoch, UTC; the UI shows them
 //! in the computer's time zone. An all-day appointment runs from local midnight to the next.
+//!
+//! A recurring appointment is stored once, with a [`Recurrence`]; its occurrences are computed
+//! when a period is shown ([`Appointment::occurrences`]). Repetition follows the wall clock of
+//! the time zone the caller passes, so a weekly 10:00 stays 10:00 across a daylight-saving
+//! change.
 
+use chrono::{Datelike, Days, Months, NaiveDateTime, TimeZone};
 use serde::{Deserialize, Serialize};
 
 use crate::clean_text;
 
 /// How long the notes of one appointment may be, in characters.
 pub const MAX_NOTES: usize = 10_000;
+/// The most occurrences one series yields in one expansion, so a wide window stays cheap.
+pub const MAX_OCCURRENCES: usize = 5_000;
+/// The largest step between occurrences.
+pub const MAX_INTERVAL: u32 = 999;
 
 /// A calendar: local, or one of an account once calendars sync.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +49,10 @@ pub struct Appointment {
     pub location: String,
     #[serde(default)]
     pub notes: String,
+    /// How the appointment repeats; `None` for a single one. `start` and `end` are then the
+    /// first occurrence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurrence: Option<Recurrence>,
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -47,6 +61,151 @@ pub enum AppointmentError {
     NoTitle,
     #[error("an appointment ends after it starts")]
     EndsBeforeStart,
+    #[error("a recurring appointment must be shorter than its repeat interval")]
+    LongerThanInterval,
+}
+
+/// The unit a recurrence counts in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Frequency {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+}
+
+fn one() -> u32 {
+    1
+}
+
+/// How an appointment repeats: every `interval` days, weeks, months or years from its start,
+/// on the given weekdays when weekly, until `until` or for `count` occurrences, with some
+/// occurrences skipped. The vocabulary is RFC 5545's (`FREQ`, `INTERVAL`, `BYDAY`, `UNTIL`,
+/// `COUNT`, `EXDATE`) so a series can later travel to a server as an `RRULE`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Recurrence {
+    pub frequency: Frequency,
+    /// Every so many units; at least 1.
+    #[serde(default = "one")]
+    pub interval: u32,
+    /// Weekly only: the days it falls on, 0 = Monday to 6 = Sunday. Empty means the start's day.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub weekdays: Vec<u8>,
+    /// The last moment an occurrence may start, inclusive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<i64>,
+    /// How many occurrences there are, the skipped ones included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<u32>,
+    /// Occurrences that were taken out, by the start they would have had.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<i64>,
+}
+
+impl Recurrence {
+    /// A series that repeats every `frequency` without end.
+    pub fn every(frequency: Frequency) -> Self {
+        Recurrence { frequency, interval: 1, weekdays: Vec::new(), until: None, count: None, skipped: Vec::new() }
+    }
+
+    /// Puts the fields in range: interval 1..=999, weekdays 0..=6 without doubles, count at
+    /// least 1, and the skipped list sorted without doubles.
+    pub fn normalized(mut self) -> Self {
+        self.interval = self.interval.clamp(1, MAX_INTERVAL);
+        self.weekdays.retain(|d| *d < 7);
+        self.weekdays.sort_unstable();
+        self.weekdays.dedup();
+        if self.frequency != Frequency::Weekly {
+            self.weekdays.clear();
+        }
+        if self.count == Some(0) {
+            self.count = None;
+        }
+        self.skipped.sort_unstable();
+        self.skipped.dedup();
+        self
+    }
+
+    /// Whether the occurrence that would start at `start` was taken out.
+    pub fn skips(&self, start: i64) -> bool {
+        self.skipped.binary_search(&start).is_ok()
+    }
+
+    /// The occurrence starts of a series beginning at `first` (a wall-clock moment in `tz`),
+    /// in series order, as long as they start before `to` and the end conditions allow; a
+    /// closure sees each one and says whether to go on. Skipped occurrences are reported
+    /// too, flagged, since they count towards `count`.
+    fn walk<Tz: TimeZone>(&self, first: NaiveDateTime, to: i64, tz: &Tz, mut visit: impl FnMut(i64, bool) -> bool) {
+        let mut produced = 0usize;
+        let mut n: u32 = 0;
+        let max = self.count.map_or(MAX_OCCURRENCES, |c| (c as usize).min(MAX_OCCURRENCES));
+        let mut emit = |local: NaiveDateTime| -> Option<bool> {
+            let start = tz.from_local_datetime(&local).earliest().or_else(|| tz.from_local_datetime(&local).latest())?.timestamp();
+            if start >= to || self.until.is_some_and(|u| start > u) {
+                return Some(false);
+            }
+            produced += 1;
+            Some(visit(start, self.skips(start)) && produced < max)
+        };
+        match self.frequency {
+            Frequency::Weekly => {
+                let mut days = self.weekdays.clone();
+                if days.is_empty() {
+                    days.push(first.weekday().num_days_from_monday() as u8);
+                }
+                let week = first.checked_sub_days(Days::new(u64::from(first.weekday().num_days_from_monday())));
+                let Some(week) = week else { return };
+                loop {
+                    let Some(base) = week.checked_add_days(Days::new(7 * u64::from(self.interval) * u64::from(n))) else { return };
+                    for d in &days {
+                        let Some(local) = base.checked_add_days(Days::new(u64::from(*d))) else { return };
+                        if local < first {
+                            continue;
+                        }
+                        match emit(local) {
+                            Some(true) => {}
+                            _ => return,
+                        }
+                    }
+                    n += 1;
+                    if n > MAX_OCCURRENCES as u32 {
+                        return;
+                    }
+                }
+            }
+            Frequency::Daily | Frequency::Monthly | Frequency::Yearly => loop {
+                let steps = self.interval.saturating_mul(n);
+                let local = match self.frequency {
+                    Frequency::Daily => first.checked_add_days(Days::new(u64::from(steps))),
+                    Frequency::Monthly => first.checked_add_months(Months::new(steps)),
+                    _ => first.checked_add_months(Months::new(steps.saturating_mul(12))),
+                };
+                let Some(local) = local else { return };
+                match emit(local) {
+                    Some(true) => {}
+                    _ => return,
+                }
+                n += 1;
+                if n > MAX_OCCURRENCES as u32 {
+                    return;
+                }
+            },
+        }
+    }
+
+    /// The shortest time between two occurrences, in seconds, for the overlap check.
+    fn shortest_gap(&self) -> i64 {
+        let interval = i64::from(self.interval.max(1));
+        match self.frequency {
+            Frequency::Daily => 86_400 * interval,
+            // Several days a week can be next to each other, whatever the interval.
+            Frequency::Weekly if self.weekdays.len() > 1 => 86_400,
+            Frequency::Weekly => 7 * 86_400 * interval,
+            Frequency::Monthly => 28 * 86_400 * interval,
+            Frequency::Yearly => 365 * 86_400 * interval,
+        }
+    }
 }
 
 impl Appointment {
@@ -61,13 +220,92 @@ impl Appointment {
         if self.end <= self.start {
             return Err(AppointmentError::EndsBeforeStart);
         }
+        if let Some(r) = self.recurrence.take() {
+            let r = r.normalized();
+            if self.end - self.start > r.shortest_gap() {
+                return Err(AppointmentError::LongerThanInterval);
+            }
+            self.recurrence = Some(r);
+        }
         Ok(self)
     }
 
-    /// Whether any part of the appointment falls in `[from, to)`.
+    /// Whether any part of the appointment itself (the first occurrence, when it repeats)
+    /// falls in `[from, to)`.
     pub fn overlaps(&self, from: i64, to: i64) -> bool {
         self.start < to && self.end > from
     }
+
+    /// The occurrences touching `[from, to)`, as copies of the appointment with their own
+    /// `start` and `end`, earliest first. A single appointment is its own one occurrence.
+    /// `tz` is the time zone the series keeps its wall-clock time in.
+    pub fn occurrences<Tz: TimeZone>(&self, from: i64, to: i64, tz: &Tz) -> Vec<Appointment> {
+        let Some(r) = &self.recurrence else {
+            return if self.overlaps(from, to) { vec![self.clone()] } else { Vec::new() };
+        };
+        let Some(first) = chrono::DateTime::from_timestamp(self.start, 0).map(|d| d.with_timezone(tz).naive_local()) else { return Vec::new() };
+        let Some(first_end) = chrono::DateTime::from_timestamp(self.end, 0).map(|d| d.with_timezone(tz).naive_local()) else {
+            return Vec::new();
+        };
+        let length = first_end - first;
+        let mut out = Vec::new();
+        r.walk(first, to, tz, |start, skipped| {
+            if skipped {
+                return true;
+            }
+            let end = chrono::DateTime::from_timestamp(start, 0)
+                .map(|d| d.with_timezone(tz).naive_local())
+                .and_then(|s| s.checked_add_signed(length))
+                .and_then(|e| tz.from_local_datetime(&e).earliest().or_else(|| tz.from_local_datetime(&e).latest()))
+                .map_or(start + (self.end - self.start), |e| e.timestamp())
+                .max(start + 1);
+            if end > from {
+                out.push(Appointment { start, end, ..self.clone() });
+            }
+            true
+        });
+        out
+    }
+
+    /// The start of the occurrence on or after `at`, if the series has one.
+    pub fn next_occurrence<Tz: TimeZone>(&self, at: i64, tz: &Tz) -> Option<i64> {
+        self.occurrences(at, i64::MAX / 4, tz).iter().map(|a| a.start).find(|s| *s >= at)
+    }
+
+    /// Takes the occurrence that would start at `start` out of the series. A single
+    /// appointment is left as it is.
+    pub fn skip(&mut self, start: i64) {
+        if let Some(r) = &mut self.recurrence
+            && !r.skips(start)
+        {
+            r.skipped.push(start);
+            r.skipped.sort_unstable();
+        }
+    }
+}
+
+/// One line that says how a series repeats, in Dutch, for the window and the chips.
+pub fn describe_recurrence(r: &Recurrence) -> String {
+    const DAYS: [&str; 7] = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"];
+    let every = |one: &str, many: &str| if r.interval <= 1 { format!("Elke {one}") } else { format!("Om de {} {many}", r.interval) };
+    let mut text = match r.frequency {
+        Frequency::Daily => every("dag", "dagen"),
+        Frequency::Weekly => {
+            let names: Vec<&str> = r.weekdays.iter().filter_map(|d| DAYS.get(*d as usize).copied()).collect();
+            let days = match names.len() {
+                0 => String::new(),
+                1 => format!(" op {}", names[0]),
+                n => format!(" op {} en {}", names[..n - 1].join(", "), names[n - 1]),
+            };
+            format!("{}{days}", every("week", "weken"))
+        }
+        Frequency::Monthly => every("maand", "maanden"),
+        Frequency::Yearly => every("jaar", "jaar"),
+    };
+    if let Some(c) = r.count {
+        text.push_str(&format!(", {c} keer"));
+    }
+    text
 }
 
 #[cfg(test)]
@@ -84,8 +322,12 @@ mod tests {
             all_day: false,
             location: String::new(),
             notes: "x\u{7}y".into(),
+            recurrence: None,
         }
     }
+
+    /// 2026-10-19 (a Monday) 10:00 UTC.
+    const MONDAY: i64 = 1_792_404_000;
 
     #[test]
     fn validation_cleans_and_checks() {
@@ -95,6 +337,68 @@ mod tests {
         let mut untitled = a(0, 1);
         untitled.title = "  ".into();
         assert_eq!(untitled.validated(), Err(AppointmentError::NoTitle));
+    }
+
+    #[test]
+    fn a_series_is_expanded_on_the_wall_clock_and_honours_its_end_and_skips() {
+        use chrono::Utc;
+        let day = 86_400;
+        let mut weekly = a(MONDAY, MONDAY + 3600);
+        weekly.recurrence = Some(Recurrence { weekdays: vec![0, 2], ..Recurrence::every(Frequency::Weekly) });
+        let weekly = weekly.validated().unwrap();
+        let starts: Vec<i64> = weekly.occurrences(MONDAY, MONDAY + 15 * day, &Utc).iter().map(|o| o.start).collect();
+        assert_eq!(starts, vec![MONDAY, MONDAY + 2 * day, MONDAY + 7 * day, MONDAY + 9 * day, MONDAY + 14 * day]);
+        assert!(weekly.occurrences(0, MONDAY, &Utc).is_empty(), "nothing before the first");
+        // A window that starts mid-occurrence still shows it.
+        assert_eq!(weekly.occurrences(MONDAY + 1800, MONDAY + 1900, &Utc).len(), 1);
+
+        let mut counted = weekly.clone();
+        counted.recurrence = Some(Recurrence { count: Some(3), ..counted.recurrence.clone().unwrap() });
+        assert_eq!(counted.occurrences(0, MONDAY + 100 * day, &Utc).len(), 3);
+        counted.skip(MONDAY + 2 * day);
+        assert_eq!(counted.occurrences(0, MONDAY + 100 * day, &Utc).len(), 2, "a skipped occurrence still counts");
+        assert_eq!(counted.next_occurrence(MONDAY + 1, &Utc), Some(MONDAY + 7 * day));
+
+        let mut until = weekly.clone();
+        until.recurrence = Some(Recurrence { until: Some(MONDAY + 8 * day), ..until.recurrence.clone().unwrap() });
+        assert_eq!(until.occurrences(0, MONDAY + 100 * day, &Utc).len(), 3);
+
+        // Monthly on the 31st lands on the last day of shorter months; yearly keeps the date.
+        let jan31 = 1_769_817_600; // 2026-01-31 00:00 UTC
+        let mut monthly = a(jan31, jan31 + day);
+        monthly.all_day = true;
+        monthly.recurrence = Some(Recurrence::every(Frequency::Monthly));
+        let starts: Vec<i64> = monthly.occurrences(0, jan31 + 70 * day, &Utc).iter().map(|o| o.start).collect();
+        assert_eq!(starts, vec![jan31, jan31 + 28 * day, jan31 + (28 + 31) * day]);
+        let mut every_other_day = a(MONDAY, MONDAY + 3600);
+        every_other_day.recurrence = Some(Recurrence { interval: 2, ..Recurrence::every(Frequency::Daily) });
+        assert_eq!(every_other_day.occurrences(0, MONDAY + 5 * day, &Utc).len(), 3);
+
+        // Across a daylight-saving change the local time stays, so the UTC gap is not a week.
+        let ams = chrono_tz::Europe::Amsterdam;
+        let mut dst = a(MONDAY, MONDAY + 3600);
+        dst.recurrence = Some(Recurrence::every(Frequency::Weekly));
+        let starts: Vec<i64> = dst.occurrences(0, MONDAY + 15 * day, &ams).iter().map(|o| o.start).collect();
+        assert_eq!(starts[1] - starts[0], 7 * day + 3600, "the clock went back on 25 October 2026");
+        assert_eq!(starts[2] - starts[1], 7 * day);
+
+        assert_eq!(
+            a(MONDAY, MONDAY + 2 * day).validated().map(|_| ()).and_then(|()| {
+                let mut long = a(MONDAY, MONDAY + 2 * day);
+                long.recurrence = Some(Recurrence::every(Frequency::Daily));
+                long.validated().map(|_| ())
+            }),
+            Err(AppointmentError::LongerThanInterval)
+        );
+        let messy =
+            Recurrence { interval: 0, weekdays: vec![9, 3, 3], count: Some(0), skipped: vec![5, 1, 5], ..Recurrence::every(Frequency::Weekly) }
+                .normalized();
+        assert_eq!((messy.interval, messy.weekdays.as_slice(), messy.count, messy.skipped.as_slice()), (1, &[3][..], None, &[1, 5][..]));
+        assert_eq!(
+            describe_recurrence(&Recurrence { weekdays: vec![0, 2, 4], count: Some(10), ..Recurrence::every(Frequency::Weekly) }),
+            "Elke week op maandag, woensdag en vrijdag, 10 keer"
+        );
+        assert_eq!(describe_recurrence(&Recurrence { interval: 3, ..Recurrence::every(Frequency::Monthly) }), "Om de 3 maanden");
     }
 
     #[test]

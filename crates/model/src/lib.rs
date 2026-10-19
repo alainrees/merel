@@ -10,7 +10,7 @@ mod contact;
 mod task;
 
 pub use address::{Address, AddressError, parse_address_list};
-pub use calendar::{Appointment, AppointmentError, Calendar, MAX_NOTES};
+pub use calendar::{Appointment, AppointmentError, Calendar, Frequency, MAX_INTERVAL, MAX_NOTES, MAX_OCCURRENCES, Recurrence, describe_recurrence};
 pub use contact::{Contact, ContactError};
 pub use task::{Priority, Task, TaskError};
 
