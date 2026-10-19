@@ -47,7 +47,7 @@ fn target(s: &Session, params: &Value) -> Result<String, CommandError> {
 }
 
 /// Changes a message's categories in the session and hands the server the new set.
-fn set_message_categories(s: &mut Session, message_id: &str, categories: Vec<String>, removed: Vec<String>) -> Result<(), CommandError> {
+pub(crate) fn set_message_categories(s: &mut Session, message_id: &str, categories: Vec<String>, removed: Vec<String>) -> Result<(), CommandError> {
     let m = s.message(message_id).cloned().ok_or(CommandError::NotFound)?;
     let folder = s.folder(&m.folder_id).cloned().ok_or(CommandError::NotFound)?;
     if folder.account_id != SAMPLE_ACCOUNT {

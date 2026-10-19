@@ -1,6 +1,7 @@
-//! How the message list is shown: which messages (a [`Filter`]) and in what order (a [`Sort`]),
-//! set with `view.filter { filter }` and `view.sort { sort }`. The search box narrows the list
-//! further; both leave the folder itself alone.
+//! How the message list is shown: which messages (a [`Filter`], and a category with
+//! `view.category { name? }`) and in what order (a [`Sort`]), set with `view.filter { filter }`
+//! and `view.sort { sort }`. The search box narrows the list further; all of it leaves the
+//! folder itself alone.
 
 use std::cmp::Ordering;
 
@@ -90,6 +91,16 @@ pub fn sort(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// `view.category { name? }`: only messages that carry the category; no name (or an empty one)
+/// shows them all again. The name need not be in the person's list: one from the server works.
+pub fn category(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    s.category_filter = match params.get("name") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.as_str().ok_or(CommandError::Param("name"))?.trim()).filter(|n| !n.is_empty()).map(str::to_string),
+    };
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -114,5 +125,10 @@ mod tests {
         s.run("view.sort", &json!({ "sort": "oldest" })).expect("sort");
         assert_eq!(subjects(&s).last().map(String::as_str), Some("Welkom bij Mailcraft"));
         assert!(matches!(s.run("view.sort", &json!({ "sort": "sideways" })), Err(CommandError::Param("sort"))));
+        s.run("view.category", &json!({ "name": "groene categorie" })).expect("category");
+        assert_eq!(subjects(&s), vec!["Planning voor donderdag"]);
+        s.run("view.category", &json!({ "name": "" })).expect("all again");
+        assert_eq!(subjects(&s).len(), 4);
+        assert!(matches!(s.run("view.category", &json!({ "name": 3 })), Err(CommandError::Param("name"))));
     }
 }

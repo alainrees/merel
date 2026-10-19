@@ -82,7 +82,7 @@ impl MailApp {
     }
 }
 
-/// The "Beeld" tab: list filter and order, reading pane, row height and theme.
+/// The "Beeld" tab: list filter, category and order, reading pane, row height and theme.
 pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     let mut changed = false;
     if app.module == Module::Mail {
@@ -91,6 +91,28 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
                 if ui.selectable_label(app.engine.session.filter == f, f.dutch_name()).clicked() {
                     app.run("view.filter", json!({ "filter": f }));
                 }
+            }
+        });
+        ui.separator();
+        group(ui, t, "Categorie", |ui| {
+            let current = app.engine.session.category_filter.clone();
+            let names: Vec<String> = app.engine.session.categories.iter().map(|c| c.name.clone()).collect();
+            let mut pick: Option<Option<String>> = None;
+            egui::ComboBox::from_id_salt("view-category").selected_text(current.clone().unwrap_or_else(|| "Alle".to_string())).width(150.0).show_ui(
+                ui,
+                |ui| {
+                    if ui.selectable_label(current.is_none(), "Alle").clicked() {
+                        pick = Some(None);
+                    }
+                    for n in names {
+                        if ui.selectable_label(current.as_deref() == Some(n.as_str()), &n).clicked() {
+                            pick = Some(Some(n));
+                        }
+                    }
+                },
+            );
+            if let Some(name) = pick {
+                app.run("view.category", json!({ "name": name }));
             }
         });
         ui.separator();
