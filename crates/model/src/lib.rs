@@ -303,6 +303,10 @@ pub struct Draft {
     pub attachments: Vec<DraftAttachment>,
     #[serde(default, skip_serializing_if = "Importance::is_normal")]
     pub importance: Importance,
+    /// Asks the reader's mail program to say when the message was read, Outlook's
+    /// "Leesbevestiging vragen"; goes out as the `Disposition-Notification-To` header.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_receipt: bool,
 }
 
 impl Draft {
@@ -371,6 +375,8 @@ pub struct StoredDraft {
     pub send_at: Option<i64>,
     #[serde(default, skip_serializing_if = "Importance::is_normal")]
     pub importance: Importance,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_receipt: bool,
 }
 
 impl StoredDraft {
@@ -389,6 +395,7 @@ impl StoredDraft {
             in_reply_to: self.in_reply_to.clone(),
             attachments: self.attachments.clone(),
             importance: self.importance,
+            read_receipt: self.read_receipt,
         })
     }
 

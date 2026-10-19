@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use mail_parser::{MessageParser, MimeHeaders};
 use mailcraft_html::Document;
-use mailcraft_model::{Address, Importance, clean_text};
+use mailcraft_model::{Address, Importance, clean_text, parse_address_list};
 
 /// Longest message body (bytes) that is parsed; the rest is dropped with a note.
 pub const MAX_BODY: usize = 8 * 1024 * 1024;
@@ -67,6 +67,9 @@ pub struct Body {
     /// The ways out a `List-Unsubscribe` header offers: `mailto:` and `https:` targets, without
     /// their angle brackets, in the header's order. Empty for mail that is not a list's.
     pub unsubscribe: Vec<String>,
+    /// Where the sender asks a read receipt to go (`Disposition-Notification-To`), as Outlook's
+    /// "Leesbevestiging vragen" sets it. Nothing is sent back unless the person asks for it.
+    pub receipt_to: Option<Address>,
 }
 
 fn addresses(a: Option<&mail_parser::Address<'_>>) -> Vec<Address> {
@@ -149,6 +152,12 @@ pub fn parse_body(bytes: &[u8]) -> Body {
             (lower.starts_with("mailto:") || lower.starts_with("https://")) && t.len() <= 2048 && !t.chars().any(char::is_control)
         })
         .collect();
+    // The parser does not know this header, so its raw text is read as an address list.
+    let receipt_to = m
+        .headers_raw()
+        .find(|(name, _)| name.eq_ignore_ascii_case("Disposition-Notification-To"))
+        .and_then(|(_, v)| parse_address_list(&v.replace(['\r', '\n'], " ")).ok())
+        .and_then(|list| list.into_iter().next());
     // A picture shown in the body is not listed as an attachment as well.
     let attachments = m
         .attachments()
@@ -160,7 +169,7 @@ pub fn parse_body(bytes: &[u8]) -> Body {
             bytes: p.contents().into(),
         })
         .collect();
-    Body { text, from_html, rich, images, attachments, authentication, unsubscribe }
+    Body { text, from_html, rich, images, attachments, authentication, unsubscribe, receipt_to }
 }
 
 fn mime_of(p: &mail_parser::MessagePart<'_>) -> String {
@@ -214,6 +223,15 @@ mod tests {
         let b = parse_body(raw);
         assert_eq!(b.unsubscribe, ["mailto:leave@example.org?subject=unsubscribe", "https://example.org/u?id=7"], "plain http is left out");
         assert!(parse_body(b"From: a@example.org\r\n\r\nHallo").unsubscribe.is_empty());
+    }
+
+    #[test]
+    fn a_disposition_notification_to_header_names_where_a_receipt_would_go() {
+        let raw = b"From: Sanne <sanne@example.org>\r\nDisposition-Notification-To: Sanne de Vries\r\n <receipts@example.org>\r\nSubject: x\r\nContent-Type: text/plain\r\n\r\nHallo\r\n";
+        let to = parse_body(raw).receipt_to.expect("the address");
+        assert_eq!((to.email(), to.display()), ("receipts@example.org", "Sanne de Vries"));
+        assert!(parse_body(b"From: a@example.org\r\nDisposition-Notification-To: nonsense\r\n\r\nHallo").receipt_to.is_none());
+        assert!(parse_body(MSG).receipt_to.is_none());
     }
 
     #[test]
