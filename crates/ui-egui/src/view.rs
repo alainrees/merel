@@ -56,6 +56,8 @@ pub struct ViewPrefs {
     pub theme: ThemeChoice,
     /// Rows without the preview line, so more messages fit.
     pub compact: bool,
+    /// Messages on one subject folded behind the one that stands first in the list.
+    pub conversations: bool,
     pub sort: Sort,
 }
 
@@ -141,6 +143,13 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
         ui.separator();
         group(ui, t, "Lijst", |ui| {
             if ui.checkbox(&mut app.view.compact, "Compact").on_hover_text("Rijen zonder voorbeeldregel, zodat er meer berichten passen").changed() {
+                changed = true;
+            }
+            if ui
+                .checkbox(&mut app.view.conversations, "Gesprekken")
+                .on_hover_text("Berichten over hetzelfde onderwerp als één gesprek achter het nieuwste bericht; het pijltje ervoor toont de rest.")
+                .changed()
+            {
                 changed = true;
             }
         });

@@ -124,12 +124,58 @@ pub struct MailApp {
     pub help: Option<help::HelpWindow>,
     /// What the "Beeld" tab chose; read from `view.json` at start.
     pub view: view::ViewPrefs,
+    /// The conversations (by key) unfolded in the list, while the conversation view is on.
+    pub expanded: std::collections::HashSet<String>,
     /// Whether the saved theme has been handed to egui yet (on the first frame).
     theme_applied: bool,
 }
 
 /// A message being dragged from the list, to drop on a folder.
 struct DraggedMessage(String);
+
+/// One row of the message list: a message, indented when it sits inside an unfolded
+/// conversation, with the fold control when it heads a conversation of several messages.
+struct Row<'a> {
+    m: &'a mailcraft_model::MessageHeader,
+    indent: bool,
+    fold: Option<Fold>,
+}
+
+/// The fold control of a conversation head: how many messages it hides and whether it is open.
+struct Fold {
+    key: String,
+    count: usize,
+    open: bool,
+}
+
+/// The rows of the list: every message on its own when the conversation view is off; else one
+/// row per conversation, followed by its other messages when it is unfolded. A conversation that
+/// holds the selected message is shown unfolded for as long as it does, so a message reached
+/// with the arrow keys is seen.
+fn list_rows<'a>(
+    list: Vec<&'a mailcraft_model::MessageHeader>,
+    conversations: bool,
+    expanded: &std::collections::HashSet<String>,
+    selected: Option<&str>,
+) -> Vec<Row<'a>> {
+    if !conversations {
+        return list.into_iter().map(|m| Row { m, indent: false, fold: None }).collect();
+    }
+    let mut rows = Vec::new();
+    for c in mailcraft_engine::view::conversations(list) {
+        let (Some(head), rest) = (c.messages.first().copied(), &c.messages[1..]) else { continue };
+        if rest.is_empty() {
+            rows.push(Row { m: head, indent: false, fold: None });
+            continue;
+        }
+        let open = expanded.contains(&c.key) || rest.iter().any(|m| Some(m.id.as_str()) == selected);
+        rows.push(Row { m: head, indent: false, fold: Some(Fold { key: c.key.clone(), count: c.messages.len(), open }) });
+        if open {
+            rows.extend(rest.iter().map(|m| Row { m, indent: true, fold: None }));
+        }
+    }
+    rows
+}
 
 impl MailApp {
     pub fn new(mut engine: Engine) -> Self {
@@ -156,6 +202,7 @@ impl MailApp {
             categories: None,
             help: None,
             view,
+            expanded: std::collections::HashSet::new(),
             theme_applied: false,
         }
     }
@@ -847,12 +894,26 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let show_folder = searching && app.engine.session.search_all;
                 let compact = app.view.compact;
                 let row_height = if compact { 48.0 } else { 68.0 };
-                for m in list {
-                    let on = app.engine.session.selected_message.as_deref() == Some(m.id.as_str());
+                let selected = app.engine.session.selected_message.clone();
+                let rows = list_rows(list, app.view.conversations, &app.expanded, selected.as_deref());
+                let mut toggle: Option<String> = None;
+                for row in rows {
+                    let m = row.m;
+                    let on = selected.as_deref() == Some(m.id.as_str());
                     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click_and_drag());
                     r.dnd_set_drag_payload(DraggedMessage(m.id.clone()));
                     let r = r.on_hover_text(&m.subject);
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &m.subject));
+                    // The fold control is its own widget, drawn over the row's left edge.
+                    if let Some(fold) = &row.fold {
+                        let box_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 16.0, rect.top() + 14.0), vec2(18.0, 18.0));
+                        let c = ui.interact(box_rect, ui.make_persistent_id(("fold", &m.id)), Sense::click());
+                        let label = if fold.open { "Gesprek inklappen" } else { "Gesprek uitvouwen" };
+                        c.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+                        if c.clicked() {
+                            toggle = Some(fold.key.clone());
+                        }
+                    }
                     let p = ui.painter();
                     let fill = if on {
                         t.checked
@@ -866,16 +927,29 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         p.rect_filled(egui::Rect::from_min_size(rect.min, vec2(3.0, rect.height())), CornerRadius::ZERO, t.accent);
                     }
                     p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, t.border));
-                    let x = rect.left() + 14.0;
-                    let w = rect.width() - 28.0;
+                    let shift = if row.indent {
+                        32.0
+                    } else if row.fold.is_some() {
+                        16.0
+                    } else {
+                        0.0
+                    };
+                    let x = rect.left() + 14.0 + shift;
+                    let w = rect.width() - 28.0 - shift;
                     let from_color = if m.flags.seen { t.text } else { t.accent_text };
-                    p.text(
-                        egui::pos2(x, rect.top() + 14.0),
-                        egui::Align2::LEFT_CENTER,
-                        clip(m.from.display(), 34),
-                        egui::FontId::proportional(14.0),
-                        from_color,
-                    );
+                    let mut from = clip(m.from.display(), 34);
+                    if let Some(fold) = &row.fold {
+                        let glyph = if fold.open { "▾" } else { "▸" };
+                        p.text(
+                            egui::pos2(rect.left() + 16.0, rect.top() + 14.0),
+                            egui::Align2::CENTER_CENTER,
+                            glyph,
+                            egui::FontId::proportional(14.0),
+                            t.text_dim,
+                        );
+                        from = format!("{} ({})", clip(m.from.display(), 28), fold.count);
+                    }
+                    p.text(egui::pos2(x, rect.top() + 14.0), egui::Align2::LEFT_CENTER, from, egui::FontId::proportional(14.0), from_color);
                     let mut right = dates::short(m.date);
                     if m.has_attachments {
                         right = format!("📎 {right}");
@@ -914,6 +988,11 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     if r.clicked() {
                         pick = Some(m.id.clone());
                     }
+                }
+                if let Some(key) = toggle
+                    && !app.expanded.remove(&key)
+                {
+                    app.expanded.insert(key);
                 }
                 let selected = app.engine.session.selected_folder.clone();
                 if !searching && let Some(folder) = selected {
@@ -1405,6 +1484,45 @@ mod tests {
         h.get_by_label("Verwijderen").click();
         h.run();
         assert!(h.state().engine.session.appointments.iter().all(|a| a.title != "Tandarts"));
+    }
+
+    #[test]
+    fn the_conversation_view_folds_a_subject_behind_its_newest_message() {
+        let mut h = harness();
+        let mut earlier = h.state().engine.session.message("m2").expect("Re: Offerte drukwerk").clone();
+        earlier.id = "m9".into();
+        earlier.subject = "Offerte drukwerk".into();
+        earlier.date -= 86_400;
+        h.state_mut().engine.session.messages.push(earlier);
+        h.run();
+        assert!(h.query_by_label("Offerte drukwerk").is_some(), "every message on its own while the view is off");
+        assert!(h.query_by_label("Gesprek uitvouwen").is_none());
+
+        h.get_by_label("Beeld").click();
+        h.run();
+        h.get_by_label("Gesprekken").click();
+        h.run();
+        assert!(h.state().view.conversations);
+        h.get_by_label("Start").click();
+        h.run();
+        assert!(h.query_by_label("Re: Offerte drukwerk").is_some(), "the newest message heads the conversation");
+        assert!(h.query_by_label("Offerte drukwerk").is_none(), "the older one is folded away");
+        assert_eq!(h.query_all_by_label("Gesprek uitvouwen").count(), 1, "only the conversation of two has a fold control");
+        h.get_by_label("Gesprek uitvouwen").click();
+        h.run();
+        h.get_by_label("Offerte drukwerk").click();
+        h.run();
+        assert_eq!(h.state().engine.session.selected_message.as_deref(), Some("m9"));
+        h.get_by_label("Gesprek inklappen").click();
+        h.run();
+        assert_eq!(
+            h.query_all_by_label("Offerte drukwerk").count(),
+            2,
+            "the row stays (next to the reading pane's title): the conversation holds the selected message"
+        );
+        h.state_mut().engine.session.selected_message = Some("m0".into());
+        h.run();
+        assert!(h.query_by_label("Offerte drukwerk").is_none(), "folded again once the selection has left it");
     }
 
     #[test]
