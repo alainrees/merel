@@ -401,6 +401,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 });
             });
             let mut pick = None;
+            let mut older = false;
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 let list = app.engine.session.visible_messages();
                 let loading = app.engine.session.selected_folder.as_deref().is_some_and(|f| app.engine.session.loading.contains(f));
@@ -480,9 +481,28 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         pick = Some(m.id.clone());
                     }
                 }
+                let selected = app.engine.session.selected_folder.clone();
+                if !searching && let Some(folder) = selected {
+                    if loading && !app.engine.session.visible_messages().is_empty() {
+                        ui.add_space(10.0);
+                        ui.vertical_centered(|ui| ui.label(RichText::new("Berichten ophalen…").size(12.0).color(t.text_dim)));
+                        ui.add_space(10.0);
+                    } else if app.engine.session.can_load_older(&folder) {
+                        ui.add_space(10.0);
+                        ui.vertical_centered(|ui| {
+                            if ui.button("Oudere berichten laden").on_hover_text("Haalt de volgende 200 berichten van de server.").clicked() {
+                                older = true;
+                            }
+                        });
+                        ui.add_space(10.0);
+                    }
+                }
             });
             if let Some(id) = pick {
                 app.run("message.select", json!({ "id": id }));
+            }
+            if older {
+                app.run("folder.older", Value::Null);
             }
         },
     );

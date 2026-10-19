@@ -47,6 +47,9 @@ pub enum Job {
         account_id: String,
         folder_id: String,
         path: String,
+        /// How many of the newest messages to skip: 0 for the top of the folder.
+        #[serde(default)]
+        offset: u32,
     },
     Body {
         account_id: String,
@@ -139,6 +142,8 @@ pub enum Event {
     Headers {
         folder_id: String,
         headers: Vec<RemoteHeader>,
+        /// The offset the job asked for; 0 replaces the folder's list, more adds older mail.
+        offset: u32,
     },
     Body {
         message_id: String,
@@ -215,6 +220,8 @@ pub struct Session {
     pub status: HashMap<String, AccountStatus>,
     /// Folder and message ids with a fetch in flight.
     pub loading: HashSet<String>,
+    /// Folders whose oldest message has been reached, so there is nothing older to load.
+    pub complete_folders: HashSet<String>,
     pub selected_folder: Option<String>,
     pub selected_message: Option<String>,
     /// What the person typed in the search box; empty shows the selected folder as it is.
@@ -309,6 +316,7 @@ impl Session {
         self.messages.retain(|m| !m.folder_id.starts_with(&prefix));
         self.bodies.retain(|id, _| !id.starts_with(&prefix));
         self.loading.retain(|id| !id.starts_with(&prefix) && *id != format!("sync/{account_id}"));
+        self.complete_folders.retain(|id| !id.starts_with(&prefix));
         self.status.remove(account_id);
         self.queued.remove(account_id);
         self.item_accounts.remove(account_id);
@@ -483,14 +491,24 @@ impl Session {
                     }
                 }
             }
-            Event::Headers { folder_id, headers } => {
+            Event::Headers { folder_id, headers, offset } => {
                 self.loading.remove(&folder_id);
                 if self.folder(&folder_id).is_none() {
                     return;
                 }
-                self.messages.retain(|m| m.folder_id != folder_id);
+                if (headers.len() as u32) < HEADER_LIMIT {
+                    self.complete_folders.insert(folder_id.clone());
+                } else if offset == 0 {
+                    self.complete_folders.remove(&folder_id);
+                }
+                if offset == 0 {
+                    self.messages.retain(|m| m.folder_id != folder_id);
+                }
                 for h in headers {
                     let id = format!("{folder_id}#{}", h.id);
+                    if offset > 0 && self.messages.iter().any(|m| m.id == id) {
+                        continue;
+                    }
                     let from = h.header.from.clone().or_else(|| mailcraft_model::Address::new(Some("Onbekende afzender"), "unknown@invalid").ok());
                     let Some(from) = from else { continue };
                     self.messages.push(MessageHeader {
@@ -558,7 +576,28 @@ impl Session {
             return;
         }
         self.loading.insert(folder_id.to_string());
-        self.pending.push(Job::Headers { account_id: f.account_id, folder_id: f.id, path: f.path });
+        self.pending.push(Job::Headers { account_id: f.account_id, folder_id: f.id, path: f.path, offset: 0 });
+    }
+
+    /// Whether `folder_id` may have mail older than what is listed, and nothing is being
+    /// fetched for it right now.
+    pub fn can_load_older(&self, folder_id: &str) -> bool {
+        let Some(f) = self.folder(folder_id) else { return false };
+        f.account_id != SAMPLE_ACCOUNT
+            && !self.complete_folders.contains(folder_id)
+            && !self.loading.contains(folder_id)
+            && self.messages.iter().filter(|m| m.folder_id == folder_id).count() as u32 >= HEADER_LIMIT
+    }
+
+    /// Asks for the page of mail below what is listed for `folder_id`.
+    pub(crate) fn request_older(&mut self, folder_id: &str) {
+        let Some(f) = self.folder(folder_id).cloned() else { return };
+        if !self.can_load_older(folder_id) {
+            return;
+        }
+        let offset = self.messages.iter().filter(|m| m.folder_id == folder_id).count() as u32;
+        self.loading.insert(folder_id.to_string());
+        self.pending.push(Job::Headers { account_id: f.account_id, folder_id: f.id, path: f.path, offset });
     }
 
     fn request_body(&mut self, message_id: &str) {
@@ -841,6 +880,47 @@ mod tests {
             outgoing: None,
             dav: None,
         }
+    }
+
+    fn header(n: u32) -> RemoteHeader {
+        RemoteHeader {
+            id: n.to_string(),
+            seen: true,
+            flagged: false,
+            answered: false,
+            size: 1,
+            has_attachments: false,
+            header: mailcraft_mime::parse_header(format!("From: x@y.nl\r\nSubject: Bericht {n}\r\n\r\n").as_bytes()),
+            date: i64::from(n),
+        }
+    }
+
+    #[test]
+    fn older_mail_is_fetched_page_by_page_until_the_folder_starts() {
+        let mut s = Session::with_accounts(vec![account("a")]);
+        s.apply(Event::Connected {
+            account_id: "a".into(),
+            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true }],
+            syncs_items: false,
+        });
+        s.take_jobs();
+        let folder = "a/INBOX";
+        s.apply(Event::Headers { folder_id: folder.into(), headers: (1..=HEADER_LIMIT).map(header).collect(), offset: 0 });
+        assert!(s.can_load_older(folder), "a full first page may have more below it");
+        s.run("folder.older", &serde_json::Value::Null).unwrap();
+        assert!(!s.can_load_older(folder), "not while the page is on its way");
+        let jobs = s.take_jobs();
+        assert!(matches!(&jobs[..], [Job::Headers { folder_id, offset, .. }] if folder_id == folder && *offset == HEADER_LIMIT), "{jobs:?}");
+        // The page below: one overlaps (the server shifted), two are new, and it is short.
+        s.apply(Event::Headers { folder_id: folder.into(), headers: vec![header(1), header(0), header(999)], offset: HEADER_LIMIT });
+        assert_eq!(s.messages.len() as u32, HEADER_LIMIT + 2);
+        assert!(!s.can_load_older(folder), "a short page means the folder's start was reached");
+        s.run("folder.older", &serde_json::Value::Null).unwrap();
+        assert!(s.take_jobs().is_empty());
+        // A refresh from the top with a full page opens the folder up again.
+        s.apply(Event::Headers { folder_id: folder.into(), headers: (1..=HEADER_LIMIT).map(header).collect(), offset: 0 });
+        assert_eq!(s.messages.len() as u32, HEADER_LIMIT);
+        assert!(s.can_load_older(folder));
     }
 
     #[test]

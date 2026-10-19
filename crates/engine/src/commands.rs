@@ -33,6 +33,7 @@ pub enum CommandError {
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "folder.select", label: "Open folder", run: folder_select },
     CommandSpec { id: "folder.refresh", label: "Refresh folder", run: folder_refresh },
+    CommandSpec { id: "folder.older", label: "Load older messages", run: folder_older },
     CommandSpec { id: "message.select", label: "Open message", run: message_select },
     CommandSpec { id: "message.mark_read", label: "Mark as Read", run: |s, _| set_seen(s, true) },
     CommandSpec { id: "message.mark_unread", label: "Mark as Unread", run: |s, _| set_seen(s, false) },
@@ -76,6 +77,13 @@ fn folder_select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     if !loaded {
         s.request_headers(&id);
     }
+    Ok(())
+}
+
+/// `folder.older`: the page of mail below what the selected folder lists.
+fn folder_older(s: &mut Session, _: &Value) -> Result<(), CommandError> {
+    let id = s.selected_folder.clone().ok_or(CommandError::NoSelection)?;
+    s.request_older(&id);
     Ok(())
 }
 
@@ -211,7 +219,7 @@ mod tests {
         });
         assert_eq!(s.folders.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Postvak IN", "Verwijderde items"]);
         assert_eq!(s.selected_folder.as_deref(), Some("acc/INBOX"));
-        assert_eq!(s.take_jobs(), vec![Job::Headers { account_id: "acc".into(), folder_id: "acc/INBOX".into(), path: "INBOX".into() }]);
+        assert_eq!(s.take_jobs(), vec![Job::Headers { account_id: "acc".into(), folder_id: "acc/INBOX".into(), path: "INBOX".into(), offset: 0 }]);
         let header = mailcraft_mime::parse_header(b"From: x@y.nl\r\nSubject: Hoi\r\n\r\n");
         s.apply(crate::Event::Headers {
             folder_id: "acc/INBOX".into(),
@@ -225,6 +233,7 @@ mod tests {
                 header,
                 date: 5,
             }],
+            offset: 0,
         });
         assert_eq!(s.folder("acc/INBOX").unwrap().unread, 1);
         s.run("message.select", &json!({ "id": "acc/INBOX#7" })).unwrap();
