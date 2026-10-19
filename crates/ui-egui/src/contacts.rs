@@ -1,6 +1,6 @@
 //! The contacts module: a searchable list, a contact card, and the form to add or change one.
 
-use egui::{Align2, Color32, CornerRadius, FontId, Margin, RichText, Sense, Stroke, Ui, vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Margin, RichText, Sense, Ui, vec2};
 use serde_json::json;
 
 use mailcraft_engine::CommandError;
@@ -144,14 +144,11 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::Panel::left("contacts-list")
         .default_size(280.0)
         .resizable(true)
-        .frame(egui::Frame::NONE.fill(t.panel).inner_margin(Margin::symmetric(10, 10)).stroke(Stroke::new(1.0, t.border)))
+        .show_separator_line(false)
+        .frame(crate::helder::card_frame(t).inner_margin(Margin::same(12)).outer_margin(Margin { left: 0, right: 6, top: 0, bottom: 12 }))
         .show(ui, |ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut app.contacts.query)
-                    .id(egui::Id::new(SEARCH_BOX))
-                    .hint_text("Zoeken in contacten")
-                    .desired_width(f32::INFINITY),
-            );
+            let width = ui.available_width();
+            crate::helder::search_field(ui, t, &mut app.contacts.query, egui::Id::new(SEARCH_BOX), "Zoeken in contacten", width);
             ui.add_space(8.0);
             let selected = app.engine.session.selected_contact.clone();
             let list: Vec<Contact> = app.engine.session.contacts_matching(&app.contacts.query).into_iter().cloned().collect();
@@ -326,7 +323,8 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 /// The contacts module's panes; the ribbon is drawn by the caller.
 pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     list_pane(app, ui, t);
-    egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading).inner_margin(Margin::same(24))).show(ui, |ui| {
+    let frame = crate::helder::card_frame(t).inner_margin(Margin::same(24)).outer_margin(Margin { left: 6, right: 12, top: 0, bottom: 12 });
+    egui::CentralPanel::default().frame(frame).show(ui, |ui| {
         if app.contacts.editor.is_some() {
             form(app, ui, t);
         } else if let Some(id) = app.contacts.group.clone() {
