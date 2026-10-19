@@ -104,7 +104,17 @@ pub struct ViewPrefs {
     pub favorites: Vec<String>,
     /// The saved searches listed under "Zoekmappen" in the folder pane.
     pub search_folders: Vec<crate::search_folders::SearchFolder>,
+    /// What was last typed in the mail search box, newest first, as Outlook's "Recente
+    /// zoekopdrachten"; at most [`RECENT_SEARCHES`].
+    pub recent_searches: Vec<String>,
 }
+
+/// How many recent searches the menu next to the search box keeps.
+pub const RECENT_SEARCHES: usize = 10;
+/// The menu's button and its hover text.
+pub const RECENT_MENU: &str = "🕒";
+pub const RECENT_HINT: &str = "Recente zoekopdrachten";
+pub const RECENT_CLEAR: &str = "Lijst wissen";
 
 impl Default for ViewPrefs {
     fn default() -> Self {
@@ -120,11 +130,24 @@ impl Default for ViewPrefs {
             work_hours: true,
             favorites: Vec::new(),
             search_folders: Vec::new(),
+            recent_searches: Vec::new(),
         }
     }
 }
 
 impl ViewPrefs {
+    /// Puts `query` at the top of the recent searches, once, dropping the oldest beyond the
+    /// limit. Blank text is not kept.
+    pub fn remember_search(&mut self, query: &str) {
+        let query = query.trim();
+        if query.is_empty() {
+            return;
+        }
+        self.recent_searches.retain(|q| !q.eq_ignore_ascii_case(query));
+        self.recent_searches.insert(0, query.to_string());
+        self.recent_searches.truncate(RECENT_SEARCHES);
+    }
+
     /// The saved choices, or the defaults when there is no file or it does not parse.
     pub fn load(path: Option<&Path>) -> Self {
         path.map(|p| mailcraft_engine::config::load_json(&mailcraft_engine::config::view_path(p))).unwrap_or_default()
@@ -321,4 +344,25 @@ fn group(ui: &mut egui::Ui, t: &Tokens, name: &str, add: impl FnOnce(&mut egui::
         ui.add_space(2.0);
         ui.label(RichText::new(name).size(11.0).color(t.text_dim));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recent_searches_keep_the_newest_once_and_drop_the_oldest() {
+        let mut v = ViewPrefs::default();
+        v.remember_search("  ");
+        assert!(v.recent_searches.is_empty(), "blank text is not kept");
+        for q in ["offerte", "factuur", "Offerte "] {
+            v.remember_search(q);
+        }
+        assert_eq!(v.recent_searches, ["Offerte", "factuur"], "the same words once, newest first, case aside");
+        for i in 0..RECENT_SEARCHES {
+            v.remember_search(&format!("zoek{i}"));
+        }
+        assert_eq!(v.recent_searches.len(), RECENT_SEARCHES);
+        assert_eq!(v.recent_searches[0], format!("zoek{}", RECENT_SEARCHES - 1));
+    }
 }
