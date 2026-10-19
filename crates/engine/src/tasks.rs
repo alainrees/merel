@@ -1,7 +1,10 @@
 //! Tasks in the session and the commands that change them. Local tasks live in `tasks.json`
 //! next to the accounts file; an account's live in its store and are mirrored here (see
-//! [`crate::sync`]).
+//! [`crate::sync`]). A task with a due day reminds from eight in the morning of that day, as
+//! Outlook does for tasks with a due date; a closed reminder is kept in `tasks.json` by the task
+//! and the due day it was closed for, so a new due day reminds again.
 
+use chrono::{Local, NaiveDate, NaiveTime, TimeZone};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -14,7 +17,20 @@ use crate::{CommandError, Session};
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TasksFile {
     pub tasks: Vec<Task>,
+    /// The task reminders that were closed, by task and due day.
+    #[serde(default)]
+    pub dismissed: Vec<TaskReminderKey>,
 }
+
+/// One task's reminder: the task and the due day it was set for.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TaskReminderKey {
+    pub id: String,
+    pub due: i64,
+}
+
+/// The hour of the due day from which a task reminds, Outlook's default reminder time.
+pub const TASK_REMINDER_HOUR: u32 = 8;
 
 /// Which tasks a list shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,9 +46,43 @@ impl Session {
         self.selected_task = None;
     }
 
-    /// What goes to the file: the local tasks.
+    /// The file's contents: the local tasks and the reminders closed so far.
+    pub fn set_tasks_data(&mut self, data: TasksFile) {
+        self.set_tasks(data.tasks);
+        self.dismissed_task_reminders = data.dismissed;
+    }
+
+    /// What goes to the file: the local tasks, and the closed reminders of tasks still open on
+    /// that due day.
     pub fn tasks_data(&self) -> TasksFile {
-        TasksFile { tasks: self.tasks.iter().filter(|t| t.account_id.is_none()).cloned().collect() }
+        let dismissed =
+            self.dismissed_task_reminders.iter().filter(|k| self.task(&k.id).is_some_and(|t| !t.done && t.due == Some(k.due))).cloned().collect();
+        TasksFile { tasks: self.tasks.iter().filter(|t| t.account_id.is_none()).cloned().collect(), dismissed }
+    }
+
+    /// The open tasks whose due day has come, Outlook's task reminders: from eight in the
+    /// morning of the due day, and every day after until the task is done, unless the reminder
+    /// was closed for that due day or put off until later than `now`. Earliest due first.
+    pub fn due_task_reminders(&self, today: NaiveDate, now: i64) -> Vec<Task> {
+        let after_eight = Local
+            .timestamp_opt(now, 0)
+            .single()
+            .is_some_and(|t| t.time() >= NaiveTime::from_hms_opt(TASK_REMINDER_HOUR, 0, 0).unwrap_or(NaiveTime::MIN));
+        let mut due: Vec<Task> = self
+            .tasks
+            .iter()
+            .filter(|t| !t.done)
+            .filter(|t| {
+                let Some(due) = t.due else { return false };
+                let Some(day) = Local.timestamp_opt(due, 0).single().map(|d| d.date_naive()) else { return false };
+                (day < today || (day == today && after_eight))
+                    && !self.dismissed_task_reminders.contains(&TaskReminderKey { id: t.id.clone(), due })
+                    && !self.snoozed_task_reminders.get(&t.id).is_some_and(|until| *until > now)
+            })
+            .cloned()
+            .collect();
+        due.sort_by(|a, b| (a.due, &a.title).cmp(&(b.due, &b.title)));
+        due
     }
 
     pub fn task(&self, id: &str) -> Option<&Task> {
@@ -90,6 +140,32 @@ impl Session {
 
 fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+/// `task.reminder_dismiss { id }`: closes the task's reminder for its current due day.
+pub fn reminder_dismiss(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let id = str_param(params, "id").ok_or(CommandError::Param("id"))?.to_string();
+    let due = s.task(&id).ok_or(CommandError::NotFound)?.due.ok_or(CommandError::Param("id"))?;
+    s.snoozed_task_reminders.remove(&id);
+    let key = TaskReminderKey { id, due };
+    if !s.dismissed_task_reminders.contains(&key) {
+        s.dismissed_task_reminders.push(key);
+        s.tasks_dirty = true;
+    }
+    Ok(())
+}
+
+/// `task.reminder_snooze { id, minutes }`: puts the task's reminder off for `minutes` from now.
+pub fn reminder_snooze(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let id = str_param(params, "id").ok_or(CommandError::Param("id"))?.to_string();
+    s.task(&id).ok_or(CommandError::NotFound)?;
+    let minutes = params
+        .get("minutes")
+        .and_then(Value::as_u64)
+        .filter(|m| (1..=u64::from(mailcraft_model::MAX_REMINDER)).contains(m))
+        .ok_or(CommandError::Param("minutes"))?;
+    s.snoozed_task_reminders.insert(id, now() + minutes as i64 * 60);
+    Ok(())
 }
 
 fn str_param<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
@@ -255,6 +331,49 @@ mod tests {
         assert_eq!(titles(s.tasks_matching(TaskFilter::All, "offerte")), ["Offerte drukwerk", "Offerte sturen"]);
         assert_eq!(titles(s.tasks_matching(TaskFilter::Open, "ravi offerte")), ["Offerte drukwerk"], "every word, title or notes");
         assert!(s.tasks_matching(TaskFilter::Open, "belasting").is_empty());
+    }
+
+    #[test]
+    fn a_task_reminds_from_its_due_day_until_done_closed_or_put_off() {
+        use chrono::{Days, Local, NaiveTime, TimeZone};
+        let mut s = Session::default();
+        let today = Local::now().date_naive();
+        let midnight = |d: chrono::NaiveDate| Local.from_local_datetime(&d.and_time(NaiveTime::MIN)).earliest().map(|t| t.timestamp()).unwrap();
+        let yesterday = today.checked_sub_days(Days::new(1)).unwrap();
+        let tomorrow = today.checked_add_days(Days::new(1)).unwrap();
+        s.run("task.save", &json!({ "title": "Aangifte", "due": midnight(yesterday) })).unwrap();
+        let late = s.selected_task().unwrap().id.clone();
+        s.run("task.save", &json!({ "title": "Later", "due": midnight(tomorrow) })).unwrap();
+        s.run("task.save", &json!({ "title": "Ooit" })).unwrap();
+        s.run("task.save", &json!({ "title": "Vandaag", "due": midnight(today) })).unwrap();
+        let noon = midnight(today) + 12 * 3600;
+        let early = midnight(today) + 7 * 3600;
+        let titles = |s: &Session, now: i64| s.due_task_reminders(today, now).iter().map(|t| t.title.clone()).collect::<Vec<_>>();
+        assert_eq!(titles(&s, noon), ["Aangifte", "Vandaag"], "overdue and due today at noon; not tomorrow's, not one without a day");
+        assert_eq!(titles(&s, early), ["Aangifte"], "before eight only the overdue one");
+
+        s.run("task.reminder_snooze", &json!({ "id": late, "minutes": 60 })).unwrap();
+        assert!(!titles(&s, now()).contains(&"Aangifte".to_string()), "put off");
+        assert!(titles(&s, now() + 3601).contains(&"Aangifte".to_string()), "and back after an hour");
+        assert_eq!(s.run("task.reminder_snooze", &json!({ "id": late, "minutes": 0 })), Err(CommandError::Param("minutes")));
+        assert_eq!(s.run("task.reminder_dismiss", &json!({ "id": "nope" })), Err(CommandError::NotFound));
+
+        s.take_tasks_dirty();
+        s.run("task.reminder_dismiss", &json!({ "id": late })).unwrap();
+        assert!(s.take_tasks_dirty(), "closing is kept in the file");
+        assert_eq!(titles(&s, noon), ["Vandaag"], "closed for this due day");
+        let saved = s.tasks_data();
+        assert_eq!(saved.dismissed, vec![TaskReminderKey { id: late.clone(), due: midnight(yesterday) }]);
+        let mut again = Session::default();
+        again.set_tasks_data(saved);
+        assert_eq!(titles(&again, noon), ["Vandaag"], "the file remembers what was closed");
+
+        s.run("task.save", &json!({ "id": late, "title": "Aangifte", "due": midnight(today) })).unwrap();
+        assert_eq!(titles(&s, noon), ["Aangifte", "Vandaag"], "a new due day reminds again");
+        s.run("task.complete", &json!({ "id": late, "done": true })).unwrap();
+        assert_eq!(titles(&s, noon), ["Vandaag"], "done is done");
+        s.run("task.reminder_dismiss", &json!({ "id": late })).unwrap();
+        assert!(s.tasks_data().dismissed.is_empty(), "a closed reminder of a finished task is not kept");
     }
 
     #[test]
