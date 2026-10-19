@@ -100,6 +100,15 @@ Let op: Mailcraft meldt zich aan met *Basic authentication* over TLS. Veel serve
 EWS alleen NTLM of Kerberos toe; Mailcraft zegt dat dan en de beheerder kan Basic voor EWS
 inschakelen. Voor Exchange Online (Microsoft 365) gebruik je de soort **Microsoft 365**.
 
+## Account verwijderen
+
+Bestand › Accounts, bij het account de knop **Account verwijderen**, en dan **Ja, verwijderen**.
+Het account, het wachtwoord of de aanmelding in de sleutelhanger en de versleutelde offline
+kopie verdwijnen van deze computer; de afspraken, contactpersonen en taken die bij het account
+hoorden ook. Je mail en je agenda bij de aanbieder blijven staan. Afspraken, contactpersonen en
+taken die op deze computer staan ("Mijn agenda") blijven. Zonder accounts zie je weer de
+voorbeeldmail.
+
 ## Hoe het aanmelden werkt
 
 Mailcraft opent je eigen browser en luistert ondertussen op een willekeurige poort op

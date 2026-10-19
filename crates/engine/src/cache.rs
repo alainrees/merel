@@ -64,6 +64,15 @@ impl Cache {
         }
     }
 
+    /// Forgets `account_id`, in memory and on disk.
+    pub fn remove(&mut self, account_id: &str) {
+        self.accounts.remove(account_id);
+        self.dirty.remove(account_id);
+        if let Some(store) = &self.store {
+            store.remove(account_id);
+        }
+    }
+
     /// Takes note of a server answer before the session applies it.
     pub fn note_event(&mut self, session: &Session, event: &Event) {
         let account = match event {
