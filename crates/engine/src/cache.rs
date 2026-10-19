@@ -148,13 +148,13 @@ impl Cache {
     }
 
     /// Serves what the cache has from `jobs` (opened messages) and returns the rest.
-    pub fn serve(&mut self, session: &mut Session, jobs: Vec<Job>) -> Vec<Job> {
+    pub fn serve(&mut self, session: &mut Session, identities: &crate::certificates::Identities, jobs: Vec<Job>) -> Vec<Job> {
         let mut rest = Vec::with_capacity(jobs.len());
         for job in jobs {
             if let Job::Body { account_id, message_id, .. } = &job
                 && let Some(raw) = self.accounts.get(account_id).and_then(|c| c.body(message_id))
             {
-                let body = Box::new(mailcraft_mime::parse_body(raw));
+                let body = Box::new(crate::certificates::parse_body(identities, account_id, raw));
                 let header = mailcraft_mime::parse_header(raw);
                 session.apply(Event::Body { message_id: message_id.clone(), body, header, raw: Vec::new() });
                 continue;
@@ -352,7 +352,7 @@ mod tests {
         // Opening the message needs no server.
         s.run("message.select", &json!({ "id": "a1/INBOX#7" })).unwrap();
         let pending = s.take_jobs();
-        let jobs = cache.serve(&mut s, pending);
+        let jobs = cache.serve(&mut s, &Default::default(), pending);
         assert!(!jobs.iter().any(|j| matches!(j, Job::Body { .. })), "{jobs:?}");
         assert_eq!(s.bodies.get("a1/INBOX#7").map(|b| b.text.trim()), Some("Hallo daar"));
         assert!(!s.loading.contains("a1/INBOX#7"));

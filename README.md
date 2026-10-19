@@ -231,7 +231,17 @@ when it opens (RSA with SHA-256/384/512, ECDSA P-256 and P-384): a strip over th
 door …" when the signature holds, warns when the certificate belongs to another address than the sender's, and warns
 in red when the message changed after it was signed; a signature Mailcraft cannot check (SHA-1, an unknown algorithm)
 is named as such, never shown as valid. The `smime.p7s` part is not listed as an attachment. Whether the certificate's
-issuer is to be trusted is not checked yet. Encrypting is the next step.
+issuer is to be trusted is not checked yet.
+
+Encrypted mail (S/MIME), Outlook's "Versleutelen": with a certificate on the account the compose window has a
+"Versleutelen" box. The message and its attachments go out as `application/pkcs7-mime` (AES-256-CBC, the key wrapped
+with RSA for every recipient and for the sender, so Sent stays readable); the subject travels in the clear, as in
+every mail program. Mailcraft learns a correspondent's certificate the way Outlook does, from a valid signature on
+their mail that matches the sender (not from the Junk folder), and keeps it in `certificates.json`; encrypting to
+someone whose certificate is not known yet is refused with their address named, never sent in the clear. Encrypted
+mail that comes in is opened with the account's certificate (RSAES-PKCS1-v1_5 or OAEP, AES-128/192/256) and shows a
+"🔒 Versleuteld bericht" strip; one that cannot be opened says why in place of its text. The offline cache keeps it
+encrypted as it came.
 
 A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
 hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the

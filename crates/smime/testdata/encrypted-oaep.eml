@@ -1,0 +1,20 @@
+To: jij@example.org
+From: sanne@example.org
+Subject: Versleuteld
+MIME-Version: 1.0
+Content-Disposition: attachment; filename="smime.p7m"
+Content-Type: application/pkcs7-mime; smime-type=enveloped-data; name="smime.p7m"
+Content-Transfer-Encoding: base64
+
+MIIB6AYJKoZIhvcNAQcDoIIB2TCCAdUCAQAxggFQMIIBTAIBADA0MBwxGjAYBgNV
+BAMMEU1haWxjcmFmdCBUZXN0IENBAhQbCRRGNrQLNB6J+SkzNkKg7zjgoDANBgkq
+hkiG9w0BAQcwAASCAQCmjkKX4zij5VXrFWFbIGUaOcaNKMyRaLQNr/oSN6U2r2/h
+y4NDdHTYCCu9gXQ089OkMHsU/kFpLydRXgjWEABxHrwdNrCe+Ueo9pHNtdrstjGK
+1VAmBdqIBU3Nm01SxlW5yV+NJvYrOEaPKjNyg/UMQQlu6LGtq2zLzT6HUreScBT7
+WgUbNrIFe4I7Cj5VuMSvP/gistFduojQg7EETyBBiWT/xQhyUQ7VqnXl0nkm8H+B
+8fDI1rnnIF9/qTtbLeYa9wAciSJJxAr5y6b+0cDHIlfSOsrhPIGeeYd+t1pjEA1t
+QtdllFIzvMQDxE/h4mN5PTH7BgMxqxdXMqCiAfQXMHwGCSqGSIb3DQEHATAdBglg
+hkgBZQMEASoEEBhWpJMldbjnFoSrXSbA98WAUHmgGGMBra3LiocJfOFMgQmuIKXA
+48RzfsZi73Ny20F11Ish4GtM4o3qLallm5utteDdvaGMtOgNFnVs4whvdzQdkXrr
+aptea7c/rJ4AHwQy
+

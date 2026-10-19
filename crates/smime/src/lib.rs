@@ -9,6 +9,10 @@
 
 use std::fmt;
 
+mod envelope;
+
+pub use envelope::{can_encrypt_to, decrypt_message, encrypt_message, is_encrypted};
+
 use aws_lc_rs::digest;
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::rsa::KeyPair;
@@ -66,6 +70,14 @@ pub enum SmimeError {
     Certificate,
     #[error("Het bericht kan niet worden ondertekend.")]
     Sign,
+    #[error("Het certificaat van een ontvanger is niet geschikt om naar te versleutelen.")]
+    RecipientKey,
+    #[error("Het bericht kan niet worden versleuteld.")]
+    Encrypt,
+    #[error("Het bericht is niet voor jouw certificaat versleuteld.")]
+    NotForMe,
+    #[error("Dit bericht is versleuteld, maar {0}.")]
+    Decrypt(String),
 }
 
 /// What a person sees of a certificate.
@@ -164,6 +176,11 @@ impl Identity {
 
     pub fn info(&self) -> &CertInfo {
         &self.info
+    }
+
+    /// The person's own certificate, DER: what others encrypt to.
+    pub fn certificate_der(&self) -> &[u8] {
+        self.certs.first().map(Vec::as_slice).unwrap_or_default()
     }
 
     fn certificate(&self) -> Result<Certificate, SmimeError> {
@@ -522,10 +539,10 @@ fn signed_parts<'a>(body: &'a [u8], boundary: &[u8]) -> Option<(&'a [u8], Vec<u8
     Some((content, p7s))
 }
 
-/// Turns the RFC 5322 message `raw` into a signed one (RFC 8551 section 3.5,
-/// multipart/signed): the content headers and the body become the signed part, the other
-/// headers stay on top, and the signature follows as `smime.p7s`.
-pub fn sign_message(identity: &Identity, raw: &[u8], now: i64) -> Result<Vec<u8>, SmimeError> {
+/// The header fields of `raw` that stay on the outside of a signed or encrypted message (all
+/// but the content headers and MIME-Version), and the MIME entity inside it: the content
+/// headers and the body, in CRLF form, ending with a line break.
+fn split_message(raw: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let raw = crlf(raw);
     let (head, body) = match find(&raw, b"\r\n\r\n") {
         Some(i) => (&raw[..i + 2], &raw[i + 4..]),
@@ -545,10 +562,18 @@ pub fn sign_message(identity: &Identity, raw: &[u8], now: i64) -> Result<Vec<u8>
     }
     inner.extend_from_slice(b"\r\n");
     inner.extend_from_slice(body);
-    // The part ends with a line break that belongs to the boundary after it.
     if !inner.ends_with(b"\r\n") {
         inner.extend_from_slice(b"\r\n");
     }
+    (outer, inner)
+}
+
+/// Turns the RFC 5322 message `raw` into a signed one (RFC 8551 section 3.5,
+/// multipart/signed): the content headers and the body become the signed part, the other
+/// headers stay on top, and the signature follows as `smime.p7s`.
+pub fn sign_message(identity: &Identity, raw: &[u8], now: i64) -> Result<Vec<u8>, SmimeError> {
+    let (outer, inner) = split_message(raw);
+    // The part ends with a line break that belongs to the boundary after it.
     let signed = &inner[..inner.len() - 2];
     let p7s = identity.sign_detached(signed, now)?;
 

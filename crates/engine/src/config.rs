@@ -38,6 +38,11 @@ pub fn junk_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("junk.json")
 }
 
+/// The correspondents' S/MIME certificates, next to the accounts file.
+pub fn certificates_path(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("certificates.json")
+}
+
 /// The ignored conversations, next to the accounts file.
 pub fn ignored_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("ignored.json")
