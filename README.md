@@ -230,14 +230,19 @@ Signing is aws-lc-rs; the CMS structures come from the RustCrypto `cms` crate. S
 when it opens (RSA with SHA-256/384/512, ECDSA P-256 and P-384): a strip over the message says "Digitaal ondertekend
 door …" when the signature holds, warns when the certificate belongs to another address than the sender's, and warns
 in red when the message changed after it was signed; a signature Mailcraft cannot check (SHA-1, an unknown algorithm)
-is named as such, never shown as valid. The `smime.p7s` part is not listed as an attachment. Whether the certificate's
-issuer is to be trusted is not checked yet.
+is named as such, never shown as valid. The `smime.p7s` part is not listed as an attachment. The certificate's issuer
+is checked too: the chain from the certificate through the issuers enclosed with the signature must reach one of the
+computer's trusted root certificates (the system store, as for TLS), each link signed by the next, each issuer a
+certificate authority, all valid now. A valid signature from another issuer (a self-made certificate, or a company's
+own CA) gets a warning that anyone can make such a certificate, with "Certificaat vertrouwen" to accept it for that
+address; revocation is not checked online.
 
 Encrypted mail (S/MIME), Outlook's "Versleutelen": with a certificate on the account the compose window has a
 "Versleutelen" box. The message and its attachments go out as `application/pkcs7-mime` (AES-256-CBC, the key wrapped
 with RSA for every recipient and for the sender, so Sent stays readable); the subject travels in the clear, as in
 every mail program. Mailcraft learns a correspondent's certificate the way Outlook does, from a valid signature on
-their mail that matches the sender (not from the Junk folder), and keeps it in `certificates.json`; encrypting to
+their mail that matches the sender and comes from a trusted issuer (not from the Junk folder; others only through
+"Certificaat vertrouwen"), and keeps it in `certificates.json`; encrypting to
 someone whose certificate is not known yet is refused with their address named, never sent in the clear. Encrypted
 mail that comes in is opened with the account's certificate (RSAES-PKCS1-v1_5 or OAEP, AES-128/192/256) and shows a
 "🔒 Versleuteld bericht" strip; one that cannot be opened says why in place of its text. The offline cache keeps it

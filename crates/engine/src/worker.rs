@@ -301,7 +301,7 @@ fn run(c: &mut dyn Mailbox, account: &Account, keys: &Keys, job: &Job) -> Result
         }
         Job::Body { account_id, message_id, path, id } => {
             let raw = c.body(path, id)?;
-            let (body, header) = (Box::new(crate::certificates::parse_body(&keys.identities, account_id, &raw)), mailcraft_mime::parse_header(&raw));
+            let (body, header) = (Box::new(crate::certificates::parse_body(keys, account_id, &raw)), mailcraft_mime::parse_header(&raw));
             Some(Event::Body { message_id: message_id.clone(), body, header, raw })
         }
         Job::Flag { path, id, flag, on, .. } => {

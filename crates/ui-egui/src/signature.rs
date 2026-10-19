@@ -7,6 +7,9 @@ use mailcraft_smime::Signature;
 
 use crate::Tokens;
 
+/// The button under a signature from an issuer the computer does not know.
+pub const TRUST: &str = "Certificaat vertrouwen";
+
 pub const BROKEN: &str = "⚠ De digitale handtekening klopt niet. Het bericht is na het ondertekenen veranderd, of de handtekening is vervalst.";
 
 pub const ENCRYPTED: &str = "🔒 Versleuteld bericht. Alleen de ontvangers kunnen het lezen; het onderwerp was onderweg niet versleuteld.";
@@ -27,9 +30,18 @@ pub fn encryption_strip(ui: &mut Ui, t: &Tokens, encryption: &Encryption) {
 /// What the strip says, and whether it is a warning.
 pub fn text(signature: &Signature, from: &str) -> (String, bool) {
     match signature {
-        Signature::Valid { signer, .. } if signer.covers(from) => {
+        Signature::Valid { signer, trusted: true, .. } if signer.covers(from) => {
             (format!("✔ Digitaal ondertekend door {} <{}>. Het bericht is onderweg niet veranderd.", signer.name, from.to_lowercase()), false)
         }
+        Signature::Valid { signer, .. } if signer.covers(from) => (
+            format!(
+                "⚠ Ondertekend als {} <{}>, maar de uitgever ({}) is niet bekend als betrouwbaar. Iedereen kan zo'n certificaat maken; vertrouw het alleen als je weet dat het van deze afzender is.",
+                signer.name,
+                from.to_lowercase(),
+                if signer.issuer.is_empty() { "onbekend" } else { signer.issuer.as_str() }
+            ),
+            true,
+        ),
         Signature::Valid { signer, .. } => (
             format!(
                 "⚠ Ondertekend met een certificaat van {}, niet van de afzender {}. Wees voorzichtig.",
@@ -45,8 +57,12 @@ pub fn text(signature: &Signature, from: &str) -> (String, bool) {
     }
 }
 
-pub fn strip(ui: &mut Ui, t: &Tokens, signature: &Signature, from: &str) {
+/// Draws the strip; true when "Certificaat vertrouwen" was pressed. `can_trust` is false in
+/// the junk folder, where nothing is to be trusted.
+pub fn strip(ui: &mut Ui, t: &Tokens, signature: &Signature, from: &str, can_trust: bool) -> bool {
     let (line, warning) = text(signature, from);
+    let offer = can_trust && matches!(signature, Signature::Valid { signer, trusted: false, .. } if signer.covers(from));
+    let mut trust = false;
     let fill = if warning { t.flag.gamma_multiply(0.18) } else { t.checked };
     let response = egui::Frame::NONE
         .fill(fill)
@@ -55,17 +71,28 @@ pub fn strip(ui: &mut Ui, t: &Tokens, signature: &Signature, from: &str) {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(RichText::new(line).size(12.0).color(t.text));
+            if offer
+                && ui
+                    .button(TRUST)
+                    .on_hover_text(
+                        "Bewaart dit certificaat voor dit adres: de handtekening telt voortaan als betrouwbaar en je kunt versleuteld terugmailen. Doe dit alleen als je zeker weet dat het van de afzender is, bijvoorbeeld omdat je het hebt nagevraagd.",
+                    )
+                    .clicked()
+            {
+                trust = true;
+            }
         })
         .response;
     if let Signature::Valid { signer, .. } = signature {
         response.on_hover_text(format!(
-            "Certificaat van {}, uitgegeven door {}, geldig tot {}. Mailcraft controleert nog niet of deze uitgever te vertrouwen is.",
+            "Certificaat van {}, uitgegeven door {}, geldig tot {}. Mailcraft controleert niet online of het is ingetrokken.",
             signer.name,
             if signer.issuer.is_empty() { "onbekend" } else { signer.issuer.as_str() },
             crate::dates::day(signer.not_after)
         ));
     }
     ui.add_space(8.0);
+    trust
 }
 
 #[cfg(test)]
@@ -78,6 +105,8 @@ mod tests {
         Signature::Valid {
             signer: CertInfo { name: "Sanne".into(), emails: vec!["sanne@example.org".into()], issuer: "CA".into(), not_before: 0, not_after: 0 },
             certificate: Vec::new(),
+            issuers: Vec::new(),
+            trusted: true,
         }
     }
 
@@ -91,5 +120,9 @@ mod tests {
         assert!(warning && line.contains("certificaat van sanne@example.org, niet van de afzender bank@example.org"));
         assert_eq!(text(&Signature::Broken, "x@y.nl"), (BROKEN.to_string(), true));
         assert!(!text(&Signature::Unchecked("oud".into()), "x@y.nl").1);
+        let Signature::Valid { signer, certificate, issuers, .. } = valid() else { unreachable!() };
+        let unknown = Signature::Valid { signer, certificate, issuers, trusted: false };
+        let (line, warning) = text(&unknown, "sanne@example.org");
+        assert!(warning && line.contains("de uitgever (CA) is niet bekend als betrouwbaar"), "{line}");
     }
 }

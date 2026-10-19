@@ -10,8 +10,10 @@
 use std::fmt;
 
 mod envelope;
+mod trust;
 
 pub use envelope::{can_encrypt_to, decrypt_message, encrypt_message, is_encrypted};
+pub use trust::issued_by_trusted;
 
 use aws_lc_rs::digest;
 use aws_lc_rs::rand::SystemRandom;
@@ -330,12 +332,17 @@ fn common_name(name: &x509_cert::name::Name) -> Option<String> {
 /// What a signature on a message says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Signature {
-    /// The signature matches: the message is as the holder of `signer` sent it. Whether the
-    /// issuer of the certificate is to be trusted is not checked yet.
+    /// The signature matches: the message is as the holder of `signer` sent it.
     Valid {
         signer: CertInfo,
         /// The signer's certificate, DER: what an encrypted answer would need.
         certificate: Vec<u8>,
+        /// The other certificates that came with the signature, DER: the issuers, usually.
+        issuers: Vec<Vec<u8>>,
+        /// Whether the certificate comes from an issuer the computer trusts, or the person
+        /// said to trust it ([`issued_by_trusted`]); `false` as the signature is read, the
+        /// engine decides.
+        trusted: bool,
     },
     /// It does not match: the message changed after it was signed, or the signature is false.
     Broken,
@@ -359,7 +366,8 @@ fn unchecked(reason: &str) -> Signature {
 }
 
 /// Checks a detached signature `p7s` (CMS SignedData, RFC 5652) over `content`. Only the
-/// signature itself is checked, not whether the certificate's issuer is trusted.
+/// signature itself is checked; whether the certificate's issuer is trusted is
+/// [`issued_by_trusted`]'s question.
 pub fn verify_detached(content: &[u8], p7s: &[u8]) -> Signature {
     let Ok(info) = ContentInfo::from_der(p7s) else { return unchecked("de handtekening kan niet worden gelezen") };
     if info.content_type != ID_SIGNED_DATA {
@@ -450,8 +458,9 @@ pub fn verify_detached(content: &[u8], p7s: &[u8]) -> Signature {
     if !ok {
         return Signature::Broken;
     }
+    let issuers = certs.iter().filter(|c| **c != *cert).filter_map(|c| c.to_der().ok()).collect();
     match (cert_info(cert), cert.to_der()) {
-        (Ok(signer), Ok(certificate)) => Signature::Valid { signer, certificate },
+        (Ok(signer), Ok(certificate)) => Signature::Valid { signer, certificate, issuers, trusted: false },
         _ => unchecked("het certificaat van de afzender kan niet worden gelezen"),
     }
 }
@@ -702,9 +711,11 @@ mod tests {
         let content = b"Content-Type: text/plain\r\n\r\nHallo\r\n";
         let p7s = id.sign_detached(content, NOW).unwrap();
         match verify_detached(content, &p7s) {
-            Signature::Valid { signer, certificate } => {
+            Signature::Valid { signer, certificate, issuers, trusted } => {
                 assert_eq!(signer, *id.info());
                 assert_eq!(certificate, id.certs[0]);
+                assert_eq!(issuers, id.certs[1..], "the issuer goes along, so the reader can build the chain");
+                assert!(!trusted, "trust is the engine's call");
             }
             other => panic!("{other:?}"),
         }
@@ -737,6 +748,27 @@ mod tests {
         // Bare line feeds are made canonical before signing.
         let lf = String::from_utf8(raw.to_vec()).unwrap().replace("\r\n", "\n");
         assert!(sign_message(&identity(), lf.as_bytes(), NOW).unwrap().windows(2).all(|w| w[1] != b'\n' || w[0] == b'\r'));
+    }
+
+    #[test]
+    fn a_certificate_is_trusted_only_through_a_chain_to_a_trusted_root() {
+        let ca = include_bytes!("../testdata/ca.der").to_vec();
+        let sub = include_bytes!("../testdata/sub-ca.der").to_vec();
+        let jij = include_bytes!("../testdata/jij.der");
+        let sanne = include_bytes!("../testdata/sanne.der");
+        let forged = include_bytes!("../testdata/forged.der");
+        let roots = vec![ca.clone()];
+        assert!(issued_by_trusted(jij, &[], &roots, NOW), "issued by the root itself");
+        assert!(issued_by_trusted(sanne, std::slice::from_ref(&sub), &roots, NOW), "through an intermediate");
+        assert!(!issued_by_trusted(sanne, &[], &roots, NOW), "without the intermediate there is no chain");
+        assert!(!issued_by_trusted(sanne, std::slice::from_ref(&sub), &[], NOW), "no trusted roots");
+        assert!(!issued_by_trusted(forged, std::slice::from_ref(&ca), &roots, NOW), "self-made, for someone else's address");
+        assert!(!issued_by_trusted(jij, &[], &roots, 0), "not valid yet");
+        assert!(!issued_by_trusted(b"rommel", &[], &roots, NOW));
+        match check_message(include_bytes!("../testdata/signed-chain.eml")) {
+            Some(Signature::Valid { certificate, issuers, .. }) => assert!(issued_by_trusted(&certificate, &issuers, &roots, NOW)),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

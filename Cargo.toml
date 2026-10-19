@@ -45,6 +45,8 @@ html5ever = "0.40"
 keyring = "4"
 # OAuth 2.0 token exchange over HTTPS, same TLS stack as the mail protocols.
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier", "json"] }
+# The computer's trusted root certificates, to check who issued an S/MIME certificate.
+rustls-native-certs = "0.8"
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
 # The offline cache is sealed with ChaCha20-Poly1305 from the same crypto library rustls uses.
 aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys"] }

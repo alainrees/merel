@@ -1387,7 +1387,7 @@ impl Engine {
 
     fn dispatch(&mut self) {
         let jobs = self.session.take_jobs();
-        let jobs = self.cache.serve(&mut self.session, &self.keys.identities, jobs);
+        let jobs = self.cache.serve(&mut self.session, &self.keys, jobs);
         let Some(worker) = &self.worker else { return };
         for j in jobs {
             if j.account_id() != SAMPLE_ACCOUNT {

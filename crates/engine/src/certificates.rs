@@ -3,14 +3,16 @@
 //! message says otherwise, and encrypted when the message asks for it.
 //!
 //! The certificates of the people who write to us come with their signed mail, as Outlook
-//! learns them: a valid signature that matches the sender keeps the certificate (public, so
-//! in `certificates.json`), and mail to that address can then be encrypted.
+//! learns them: a valid signature that matches the sender, from a certificate whose issuer the
+//! computer trusts, keeps the certificate (public, so in `certificates.json`), and mail to that
+//! address can then be encrypted. A certificate from another issuer (a company's own, say) is
+//! kept only when the person says to trust it.
 //!
 //! The worker threads share the certificates with the engine, so a certificate imported or
 //! removed takes effect with the next message, without reconnecting.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use base64::Engine as _;
 use mailcraft_mime::{Body, Encryption};
@@ -26,14 +28,38 @@ pub type Identities = Arc<RwLock<HashMap<String, Arc<Identity>>>>;
 /// The certificates of correspondents, DER, by lowercase address.
 pub type People = Arc<RwLock<HashMap<String, Vec<u8>>>>;
 
-/// Most correspondents' certificates kept; the oldest learned go first beyond it.
+/// Most correspondents' certificates kept; beyond it, new addresses are not learned.
 const MAX_PEOPLE: usize = 5000;
 
 /// Everything the worker threads need to sign, encrypt and decrypt.
 #[derive(Clone, Default)]
 pub struct Keys {
     pub identities: Identities,
+    /// Trusted certificates of correspondents: from a trusted issuer, or trusted by the person.
     pub people: People,
+    /// The computer's trusted root certificates, DER, read the first time a signature needs
+    /// them.
+    pub roots: Arc<OnceLock<Vec<Vec<u8>>>>,
+}
+
+impl Keys {
+    fn roots(&self) -> &[Vec<u8>] {
+        self.roots.get_or_init(|| {
+            let found = rustls_native_certs::load_native_certs();
+            for e in &found.errors {
+                log::warn!("trusted roots: {e}");
+            }
+            found.certs.into_iter().map(|c| c.to_vec()).collect()
+        })
+    }
+
+    /// Settles whether a valid signature on `body` is from a trusted certificate: one whose
+    /// issuer chains to a trusted root, or one the person already trusts.
+    pub fn judge(&self, body: &mut Body) {
+        let Some(Signature::Valid { signer, certificate, issuers, trusted }) = body.signature.as_mut() else { return };
+        let known = self.people.read().is_ok_and(|p| signer.emails.iter().any(|e| p.get(e) == Some(&*certificate)));
+        *trusted = known || mailcraft_smime::issued_by_trusted(certificate, issuers, self.roots(), now());
+    }
 }
 
 /// `certificates.json`: the correspondents' certificates, base64 DER by address.
@@ -96,7 +122,7 @@ fn missing<'a>(people: &People, addresses: impl Iterator<Item = &'a Address>) ->
     let Ok(people) = people.read() else { return addresses.map(|a| a.email().to_lowercase()).collect() };
     let mut out: Vec<String> = Vec::new();
     for email in addresses.map(|a| a.email().to_lowercase()) {
-        if !people.contains_key(&email) && !out.contains(&email) {
+        if !people.get(&email).is_some_and(|c| mailcraft_smime::can_encrypt_to(c)) && !out.contains(&email) {
             out.push(email);
         }
     }
@@ -113,8 +139,15 @@ pub fn missing_text(missing: &[String]) -> String {
 }
 
 /// The body of `raw` for `account_id`: an encrypted message is opened with the account's
-/// certificate first; one that does not open shows why instead of its contents.
-pub fn parse_body(identities: &Identities, account_id: &str, raw: &[u8]) -> Body {
+/// certificate first; one that does not open shows why instead of its contents. A signature
+/// is judged for trust ([`Keys::judge`]).
+pub fn parse_body(keys: &Keys, account_id: &str, raw: &[u8]) -> Body {
+    let mut body = open_body(&keys.identities, account_id, raw);
+    keys.judge(&mut body);
+    body
+}
+
+fn open_body(identities: &Identities, account_id: &str, raw: &[u8]) -> Body {
     if !mailcraft_smime::is_encrypted(raw) {
         return mailcraft_mime::parse_body(raw);
     }
@@ -140,30 +173,51 @@ impl Engine {
         missing(&self.keys.people, addresses.iter())
     }
 
-    /// Keeps the certificate of a valid signature on `message_id` that belongs to its sender
-    /// `from`. Mail in the junk folder teaches nothing.
+    /// Keeps the certificate of a trusted, valid signature on `message_id` that belongs to its
+    /// sender `from`. Mail in the junk folder teaches nothing.
     pub(crate) fn learn_certificate(&mut self, message_id: &str, from: Option<&Address>, body: &Body) {
-        let (Some(from), Some(Signature::Valid { signer, certificate })) = (from, &body.signature) else { return };
-        let junk = self
-            .session
-            .message(message_id)
-            .and_then(|m| self.session.folder(&m.folder_id))
-            .is_some_and(|f| f.kind == mailcraft_model::FolderKind::Junk);
-        if junk {
-            return;
-        }
+        let (Some(from), Some(Signature::Valid { signer, certificate, trusted: true, .. })) = (from, &body.signature) else { return };
         let email = from.email().to_lowercase();
-        if !signer.covers(&email) || !mailcraft_smime::can_encrypt_to(certificate) {
+        if self.in_junk(message_id) || !signer.covers(&email) || !mailcraft_smime::can_encrypt_to(certificate) {
             return;
         }
+        self.keep_certificate(email, certificate);
+    }
+
+    fn in_junk(&self, message_id: &str) -> bool {
+        self.session.message(message_id).and_then(|m| self.session.folder(&m.folder_id)).is_some_and(|f| f.kind == mailcraft_model::FolderKind::Junk)
+    }
+
+    /// "Certificaat vertrouwen": the person says the certificate on the open message
+    /// `message_id` is its sender's, though its issuer is not one the computer trusts. It is
+    /// kept like a learned one, and the message shows as trusted.
+    pub fn trust_certificate(&mut self, message_id: &str) -> Result<(), String> {
+        let from = self.session.message(message_id).map(|m| m.from.email().to_lowercase()).ok_or("Dit bericht is er niet meer.")?;
+        if self.in_junk(message_id) {
+            return Err("Een certificaat uit Ongewenste e-mail wordt niet vertrouwd.".into());
+        }
+        let Some(body) = self.session.bodies.get_mut(message_id) else { return Err("Dit bericht is er niet meer.".into()) };
+        let Some(Signature::Valid { signer, certificate, trusted, .. }) = body.signature.as_mut() else {
+            return Err("Dit bericht heeft geen geldige handtekening.".into());
+        };
+        if !signer.covers(&from) {
+            return Err(format!("Dit certificaat is niet van de afzender {from}."));
+        }
+        *trusted = true;
+        let certificate = certificate.clone();
+        self.keep_certificate(from, &certificate);
+        Ok(())
+    }
+
+    fn keep_certificate(&mut self, email: String, certificate: &[u8]) {
         let Ok(mut people) = self.keys.people.write() else { return };
-        if people.get(&email) == Some(certificate) {
+        if people.get(&email).is_some_and(|c| c == certificate) {
             return;
         }
         if people.len() >= MAX_PEOPLE && !people.contains_key(&email) {
             return;
         }
-        people.insert(email, certificate.clone());
+        people.insert(email, certificate.to_vec());
         let file =
             PeopleFile { certificates: people.iter().map(|(k, v)| (k.clone(), base64::engine::general_purpose::STANDARD.encode(v))).collect() };
         drop(people);
@@ -180,9 +234,7 @@ impl Engine {
         let file: PeopleFile = config::load_json(&config::certificates_path(path));
         let Ok(mut people) = self.keys.people.write() else { return };
         for (email, der) in file.certificates {
-            if let Ok(der) = base64::engine::general_purpose::STANDARD.decode(der)
-                && mailcraft_smime::can_encrypt_to(&der)
-            {
+            if let Ok(der) = base64::engine::general_purpose::STANDARD.decode(der) {
                 people.insert(email.to_lowercase(), der);
             }
         }
@@ -262,8 +314,23 @@ mod tests {
     /// Signed by "Jij Tester" <jij@example.org>.
     const SIGNED: &[u8] = include_bytes!("../../smime/testdata/signed-openssl.eml");
 
+    /// Signed by a self-made certificate for jij@example.org: anyone could make one.
+    const FORGED: &[u8] = include_bytes!("../../smime/testdata/signed-forged.eml");
+    const CA: &[u8] = include_bytes!("../../smime/testdata/ca.der");
+
     fn jij() -> Address {
         Address::new(None, "Jij@Example.org").unwrap()
+    }
+
+    /// The test CA as the one trusted root.
+    fn trust_test_ca(e: &Engine) {
+        let _ = e.keys.roots.set(vec![CA.to_vec()]);
+    }
+
+    fn signed(e: &Engine, raw: &[u8]) -> Body {
+        let mut body = mailcraft_mime::parse_body(raw);
+        e.keys.judge(&mut body);
+        body
     }
 
     fn account(email: &str) -> Account {
@@ -324,6 +391,7 @@ mod tests {
     #[test]
     fn mail_is_encrypted_only_to_people_whose_certificate_came_with_signed_mail() {
         let mut e = engine("alain@voorbeeld.nl");
+        trust_test_ca(&e);
         let a = account("alain@voorbeeld.nl");
         e.import_certificate("a1", P12, "geheim").unwrap();
         let draft = Draft { to: vec![jij()], subject: "Contract".into(), body: "Hallo".into(), encrypt: true, ..Draft::default() };
@@ -333,7 +401,7 @@ mod tests {
         assert_eq!(e.missing_certificates(&[jij()]), vec!["jij@example.org".to_string()]);
 
         // A valid signature teaches the certificate, but only for the address it was issued to.
-        let body = mailcraft_mime::parse_body(SIGNED);
+        let body = signed(&e, SIGNED);
         e.learn_certificate("x", Some(&Address::new(None, "bank@example.org").unwrap()), &body);
         assert!(!e.missing_certificates(&[jij()]).is_empty());
         e.learn_certificate("x", Some(&jij()), &body);
@@ -344,15 +412,38 @@ mod tests {
         // The recipient opens it, and so does the sender, signature and all.
         let theirs = Identity::from_pkcs12(JIJ, "geheim", now()).unwrap();
         assert!(String::from_utf8_lossy(&mailcraft_smime::decrypt_message(&theirs, &sent).unwrap()).contains("multipart/signed"));
-        let mine = parse_body(&e.keys.identities, "a1", &sent);
+        let mine = parse_body(&e.keys, "a1", &sent);
         assert_eq!(mine.encrypted, Some(Encryption::Opened));
         assert!(mine.text.contains("Hallo"), "{}", mine.text);
-        assert!(matches!(mine.signature, Some(Signature::Valid { .. })));
-        let locked = parse_body(&Identities::default(), "a1", &sent);
+        assert!(matches!(mine.signature, Some(Signature::Valid { trusted: true, .. })), "own certificate, from the trusted test CA");
+        let locked = parse_body(&Keys::default(), "a1", &sent);
         assert!(matches!(locked.encrypted, Some(Encryption::Locked(_))) && locked.text.contains("geen certificaat met privésleutel"));
 
         let plain = Draft { encrypt: false, ..draft };
         assert!(!mailcraft_smime::is_encrypted(&outgoing(&e.keys, &a, &plain, raw).unwrap()));
+    }
+
+    #[test]
+    fn a_certificate_from_an_unknown_issuer_is_kept_only_when_the_person_trusts_it() {
+        let mut e = Engine::sample();
+        trust_test_ca(&e);
+        let forged = signed(&e, FORGED);
+        assert!(matches!(&forged.signature, Some(Signature::Valid { trusted: false, .. })), "valid signature, untrusted issuer");
+        e.learn_certificate("x", Some(&jij()), &forged);
+        assert!(!e.missing_certificates(&[jij()]).is_empty(), "never learned by itself");
+
+        // The person says it is theirs, on an open message from that address.
+        let id = e.session.messages.iter().find(|m| !e.in_junk(&m.id)).map(|m| m.id.clone()).unwrap();
+        if let Some(m) = e.session.messages.iter_mut().find(|m| m.id == id) {
+            m.from = jij();
+        }
+        e.session.bodies.insert(id.clone(), forged);
+        assert_eq!(e.trust_certificate("weg"), Err("Dit bericht is er niet meer.".to_string()));
+        e.trust_certificate(&id).unwrap();
+        assert!(matches!(e.session.bodies[&id].signature, Some(Signature::Valid { trusted: true, .. })));
+        assert!(e.missing_certificates(&[jij()]).is_empty());
+        // From then on the same certificate counts as trusted.
+        assert!(matches!(signed(&e, FORGED).signature, Some(Signature::Valid { trusted: true, .. })));
     }
 
     #[test]
@@ -365,7 +456,9 @@ mod tests {
         let mut e = Engine::load(Arc::clone(&secrets), Some(path.clone()));
         e.add_account(account("alain@voorbeeld.nl"), Secret::new("x")).unwrap();
         e.import_certificate("a1", P12, "geheim").unwrap();
-        e.learn_certificate("x", Some(&jij()), &mailcraft_mime::parse_body(SIGNED));
+        trust_test_ca(&e);
+        let body = signed(&e, SIGNED);
+        e.learn_certificate("x", Some(&jij()), &body);
         let file = std::fs::read(dir.join("cache").join("a1.identity")).unwrap();
         assert!(!file.windows(12).any(|w| w == b"Alain Tester"), "nothing readable on disk");
         drop(e);
