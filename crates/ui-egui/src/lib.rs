@@ -8,6 +8,7 @@
 mod attachments;
 mod backstage;
 pub mod calendar;
+pub mod categories;
 mod compose;
 pub mod contacts;
 mod dates;
@@ -112,6 +113,8 @@ pub struct MailApp {
     pub move_to: bool,
     /// The window for a new, renamed or removed folder, while it is open.
     pub folder_edit: Option<folders::FolderEdit>,
+    /// The "Alle categorieën" window, while it is open.
+    pub categories: Option<categories::Manager>,
     /// What the "Beeld" tab chose; read from `view.json` at start.
     pub view: view::ViewPrefs,
     /// Whether the saved theme has been handed to egui yet (on the first frame).
@@ -142,6 +145,7 @@ impl MailApp {
             rules: None,
             move_to: false,
             folder_edit: None,
+            categories: None,
             view,
             theme_applied: false,
         }
@@ -199,6 +203,7 @@ impl MailApp {
         rules::window(self, &ctx, &t);
         move_window(self, &ctx, &t);
         folders::window(self, &ctx, &t);
+        categories::window(self, &ctx, &t);
         drag_preview(self, &ctx, &t);
         if self.tab == Tab::Home && self.module == Module::Mail {
             shortcuts(self, &ctx);
@@ -362,6 +367,7 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ribbon_button(app, ui, t, "◉", "Gelezen", ("message.mark_read", Some(&key_hint("Q"))), has);
                     ribbon_button(app, ui, t, "○", "Ongelezen", ("message.mark_unread", Some(&key_hint("U"))), has);
                     ribbon_button(app, ui, t, "⚑", "Vlag", ("message.flag", None), has);
+                    categories::menu(app, ui, t);
                     ui.separator();
                     if ribbon_action_hint(ui, t, "⚙", "Regels", true, Some("Mail automatisch verplaatsen of markeren")) {
                         app.open_rules(false);
@@ -822,10 +828,11 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         egui::FontId::proportional(12.0),
                         if m.flags.flagged { t.flag } else { t.text_dim },
                     );
+                    let squares = categories::squares(app, p, egui::pos2(x + w, rect.top() + 34.0), &m.categories);
                     p.text(
                         egui::pos2(x, rect.top() + 34.0),
                         egui::Align2::LEFT_CENTER,
-                        clip(&m.subject, 48),
+                        clip(&m.subject, if squares > 0.0 { 40 } else { 48 }),
                         egui::FontId::proportional(13.0),
                         if m.flags.seen { t.text } else { t.accent_text },
                     );
@@ -874,7 +881,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 }
 
 fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
-    let Some(m) = app.engine.session.selected() else {
+    let Some(m) = app.engine.session.selected().cloned() else {
         ui.centered_and_justified(|ui| ui.label(RichText::new("Selecteer een bericht om het te lezen.").color(t.text_dim).size(15.0)));
         return;
     };
@@ -896,6 +903,11 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     });
     ui.add_space(8.0);
     let message_id = m.id.clone();
+    let names = m.categories.clone();
+    if !names.is_empty() {
+        categories::chips(app, ui, t, &message_id, &names);
+        ui.add_space(6.0);
+    }
     let body = app.engine.session.selected_body().cloned();
     let loading = app.engine.session.loading.contains(&m.id);
     let sample = app.engine.session.is_sample();
@@ -1103,6 +1115,7 @@ mod tests {
             answered: false,
             size: 1,
             has_attachments: false,
+            categories: Vec::new(),
             header: mailcraft_mime::parse_header(b"From: boekhouding@voorbeeld.nl\r\nSubject: Jaaroverzicht\r\n\r\n"),
             date: 1_700_000_000,
         };
@@ -1601,6 +1614,38 @@ mod tests {
         h.run();
         h.run();
         assert_eq!(h.ctx.theme(), egui::Theme::Light);
+    }
+
+    #[test]
+    fn a_category_is_put_on_a_message_from_the_menu_and_the_list_is_managed() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Welkom bij Mailcraft").click();
+        h.run();
+        h.get_by_label_contains("Categoriseren").click();
+        h.run();
+        h.get_by_label_contains("Rode categorie").click();
+        h.run();
+        assert_eq!(h.state().engine.session.message("m0").map(|m| m.categories.clone()), Some(vec!["Rode categorie".to_string()]));
+        // The chip above the message takes it off again.
+        h.get_by_label("Rode categorie").click();
+        h.run();
+        assert!(h.state().engine.session.message("m0").is_some_and(|m| m.categories.is_empty()));
+
+        h.state_mut().open_categories();
+        h.run();
+        h.state_mut().categories.as_mut().expect("manager").name = "Klanten".into();
+        h.run();
+        h.get_by_label("Toevoegen").click();
+        h.run();
+        assert!(h.state().engine.session.categories.iter().any(|c| c.name == "Klanten"));
+        assert_eq!(h.state().categories.as_ref().map(|m| m.name.as_str()), Some(""), "the field is cleared for the next one");
+        h.get_by_label("Toevoegen").click();
+        h.run();
+        assert!(h.state().categories.as_ref().and_then(|m| m.error.as_deref()).is_some(), "an empty name is refused");
+        h.get_by_label("Sluiten").click();
+        h.run();
+        assert!(h.state().categories.is_none());
     }
 
     #[test]

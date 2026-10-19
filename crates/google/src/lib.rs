@@ -105,6 +105,10 @@ impl Mailbox for GoogleMailbox {
         Mailbox::empty_folder(&mut self.imap, folder)
     }
 
+    fn set_categories(&mut self, folder: &str, id: &str, categories: &[String], removed: &[String]) -> Result<()> {
+        Mailbox::set_categories(&mut self.imap, folder, id, categories, removed)
+    }
+
     fn items(&mut self) -> Option<&mut dyn ItemStore> {
         self.items.as_mut().map(|i| i as &mut dyn ItemStore)
     }

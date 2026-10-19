@@ -342,6 +342,13 @@ impl EwsClient {
     }
 }
 
+/// The `Categories` strings of an item.
+fn categories_of(item: Node<'_, '_>) -> Vec<String> {
+    child(item, "Categories")
+        .map(|c| c.children().filter(|n| n.is_element()).filter_map(|n| n.text()).map(clean_text).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default()
+}
+
 fn header_of(item: Node<'_, '_>) -> RemoteHeader {
     let subject = text(item, "Subject").map(clean_text).unwrap_or_default();
     let date = text(item, "DateTimeReceived").and_then(parse_datetime).unwrap_or(0);
@@ -355,6 +362,7 @@ fn header_of(item: Node<'_, '_>) -> RemoteHeader {
         answered: matches!(last_verb, Some(102 | 103)),
         size: text(item, "Size").and_then(|s| s.parse().ok()).unwrap_or(0),
         has_attachments: text(item, "HasAttachments") == Some("true"),
+        categories: categories_of(item),
         header: mailcraft_mime::ParsedHeader { from, to: Vec::new(), subject, date: Some(date), message_id },
         date,
     }
@@ -368,7 +376,7 @@ fn find_item_request(folder: &str, offset: u32, limit: u32, query: Option<&str>)
         concat!(
             "<m:FindItem Traversal=\"Shallow\"><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape><t:AdditionalProperties>",
             "<t:FieldURI FieldURI=\"item:Subject\"/><t:FieldURI FieldURI=\"item:DateTimeReceived\"/>",
-            "<t:FieldURI FieldURI=\"item:HasAttachments\"/><t:FieldURI FieldURI=\"item:Size\"/>",
+            "<t:FieldURI FieldURI=\"item:HasAttachments\"/><t:FieldURI FieldURI=\"item:Size\"/><t:FieldURI FieldURI=\"item:Categories\"/>",
             "<t:FieldURI FieldURI=\"message:From\"/><t:FieldURI FieldURI=\"message:IsRead\"/>",
             "<t:FieldURI FieldURI=\"message:InternetMessageId\"/>{flag}{verb}",
             "</t:AdditionalProperties></m:ItemShape>",
@@ -524,6 +532,18 @@ impl Mailbox for EwsClient {
         let xml =
             self.call(&format!("<m:DeleteItem DeleteType=\"SoftDelete\"><m:ItemIds><t:ItemId Id=\"{}\"/></m:ItemIds></m:DeleteItem>", esc(id)))?;
         response_messages(&parse(&xml)?, false).map(drop)
+    }
+
+    fn set_categories(&mut self, _folder: &str, id: &str, categories: &[String], _removed: &[String]) -> Result<()> {
+        let change = if categories.is_empty() {
+            "<t:DeleteItemField><t:FieldURI FieldURI=\"item:Categories\"/></t:DeleteItemField>".to_string()
+        } else {
+            let strings: String = categories.iter().map(|c| format!("<t:String>{}</t:String>", esc(c))).collect();
+            format!(
+                "<t:SetItemField><t:FieldURI FieldURI=\"item:Categories\"/><t:Message><t:Categories>{strings}</t:Categories></t:Message></t:SetItemField>"
+            )
+        };
+        self.update(id, &change)
     }
 
     fn empty_folder(&mut self, folder: &str) -> Result<()> {
