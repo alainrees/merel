@@ -228,6 +228,7 @@ mod tests {
             notes: String::new(),
             recurrence: None,
             reminder: None,
+            private: false,
         }
     }
 
