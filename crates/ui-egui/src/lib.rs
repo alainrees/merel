@@ -17,6 +17,7 @@ pub mod eml;
 pub mod folders;
 mod fonts;
 pub mod groups;
+pub mod helder;
 pub mod help;
 mod html;
 pub mod importance;
