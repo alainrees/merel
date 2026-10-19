@@ -1,5 +1,8 @@
 //! Outlook's "Doorsturen als bijlage": a new message with the selected one attached as an
-//! `.eml` file, headers and all, so the reader sees it exactly as it arrived.
+//! `.eml` file, headers and all, so the reader sees it exactly as it arrived. The same source
+//! goes to disk for "Opslaan als…" under Bestand, Outlook's "Save As".
+
+use std::path::{Path, PathBuf};
 
 use mailcraft_model::{Address, FolderKind, MessageHeader, clean_text};
 
@@ -8,6 +11,8 @@ use crate::compose::{Compose, Kind, prefixed};
 
 pub const FORWARD: &str = "Doorsturen als bijlage";
 pub const NOT_FROM_JUNK: &str = "Uit de map Ongewenst wordt niets doorgestuurd.";
+pub const SAVE_AS: &str = "Opslaan als…";
+pub const NOTHING_TO_SAVE: &str = "Open eerst een bericht om het op te slaan.";
 
 /// The attachment's file name: the subject, without the characters a file name cannot have,
 /// with `.eml`; `bericht.eml` when the subject is empty.
@@ -46,6 +51,15 @@ pub fn plain_source(m: &MessageHeader, text: &str) -> Vec<u8> {
 }
 
 impl MailApp {
+    /// The message as it arrived when the cache still holds its source, else a plain copy of
+    /// its envelope and text.
+    fn source_of(&self, m: &MessageHeader) -> Vec<u8> {
+        match self.engine.raw_message(&m.id) {
+            Some(raw) => raw.to_vec(),
+            None => plain_source(m, self.engine.session.bodies.get(&m.id).map(|b| b.text.as_str()).unwrap_or(&m.preview)),
+        }
+    }
+
     /// Opens a new message with the selected one attached as an `.eml` file, Outlook's
     /// "Doorsturen als bijlage": nothing is quoted, the message travels whole. Not from the
     /// Junk folder, whose mail is not passed on.
@@ -55,10 +69,7 @@ impl MailApp {
             self.notice = Some(NOT_FROM_JUNK.to_string());
             return;
         }
-        let bytes = match self.engine.raw_message(&m.id) {
-            Some(raw) => raw.to_vec(),
-            None => plain_source(&m, self.engine.session.bodies.get(&m.id).map(|b| b.text.as_str()).unwrap_or(&m.preview)),
-        };
+        let bytes = self.source_of(&m);
         let session = &self.engine.session;
         let signature = session.current_account().map(|a| a.signature.clone()).unwrap_or_default();
         let account_id = session.current_account().map(|a| a.id.clone()).unwrap_or_default();
@@ -69,11 +80,66 @@ impl MailApp {
         }
         self.compose = Some(c);
     }
+
+    /// Outlook's "Opslaan als": the selected message as an `.eml` file in the Downloads folder,
+    /// named after its subject, never over an existing file. The status bar says where it went.
+    pub fn save_as_file(&mut self) {
+        let Some(dir) = crate::attachments::downloads_dir() else {
+            self.notice = Some("Bericht niet opgeslagen: geen map Downloads gevonden.".into());
+            return;
+        };
+        self.save_as_into(&dir);
+    }
+
+    /// Writes the selected message into `dir` as an `.eml` file; the path when it went in.
+    pub(crate) fn save_as_into(&mut self, dir: &Path) -> Option<PathBuf> {
+        let Some(m) = self.engine.session.selected().cloned() else {
+            self.notice = Some(NOTHING_TO_SAVE.to_string());
+            return None;
+        };
+        let bytes = self.source_of(&m);
+        match crate::attachments::save_to(dir, &file_name(&m.subject), &bytes) {
+            Ok(path) => {
+                self.notice = Some(format!("Bericht opgeslagen als {}", path.display()));
+                Some(path)
+            }
+            Err(e) => {
+                self.notice = Some(format!("Bericht niet opgeslagen: {e}"));
+                None
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MailApp;
+
+    #[test]
+    fn opslaan_als_writes_the_selected_message_as_an_eml_file_and_never_over_another() {
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let dir = std::env::temp_dir().join(format!("mailcraft-save-as-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+
+        assert!(app.save_as_into(&dir).is_none(), "nothing is selected yet");
+        assert_eq!(app.notice.as_deref(), Some(NOTHING_TO_SAVE));
+
+        let id = app.engine.session.visible_messages().first().map(|m| m.id.clone()).expect("sample mail");
+        app.select_message(&id);
+        let m = app.engine.session.selected().cloned().expect("selected");
+        let first = app.save_as_into(&dir).expect("the file is written");
+        assert_eq!(first.file_name().and_then(|n| n.to_str()), Some(file_name(&m.subject).as_str()));
+        let source = std::fs::read_to_string(&first).expect("readable");
+        assert!(source.contains(&format!("Subject: {}", m.subject)) && source.contains(m.from.email()), "{source}");
+        assert!(app.notice.as_deref().is_some_and(|n| n.starts_with("Bericht opgeslagen als ")), "{:?}", app.notice);
+
+        let second = app.save_as_into(&dir).expect("a second copy gets its own name");
+        assert_ne!(first, second);
+        assert!(second.to_string_lossy().ends_with(" (2).eml"), "{}", second.display());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn the_file_is_named_after_the_subject_without_what_a_file_name_cannot_hold() {
