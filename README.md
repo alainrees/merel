@@ -20,7 +20,7 @@ The Outlook-style window (ribbon, module rail, folder pane, message list, readin
 built-in sample mail, and reading mail from an IMAP account: add it under File › Accounts,
 browse folders, open messages (plain text, or HTML drawn with its headings, lists, tables, links
 and embedded pictures, while pictures on the internet stay blocked until you click "Afbeeldingen
-laden" for that one message), mark read or unread, flag,
+laden" for that one message; a click on an attachment saves it to your Downloads folder), mark read or unread, flag,
 delete, archive and move to junk; changes go back to the server. A folder shows its newest 200
 messages and a button at the bottom of the list fetches the next 200, as often as needed. A search box above the
 message list narrows it by subject, sender, recipient or preview text, in the current folder or
