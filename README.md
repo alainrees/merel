@@ -166,7 +166,9 @@ new message, appointment, contact or task, as in Outlook (the contact and task f
 of them fires while you are typing in a text field or writing a message. A right click on a message opens a menu with
 the everyday actions (reply, forward, read or unread, flag, move, archive, junk, delete) and two Outlook favourites:
 "Taak maken van dit bericht" and "Afspraak maken van dit bericht", which open a new task or appointment named after the
-message, with the sender, the date and the text as notes. Hovering a ribbon button
+message, with the sender, the date and the text as notes. Two more are about the sender: "Alles van deze afzender
+zoeken" puts the address in the search box over every folder, and "Regel maken voor deze afzender…" opens the rules
+window with a rule for that address filled in. Hovering a ribbon button
 shows its shortcut, and the "Help" tab lists them all in one window; the same tab opens the folder
 that holds your settings and cache, the project page, and "Over Mailcraft" with the version.
 
