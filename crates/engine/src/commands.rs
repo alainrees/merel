@@ -90,6 +90,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "sync.refresh", label: "Refresh calendar, contacts and tasks", run: crate::sync::refresh },
     CommandSpec { id: "draft.save", label: "Save draft", run: crate::drafts::save },
     CommandSpec { id: "draft.delete", label: "Delete draft", run: crate::drafts::delete },
+    CommandSpec { id: "draft.schedule", label: "Send draft later", run: crate::drafts::schedule },
 ];
 
 impl Session {

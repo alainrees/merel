@@ -382,6 +382,10 @@ pub struct Session {
     pub outbox: HashMap<u64, SendState>,
     /// Messages being written that were put aside, every account's together.
     pub drafts: Vec<StoredDraft>,
+    /// Scheduled messages on their way: the outbox id and the stored draft it came from, which
+    /// stays until the server took the message.
+    pub scheduled_sends: HashMap<u64, String>,
+    scheduled_failures: Vec<String>,
     /// The id `draft.save` gave or kept, for the window that saved it.
     pub last_draft: Option<String>,
     next_stored_draft: u64,
@@ -813,6 +817,7 @@ impl Session {
                 Err(e) => self.sign_in = Some(Some(Err(e))),
             },
             Event::Sent { account_id, draft_id, result } => {
+                self.settle_scheduled(draft_id, result.clone());
                 let state = match result {
                     Ok(()) => SendState::Sent,
                     Err(e) => SendState::Failed(e),
@@ -1212,6 +1217,15 @@ impl Engine {
     /// Applies everything the worker has reported. Returns true when something changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
+        // Messages whose moment has come go out now.
+        let due = self.session.due_scheduled(drafts::now());
+        if !due.is_empty() {
+            for id in due {
+                self.session.send_scheduled(&id);
+            }
+            self.cache.note_commands(&self.session);
+            changed = true;
+        }
         // New mail comes in on its own: open folders every two minutes, items every five.
         if self.last_refresh.elapsed() >= REFRESH_EVERY {
             self.last_refresh = Instant::now();
@@ -1235,7 +1249,12 @@ impl Engine {
                 Event::Connected { account_id, .. } => self.cache.take_pending(account_id),
                 _ => Vec::new(),
             };
+            let sent = matches!(e, Event::Sent { .. });
             self.session.apply(e);
+            if sent {
+                // A scheduled message that went out, or came back as a draft, changes the drafts.
+                self.cache.note_commands(&self.session);
+            }
             self.session.prepend_jobs(replay);
             if let Some(id) = signed_in {
                 if let Err(e) = self.save_accounts() {
