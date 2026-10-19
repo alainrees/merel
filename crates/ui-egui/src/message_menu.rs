@@ -19,6 +19,8 @@ pub enum Pick {
     Command(&'static str),
     /// A follow-up flag for the day named as `message.follow_up` takes it.
     FollowUp(&'static str),
+    /// Out of the list until the moment named as `message.snooze` takes it.
+    Snooze(&'static str),
     Move,
     Task,
     Appointment,
@@ -51,11 +53,15 @@ pub fn attendee_line(m: &MessageHeader, me: &str) -> String {
     list.into_iter().map(mailbox).collect::<Vec<_>>().join("; ")
 }
 
+/// Outlook's "Sluimeren", the submenu's name.
+pub const SNOOZE: &str = "Sluimeren";
+pub const UNSNOOZE: &str = "Niet meer sluimeren";
+
 /// Draws the menu on `r` for message `m`; what was clicked comes back once, to be run by
 /// [`MailApp::act_on_message`]. `known_sender` says whether the sender is in the contacts,
 /// `in_junk` whether the message sits in the Junk folder, `ignored` whether its conversation
-/// is ignored.
-pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, ignored: bool) -> Option<Pick> {
+/// is ignored, `snoozed` whether it is put off with "Sluimeren".
+pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, ignored: bool, snoozed: bool) -> Option<Pick> {
     let mut pick = None;
     r.context_menu(|ui| {
         let read = if m.flags.seen { ("Als ongelezen markeren", "message.mark_unread") } else { ("Als gelezen markeren", "message.mark_read") };
@@ -106,6 +112,23 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
                         egui::Popup::close_all(ui.ctx());
                     }
                 });
+                // Outlook's "Sluimeren": out of the list until a moment of choice.
+                ui.menu_button(SNOOZE, |ui| {
+                    for (when, label) in mailcraft_engine::snooze::WHEN {
+                        if ui.button(label).clicked() {
+                            pick = Some(Pick::Snooze(when));
+                        }
+                    }
+                    if snoozed {
+                        ui.separator();
+                        if ui.button(UNSNOOZE).clicked() {
+                            pick = Some(Pick::Command("message.unsnooze"));
+                        }
+                    }
+                    if pick.is_some() {
+                        egui::Popup::close_all(ui.ctx());
+                    }
+                });
             }
             if ui.button(label).clicked() {
                 pick = Some(p);
@@ -137,6 +160,7 @@ impl MailApp {
             Pick::Compose(kind) => self.open_compose(kind),
             Pick::Command(id) => self.run(id, Value::Null),
             Pick::FollowUp(when) => self.run("message.follow_up", json!({ "when": when })),
+            Pick::Snooze(when) => self.run("message.snooze", json!({ "when": when })),
             Pick::Move => self.move_to = true,
             Pick::Task => self.task_from_message(m),
             Pick::Appointment => self.appointment_from_message(m),
@@ -237,6 +261,20 @@ mod tests {
         assert_eq!(e.attendees, "Sanne de Vries <sanne@example.org>; Ravi <ravi@example.org>", "me (jij@example.org) left out, Sanne once");
         assert!(e.notes.starts_with("Van: Sanne de Vries"));
         assert_eq!(e.calendar_id, None, "the sample account has no calendar of its own; the window picks the default");
+    }
+
+    #[test]
+    fn sluimeren_takes_the_message_out_of_the_list_until_its_moment() {
+        let mut app = MailApp::new(Engine::sample());
+        let m = app.engine.session.message("m1").expect("sample mail").clone();
+        app.act_on_message(&m, Pick::Snooze("tomorrow"));
+        assert!(!app.engine.session.visible_messages().iter().any(|h| h.id == "m1"), "out of the list");
+        let now = chrono::Local::now().timestamp();
+        let until = app.engine.session.snoozed_until(&m, now).expect("a moment");
+        assert!(until > now && until - now <= 48 * 3600);
+        assert_eq!(app.engine.session.snoozes_due(now).len(), 0);
+        app.act_on_message(&m, Pick::Command("message.unsnooze"));
+        assert!(app.engine.session.visible_messages().iter().any(|h| h.id == "m1"), "back by hand");
     }
 
     #[test]
