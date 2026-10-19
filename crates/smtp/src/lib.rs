@@ -78,6 +78,10 @@ pub fn build(from: &Address, draft: &Draft) -> Result<Message, SmtpError> {
             .raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("X-Priority"), priority.to_string()))
             .raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Importance"), importance.to_string()));
     }
+    // Outlook's "Leesbevestiging vragen": the reader's program may answer to this address.
+    if draft.read_receipt {
+        b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Disposition-Notification-To"), format!("<{}>", from.email())));
+    }
     if draft.attachments.is_empty() {
         return b.header(ContentType::TEXT_PLAIN).body(draft.body.clone()).map_err(|e| SmtpError::Build(e.to_string()));
     }
@@ -131,6 +135,7 @@ mod tests {
             in_reply_to: Some("<abc@example.org>".into()),
             attachments: Vec::new(),
             importance: Importance::High,
+            read_receipt: true,
         };
         let m = build(&from, &draft).unwrap();
         let text = String::from_utf8(m.formatted()).unwrap();
@@ -141,6 +146,7 @@ mod tests {
         assert_ne!(message_id(&from), message_id(&from));
         assert!(text.contains("Prima, tien uur."));
         assert!(text.contains("X-Priority: 1 (Highest)\r\n") && text.contains("Importance: High\r\n"), "{text}");
+        assert!(text.contains("Disposition-Notification-To: <jij@example.org>\r\n"), "{text}");
     }
 
     #[test]
@@ -159,6 +165,7 @@ mod tests {
         let text = String::from_utf8(build(&from, &draft).unwrap().formatted()).unwrap();
         assert!(text.contains("Content-Type: multipart/mixed"));
         assert!(!text.contains("Importance:") && !text.contains("X-Priority:"), "normal importance adds no header");
+        assert!(!text.contains("Disposition-Notification-To"), "no receipt asked, no header");
         assert!(text.contains("Zie bijlage."));
         assert!(text.contains("Content-Type: application/pdf"), "{text}");
         assert!(text.contains("filename=\"offerte.pdf\""), "{text}");

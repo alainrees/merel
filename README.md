@@ -177,6 +177,13 @@ happens by itself: a window first says what will be done, a mail to the list's a
 came in on (preferred, since it tells the sender nothing new) or the list's web page in the browser (which does tell
 the sender the mail was read), and the person decides. Mail in the Junk folder gets no such offer.
 
+Read receipts, Outlook's "Leesbevestiging": "Leesbevestiging vragen" in the compose window adds the
+`Disposition-Notification-To` header, and a message whose sender asked for one shows "De afzender vraagt een
+leesbevestiging." over the text with "Leesbevestiging sturen". Nothing goes back by itself: the receipt is a short plain
+mail ("Gelezen: subject", with the moment it was read, answering the message) from the account the message came in
+on, sent only when the button is pressed; the sender learns nothing otherwise. Mail in the Junk folder gets no such
+offer.
+
 A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
 hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the
 list until then and comes back unread, with a line in the status bar; the "Gesluimerd" filter on the Beeld tab shows
