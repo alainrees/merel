@@ -10,7 +10,7 @@ use mailcraft_model::Template;
 
 use crate::{MailApp, Tokens};
 
-pub const MENU: &str = "Sjablonen ▾";
+pub const MENU: &str = "Sjablonen";
 pub const SAVE_AS: &str = "Tekst opslaan als sjabloon…";
 pub const MANAGE: &str = "Sjablonen beheren…";
 pub const HEADING: &str = "Sjablonen";
@@ -107,9 +107,9 @@ fn save_error(e: &CommandError) -> String {
 
 /// The "Sjablonen" menu in the compose window: a template to drop in, saving the text written
 /// so far, and the window.
-pub fn menu(ui: &mut Ui, templates: &[&Template]) -> Option<Pick> {
+pub fn menu(ui: &mut Ui, t: &crate::Tokens, templates: &[&Template]) -> Option<Pick> {
     let mut pick = None;
-    crate::action_menu(ui, MENU, |ui| {
+    crate::helder::menu_button(ui, t, Some(crate::helder::Icon::FileText), RichText::new(MENU).size(14.0).color(t.text), |ui| {
         for t in templates {
             if ui.button(&t.name).on_hover_text(t.first_line()).clicked() {
                 pick = Some(Pick::Insert(t.text.clone()));
@@ -129,7 +129,6 @@ pub fn menu(ui: &mut Ui, templates: &[&Template]) -> Option<Pick> {
             ui.close();
         }
     })
-    .0
     .on_hover_text("Een vaste tekst in het bericht zetten, zoals Mijn sjablonen in Outlook.");
     pick
 }

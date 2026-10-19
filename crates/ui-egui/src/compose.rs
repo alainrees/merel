@@ -15,6 +15,7 @@ use mailcraft_model::{Address, Draft, DraftAttachment, FolderKind, Importance, M
 
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 
+use crate::helder::{self, Icon};
 use crate::{MailApp, Tokens, calendar, dates};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +77,18 @@ pub const SEND_ANYWAY: &str = "Toch verzenden";
 pub const LOOK_AGAIN: &str = "Nog even nakijken";
 /// The tick box that signs the message with the account's S/MIME certificate.
 pub const SIGN: &str = "Ondertekenen";
+/// The send button.
+pub const SEND: &str = "Verzenden";
+/// The chevron beside the send button.
+pub const LATER: &str = "Later verzenden";
+/// The button that opens the file dialog.
+pub const ATTACH: &str = "Bijlage";
+/// The menu with the read receipt.
+pub const OPTIONS: &str = "Opties";
+/// The button that keeps the message under Concepten.
+pub const PUT_ASIDE: &str = "Opslaan als concept";
+/// The button that throws the message away.
+pub const DISCARD: &str = "Verwijderen";
 /// The tick box that encrypts the message for its recipients.
 pub const ENCRYPT: &str = "Versleutelen";
 
@@ -449,93 +462,103 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             _ => c.check = None,
         }
     }
+    let from = app.engine.session.accounts.iter().find(|a| a.id == account).map(|a| {
+        let (name, email) = (a.address.display(), a.address.email());
+        if name == email { email.to_string() } else { format!("{name} · {email}") }
+    });
+    let templates = app.engine.session.templates_sorted();
     egui::Window::new(if c.stored.is_some() { "Concept" } else { "Nieuw bericht" })
         .open(&mut open)
-        .default_size(vec2(680.0, 520.0))
-        .min_size(vec2(420.0, 320.0))
+        .default_size(vec2(860.0, 620.0))
+        .min_size(vec2(520.0, 360.0))
         .collapsible(false)
-        .frame(egui::Frame::window(&ctx.global_style()).fill(t.reading).stroke(Stroke::new(1.0, t.border)).inner_margin(Margin::same(14)))
+        .frame(helder::window_frame(ctx, t))
         .show(ctx, |ui| {
             ui.add_enabled_ui(!sending, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    // One even row: every button and menu the same height, the same gap between
-                    // them, also where the row wraps.
-                    ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-                    let h = crate::ACTION_HEIGHT;
-                    let b = egui::Button::new(RichText::new("Verzenden").color(t.on_accent)).fill(t.accent).min_size(vec2(110.0, h));
-                    if ui.add(b).clicked() {
-                        send = true;
-                    }
-                    if c.send_at.is_none() {
-                        crate::action_menu(ui, "Later verzenden ▾", |ui| {
-                            for (label, ts) in later_options(Local::now()) {
-                                if ui.button(label).clicked() {
-                                    schedule = Some(ts);
-                                    ui.close();
-                                }
-                            }
-                        })
-                        .0
-                        .on_hover_text(
-                            "Zet het bericht opzij en verstuurt het op dat moment, als Mailcraft dan draait. Tot die tijd staat het onder Concepten.",
-                        );
-                    }
-                    if ui
-                        .add(egui::Button::new("Opslaan als concept").min_size(vec2(140.0, h)))
-                        .on_hover_text(
-                            "Sluit het venster en bewaart het bericht onder Concepten bij het account. Het venster sluiten doet hetzelfde.",
-                        )
-                        .clicked()
-                    {
-                        put_aside = true;
-                    }
-                    if ui
-                        .add(egui::Button::new("Verwijderen").min_size(vec2(100.0, h)))
-                        .on_hover_text("Gooit het bericht weg, ook als concept.")
-                        .clicked()
-                    {
-                        discard = true;
-                    }
-                    if ui
-                        .add(egui::Button::new("📎 Bijlage toevoegen").min_size(vec2(150.0, h)))
-                        .on_hover_text("Kies een of meer bestanden. Je kunt ze ook naar dit venster slepen.")
-                        .clicked()
-                    {
-                        pick = true;
-                    }
-                    crate::importance::chooser(ui, t, &mut c.importance);
-                    ui.checkbox(&mut c.read_receipt, crate::receipt::ASK).on_hover_text(
-                        "Vraagt het mailprogramma van de ontvanger om je te laten weten dat het bericht is geopend; de ontvanger beslist zelf of dat gebeurt.",
-                    );
-                    if certificate.is_some() || c.sign == Some(true) {
-                        let mut on = c.sign.unwrap_or(certificate.is_some());
-                        let hover = match &certificate {
-                            Some(info) => format!(
-                                "Zet je digitale handtekening onder het bericht (S/MIME), met het certificaat van {}, geldig tot {}. De ontvanger ziet dat het bericht van jou komt en onderweg niet is veranderd.",
-                                info.name,
-                                crate::dates::day(info.not_after)
-                            ),
-                            None => "Dit account heeft geen certificaat meer; importeer er een onder Bestand of zet dit uit.".to_string(),
-                        };
-                        if ui.checkbox(&mut on, SIGN).on_hover_text(hover).changed() {
-                            c.sign = Some(on);
+                // The Helder command bar: the blue send button with its "later" half, then quiet
+                // icon buttons, and on the right what puts the message away.
+                helder::quiet(ui, t, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = vec2(4.0, 8.0);
+                        if send_button(ui, t, c.send_at.is_none()).clicked() {
+                            send = true;
                         }
-                    }
-                    if certificate.is_some() || c.encrypt {
-                        ui.checkbox(&mut c.encrypt, ENCRYPT).on_hover_text(
-                            "Versleutelt het bericht en de bijlagen (S/MIME), zodat alleen de ontvangers en jij het kunnen lezen. Het onderwerp gaat niet versleuteld. Dat lukt alleen naar mensen van wie je al een ondertekend bericht hebt gehad.",
-                        );
-                    }
-                    template = crate::templates::menu(ui, &app.engine.session.templates_sorted());
-                    if sending {
-                        ui.label(RichText::new("Verzenden…").color(t.text_dim));
-                    } else if hovering {
-                        ui.label(RichText::new("Laat los om toe te voegen").color(t.accent_text));
-                    }
+                        if c.send_at.is_none() {
+                            later_menu(ui, t, |ui| {
+                                for (label, ts) in later_options(Local::now()) {
+                                    if ui.button(label).clicked() {
+                                        schedule = Some(ts);
+                                        ui.close();
+                                    }
+                                }
+                            });
+                        }
+                        helder::bar_separator(ui, t);
+                        if helder::tool_button(ui, t, Icon::Paperclip, ATTACH)
+                            .on_hover_text("Kies een of meer bestanden. Je kunt ze ook naar dit venster slepen.")
+                            .clicked()
+                        {
+                            pick = true;
+                        }
+                        template = crate::templates::menu(ui, t, &templates);
+                        crate::importance::chooser(ui, t, &mut c.importance);
+                        if certificate.is_some() || c.sign == Some(true) {
+                            let on = c.sign.unwrap_or(certificate.is_some());
+                            let hover = match &certificate {
+                                Some(info) => format!(
+                                    "Zet je digitale handtekening onder het bericht (S/MIME), met het certificaat van {}, geldig tot {}. De ontvanger ziet dat het bericht van jou komt en onderweg niet is veranderd.",
+                                    info.name,
+                                    crate::dates::day(info.not_after)
+                                ),
+                                None => "Dit account heeft geen certificaat meer; importeer er een onder Bestand of zet dit uit.".to_string(),
+                            };
+                            if helder::toggle_button(ui, t, Icon::ShieldCheck, SIGN, on).on_hover_text(hover).clicked() {
+                                c.sign = Some(!on);
+                            }
+                        }
+                        if (certificate.is_some() || c.encrypt)
+                            && helder::toggle_button(ui, t, Icon::Lock, ENCRYPT, c.encrypt)
+                                .on_hover_text(
+                                    "Versleutelt het bericht en de bijlagen (S/MIME), zodat alleen de ontvangers en jij het kunnen lezen. Het onderwerp gaat niet versleuteld. Dat lukt alleen naar mensen van wie je al een ondertekend bericht hebt gehad.",
+                                )
+                                .clicked()
+                        {
+                            c.encrypt = !c.encrypt;
+                        }
+                        helder::menu_button(ui, t, Some(Icon::SlidersHorizontal), RichText::new(OPTIONS).size(14.0).color(t.text), |ui| {
+                            ui.checkbox(&mut c.read_receipt, crate::receipt::ASK).on_hover_text(
+                                "Vraagt het mailprogramma van de ontvanger om je te laten weten dat het bericht is geopend; de ontvanger beslist zelf of dat gebeurt.",
+                            );
+                        });
+                        // A narrow window puts the two on a line of their own rather than on top
+                        // of the buttons before them.
+                        if ui.available_width() < 2.0 * helder::BUTTON_HEIGHT + 24.0 {
+                            ui.end_row();
+                        }
+                        helder::right(ui, |ui| {
+                            if icon_button(ui, t, Icon::Trash, DISCARD).on_hover_text("Gooit het bericht weg, ook als concept.").clicked() {
+                                discard = true;
+                            }
+                            if icon_button(ui, t, Icon::Save, PUT_ASIDE)
+                                .on_hover_text(
+                                    "Opslaan als concept: sluit het venster en bewaart het bericht onder Concepten bij het account. Het venster sluiten doet hetzelfde.",
+                                )
+                                .clicked()
+                            {
+                                put_aside = true;
+                            }
+                            if sending {
+                                ui.label(RichText::new("Verzenden…").color(t.text_dim));
+                            } else if hovering {
+                                ui.label(RichText::new("Laat los om toe te voegen").color(t.accent_text));
+                            }
+                        });
+                    });
                 });
+                ui.add_space(8.0);
                 if let Some(check) = &c.check {
                     let mut look_again = false;
-                    egui::Frame::new().fill(t.flag.gamma_multiply(0.15)).corner_radius(4).inner_margin(8).show(ui, |ui| {
+                    egui::Frame::new().fill(t.flag.gamma_multiply(0.15)).corner_radius(helder::CONTROL_RADIUS).inner_margin(8).show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         for w in &check.warnings {
                             ui.label(RichText::new(format!("⚠ {w}")).color(t.text));
@@ -549,17 +572,17 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                             }
                         });
                     });
-                    ui.add_space(6.0);
+                    ui.add_space(8.0);
                     if look_again {
                         c.check = None;
                     }
                 }
                 if !missing.is_empty() {
-                    egui::Frame::new().fill(t.flag.gamma_multiply(0.15)).corner_radius(4).inner_margin(8).show(ui, |ui| {
+                    egui::Frame::new().fill(t.flag.gamma_multiply(0.15)).corner_radius(helder::CONTROL_RADIUS).inner_margin(8).show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.label(RichText::new(format!("🔒 {}", mailcraft_engine::certificates::missing_text(&missing))).color(t.text));
                     });
-                    ui.add_space(6.0);
+                    ui.add_space(8.0);
                 }
                 if let Some(ts) = c.send_at {
                     ui.horizontal_wrapped(|ui| {
@@ -572,40 +595,58 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                             c.send_at = None;
                         }
                     });
+                    ui.add_space(8.0);
                 }
-                ui.add_space(8.0);
-                field(ui, t, "Aan", &mut c.to);
-                crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut c.to);
-                field(ui, t, "CC", &mut c.cc);
-                crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut c.cc);
-                field(ui, t, "Onderwerp", &mut c.subject);
-                if !c.attachments.is_empty() {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.add_sized([80.0, 24.0], egui::Label::new(RichText::new("Bijlagen").color(t.text_dim)));
-                        for (i, a) in c.attachments.iter().enumerate() {
-                            egui::Frame::NONE
-                                .fill(t.panel)
-                                .stroke(Stroke::new(1.0, t.border))
-                                .corner_radius(6.0)
-                                .inner_margin(Margin::symmetric(8, 3))
-                                .show(ui, |ui| {
-                                    ui.label(RichText::new(format!("📎 {} ({})", a.name, crate::size_text(a.bytes.len()))).size(12.0).color(t.text));
-                                    if ui.small_button("✕").on_hover_text("Bijlage weghalen").clicked() {
-                                        remove = Some(i);
-                                    }
-                                });
+                // The message itself: one white card with the addresses, the subject, the
+                // attachments and the text.
+                helder::card_frame(t).inner_margin(Margin { left: 24, right: 24, top: 8, bottom: 16 }).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let wide = ui.available_width() - LABEL_WIDTH - 12.0;
+                    if let Some(from) = &from {
+                        address_row(ui, t, "Van", |ui| {
+                            ui.label(RichText::new(from).size(helder::FIELD_TEXT).color(t.text));
+                        });
+                    }
+                    address_row(ui, t, "Aan", |ui| helder::underline_field(ui, t, &mut c.to, "Ontvangers toevoegen", wide, false));
+                    crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut c.to);
+                    address_row(ui, t, "CC", |ui| helder::underline_field(ui, t, &mut c.cc, "", wide, false));
+                    crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut c.cc);
+                    ui.horizontal(|ui| {
+                        let width = if c.encrypt { ui.available_width() - 230.0 } else { ui.available_width() };
+                        helder::underline_field(ui, t, &mut c.subject, "Onderwerp toevoegen", width, true)
+                            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Onderwerp"));
+                        if c.encrypt {
+                            pill(ui, t, Icon::Lock, "Wordt versleuteld verzonden");
                         }
                     });
-                }
-                if let Some(e) = &c.error {
-                    ui.label(RichText::new(e).color(t.flag));
-                }
-                ui.add_space(6.0);
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-                    ui.add_sized(
-                        ui.available_size(),
-                        egui::TextEdit::multiline(&mut c.body).font(egui::TextStyle::Body).desired_width(f32::INFINITY),
-                    );
+                    if !c.attachments.is_empty() {
+                        ui.add_space(12.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+                            for (i, a) in c.attachments.iter().enumerate() {
+                                if attachment_tile(ui, t, &a.name, a.bytes.len()) {
+                                    remove = Some(i);
+                                }
+                            }
+                        });
+                    }
+                    if let Some(e) = &c.error {
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(e).color(t.flag));
+                    }
+                    ui.add_space(8.0);
+                    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                        let r = ui.add_sized(
+                            ui.available_size(),
+                            egui::TextEdit::multiline(&mut c.body)
+                                .frame(egui::Frame::NONE)
+                                .font(egui::FontId::proportional(helder::FIELD_TEXT))
+                                .text_color(t.text)
+                                .margin(Margin::symmetric(4, 8))
+                                .desired_width(f32::INFINITY),
+                        );
+                        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Bericht"));
+                    });
                 });
             });
         });
@@ -693,11 +734,96 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     }
 }
 
-fn field(ui: &mut Ui, t: &Tokens, label: &str, value: &mut String) {
+/// The width of the names before the address fields.
+const LABEL_WIDTH: f32 = 56.0;
+
+/// One row of the address block: the name in grey, then the field.
+fn address_row<R>(ui: &mut Ui, t: &Tokens, label: &str, add: impl FnOnce(&mut Ui) -> R) {
     ui.horizontal(|ui| {
-        ui.add_sized([80.0, 24.0], egui::Label::new(RichText::new(label).color(t.text_dim)));
-        ui.add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY));
+        ui.add_sized([LABEL_WIDTH, helder::BUTTON_HEIGHT], egui::Label::new(RichText::new(label).size(14.0).color(t.text_dim)));
+        add(ui);
     });
+}
+
+/// The blue "Verzenden" button; with `split` it is the left half, the "later" chevron the right.
+fn send_button(ui: &mut Ui, t: &Tokens, split: bool) -> egui::Response {
+    let r = helder::CONTROL_RADIUS;
+    let corners = if split { egui::CornerRadius { nw: r, sw: r, ne: 0, se: 0 } } else { egui::CornerRadius::same(r) };
+    ui.add(
+        egui::Button::image_and_text(Icon::Send.image(helder::ICON, t.on_accent), RichText::new(SEND).size(14.0).color(t.on_accent))
+            .fill(t.accent)
+            .stroke(Stroke::NONE)
+            .corner_radius(corners)
+            .min_size(vec2(0.0, helder::BUTTON_HEIGHT)),
+    )
+}
+
+/// The right half of the send button: a chevron that opens the moments for "Later verzenden".
+fn later_menu(ui: &mut Ui, t: &Tokens, add: impl FnOnce(&mut Ui)) {
+    let r = helder::CONTROL_RADIUS;
+    let button = egui::Button::image(Icon::ChevronDown.image(16.0, t.on_accent))
+        .fill(t.accent)
+        .stroke(Stroke::NONE)
+        .corner_radius(egui::CornerRadius { nw: 0, sw: 0, ne: r, se: r })
+        .min_size(vec2(30.0, helder::BUTTON_HEIGHT));
+    // Glued to the send button, with a thin light line between the two.
+    ui.add_space(-ui.spacing().item_spacing.x);
+    let (response, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, add);
+    ui.painter().vline(response.rect.left(), response.rect.shrink(8.0).y_range(), Stroke::new(1.0, t.on_accent.gamma_multiply(0.5)));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, LATER));
+    response.on_hover_text("Zet het bericht opzij en verstuurt het op dat moment, als Mailcraft dan draait. Tot die tijd staat het onder Concepten.");
+}
+
+/// A quiet square button with only an icon; `label` is what a screen reader says.
+fn icon_button(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str) -> egui::Response {
+    let r = ui.add(
+        egui::Button::image(icon.image(helder::ICON, t.text))
+            .frame_when_inactive(false)
+            .corner_radius(helder::CONTROL_RADIUS)
+            .min_size(vec2(helder::BUTTON_HEIGHT, helder::BUTTON_HEIGHT)),
+    );
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    r
+}
+
+/// A small rounded note with an icon, such as "Wordt versleuteld verzonden".
+fn pill(ui: &mut Ui, t: &Tokens, icon: Icon, text: &str) {
+    egui::Frame::new().fill(t.checked).corner_radius(12).inner_margin(Margin::symmetric(10, 4)).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        ui.add(icon.image(14.0, t.accent_text));
+        ui.label(RichText::new(text).size(12.0).color(t.accent_text));
+    });
+}
+
+/// An attachment as a tile: its kind, name and size, and a cross to take it off again.
+/// Whether the cross was clicked.
+fn attachment_tile(ui: &mut Ui, t: &Tokens, name: &str, bytes: usize) -> bool {
+    let mut gone = false;
+    egui::Frame::new()
+        .fill(t.window)
+        .stroke(Stroke::new(1.0, t.card_border))
+        .corner_radius(helder::CONTROL_RADIUS)
+        .inner_margin(Margin { left: 8, right: 4, top: 6, bottom: 6 })
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                let kind = Path::new(name).extension().and_then(|e| e.to_str()).unwrap_or("").to_uppercase();
+                let kind: String = kind.chars().take(4).collect();
+                let (rect, _) = ui.allocate_exact_size(vec2(28.0, 28.0), egui::Sense::hover());
+                ui.painter().rect_filled(rect, 6, t.checked);
+                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, kind, egui::FontId::proportional(9.0), t.accent_text);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui.label(RichText::new(name).size(13.0).color(t.text));
+                    ui.label(RichText::new(crate::size_text(bytes)).size(12.0).color(t.text_dim));
+                });
+                let r = ui.add(egui::Button::image(Icon::X.image(14.0, t.text_dim)).frame_when_inactive(false).min_size(vec2(28.0, 28.0)));
+                let label = format!("{name} weghalen");
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+                gone = r.on_hover_text("Bijlage weghalen").clicked();
+            });
+        });
+    gone
 }
 
 #[cfg(test)]
@@ -780,15 +906,14 @@ mod tests {
         let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         harness.run();
         harness.step();
-        let heights: Vec<f32> =
-            ["Verzenden", "Later verzenden ▾", "Opslaan als concept", "📎 Bijlage toevoegen", "Urgentie ▾", crate::templates::MENU]
-                .iter()
-                .map(|label| harness.get_by_label(label).rect().height())
-                .collect();
+        let heights: Vec<f32> = [SEND, LATER, PUT_ASIDE, ATTACH, "Urgentie: normaal", crate::templates::MENU, OPTIONS]
+            .iter()
+            .map(|label| harness.get_by_label(label).rect().height())
+            .collect();
         assert!(
-            heights.iter().all(|h| (h - crate::ACTION_HEIGHT).abs() < 1.0),
+            heights.iter().all(|h| (h - helder::BUTTON_HEIGHT).abs() < 1.0),
             "every button and menu is {} high, not {heights:?}",
-            crate::ACTION_HEIGHT
+            helder::BUTTON_HEIGHT
         );
     }
 
@@ -804,14 +929,15 @@ mod tests {
         }
         let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         harness.run();
-        harness.get_by_label("📎 Bijlage toevoegen");
-        harness.get_by_label("📎 offerte.pdf (2 kB)");
-        harness.get_by_label("📎 foto.jpg (10 B)");
-        harness.get_all_by_label("✕").next().expect("a remove button").click();
+        harness.get_by_label(ATTACH);
+        harness.get_by_label("offerte.pdf");
+        harness.get_by_label("2 kB");
+        harness.get_by_label("foto.jpg");
+        harness.get_by_label("offerte.pdf weghalen").click();
         harness.run();
         let names: Vec<String> = harness.state().compose.as_ref().map(|c| c.attachments.iter().map(|a| a.name.clone()).collect()).unwrap_or_default();
         assert_eq!(names, ["foto.jpg"]);
-        assert!(harness.query_by_label("📎 offerte.pdf (2 kB)").is_none());
+        assert!(harness.query_by_label("offerte.pdf").is_none());
     }
 
     #[test]
@@ -822,14 +948,16 @@ mod tests {
         app.open_compose(Kind::New);
         let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         h.run();
-        h.get_by_label("Urgentie ▾").click();
+        h.get_by_label("Urgentie: normaal").click();
         h.run();
         h.get_all_by_label("Hoog").next().expect("the menu item").click();
         h.run();
         assert_eq!(h.state().compose.as_ref().map(|c| c.importance), Some(Importance::High));
-        h.get_by_label("! Hoge urgentie");
+        h.get_by_label("Urgentie: hoog");
         assert_eq!(h.state().compose.as_ref().map(|c| c.as_stored().importance), Some(Importance::High));
         assert_eq!(h.state().compose.as_ref().and_then(|c| c.as_stored().to_draft().ok()).map(|d| d.importance), None, "no recipient yet");
+        h.get_by_label(OPTIONS).click();
+        h.run();
         h.get_by_label(crate::receipt::ASK).click();
         h.run();
         assert_eq!(h.state().compose.as_ref().map(|c| (c.read_receipt, c.as_stored().read_receipt)), Some((true, true)));
@@ -843,7 +971,7 @@ mod tests {
         app.open_compose(Kind::New);
         let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         h.run();
-        h.get_by_label("Later verzenden ▾").click();
+        h.get_by_label(LATER).click();
         h.run();
         h.get_by_label("Over een uur").click();
         h.run();
@@ -855,7 +983,7 @@ mod tests {
             c.subject = "Later".into();
         }
         h.run();
-        h.get_by_label("Later verzenden ▾").click();
+        h.get_by_label(LATER).click();
         h.run();
         h.get_by_label("Over een uur").click();
         h.run();
@@ -871,7 +999,7 @@ mod tests {
         let id = drafts[0].id.clone();
         h.state_mut().open_draft(&id);
         h.run();
-        assert!(h.query_by_label("Later verzenden ▾").is_none(), "no second moment on top of the first");
+        assert!(h.query_by_label(LATER).is_none(), "no second moment on top of the first");
         h.get_by_label("Niet meer uitstellen").click();
         h.run();
         assert_eq!(h.state().compose.as_ref().and_then(|c| c.send_at), None);
@@ -943,7 +1071,7 @@ mod tests {
         }
         let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         h.run();
-        h.get_by_label("Later verzenden ▾").click();
+        h.get_by_label(LATER).click();
         h.run();
         h.get_by_label("Over een uur").click();
         h.run();
