@@ -97,6 +97,17 @@ pub enum Job {
         id: String,
         dest: String,
     },
+    /// Remove one message for good (it was in the Deleted folder already).
+    Delete {
+        account_id: String,
+        path: String,
+        id: String,
+    },
+    /// Remove every message in a folder for good.
+    Empty {
+        account_id: String,
+        path: String,
+    },
     /// Send `draft` (over SMTP, or through the store itself) and file a copy in `sent_path`.
     Send {
         account_id: String,
@@ -148,6 +159,8 @@ impl Job {
             | Job::Search { account_id, .. }
             | Job::Flag { account_id, .. }
             | Job::Move { account_id, .. }
+            | Job::Delete { account_id, .. }
+            | Job::Empty { account_id, .. }
             | Job::Send { account_id, .. }
             | Job::Sync { account_id, .. }
             | Job::SaveItem { account_id, .. }
@@ -161,7 +174,7 @@ impl Job {
     /// Whether the job changes something on the server, so it must not be lost offline. A
     /// folder change is not kept: the person sees the folder list, so it needs the server now.
     pub fn is_change(&self) -> bool {
-        matches!(self, Job::Flag { .. } | Job::Move { .. } | Job::SaveItem { .. } | Job::DeleteItem { .. })
+        matches!(self, Job::Flag { .. } | Job::Move { .. } | Job::Delete { .. } | Job::Empty { .. } | Job::SaveItem { .. } | Job::DeleteItem { .. })
     }
 }
 
@@ -1182,7 +1195,7 @@ mod tests {
         }
     }
 
-    fn header(n: u32) -> RemoteHeader {
+    pub(crate) fn header(n: u32) -> RemoteHeader {
         RemoteHeader {
             id: n.to_string(),
             seen: true,

@@ -519,6 +519,21 @@ impl Mailbox for EwsClient {
         response_messages(&parse(&xml)?, false).map(drop)
     }
 
+    fn delete_message(&mut self, _folder: &str, id: &str) -> Result<()> {
+        // Soft: out of the mailbox, but the server can still recover it for a while.
+        let xml =
+            self.call(&format!("<m:DeleteItem DeleteType=\"SoftDelete\"><m:ItemIds><t:ItemId Id=\"{}\"/></m:ItemIds></m:DeleteItem>", esc(id)))?;
+        response_messages(&parse(&xml)?, false).map(drop)
+    }
+
+    fn empty_folder(&mut self, folder: &str) -> Result<()> {
+        let xml = self.call(&format!(
+            "<m:EmptyFolder DeleteType=\"SoftDelete\" DeleteSubFolders=\"false\"><m:FolderIds><t:FolderId Id=\"{}\"/></m:FolderIds></m:EmptyFolder>",
+            esc(folder)
+        ))?;
+        response_messages(&parse(&xml)?, false).map(drop)
+    }
+
     fn append(&mut self, folder: &str, message: &[u8]) -> Result<()> {
         // MSGFLAG_READ, so the copy is neither unread nor a draft.
         let read = format!("<t:ExtendedProperty>{}<t:Value>1</t:Value></t:ExtendedProperty>", extended_field(PR_MESSAGE_FLAGS));

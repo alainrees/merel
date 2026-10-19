@@ -97,6 +97,14 @@ impl Mailbox for GoogleMailbox {
         Mailbox::delete_folder(&mut self.imap, folder)
     }
 
+    fn delete_message(&mut self, folder: &str, id: &str) -> Result<()> {
+        Mailbox::delete_message(&mut self.imap, folder, id)
+    }
+
+    fn empty_folder(&mut self, folder: &str) -> Result<()> {
+        Mailbox::empty_folder(&mut self.imap, folder)
+    }
+
     fn items(&mut self) -> Option<&mut dyn ItemStore> {
         self.items.as_mut().map(|i| i as &mut dyn ItemStore)
     }

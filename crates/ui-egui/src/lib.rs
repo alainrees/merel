@@ -138,8 +138,13 @@ impl MailApp {
         }
     }
 
-    /// Runs a command; an error is shown, never raised.
+    /// Runs a command; an error is shown, never raised. Deleting a message that is in the
+    /// Deleted folder already would remove it for good, so that asks first.
     fn run(&mut self, id: &str, params: Value) {
+        if id == "message.delete" && self.selected_is_deleted() {
+            self.delete_forever();
+            return;
+        }
         self.notice = match self.engine.run(id, &params) {
             Ok(()) => None,
             Err(e) => {
@@ -1481,6 +1486,55 @@ mod tests {
         h.run();
         assert!(h.state().folder_edit.is_none());
         assert!(h.state().notice.as_deref().is_some_and(|n| n.contains("hoort bij het account")));
+    }
+
+    #[test]
+    fn deleting_from_the_deleted_folder_asks_first_and_a_folder_can_be_emptied_or_marked_read() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Map").click();
+        h.run();
+        assert!(h.state().engine.session.folder("inbox").is_some_and(|f| f.unread > 0));
+        h.get_by_label("Alles gelezen").click();
+        h.run();
+        assert_eq!(h.state().engine.session.folder("inbox").map(|f| f.unread), Some(0));
+
+        // Shortcuts belong to the Start tab.
+        h.get_by_label("Start").click();
+        h.run();
+        h.get_by_label("Welkom bij Mailcraft").click();
+        h.run();
+        h.key_press(egui::Key::Delete);
+        h.run();
+        assert_eq!(h.state().engine.session.message("m0").map(|m| m.folder_id.as_str()), Some("deleted"), "first to the deleted folder");
+        h.get_by_label("Verwijderde items").click();
+        h.run();
+        h.get_by_label("Welkom bij Mailcraft").click();
+        h.run();
+        h.key_press(egui::Key::Delete);
+        h.run();
+        assert!(h.state().engine.session.message("m0").is_some(), "nothing goes before the question is answered");
+        assert!(matches!(h.state().folder_edit.as_ref().map(|e| &e.action), Some(folders::Action::DeleteForever { .. })));
+        h.get_by_label("Annuleren").click();
+        h.run();
+        assert!(h.state().folder_edit.is_none() && h.state().engine.session.message("m0").is_some());
+        h.get_by_label("Verwijderen").click();
+        h.run();
+        h.get_by_label("Ja, verwijderen").click();
+        h.run();
+        assert!(h.state().engine.session.message("m0").is_none());
+
+        h.get_by_label("Postvak IN").click();
+        h.run();
+        h.get_by_label("Map").click();
+        h.run();
+        h.get_by_label("Map leegmaken").click();
+        h.run();
+        h.get_by_label("Ja, leegmaken").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert!(s.messages.iter().all(|m| m.folder_id != "inbox"));
+        assert!(h.query_all_by_label("Planning voor donderdag").next().is_none());
     }
 
     #[test]

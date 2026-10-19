@@ -528,6 +528,22 @@ impl Mailbox for GraphClient {
         self.call("DELETE", &format!("/me/mailFolders/{}", encode(folder)), None).map(drop)
     }
 
+    fn delete_message(&mut self, _folder: &str, id: &str) -> Result<()> {
+        // Graph moves a message in Deleted Items on to the recoverable items, like Outlook.
+        self.call("DELETE", &format!("/me/messages/{}", encode(id)), None).map(drop)
+    }
+
+    fn empty_folder(&mut self, folder: &str) -> Result<()> {
+        // Graph has no "empty folder": every message goes one by one, as many as `list` pages.
+        let path = format!("/me/mailFolders/{}/messages?$top={PAGE}&$select=id", encode(folder));
+        for m in self.list(&path)? {
+            if let Some(id) = id_of(&m) {
+                self.call("DELETE", &format!("/me/messages/{}", encode(&id)), None)?;
+            }
+        }
+        Ok(())
+    }
+
     fn append(&mut self, folder: &str, message: &[u8]) -> Result<()> {
         // Graph files raw MIME as a draft; sending goes through `send`, which files its own copy.
         self.post_mime(&format!("/me/mailFolders/{}/messages", encode(folder)), message)

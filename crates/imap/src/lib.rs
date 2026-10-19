@@ -241,6 +241,31 @@ impl ImapClient {
         Ok(())
     }
 
+    /// Removes one message for good: `\Deleted`, then expunged (the whole folder's deleted
+    /// messages when the server lacks UIDPLUS).
+    pub fn delete_message(&mut self, folder: &str, uid: u32) -> Result<()> {
+        if self.selected.as_deref() != Some(folder) {
+            self.select(folder)?;
+        }
+        let uid = uid.to_string();
+        self.session.uid_store(&uid, "+FLAGS.SILENT (\\Deleted)")?;
+        if self.session.uid_expunge(&uid).is_err() {
+            self.session.expunge()?;
+        }
+        Ok(())
+    }
+
+    /// Removes every message in `folder` for good.
+    pub fn empty_folder(&mut self, folder: &str) -> Result<()> {
+        let mb = self.select(folder)?;
+        if mb.exists == 0 {
+            return Ok(());
+        }
+        self.session.store("1:*", "+FLAGS.SILENT (\\Deleted)")?;
+        self.session.expunge()?;
+        Ok(())
+    }
+
     /// Files a sent message in `folder`, marked read.
     pub fn append(&mut self, folder: &str, message: &[u8]) -> Result<()> {
         let folder = quote(folder)?;
@@ -406,6 +431,14 @@ impl Mailbox for ImapClient {
 
     fn delete_folder(&mut self, folder: &str) -> mailcraft_mailbox::Result<()> {
         Ok(ImapClient::delete_folder(self, folder)?)
+    }
+
+    fn delete_message(&mut self, folder: &str, id: &str) -> mailcraft_mailbox::Result<()> {
+        Ok(ImapClient::delete_message(self, folder, uid_of(id)?)?)
+    }
+
+    fn empty_folder(&mut self, folder: &str) -> mailcraft_mailbox::Result<()> {
+        Ok(ImapClient::empty_folder(self, folder)?)
     }
 
     fn logout(self: Box<Self>) {
