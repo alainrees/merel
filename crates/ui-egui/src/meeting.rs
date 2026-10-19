@@ -6,6 +6,7 @@ use mailcraft_dav::ical::{self, Prop};
 use mailcraft_engine::{SAMPLE_ACCOUNT, Session};
 use mailcraft_model::{Account, Address, Appointment, Draft, DraftAttachment, parse_address_list};
 
+use crate::compose::{Compose, Kind};
 use crate::invitation;
 
 pub const FIELD: &str = "Genodigden";
@@ -13,6 +14,10 @@ pub const FILE: &str = "uitnodiging.ics";
 pub const MIME: &str = "text/calendar; method=REQUEST; charset=utf-8";
 pub const NO_ACCOUNT: &str = "Voeg eerst een echt account toe om een uitnodiging te kunnen versturen; de afspraak is nog niet opgeslagen.";
 pub const BAD_ADDRESSES: &str = "Controleer de adressen bij Genodigden.";
+/// The button in the window of a saved appointment that passes it on by mail.
+pub const FORWARD: &str = "Doorsturen…";
+pub const FORWARD_FILE: &str = "afspraak.ics";
+pub const FORWARD_MIME: &str = "text/calendar; method=PUBLISH; charset=utf-8";
 const NOTE: &str = "Genodigden: ";
 
 /// The addresses typed under Genodigden, or what is wrong with them; empty for no invitation.
@@ -72,6 +77,49 @@ pub fn draft(a: &Appointment, organizer: &Address, attendees: Vec<Address>) -> D
     Draft { to: attendees, subject: format!("Uitnodiging: {}", a.title.trim()), body, attachments: vec![attachment], ..Draft::default() }
 }
 
+/// The appointment as a published calendar file, for passing it on: no organiser, no attendees
+/// and nothing to answer, so the reader's program simply offers to add it.
+pub fn published(a: &Appointment) -> String {
+    let id: String = a.id.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let mut root = ical::new_calendar("VEVENT", &format!("{id}-{}@mailcraft.local", a.start));
+    root.props.push(Prop::new("METHOD", "PUBLISH"));
+    if let Some(event) = root.find_mut("VEVENT") {
+        ical::write_appointment(event, a);
+    }
+    root.serialize()
+}
+
+/// The message that passes an appointment on, Outlook's "Doorsturen" on an appointment: the
+/// appointment in words, and as an attachment the reader can put in their own calendar. The
+/// recipients are left to the person.
+pub fn forward(a: &Appointment) -> Draft {
+    let mut body = format!("Afspraak: {}\nWanneer: {}\n", a.title.trim(), invitation::when(a));
+    if !a.location.trim().is_empty() {
+        body.push_str(&format!("Waar: {}\n", a.location.trim()));
+    }
+    if !a.notes.trim().is_empty() {
+        body.push_str(&format!("\n{}\n", a.notes.trim()));
+    }
+    body.push_str("\nMet de bijgevoegde afspraak zet je hem in je eigen agenda.\n");
+    let mut attachment = DraftAttachment::new(FORWARD_FILE, published(a).into_bytes());
+    attachment.mime = FORWARD_MIME.to_string();
+    Draft { subject: format!("Doorgestuurd: {}", a.title.trim()), body, attachments: vec![attachment], ..Draft::default() }
+}
+
+/// The compose window for passing `a` on, from the calendar's account (else the current one),
+/// with that account's signature under the text.
+pub fn forward_window(session: &Session, a: &Appointment) -> Compose {
+    let account =
+        session.appointment_account(&a.calendar_id).and_then(|id| session.accounts.iter().find(|x| x.id == id)).or_else(|| session.current_account());
+    let (account_id, signature) = account.map(|x| (x.id.clone(), x.signature.clone())).unwrap_or_default();
+    let d = forward(a);
+    let mut c = Compose::new(Kind::New, None).with_signature(&signature).opened_from(&account_id);
+    c.subject = d.subject;
+    c.body = format!("{}{}", d.body, c.body);
+    c.attachments = d.attachments;
+    c
+}
+
 /// `ORGANIZER;CN=Naam:mailto:adres`, or an attendee the same way.
 fn person(name: &str, a: &Address) -> Prop {
     let p = Prop::new(name, &format!("mailto:{}", a.email()));
@@ -127,6 +175,25 @@ mod tests {
         assert_eq!((d.attachments[0].name.as_str(), d.attachments[0].mime.as_str()), (FILE, MIME));
         assert!(d.body.starts_with("Je bent uitgenodigd voor: Overleg ontwerp\nWanneer: ") && d.body.contains("Waar: Kamer 2\n"), "{}", d.body);
         assert!(d.body.contains("Organisator: Alain <alain@example.org>\n") && d.body.contains("\nSchetsen meenemen.\n"));
+    }
+
+    #[test]
+    fn forwarding_publishes_the_appointment_without_organiser_or_attendees() {
+        let text = published(&appointment()).replace("\r\n ", "");
+        assert!(text.contains("METHOD:PUBLISH\r\n") && text.contains("SUMMARY:Overleg ontwerp\r\n"), "{text}");
+        assert!(!text.contains("ORGANIZER") && !text.contains("ATTENDEE") && !text.contains("REQUEST"), "{text}");
+        let inv = invitation::parse(&text).expect("our own reading understands it");
+        assert_eq!((inv.title.as_str(), inv.cancelled), ("Overleg ontwerp", false));
+        assert_eq!(inv.appointment.map(|a| (a.start, a.end)), Some((1_792_000_000, 1_792_003_600)));
+
+        let d = forward(&appointment());
+        assert_eq!((d.subject.as_str(), d.to.len(), d.attachments.len()), ("Doorgestuurd: Overleg ontwerp", 0, 1));
+        assert_eq!((d.attachments[0].name.as_str(), d.attachments[0].mime.as_str()), (FORWARD_FILE, FORWARD_MIME));
+        assert!(
+            d.body.starts_with("Afspraak: Overleg ontwerp\nWanneer: ") && d.body.contains("Waar: Kamer 2\n") && d.body.contains("Schetsen meenemen."),
+            "{}",
+            d.body
+        );
     }
 
     #[test]

@@ -2042,6 +2042,25 @@ mod tests {
     }
 
     #[test]
+    fn doorsturen_in_the_appointment_window_opens_a_message_with_the_appointment_attached() {
+        let mut h = harness();
+        let a = h.state().engine.session.appointments.first().cloned().expect("a sample appointment");
+        h.state_mut().open_appointment(&a.id, a.start);
+        h.run();
+        h.get_by_label(meeting::FORWARD).click();
+        h.run();
+        assert!(h.state().calendar.editor.is_none(), "the appointment window closed");
+        let c = h.state().compose.as_ref().expect("the compose window");
+        assert_eq!(c.subject, format!("Doorgestuurd: {}", a.title));
+        assert!(c.to.is_empty() && c.body.contains(&a.title) && c.body.contains("Wanneer:"), "{}", c.body);
+        assert_eq!(
+            c.attachments.iter().map(|x| (x.name.as_str(), x.mime.as_str())).collect::<Vec<_>>(),
+            [(meeting::FORWARD_FILE, meeting::FORWARD_MIME)]
+        );
+        assert_eq!(c.account_id, h.state().engine.session.current_account().map(|x| x.id.clone()).unwrap_or_default());
+    }
+
+    #[test]
     fn an_appointment_with_attendees_offers_verzenden_and_needs_a_real_account() {
         let mut h = harness();
         let mut e = calendar::Editor::new_at(chrono::Local::now().naive_local());
