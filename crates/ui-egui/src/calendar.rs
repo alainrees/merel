@@ -1,6 +1,8 @@
 //! The calendar module: month, week and day views over the session's appointments, and the
 //! appointment window. Times are shown in the computer's time zone. A recurring appointment
 //! shows every occurrence; opening one opens the series, with a button to skip just that time.
+//! A search box above the view lists the matching appointments of the past year and the two
+//! years ahead instead of the view, until it is cleared.
 
 use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
 use egui::{Align2, Color32, CornerRadius, FontId, Margin, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
@@ -17,6 +19,11 @@ pub const WEEKDAYS: [&str; 7] = ["maandag", "dinsdag", "woensdag", "donderdag", 
 const WEEKDAYS_SHORT: [&str; 7] = ["ma", "di", "wo", "do", "vr", "za", "zo"];
 /// Marks an occurrence of a recurring appointment in the views.
 const REPEAT_MARK: &str = "🔁";
+/// The search box's widget id, so Ctrl+E can put the cursor there.
+pub(crate) const SEARCH_BOX: &str = "calendar_search_box";
+/// How far a search looks: this many days back and ahead of today.
+const SEARCH_BACK_DAYS: i64 = 365;
+const SEARCH_AHEAD_DAYS: i64 = 731;
 
 /// Pixels per hour in the week and day views.
 const HOUR_HEIGHT: f32 = 44.0;
@@ -35,12 +42,21 @@ pub struct State {
     pub view: View,
     /// The day the view is built around.
     pub focus: NaiveDate,
+    /// What the search box holds; while it has words, the results list replaces the view.
+    pub query: String,
     pub editor: Option<Editor>,
 }
 
 impl Default for State {
     fn default() -> Self {
-        State { view: View::Month, focus: today(), editor: None }
+        State { view: View::Month, focus: today(), query: String::new(), editor: None }
+    }
+}
+
+impl State {
+    /// Whether the results list is shown instead of the view.
+    pub fn is_searching(&self) -> bool {
+        !self.query.trim().is_empty()
     }
 }
 
@@ -658,15 +674,83 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 app.calendar.focus = step(app.calendar.view, app.calendar.focus, 1);
             }
             ui.add_space(8.0);
-            ui.label(RichText::new(period_title(app.calendar.view, app.calendar.focus)).size(18.0).strong().color(t.text));
+            let title = if app.calendar.is_searching() { "Zoekresultaten".to_string() } else { period_title(app.calendar.view, app.calendar.focus) };
+            ui.label(RichText::new(title).size(18.0).strong().color(t.text));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if app.calendar.is_searching() && ui.small_button("✕").on_hover_text("Zoekopdracht wissen").clicked() {
+                    app.calendar.query.clear();
+                }
+                let width = ui.available_width().clamp(80.0, 240.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut app.calendar.query)
+                        .id(egui::Id::new(SEARCH_BOX))
+                        .hint_text("Zoeken in agenda")
+                        .desired_width(width),
+                );
+            });
         });
         ui.add_space(8.0);
+        if app.calendar.is_searching() {
+            search_results(app, ui, t);
+            return;
+        }
         match app.calendar.view {
             View::Month => month_view(app, ui, t),
             View::Week => time_grid(app, ui, t, 7),
             View::Day => time_grid(app, ui, t, 1),
         }
     });
+}
+
+/// The appointments that match the search box, from a year back to two years ahead, one row
+/// per occurrence; a click opens it and moves the focus to its day.
+fn search_results(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let today = today();
+    let (Some(from), Some(to)) = (midnight(add_days(today, -SEARCH_BACK_DAYS)), midnight(add_days(today, SEARCH_AHEAD_DAYS))) else {
+        return;
+    };
+    let list = app.engine.session.appointments_matching(app.calendar.query.trim(), from, to);
+    let count = list.len();
+    let summary = match count {
+        0 => "Geen afspraak gevonden in het afgelopen jaar en de twee jaar hierna.".to_string(),
+        1 => "1 afspraak gevonden.".to_string(),
+        n => format!("{n} afspraken gevonden, van een jaar terug tot twee jaar vooruit."),
+    };
+    ui.label(RichText::new(summary).size(12.0).color(t.text_dim));
+    ui.add_space(6.0);
+    let selected = app.engine.session.selected_appointment.clone();
+    let mut open: Option<(String, i64)> = None;
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        for a in &list {
+            let on = selected.as_deref() == Some(a.id.as_str());
+            let r = ui.add_sized(
+                [ui.available_width(), 44.0],
+                egui::Button::new("").fill(if on { t.checked } else { Color32::TRANSPARENT }).frame_when_inactive(on),
+            );
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, chip_title(a)));
+            let rect = r.rect.shrink2(vec2(8.0, 4.0));
+            let p = ui.painter();
+            let dot = Rect::from_center_size(pos2(rect.left() + 8.0, rect.center().y), vec2(12.0, 12.0));
+            p.rect_filled(dot, CornerRadius::same(3), appointment_color(app, a, t));
+            let x = rect.left() + 26.0;
+            p.text(pos2(x, rect.top() + 2.0), Align2::LEFT_TOP, chip_title(a), FontId::proportional(13.5), t.text);
+            let day = to_local(a.start).date();
+            let when = if a.all_day {
+                format!("{} {} {} {} · hele dag", weekday_name(day), day.day(), month_name(day.month()), day.year())
+            } else {
+                format!("{} {} {} {} · {} – {}", weekday_name(day), day.day(), month_name(day.month()), day.year(), hm(a.start), hm(a.end))
+            };
+            let sub = if a.location.is_empty() { when } else { format!("{when} · {}", a.location) };
+            p.text(pos2(x, rect.bottom() - 2.0), Align2::LEFT_BOTTOM, sub, FontId::proportional(11.5), t.text_dim);
+            if r.clicked() {
+                open = Some((a.id.clone(), a.start));
+            }
+        }
+    });
+    if let Some((id, start)) = open {
+        app.calendar.focus = to_local(start).date();
+        app.open_appointment(&id, start);
+    }
 }
 
 fn field(ui: &mut Ui, t: &Tokens, label: &str, value: &mut String, width: f32) {

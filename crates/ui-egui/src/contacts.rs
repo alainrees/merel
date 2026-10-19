@@ -15,6 +15,9 @@ pub struct State {
     pub editor: Option<Editor>,
 }
 
+/// The search box's widget id, so Ctrl+E can put the cursor there.
+pub(crate) const SEARCH_BOX: &str = "contacts_search_box";
+
 /// The form's fields as text; addresses and phone numbers one per line or separated by `;`.
 #[derive(Default)]
 pub struct Editor {
@@ -126,7 +129,12 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .resizable(true)
         .frame(egui::Frame::NONE.fill(t.panel).inner_margin(Margin::symmetric(10, 10)).stroke(Stroke::new(1.0, t.border)))
         .show(ui, |ui| {
-            ui.add(egui::TextEdit::singleline(&mut app.contacts.query).hint_text("Zoeken in contacten").desired_width(f32::INFINITY));
+            ui.add(
+                egui::TextEdit::singleline(&mut app.contacts.query)
+                    .id(egui::Id::new(SEARCH_BOX))
+                    .hint_text("Zoeken in contacten")
+                    .desired_width(f32::INFINITY),
+            );
             ui.add_space(8.0);
             let selected = app.engine.session.selected_contact.clone();
             let list: Vec<Contact> = app.engine.session.contacts_matching(&app.contacts.query).into_iter().cloned().collect();
