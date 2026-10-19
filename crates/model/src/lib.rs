@@ -8,6 +8,7 @@ mod address;
 mod calendar;
 mod categories;
 mod contact;
+mod junk;
 mod quicksteps;
 mod rules;
 mod task;
@@ -18,6 +19,7 @@ pub use calendar::{
 };
 pub use categories::{Category, CategoryColor, MAX_CATEGORY_NAME, category_keyword};
 pub use contact::{Contact, ContactError};
+pub use junk::{JunkLists, MAX_JUNK_ENTRY, entry_covers, junk_entry};
 pub use quicksteps::{MAX_QUICK_STEP_NAME, QuickStep, QuickStepError};
 pub use rules::{MAX_RULE_TEXT, Rule, RuleError, RuleField};
 pub use task::{Priority, Task, TaskError};

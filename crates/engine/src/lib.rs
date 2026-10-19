@@ -16,6 +16,7 @@ pub mod config;
 pub mod contacts;
 pub mod drafts;
 pub mod folders;
+pub mod junk;
 pub mod quicksteps;
 pub mod reminders;
 pub mod rules;
@@ -392,6 +393,9 @@ pub struct Session {
     /// Rules for incoming mail, every account's together, in the order they run.
     pub rules: Vec<Rule>,
     rules_dirty: bool,
+    /// Blocked and safe senders, for every account; `junk.json`.
+    pub junk: mailcraft_model::JunkLists,
+    junk_dirty: bool,
     /// The categories (coloured labels) the person knows, kept in `categories.json`.
     pub categories: Vec<Category>,
     categories_dirty: bool,
@@ -738,9 +742,12 @@ impl Session {
                         self.messages.push(m);
                     }
                 }
-                // Mail that arrived since the last listing goes past the rules.
+                // Mail that arrived since the last listing goes past the blocked senders, then
+                // the rules.
                 for id in fresh {
-                    self.apply_rules(&id, false);
+                    if !self.apply_junk(&id) {
+                        self.apply_rules(&id, false);
+                    }
                 }
                 self.recount_unread();
             }
@@ -980,6 +987,8 @@ impl Engine {
         }
         let rules = engine.config_path.as_deref().map(|p| config::load_json::<rules::RulesFile>(&config::rules_path(p))).unwrap_or_default();
         engine.session.set_rules(rules.rules);
+        let junk = engine.config_path.as_deref().map(|p| config::load_json::<mailcraft_model::JunkLists>(&config::junk_path(p))).unwrap_or_default();
+        engine.session.set_junk(junk);
         let categories =
             engine.config_path.as_deref().map(|p| config::load_json::<categories::CategoriesFile>(&config::categories_path(p))).unwrap_or_default();
         engine.session.set_categories(categories.categories);
@@ -997,6 +1006,7 @@ impl Engine {
             self.session.take_contacts_dirty();
             self.session.take_tasks_dirty();
             self.session.take_rules_dirty();
+            self.session.take_junk_dirty();
             self.session.take_categories_dirty();
             self.session.take_quick_steps_dirty();
             return Ok(());
@@ -1012,6 +1022,9 @@ impl Engine {
         }
         if self.session.take_rules_dirty() {
             config::save_json(&config::rules_path(&path), &self.session.rules_data()).map_err(|e| CommandError::Store(e.to_string()))?;
+        }
+        if self.session.take_junk_dirty() {
+            config::save_json(&config::junk_path(&path), &self.session.junk_data()).map_err(|e| CommandError::Store(e.to_string()))?;
         }
         if self.session.take_categories_dirty() {
             config::save_json(&config::categories_path(&path), &self.session.categories_data()).map_err(|e| CommandError::Store(e.to_string()))?;

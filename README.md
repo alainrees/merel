@@ -27,7 +27,13 @@ messages and a button at the bottom of the list fetches the next 200, as often a
 comes in on its own: the inbox of every connected account and the open folder are refreshed every
 two minutes (calendar, contacts and tasks every five), the status bar counts new unread messages,
 the window asks for attention, and its title shows the unread mail in the inboxes of every account
-together ("Mailcraft (3)"), so the count is visible in the dock, taskbar or window switcher. A search box above the
+together ("Mailcraft (3)"), so the count is visible in the dock, taskbar or window switcher. Junk: the
+server's own filter stays the first line, and its Junk folder shows as "Ongewenste e-mail". On top of that,
+"Afzender blokkeren" in a message's right-click menu (or "Bestand" > "Ongewenste e-mail", for an address or a
+whole domain) keeps a list of blocked senders in `junk.json`; new mail from one of them goes straight to that
+folder, like "Ongewenst" by hand. Safe senders and your contacts are never filed, and "Geen ongewenst" (on a
+message in the Junk folder, or in its menu) brings a message back and trusts its sender. The lists live on
+your computer; nothing about your mail is sent anywhere to be checked. A search box above the
 message list narrows it by subject, sender, recipient or preview text, in the current folder or
 across every folder of every account (it searches what Mailcraft has fetched so far); "Zoek op de server" asks the mail server itself, which also looks in older mail and in the text of the messages. Sending over SMTP: new mail,
 reply, reply all and forward, with attachments (picked with the file dialog or dropped onto the window, 25 MB together), a copy filed in Sent and the account's signature under the text. Closing a message you were writing puts it aside as a draft ("Concepten (deze computer)" under the account, kept in the encrypted offline cache, never on the server) to open, finish and send later. A password account's name,
