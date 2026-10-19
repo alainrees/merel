@@ -428,6 +428,7 @@ pub fn mime_of(name: &str) -> &'static str {
         "html" | "htm" => "text/html",
         "ics" => "text/calendar",
         "vcf" => "text/vcard",
+        "eml" => "message/rfc822",
         "json" => "application/json",
         "xml" => "application/xml",
         "zip" => "application/zip",
