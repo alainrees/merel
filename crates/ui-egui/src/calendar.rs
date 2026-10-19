@@ -46,11 +46,20 @@ pub struct State {
     /// What the search box holds; while it has words, the results list replaces the view.
     pub query: String,
     pub editor: Option<Editor>,
+    /// The appointment whose bottom edge is being dragged, with the end it would get.
+    pub resizing: Option<Resizing>,
+}
+
+/// An appointment being stretched or shortened by its bottom edge.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Resizing {
+    pub id: String,
+    pub end: i64,
 }
 
 impl Default for State {
     fn default() -> Self {
-        State { view: View::Month, focus: today(), query: String::new(), editor: None }
+        State { view: View::Month, focus: today(), query: String::new(), editor: None, resizing: None }
     }
 }
 
@@ -343,6 +352,20 @@ impl MailApp {
         self.notice = self.engine.run("appointment.move", &json!({ "id": id, "start": start })).err().map(|e| describe(&e));
     }
 
+    /// The bottom edge of `id` was let go: the end it was dragged to becomes the appointment's,
+    /// unless nothing changed. What went wrong becomes a notice.
+    pub fn finish_resize(&mut self, id: &str) {
+        let Some(r) = self.calendar.resizing.take() else { return };
+        if r.id != id {
+            return;
+        }
+        let Some(a) = self.engine.session.appointment(id) else { return };
+        if r.end == a.end {
+            return;
+        }
+        self.notice = self.engine.run("appointment.resize", &json!({ "id": id, "end": r.end })).err().map(|e| describe(&e));
+    }
+
     /// Selects an appointment and opens it in the window; `start` is the occurrence that was
     /// clicked, which matters for a recurring one.
     pub fn open_appointment(&mut self, id: &str, start: i64) {
@@ -491,6 +514,17 @@ fn dropped_start(a: &Appointment, day: NaiveDate, time: Option<NaiveTime>) -> Op
     to_timestamp(day.and_time(time))
 }
 
+/// Where an appointment ends when its bottom edge is dragged to the half hour `time` on `day`:
+/// the end of that half hour, and never less than half an hour after its start.
+fn resized_end(a: &Appointment, day: NaiveDate, time: NaiveTime) -> Option<i64> {
+    let end = to_timestamp(day.and_time(time))? + HALF_HOUR;
+    Some(end.max(a.start + HALF_HOUR))
+}
+
+/// The height of the grab area along the bottom edge of a block in the hour grid.
+const RESIZE_HANDLE: f32 = 7.0;
+const HALF_HOUR: i64 = 1_800;
+
 /// The half hour under `y` in an hour grid whose midnight is at `top`.
 fn grid_time(y: f32, top: f32) -> NaiveTime {
     let halves = ((y - top) / HOUR_HEIGHT * 2.0).floor().clamp(0.0, 47.0) as u32;
@@ -635,6 +669,9 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
     let mut open: Option<(String, i64)> = None;
     let mut new_at: Option<(NaiveDate, u32)> = None;
     let mut drop: Option<(String, NaiveDate, Option<NaiveTime>)> = None;
+    let mut resize: Option<Resizing> = None;
+    let mut resized: Option<String> = None;
+    let resizing = app.calendar.resizing.clone();
     let col_w = ((ui.available_width() - gutter) / days as f32).max(40.0);
     // Day headers.
     ui.horizontal(|ui| {
@@ -720,13 +757,34 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
             let (Some(from), Some(to)) = (midnight(d), midnight(add_days(d, 1))) else { continue };
             let items: Vec<Appointment> = app.engine.session.appointments_between(from, to).into_iter().filter(|a| !a.all_day).collect();
             for a in &items {
+                // While its bottom edge is dragged, the block shows the end it would get.
+                let end = resizing.as_ref().filter(|r| r.id == a.id).map_or(a.end, |r| r.end);
                 let top = ((a.start.max(from) - from) as f32 / 3600.0) * HOUR_HEIGHT;
-                let bottom = ((a.end.min(to) - from) as f32 / 3600.0) * HOUR_HEIGHT;
+                let bottom = ((end.min(to) - from) as f32 / 3600.0) * HOUR_HEIGHT;
                 let block =
                     Rect::from_min_max(pos2(x + 2.0, grid.top() + top + 1.0), pos2(x + col_w - 2.0, grid.top() + bottom.max(top + 18.0) - 1.0));
-                let label = format!("{} {}\n{}", hm(a.start), hm(a.end), chip_title(a));
+                let label = format!("{} {}\n{}", hm(a.start), hm(end), chip_title(a));
                 if chip(ui, block, &label, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), draggable(a), t) {
                     open = Some((a.id.clone(), a.start));
+                }
+                if draggable(a).is_none() || a.end > to {
+                    continue;
+                }
+                // The bottom edge stretches or shortens the appointment, by the half hour.
+                let handle = Rect::from_min_max(pos2(block.left(), block.bottom() - RESIZE_HANDLE), block.right_bottom());
+                let h = ui.interact(handle, ui.make_persistent_id(("resize", &a.id)), Sense::drag());
+                h.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Eindtijd van {} verslepen", a.title)));
+                if h.hovered() || h.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                }
+                if h.dragged()
+                    && let Some(pos) = pointer
+                    && let Some(end) = resized_end(a, d, grid_time(pos.y, grid.top()))
+                {
+                    resize = Some(Resizing { id: a.id.clone(), end });
+                }
+                if h.drag_stopped() {
+                    resized = Some(a.id.clone());
                 }
             }
             if d == today {
@@ -736,7 +794,12 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
             }
         }
     });
-    if let Some((id, day, time)) = drop {
+    if let Some(r) = resize {
+        app.calendar.resizing = Some(r);
+    }
+    if let Some(id) = resized {
+        app.finish_resize(&id);
+    } else if let Some((id, day, time)) = drop {
         app.drop_appointment(&id, day, time);
     } else if let Some((id, start)) = open {
         app.open_appointment(&id, start);
@@ -1100,12 +1163,17 @@ mod tests {
         let moved = to_local(dropped_start(&all_day, d(2026, 10, 23), Some(NaiveTime::from_hms_opt(9, 30, 0).unwrap())).unwrap());
         assert_eq!((moved.date(), moved.time()), (d(2026, 10, 23), NaiveTime::MIN), "an all-day appointment stays all day");
         assert!(draggable(&a).is_some());
-        assert!(draggable(&Appointment { recurrence: Some(Recurrence::every(Frequency::Weekly)), ..a }).is_none(), "a series is not dragged");
+        assert!(draggable(&Appointment { recurrence: Some(Recurrence::every(Frequency::Weekly)), ..a.clone() }).is_none(), "a series is not dragged");
 
         assert_eq!(grid_time(100.0, 100.0), NaiveTime::MIN);
         assert_eq!(grid_time(100.0 + HOUR_HEIGHT * 9.6, 100.0), NaiveTime::from_hms_opt(9, 30, 0).unwrap(), "snapped to the half hour");
         assert_eq!(grid_time(100.0 + HOUR_HEIGHT * 30.0, 100.0), NaiveTime::from_hms_opt(23, 30, 0).unwrap(), "clamped to the day");
         assert_eq!(grid_time(0.0, 100.0), NaiveTime::MIN);
+
+        let at = |h, m| NaiveTime::from_hms_opt(h, m, 0).unwrap();
+        assert_eq!(resized_end(&a, d(2026, 10, 21), at(15, 30)), Some(base + 2 * 3_600), "the end of the half hour under the pointer");
+        assert_eq!(resized_end(&a, d(2026, 10, 21), at(14, 0)), Some(base + 1_800), "shortened to the first half hour");
+        assert_eq!(resized_end(&a, d(2026, 10, 21), at(9, 0)), Some(base + 1_800), "never before half an hour after the start");
     }
 
     #[test]
