@@ -16,7 +16,7 @@ use std::time::Duration;
 use chrono::{DateTime, Local, NaiveDate, NaiveTime, TimeZone, Utc};
 use mailcraft_imap::ImapClient;
 use mailcraft_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result};
-use mailcraft_model::{Address, Appointment, Contact, Server, Task, clean_text};
+use mailcraft_model::{Address, Appointment, Contact, Server, ShowAs, Task, clean_text};
 use mailcraft_secrets::Secret;
 use serde_json::{Value, json};
 
@@ -201,6 +201,8 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         recurrence: None,
         reminder: reminder_of(e),
         private: matches!(str_of(e, "visibility"), "private" | "confidential"),
+        // Google knows only free or busy; a tentative or out-of-office appointment reads as busy.
+        show_as: if str_of(e, "transparency") == "transparent" { ShowAs::Free } else { ShowAs::Busy },
     }
     .validated()
     .ok()
@@ -237,7 +239,17 @@ fn event_json(a: &Appointment, zone: &str) -> Value {
         None => json!({ "useDefault": true }),
     };
     let visibility = if a.private { "private" } else { "default" };
-    let mut event = json!({ "summary": a.title, "description": a.notes, "location": a.location, "start": time(a.start), "end": time(a.end), "reminders": reminders, "visibility": visibility });
+    let transparency = if a.show_as == ShowAs::Free { "transparent" } else { "opaque" };
+    let mut event = json!({
+        "summary": a.title,
+        "description": a.notes,
+        "location": a.location,
+        "start": time(a.start),
+        "end": time(a.end),
+        "reminders": reminders,
+        "visibility": visibility,
+        "transparency": transparency,
+    });
     if let Some(r) = &a.recurrence {
         event["recurrence"] = json!([format!("RRULE:{}", r.rrule(a.all_day))]);
     }
@@ -546,6 +558,17 @@ mod tests {
         let h = appointment_of(&hidden).unwrap();
         assert!(h.private, "Privé comes back from the visibility");
         assert_eq!(event_json(&h, "Europe/Amsterdam")["visibility"], "private");
+        assert_eq!((a.show_as, event_json(&a, "Europe/Amsterdam")["transparency"].as_str()), (ShowAs::Busy, Some("opaque")));
+        let mut free = timed.clone();
+        free["transparency"] = json!("transparent");
+        let f = appointment_of(&free).unwrap();
+        assert_eq!(f.show_as, ShowAs::Free);
+        assert_eq!(event_json(&f, "Europe/Amsterdam")["transparency"], "transparent");
+        assert_eq!(
+            event_json(&Appointment { show_as: ShowAs::Tentative, ..f }, "Europe/Amsterdam")["transparency"],
+            "opaque",
+            "Google knows no tentative"
+        );
         assert_eq!(
             event_json(&a, "Europe/Amsterdam")["reminders"],
             json!({ "useDefault": false, "overrides": [{ "method": "popup", "minutes": 20 }] })

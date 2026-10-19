@@ -86,7 +86,11 @@ kept in `follow_ups.json`, a new follow-up day opens it again. Reminders travel 
 365, Google and CalDAV appointments as the server's own reminder or alarm. An appointment can be marked
 "Privé", as in Outlook: it shows a lock in the calendar, and the mark travels to Exchange and Microsoft 365 as
 sensitivity Private, to Google as visibility private and to CalDAV as `CLASS:PRIVATE`, so anyone the calendar is
-shared with there sees only that the time is taken. The contacts module keeps a local address
+shared with there sees only that the time is taken. "Weergeven als" in the same window sets how the time counts for
+your availability, Outlook's Vrij, Voorlopig, Bezet or Afwezig: a free appointment is drawn as a pale block with the
+calendar's colour as its border, a tentative one half-transparent, a busy one solid and an out-of-office one purple.
+The status travels as Exchange's LegacyFreeBusyStatus, Microsoft 365's showAs, Google's transparency (free or busy,
+all that Google knows) and iCalendar's `TRANSP` with Outlook's `X-MICROSOFT-CDO-BUSYSTATUS`. The contacts module keeps a local address
 book (`contacts.json`) with search and a contact card, and the compose window completes
 addresses from it and from the mail you have seen. A sender goes into the address book in one click: "Toevoegen aan
 contacten" next to the sender in the reading pane (and "Afzender toevoegen aan contacten" in the message's right-click
