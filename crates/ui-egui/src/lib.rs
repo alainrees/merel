@@ -127,6 +127,8 @@ pub struct MailApp {
     /// The "Afmelden" question, while it is open.
     pub unsubscribe: Option<unsubscribe::Confirm>,
     pub cleanup: Option<cleanup::Confirm>,
+    /// The picture attachment open in its preview window.
+    pub preview: Option<attachments::Preview>,
     /// The "Alle categorieën" window, while it is open.
     pub categories: Option<categories::Manager>,
     /// The open help window ("Help" tab), if any.
@@ -222,6 +224,7 @@ impl MailApp {
             notice: None,
             unsubscribe: None,
             cleanup: None,
+            preview: None,
             shown_message: None,
             remote: remote::RemoteImages::default(),
             drafts_for: None,
@@ -304,6 +307,7 @@ impl MailApp {
         folders::window(self, &ctx, &t);
         unsubscribe::window(self, &ctx, &t);
         cleanup::window(self, &ctx, &t);
+        attachments::preview_window(self, &ctx, &t);
         categories::window(self, &ctx, &t);
         help::window(self, &ctx, &t);
         drag_preview(self, &ctx, &t);
@@ -1446,13 +1450,33 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
         });
         if let Some(a) = save {
-            app.notice = Some(match attachments::downloads_dir() {
-                Some(dir) => match attachments::save_to(&dir, &a.name, &a.bytes) {
-                    Ok(path) => format!("Bijlage opgeslagen als {}", path.display()),
-                    Err(e) => format!("Bijlage niet opgeslagen: {e}"),
-                },
-                None => "Bijlage niet opgeslagen: geen map Downloads gevonden.".into(),
+            app.save_attachment(&a);
+        }
+        // Thumbnails of the pictures, as Outlook previews them; a click opens the full picture.
+        // Not in Junk, where nothing of a message is decoded beyond its text.
+        let mut open = None;
+        if !in_junk && b.attachments.iter().any(attachments::previewable) {
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                for (i, a) in b.attachments.iter().enumerate().filter(|(_, a)| attachments::previewable(a)) {
+                    let uri = attachments::preview_uri(&message_id, i);
+                    let image = egui::Image::from_bytes(uri.clone(), egui::load::Bytes::Shared(a.bytes.clone()))
+                        .max_size(vec2(200.0, 120.0))
+                        .fit_to_original_size(1.0)
+                        .corner_radius(CornerRadius::same(3));
+                    let label = attachments::preview_label(&a.name);
+                    if ui
+                        .add(egui::Button::image_and_text(image, RichText::new(&a.name).size(11.0).color(t.text_dim)).fill(t.panel))
+                        .on_hover_text(&label)
+                        .clicked()
+                    {
+                        open = Some(attachments::Preview { attachment: a.clone(), uri });
+                    }
+                }
             });
+        }
+        if open.is_some() {
+            app.preview = open;
         }
         ui.add_space(8.0);
     }
@@ -1939,6 +1963,34 @@ mod tests {
         h.state_mut().engine.session.selected_message = Some("m1".into());
         h.run();
         assert!(h.query_by_label(PHISHING_TITLE).is_none());
+    }
+
+    #[test]
+    fn a_picture_attachment_shows_a_thumbnail_that_opens_the_preview_window() {
+        let mut h = harness();
+        let png: &[u8] = &[
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+            0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf,
+            0xc0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92, 0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+        ];
+        let picture =
+            mailcraft_mime::Attachment { name: "foto.png".into(), mime: "image/png".into(), size: png.len(), bytes: std::sync::Arc::from(png) };
+        let paper =
+            mailcraft_mime::Attachment { name: "bon.pdf".into(), mime: "application/pdf".into(), size: 3, bytes: std::sync::Arc::from(&b"abc"[..]) };
+        assert!(attachments::previewable(&picture) && !attachments::previewable(&paper));
+        let body = mailcraft_engine::Body { text: "Zie bijlage".into(), attachments: vec![paper, picture], ..Default::default() };
+        h.state_mut().engine.session.bodies.insert("m3".into(), body);
+        h.state_mut().engine.session.selected_message = Some("m3".into());
+        h.run();
+        h.get_by_label_contains("📎 bon.pdf");
+        assert!(h.query_by_label("Voorbeeld van bon.pdf").is_none(), "a PDF is only saved, never decoded");
+        h.get_by_label("foto.png").click();
+        h.run();
+        assert_eq!(h.state().preview.as_ref().map(|p| p.attachment.name.as_str()), Some("foto.png"));
+        h.get_by_label("Voorbeeld van foto.png");
+        h.get_by_label("Sluiten").click();
+        h.run();
+        assert!(h.state().preview.is_none());
     }
 
     #[test]
