@@ -2118,6 +2118,28 @@ mod tests {
     }
 
     #[test]
+    fn werkuren_on_the_beeld_tab_switches_the_shading_of_the_hours_outside_the_working_day() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.run();
+        assert!(h.state().view.work_hours, "on by default, as in Outlook");
+        h.get_by_label("Beeld").click();
+        h.run();
+        h.get_by_label(calendar::WORK_HOURS).click();
+        h.run();
+        assert!(!h.state().view.work_hours);
+        h.get_by_label("Start").click();
+        h.run();
+        h.get_by_label("Week").click();
+        h.run();
+        h.get_by_label("Beeld").click();
+        h.run();
+        h.get_by_label(calendar::WORK_HOURS).click();
+        h.run();
+        assert!(h.state().view.work_hours, "and back on, with the week view drawing the shade");
+    }
+
+    #[test]
     fn weeknummers_on_the_beeld_tab_number_the_weeks_of_the_calendar() {
         let mut h = harness();
         h.state_mut().module = Module::Calendar;
