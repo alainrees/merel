@@ -256,7 +256,7 @@ mod tests {
             header: mailcraft_mime::parse_header(RAW),
             date: 1_000,
         };
-        s.apply(Event::Headers { folder_id: "a1/INBOX".into(), headers: vec![header], offset: 0 });
+        s.apply(Event::Headers { folder_id: "a1/INBOX".into(), headers: vec![header], offset: 0, limit: crate::HEADER_LIMIT });
         s.apply(Event::Synced { account_id: "a1".into(), appointments: vec![], contacts: vec![], tasks: vec![] });
         s
     }
@@ -274,7 +274,7 @@ mod tests {
         let mut s = connected_session();
         for event in [
             Event::Connected { account_id: "a1".into(), folders: vec![], syncs_items: false },
-            Event::Headers { folder_id: "a1/INBOX".into(), headers: vec![], offset: 0 },
+            Event::Headers { folder_id: "a1/INBOX".into(), headers: vec![], offset: 0, limit: crate::HEADER_LIMIT },
         ] {
             cache.note_event(&s, &event);
         }

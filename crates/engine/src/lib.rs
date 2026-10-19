@@ -25,6 +25,7 @@ pub use mailcraft_mime::Body;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
+use std::time::{Duration, Instant};
 
 use mailcraft_mailbox::{Flag, Item, RemoteFolder, RemoteHeader};
 use mailcraft_model::{Account, Appointment, Auth, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, Task, clean_text};
@@ -33,6 +34,15 @@ use serde::{Deserialize, Serialize};
 
 /// How many of the newest messages a folder shows.
 pub const HEADER_LIMIT: u32 = 200;
+/// The most a refresh of one folder fetches at once, however many pages were loaded.
+pub const MAX_REFETCH: u32 = 2_000;
+/// How often open folders are refreshed, and the calendar, contacts and tasks.
+pub const REFRESH_EVERY: Duration = Duration::from_secs(120);
+pub const ITEMS_EVERY: Duration = Duration::from_secs(300);
+
+fn default_limit() -> u32 {
+    HEADER_LIMIT
+}
 /// The sample account's id; it has no server behind it.
 pub const SAMPLE_ACCOUNT: &str = "sample";
 
@@ -50,6 +60,9 @@ pub enum Job {
         /// How many of the newest messages to skip: 0 for the top of the folder.
         #[serde(default)]
         offset: u32,
+        /// How many to fetch: a refresh asks for as many as are listed, so loaded pages stay.
+        #[serde(default = "default_limit")]
+        limit: u32,
     },
     Body {
         account_id: String,
@@ -144,6 +157,8 @@ pub enum Event {
         headers: Vec<RemoteHeader>,
         /// The offset the job asked for; 0 replaces the folder's list, more adds older mail.
         offset: u32,
+        /// The limit the job asked for; fewer headers than this means the folder's start.
+        limit: u32,
     },
     Body {
         message_id: String,
@@ -222,6 +237,8 @@ pub struct Session {
     pub loading: HashSet<String>,
     /// Folders whose oldest message has been reached, so there is nothing older to load.
     pub complete_folders: HashSet<String>,
+    /// Unread messages a refresh found that were not listed before; the UI takes and shows it.
+    arrivals: usize,
     pub selected_folder: Option<String>,
     pub selected_message: Option<String>,
     /// What the person typed in the search box; empty shows the selected folder as it is.
@@ -491,23 +508,27 @@ impl Session {
                     }
                 }
             }
-            Event::Headers { folder_id, headers, offset } => {
+            Event::Headers { folder_id, headers, offset, limit } => {
                 self.loading.remove(&folder_id);
-                if self.folder(&folder_id).is_none() {
-                    return;
-                }
-                if (headers.len() as u32) < HEADER_LIMIT {
+                let Some(folder) = self.folder(&folder_id) else { return };
+                let is_inbox = folder.kind == FolderKind::Inbox;
+                if (headers.len() as u32) < limit.max(1) {
                     self.complete_folders.insert(folder_id.clone());
                 } else if offset == 0 {
                     self.complete_folders.remove(&folder_id);
                 }
+                // What was listed before a refresh, to tell new arrivals from a first load.
+                let known: HashSet<String> = self.messages.iter().filter(|m| m.folder_id == folder_id).map(|m| m.id.clone()).collect();
                 if offset == 0 {
                     self.messages.retain(|m| m.folder_id != folder_id);
                 }
                 for h in headers {
                     let id = format!("{folder_id}#{}", h.id);
-                    if offset > 0 && self.messages.iter().any(|m| m.id == id) {
+                    if offset > 0 && known.contains(&id) {
                         continue;
+                    }
+                    if offset == 0 && is_inbox && !h.seen && !known.is_empty() && !known.contains(&id) {
+                        self.arrivals += 1;
                     }
                     let from = h.header.from.clone().or_else(|| mailcraft_model::Address::new(Some("Onbekende afzender"), "unknown@invalid").ok());
                     let Some(from) = from else { continue };
@@ -575,8 +596,40 @@ impl Session {
         if f.account_id == SAMPLE_ACCOUNT || self.loading.contains(folder_id) {
             return;
         }
+        // A refresh fetches as much as is listed, so pages loaded with "older messages" stay.
+        let listed = self.messages.iter().filter(|m| m.folder_id == folder_id).count() as u32;
+        let limit = listed.clamp(HEADER_LIMIT, MAX_REFETCH);
         self.loading.insert(folder_id.to_string());
-        self.pending.push(Job::Headers { account_id: f.account_id, folder_id: f.id, path: f.path, offset: 0 });
+        self.pending.push(Job::Headers { account_id: f.account_id, folder_id: f.id, path: f.path, offset: 0, limit });
+    }
+
+    /// Refreshes the inbox of every connected account and the selected folder, for new mail.
+    pub fn refresh_open_folders(&mut self) {
+        let online: Vec<String> =
+            self.accounts.iter().filter(|a| self.status.get(&a.id) == Some(&AccountStatus::Online)).map(|a| a.id.clone()).collect();
+        let mut folders: Vec<String> = online.iter().filter_map(|a| self.folder_of_kind(a, FolderKind::Inbox)).map(|f| f.id.clone()).collect();
+        if let Some(selected) = self.selected_folder.as_deref().and_then(|id| self.folder(id))
+            && online.contains(&selected.account_id)
+            && !folders.contains(&selected.id)
+        {
+            folders.push(selected.id.clone());
+        }
+        for id in folders {
+            self.request_headers(&id);
+        }
+    }
+
+    /// Asks every connected account that keeps them for its appointments, contacts and tasks.
+    pub fn refresh_items(&mut self) {
+        let online: Vec<String> = self.item_accounts.iter().filter(|a| self.status.get(*a) == Some(&AccountStatus::Online)).cloned().collect();
+        for id in online {
+            self.request_sync(&id);
+        }
+    }
+
+    /// New unread messages found by refreshes since the last call.
+    pub fn take_arrivals(&mut self) -> usize {
+        std::mem::take(&mut self.arrivals)
     }
 
     /// Whether `folder_id` may have mail older than what is listed, and nothing is being
@@ -597,7 +650,7 @@ impl Session {
         }
         let offset = self.messages.iter().filter(|m| m.folder_id == folder_id).count() as u32;
         self.loading.insert(folder_id.to_string());
-        self.pending.push(Job::Headers { account_id: f.account_id, folder_id: f.id, path: f.path, offset });
+        self.pending.push(Job::Headers { account_id: f.account_id, folder_id: f.id, path: f.path, offset, limit: HEADER_LIMIT });
     }
 
     fn request_body(&mut self, message_id: &str) {
@@ -620,6 +673,8 @@ pub struct Engine {
     secrets: Arc<dyn SecretStore>,
     config_path: Option<std::path::PathBuf>,
     cache: cache::Cache,
+    last_refresh: Instant,
+    last_item_refresh: Instant,
 }
 
 impl Engine {
@@ -633,6 +688,8 @@ impl Engine {
             secrets: Arc::new(mailcraft_secrets::MemoryStore::default()),
             config_path: None,
             cache: cache::Cache::none(),
+            last_refresh: Instant::now(),
+            last_item_refresh: Instant::now(),
         }
     }
 
@@ -643,7 +700,16 @@ impl Engine {
         let (tx, rx) = channel();
         let worker = worker::Worker::new(tx);
         let calendar = config_path.as_deref().map(|p| config::load_json::<calendar::CalendarFile>(&config::calendar_path(p))).unwrap_or_default();
-        let mut engine = Engine { session: Session::default(), worker: Some(worker), events: rx, secrets, config_path, cache: cache::Cache::none() };
+        let mut engine = Engine {
+            session: Session::default(),
+            worker: Some(worker),
+            events: rx,
+            secrets,
+            config_path,
+            cache: cache::Cache::none(),
+            last_refresh: Instant::now(),
+            last_item_refresh: Instant::now(),
+        };
         if accounts.is_empty() {
             engine.session = Session::sample();
         } else {
@@ -828,6 +894,15 @@ impl Engine {
     /// Applies everything the worker has reported. Returns true when something changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
+        // New mail comes in on its own: open folders every two minutes, items every five.
+        if self.last_refresh.elapsed() >= REFRESH_EVERY {
+            self.last_refresh = Instant::now();
+            self.session.refresh_open_folders();
+        }
+        if self.last_item_refresh.elapsed() >= ITEMS_EVERY {
+            self.last_item_refresh = Instant::now();
+            self.session.refresh_items();
+        }
         while let Ok(e) = self.events.try_recv() {
             let signed_in = match &e {
                 Event::SignedIn { result: Ok(a) } => Some(a.id.clone()),
@@ -913,22 +988,64 @@ mod tests {
         });
         s.take_jobs();
         let folder = "a/INBOX";
-        s.apply(Event::Headers { folder_id: folder.into(), headers: (1..=HEADER_LIMIT).map(header).collect(), offset: 0 });
+        s.apply(Event::Headers { folder_id: folder.into(), headers: (1..=HEADER_LIMIT).map(header).collect(), offset: 0, limit: HEADER_LIMIT });
         assert!(s.can_load_older(folder), "a full first page may have more below it");
         s.run("folder.older", &serde_json::Value::Null).unwrap();
         assert!(!s.can_load_older(folder), "not while the page is on its way");
         let jobs = s.take_jobs();
         assert!(matches!(&jobs[..], [Job::Headers { folder_id, offset, .. }] if folder_id == folder && *offset == HEADER_LIMIT), "{jobs:?}");
         // The page below: one overlaps (the server shifted), two are new, and it is short.
-        s.apply(Event::Headers { folder_id: folder.into(), headers: vec![header(1), header(0), header(999)], offset: HEADER_LIMIT });
+        s.apply(Event::Headers {
+            folder_id: folder.into(),
+            headers: vec![header(1), header(0), header(999)],
+            offset: HEADER_LIMIT,
+            limit: HEADER_LIMIT,
+        });
         assert_eq!(s.messages.len() as u32, HEADER_LIMIT + 2);
         assert!(!s.can_load_older(folder), "a short page means the folder's start was reached");
         s.run("folder.older", &serde_json::Value::Null).unwrap();
         assert!(s.take_jobs().is_empty());
         // A refresh from the top with a full page opens the folder up again.
-        s.apply(Event::Headers { folder_id: folder.into(), headers: (1..=HEADER_LIMIT).map(header).collect(), offset: 0 });
+        s.apply(Event::Headers { folder_id: folder.into(), headers: (1..=HEADER_LIMIT).map(header).collect(), offset: 0, limit: HEADER_LIMIT });
         assert_eq!(s.messages.len() as u32, HEADER_LIMIT);
         assert!(s.can_load_older(folder));
+    }
+
+    #[test]
+    fn a_refresh_keeps_loaded_pages_and_counts_new_unread_mail() {
+        let mut s = Session::with_accounts(vec![account("a")]);
+        s.apply(Event::Connected {
+            account_id: "a".into(),
+            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true }],
+            syncs_items: false,
+        });
+        s.take_jobs();
+        let folder = "a/INBOX";
+        // The first load lists unread mail without counting it as new.
+        let mut first: Vec<RemoteHeader> = (1..=HEADER_LIMIT).map(header).collect();
+        first[0].seen = false;
+        s.apply(Event::Headers { folder_id: folder.into(), headers: first, offset: 0, limit: HEADER_LIMIT });
+        assert_eq!(s.take_arrivals(), 0);
+        s.run("folder.older", &serde_json::Value::Null).unwrap();
+        s.take_jobs();
+        s.apply(Event::Headers { folder_id: folder.into(), headers: (201..=400).map(header).collect(), offset: HEADER_LIMIT, limit: HEADER_LIMIT });
+        assert_eq!(s.messages.len(), 400);
+        // A refresh asks for everything listed, so the second page is not lost.
+        s.refresh_open_folders();
+        let jobs = s.take_jobs();
+        assert!(matches!(&jobs[..], [Job::Headers { folder_id, offset: 0, limit: 400, .. }] if folder_id == folder), "{jobs:?}");
+        let mut again: Vec<RemoteHeader> = (1..=400).map(header).collect();
+        let mut fresh = header(401);
+        fresh.seen = false;
+        again.insert(0, fresh);
+        s.apply(Event::Headers { folder_id: folder.into(), headers: again, offset: 0, limit: 400 });
+        assert_eq!(s.messages.len(), 401);
+        assert_eq!(s.take_arrivals(), 1, "one unread message that was not listed before");
+        assert_eq!(s.take_arrivals(), 0);
+        // Only connected accounts are refreshed.
+        s.status.insert("a".into(), AccountStatus::Offline);
+        s.refresh_open_folders();
+        assert!(s.take_jobs().is_empty());
     }
 
     #[test]

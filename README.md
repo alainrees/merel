@@ -22,7 +22,10 @@ browse folders, open messages (plain text, or HTML drawn with its headings, list
 and embedded pictures, while pictures on the internet stay blocked until you click "Afbeeldingen
 laden" for that one message; a click on an attachment saves it to your Downloads folder), mark read or unread, flag,
 delete, archive and move to junk; changes go back to the server. A folder shows its newest 200
-messages and a button at the bottom of the list fetches the next 200, as often as needed. A search box above the
+messages and a button at the bottom of the list fetches the next 200, as often as needed. New mail
+comes in on its own: the inbox of every connected account and the open folder are refreshed every
+two minutes (calendar, contacts and tasks every five), the status bar counts new unread messages
+and the window asks for attention. A search box above the
 message list narrows it by subject, sender, recipient or preview text, in the current folder or
 across every folder of every account (it searches what Mailcraft has fetched so far). Sending over SMTP: new mail,
 reply, reply all and forward, with a copy filed in Sent and the account's signature under the text. Gmail and Microsoft 365 sign in through
