@@ -1045,7 +1045,9 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     let hint = if session.search_all { "Zoeken in alle mappen" } else { "Zoeken in deze map" };
                     let menu_w = if recents.is_empty() { 0.0 } else { 30.0 };
                     let width = (ui.available_width() - menu_w - if searching { 240.0 } else { 150.0 }).max(80.0);
-                    let box_r = ui.add(egui::TextEdit::singleline(&mut session.search).id(egui::Id::new(SEARCH_BOX)).hint_text(hint).desired_width(width));
+                    let box_r = ui
+                        .add(egui::TextEdit::singleline(&mut session.search).id(egui::Id::new(SEARCH_BOX)).hint_text(hint).desired_width(width))
+                        .on_hover_text(mailcraft_engine::search::HINT);
                     // Leaving the box (Enter, a click elsewhere) is when the words count as a search.
                     if box_r.lost_focus() && !session.search.trim().is_empty() {
                         remember = Some(session.search.clone());

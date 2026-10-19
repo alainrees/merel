@@ -43,6 +43,7 @@ pub fn shortcut_list() -> Vec<(String, &'static str)> {
         (key_hint("Q"), "Markeren als gelezen"),
         (key_hint("U"), "Markeren als ongelezen"),
         (key_hint("E"), "Naar het zoekveld (ook in agenda, contacten en taken)"),
+        ("van: aan: onderwerp:".to_string(), "Zoekwoorden in het zoekveld, zoals in Outlook; ook heeft:bijlage, is:ongelezen en is:gemarkeerd"),
         (key_hint("Shift+1") + " … 9", "Snelle stap 1 tot 9 van het account"),
         ("Esc".to_string(), "Berichtvenster sluiten, anders zoekopdracht wissen (ook in agenda, contacten en taken)"),
         ("F5".to_string(), "Map vernieuwen"),
@@ -132,7 +133,7 @@ mod tests {
     #[test]
     fn the_shortcut_list_names_every_key_the_mail_module_takes() {
         let list = shortcut_list();
-        assert_eq!(list.len(), 27);
+        assert_eq!(list.len(), 28);
         assert!(list.iter().any(|(k, _)| k.ends_with("+Shift+V")));
         assert!(list.iter().all(|(k, what)| !k.is_empty() && !what.is_empty()));
     }

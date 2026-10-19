@@ -25,6 +25,7 @@ pub mod quicksteps;
 pub mod reminders;
 pub mod rules;
 mod sample;
+pub mod search;
 pub mod signin;
 pub mod snooze;
 pub mod sync;
@@ -316,26 +317,6 @@ fn message_of(folder_id: &str, h: RemoteHeader) -> Option<MessageHeader> {
     })
 }
 
-/// Whether every word of `needle` (lower-case) occurs in the message's subject, sender,
-/// recipients or preview.
-fn matches(m: &MessageHeader, needle: &str) -> bool {
-    let haystack = {
-        let mut h = String::with_capacity(256);
-        for part in [m.subject.as_str(), m.from.display(), m.from.email(), m.preview.as_str()] {
-            h.push_str(part);
-            h.push('\n');
-        }
-        for a in &m.to {
-            h.push_str(a.display());
-            h.push('\n');
-            h.push_str(a.email());
-            h.push('\n');
-        }
-        h.to_lowercase()
-    };
-    needle.split_whitespace().all(|w| haystack.contains(w))
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AccountStatus {
     Offline,
@@ -625,7 +606,7 @@ impl Session {
     /// A search looks at what has been fetched: the newest headers of each opened folder and
     /// what the offline cache holds, not the whole server.
     pub fn visible_messages(&self) -> Vec<&MessageHeader> {
-        let needle = self.search.trim().to_lowercase();
+        let query = search::Query::parse(&self.search);
         let now = snooze::now();
         let hits = self.current_hits().map(|h| &h.ids);
         let mut list: Vec<&MessageHeader> = self
@@ -633,10 +614,11 @@ impl Session {
             .iter()
             .filter(|m| {
                 let in_folder = self.selected_folder.as_deref() == Some(m.folder_id.as_str());
-                if needle.is_empty() {
+                if query.is_empty() {
                     in_folder
                 } else {
-                    ((in_folder || self.search_all) && matches(m, &needle)) || hits.is_some_and(|ids| ids.contains(&m.id))
+                    // The server searched the plain words only; its hits still owe the operators.
+                    ((in_folder || self.search_all) && query.matches(m)) || (hits.is_some_and(|ids| ids.contains(&m.id)) && query.keeps(m))
                 }
             })
             .filter(|m| self.filter.keeps(m))
@@ -656,7 +638,8 @@ impl Session {
 
     /// The server's answer for the search as it stands now, if it has been asked.
     pub fn current_hits(&self) -> Option<&ServerHits> {
-        self.server_hits.as_ref().filter(|h| Some(h.folder_id.as_str()) == self.selected_folder.as_deref() && h.query == self.search.trim())
+        let plain = search::Query::parse(&self.search).plain();
+        self.server_hits.as_ref().filter(|h| Some(h.folder_id.as_str()) == self.selected_folder.as_deref() && h.query == plain)
     }
 
     /// Whether the server is being asked about the selected folder right now.
@@ -664,10 +647,13 @@ impl Session {
         self.selected_folder.as_deref().is_some_and(|f| self.loading.contains(&format!("search/{f}")))
     }
 
-    /// Whether a server search makes sense now: words in the box and a real, connected folder.
+    /// Whether a server search makes sense now: plain words in the box (operators such as
+    /// `van:` are this computer's to apply) and a real, connected folder.
     pub fn can_search_server(&self) -> bool {
         let Some(f) = self.selected_folder.as_deref().and_then(|id| self.folder(id)) else { return false };
-        self.is_searching() && f.account_id != SAMPLE_ACCOUNT && self.status.get(&f.account_id) == Some(&AccountStatus::Online)
+        !search::Query::parse(&self.search).plain().is_empty()
+            && f.account_id != SAMPLE_ACCOUNT
+            && self.status.get(&f.account_id) == Some(&AccountStatus::Online)
     }
 
     /// Asks the server of the selected folder which of its messages match the search box.
@@ -676,7 +662,7 @@ impl Session {
             return;
         }
         let Some(f) = self.selected_folder.as_deref().and_then(|id| self.folder(id)).cloned() else { return };
-        let query = self.search.trim().to_string();
+        let query = search::Query::parse(&self.search).plain();
         self.search_error = None;
         self.loading.insert(format!("search/{}", f.id));
         self.pending.push(Job::Search { account_id: f.account_id, folder_id: f.id, path: f.path, query });
@@ -1456,7 +1442,9 @@ mod tests {
         s.selected_folder = Some("a/INBOX".into());
         s.take_jobs();
         assert!(!s.can_search_server(), "nothing to search for yet");
-        s.search = " factuur ".into();
+        s.search = "is:ongelezen".into();
+        assert!(!s.can_search_server(), "operators alone are this computer's to apply");
+        s.search = "factuur van:y.nl ".into();
         assert!(s.can_search_server());
         s.request_server_search();
         assert!(s.searching_server());
@@ -1471,7 +1459,10 @@ mod tests {
         assert!(!s.searching_server());
         let mut ids: Vec<&str> = s.visible_messages().iter().map(|m| m.id.as_str()).collect();
         ids.sort_unstable();
-        assert_eq!(ids, ["a/INBOX#2", "a/INBOX#9"]);
+        assert_eq!(ids, ["a/INBOX#2", "a/INBOX#9"], "the server searched 'factuur' alone; van:y.nl holds for its hits");
+        s.search = "factuur is:ongelezen".into();
+        assert!(s.visible_messages().is_empty(), "the same server hits, now held to a flag they lack");
+        s.search = "factuur van:y.nl ".into();
         assert_eq!(s.messages.len(), 3, "the older hit joined the listing once");
         s.search = "factuur 2026".into();
         assert!(s.current_hits().is_none() && s.visible_messages().is_empty(), "other words, other answer");
@@ -1581,9 +1572,24 @@ mod tests {
         let in_folder = s.visible_messages().len();
         s.search_all = true;
         let everywhere = s.visible_messages().len();
-        assert!(everywhere >= in_folder && everywhere == s.messages.iter().filter(|m| matches(m, "e")).count());
+        assert!(everywhere >= in_folder && everywhere == s.messages.iter().filter(|m| search::Query::parse("e").matches(m)).count());
         s.search.clear();
         assert_eq!(s.visible_messages().len(), all, "an empty search shows the folder again");
+
+        // Outlook's search words narrow by one field or flag.
+        s.search_all = true;
+        s.search = "is:ongelezen".into();
+        let unread = s.visible_messages();
+        assert!(!unread.is_empty() && unread.iter().all(|m| !m.flags.seen));
+        assert_eq!(unread.len(), s.messages.iter().filter(|m| !m.flags.seen && s.snoozed_until(m, snooze::now()).is_none()).count());
+        s.search = "heeft:bijlage".into();
+        assert!(s.visible_messages().iter().all(|m| m.has_attachments));
+        let sender = s.messages[0].from.email().to_string();
+        s.search = format!("van:{sender}");
+        let from = s.visible_messages();
+        assert!(!from.is_empty() && from.iter().all(|m| m.from.email() == sender));
+        s.search = format!("onderwerp:{sender}");
+        assert!(s.visible_messages().is_empty(), "an address is not a subject");
     }
 
     #[test]
