@@ -91,7 +91,7 @@ menu) opens the contact form with the name and address filled in; when the addre
 "Contact openen" and shows that card. Contacts travel as vCard files, as with Outlook and phones: "Opslaan als vCard" on a
 card writes a `.vcf` to your Downloads folder, and "Importeren…" on the ribbon reads one or more `.vcf` files into the
 local address book, skipping a card whose address is known already. The tasks module keeps a local to-do list
-(`tasks.json`) with due days, priorities, an open/done filter and a search box; under the tasks it lists the flagged
+(`tasks.json`) with due days, priorities, a repeat like Outlook's "Terugkeerpatroon" (daily, weekly, monthly or yearly, every so many; finishing such a task adds the next one with the following due day, for tasks kept on this computer), an open/done filter and a search box; under the tasks it lists the flagged
 mail with its follow-up day, as Outlook's To-Do list does (a click opens the message, the flag icon takes the flag off). The calendar has a search box
 too: while it holds words, a list of the matching appointments of the past year and the two years ahead
 (title, location or notes; one row per occurrence of a series) replaces the view, and a click opens the

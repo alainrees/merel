@@ -442,6 +442,7 @@ pub fn task_of(todo: &Component, id: String) -> Option<Task> {
         done,
         completed: todo.prop("COMPLETED").and_then(moment).map(|(ts, _)| ts),
         account_id: None,
+        repeat: None,
     }
     .validated()
     .ok()
