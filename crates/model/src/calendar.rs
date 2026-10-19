@@ -64,6 +64,23 @@ pub struct Appointment {
     /// `Private` and Google visibility `private`.
     #[serde(default)]
     pub private: bool,
+    /// Outlook's "Weergeven als": how the time counts for whoever looks at your availability.
+    #[serde(default)]
+    pub show_as: ShowAs,
+}
+
+/// How an appointment shows in your availability, Outlook's "Weergeven als". Travels as the
+/// server's own free/busy status: iCalendar `TRANSP` plus `X-MICROSOFT-CDO-BUSYSTATUS`, Exchange
+/// `LegacyFreeBusyStatus`, Microsoft 365 `showAs`, Google `transparency` (free or busy only).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ShowAs {
+    Free,
+    Tentative,
+    #[default]
+    Busy,
+    /// Out of office.
+    Oof,
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -379,6 +396,7 @@ mod tests {
             recurrence: None,
             reminder: None,
             private: false,
+            show_as: ShowAs::Busy,
         }
     }
 

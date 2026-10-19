@@ -18,7 +18,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Utc};
 use mailcraft_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result, kind_from_name};
 use mailcraft_mime::ParsedHeader;
-use mailcraft_model::{Address, Appointment, Contact, FolderKind, Frequency, Importance, Priority, Recurrence, Server, Task, clean_text};
+use mailcraft_model::{Address, Appointment, Contact, FolderKind, Frequency, Importance, Priority, Recurrence, Server, ShowAs, Task, clean_text};
 use mailcraft_secrets::Secret;
 use serde_json::{Value, json};
 
@@ -204,6 +204,12 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
             .then(|| e.get("reminderMinutesBeforeStart").and_then(Value::as_u64).and_then(|m| u32::try_from(m).ok()))
             .flatten(),
         private: matches!(e.get("sensitivity").and_then(Value::as_str), Some("private" | "confidential")),
+        show_as: match e.get("showAs").and_then(Value::as_str) {
+            Some("free" | "workingElsewhere") => ShowAs::Free,
+            Some("tentative") => ShowAs::Tentative,
+            Some("oof") => ShowAs::Oof,
+            _ => ShowAs::Busy,
+        },
     }
     .validated()
     .ok()
@@ -272,6 +278,12 @@ impl GraphClient {
             "location": { "displayName": a.location },
             "isReminderOn": a.reminder.is_some(),
             "sensitivity": if a.private { "private" } else { "normal" },
+            "showAs": match a.show_as {
+                ShowAs::Free => "free",
+                ShowAs::Tentative => "tentative",
+                ShowAs::Busy => "busy",
+                ShowAs::Oof => "oof",
+            },
         });
         if let Some(m) = a.reminder {
             event["reminderMinutesBeforeStart"] = json!(m);
@@ -615,7 +627,7 @@ impl Mailbox for GraphClient {
 impl ItemStore for GraphClient {
     fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>> {
         let path = format!(
-            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity",
+            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity,showAs",
             encode(&utc(from)),
             encode(&utc(to.max(from)))
         );
@@ -729,6 +741,14 @@ mod tests {
         let h = appointment_of(&hidden).unwrap();
         assert!(h.private, "Privé comes back from the sensitivity");
         assert_eq!(GraphClient::event_json(&h, "UTC")["sensitivity"], "private");
+        assert_eq!((a.show_as, body["showAs"].as_str()), (ShowAs::Busy, Some("busy")));
+        let mut maybe = e.clone();
+        maybe["showAs"] = json!("tentative");
+        let m = appointment_of(&maybe).unwrap();
+        assert_eq!(m.show_as, ShowAs::Tentative);
+        assert_eq!(GraphClient::event_json(&m, "UTC")["showAs"], "tentative");
+        maybe["showAs"] = json!("workingElsewhere");
+        assert_eq!(appointment_of(&maybe).unwrap().show_as, ShowAs::Free, "working elsewhere leaves the time free");
         let silent = Appointment { reminder: None, ..a.clone() };
         let body = GraphClient::event_json(&silent, "UTC");
         assert_eq!(body["isReminderOn"], false);
