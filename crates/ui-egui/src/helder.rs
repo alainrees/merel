@@ -69,6 +69,7 @@ pub enum Icon {
     ReplyAll,
     Save,
     Send,
+    Search,
     Paperclip,
     FileText,
     CircleAlert,
@@ -94,7 +95,7 @@ pub enum Icon {
 
 impl Icon {
     /// Every icon, for the test that each one loads.
-    pub const ALL: [Icon; 61] = [
+    pub const ALL: [Icon; 62] = [
         Icon::Archive,
         Icon::Bell,
         Icon::Calendar,
@@ -135,6 +136,7 @@ impl Icon {
         Icon::ReplyAll,
         Icon::Save,
         Icon::Send,
+        Icon::Search,
         Icon::Paperclip,
         Icon::FileText,
         Icon::CircleAlert,
@@ -206,6 +208,7 @@ impl Icon {
             Icon::ReplyAll => svg!("reply-all"),
             Icon::Save => svg!("save"),
             Icon::Send => svg!("send"),
+            Icon::Search => svg!("search"),
             Icon::Paperclip => svg!("paperclip"),
             Icon::FileText => svg!("file-text"),
             Icon::CircleAlert => svg!("circle-alert"),
@@ -340,6 +343,11 @@ pub fn ribbon_icon_only(label: &str) -> bool {
     matches!(label, "Verwijderen" | "Archiveren" | "Ongewenst" | "Gelezen" | "Ongelezen" | "Vlag" | "Beheren…")
 }
 
+/// Whether a ribbon button is its ribbon's blue main button: making something new.
+pub fn ribbon_primary(label: &str) -> bool {
+    matches!(label, "Nieuwe e-mail" | "Nieuwe afspraak" | "Nieuw contact" | "Nieuwe taak")
+}
+
 /// The icon of a ribbon button, by its label, else by the glyph it had before the Helder style.
 pub fn ribbon_icon(label: &str, glyph: &str) -> Option<Icon> {
     Some(match label {
@@ -431,6 +439,32 @@ pub fn underline_field(ui: &mut Ui, t: &Tokens, text: &mut String, hint: &str, w
     );
     underline(ui, t, &r);
     r
+}
+
+/// A rounded search field with a magnifier, as the Helder title bar has it.
+pub fn search_field(ui: &mut Ui, t: &Tokens, text: &mut String, id: egui::Id, hint: &str, width: f32) -> Response {
+    Frame::new()
+        .fill(t.card)
+        .stroke(Stroke::new(1.0, t.control_border))
+        .corner_radius(18)
+        .inner_margin(Margin { left: 12, right: 12, top: 2, bottom: 2 })
+        .show(ui, |ui| {
+            ui.set_width(width - 26.0);
+            ui.horizontal(|ui| {
+                ui.add(Icon::Search.image(16.0, t.text_dim));
+                ui.add(
+                    egui::TextEdit::singleline(text)
+                        .id(id)
+                        .frame(Frame::NONE)
+                        .hint_text(RichText::new(hint).color(t.text_dim))
+                        .text_color(t.text)
+                        .desired_width(f32::INFINITY)
+                        .margin(Margin::symmetric(2, 6)),
+                )
+            })
+            .inner
+        })
+        .inner
 }
 
 /// The line under a field, or under a button that opens a list.
