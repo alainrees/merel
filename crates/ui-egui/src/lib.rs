@@ -34,7 +34,7 @@ pub mod rules;
 pub mod search_folders;
 pub mod tasks;
 pub mod templates;
-mod theme;
+pub mod theme;
 pub mod unsubscribe;
 pub mod vcard;
 pub mod view;
@@ -293,6 +293,7 @@ impl MailApp {
     pub fn ui(&mut self, ui: &mut Ui) {
         if !self.theme_applied {
             ui.ctx().set_fonts(fonts::definitions());
+            theme::install(ui.ctx());
             ui.ctx().set_theme(self.view.theme.preference());
             self.theme_applied = true;
         }
@@ -732,7 +733,7 @@ fn ribbon_action_hint(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled
         Some(s) => r.on_hover_text(format!("{label} ({s})")),
         None => r,
     };
-    let color = if enabled { t.text } else { t.text_dim.gamma_multiply(0.6) };
+    let color = if enabled { t.text } else { t.text_disabled };
     let p = ui.painter();
     if r.hovered() && enabled {
         p.rect_filled(rect, CornerRadius::same(4), t.hover.gamma_multiply(0.5));
@@ -3089,6 +3090,29 @@ mod tests {
         h.state_mut().engine.session.selected_message = Some("m0".into());
         h.run();
         assert!(h.query_by_label("Offerte drukwerk").is_none(), "folded again once the selection has left it");
+    }
+
+    #[test]
+    fn egui_draws_its_own_text_placeholders_and_disabled_widgets_in_the_readable_colours() {
+        let mut h = harness();
+        h.run();
+        h.step();
+        let t = theme::Tokens::light();
+        let visuals = h.ctx.style_of(egui::Theme::Light).visuals.clone();
+        assert_eq!(visuals.weak_text_color(), t.text_dim, "placeholders such as the search box hint use text_dim");
+        assert_eq!(visuals.widgets.noninteractive.fg_stroke.color, t.text, "plain labels use text");
+        assert_eq!(visuals.widgets.inactive.fg_stroke.color, t.text, "buttons use text");
+        assert_eq!(visuals.widgets.inactive.bg_stroke.color, t.control_border, "controls get a visible border");
+        assert_eq!(visuals.disabled_alpha, theme::DISABLED_ALPHA);
+        h.state_mut().view.theme = view::ThemeChoice::Dark;
+        h.state_mut().theme_applied = false;
+        h.run();
+        h.step();
+        assert_eq!(
+            h.ctx.style_of(egui::Theme::Dark).visuals.weak_text_color(),
+            theme::Tokens::dark().text_dim,
+            "the dark theme carries its own colours"
+        );
     }
 
     #[test]

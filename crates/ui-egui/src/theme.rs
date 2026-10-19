@@ -1,6 +1,11 @@
 //! Colours, in the ArtCraft family style: neutral greys with one app colour.
+//!
+//! Every colour pair the window draws meets WCAG 2.2 level AA: text at 4.5:1 or better on
+//! each surface it can sit on (disabled text and placeholders included, although AA exempts
+//! them), icons and control borders at 3:1 or better. [`contrast`] measures it and a test
+//! holds both themes to it.
 
-use egui::Color32;
+use egui::{Color32, Stroke};
 
 /// Mailcraft's app colour (each ArtCraft app has its own; WordCraft's is #3B5BDB).
 pub const APP_COLOR: Color32 = Color32::from_rgb(0x1F, 0x6F, 0xC9);
@@ -18,7 +23,14 @@ pub struct Tokens {
     pub reading: Color32,
     pub border: Color32,
     pub text: Color32,
+    /// Secondary text: captions, previews, the status bar. Still 4.5:1 on every surface.
     pub text_dim: Color32,
+    /// Text and glyphs of a control that cannot be used right now: told apart from enabled
+    /// text by its grey, but still readable at 4.5:1.
+    pub text_disabled: Color32,
+    /// The border of a checkbox, text field or button: 3:1 or better on every surface, so the
+    /// control's edge can be seen. Panel seams keep the lighter `border`.
+    pub control_border: Color32,
     pub hover: Color32,
     pub checked: Color32,
     pub accent: Color32,
@@ -42,6 +54,8 @@ impl Tokens {
             border: Color32::from_rgb(0xE1, 0xE1, 0xE1),
             text: Color32::from_rgb(0x24, 0x24, 0x24),
             text_dim: Color32::from_rgb(0x61, 0x61, 0x61),
+            text_disabled: Color32::from_rgb(0x5E, 0x5E, 0x5E),
+            control_border: Color32::from_rgb(0x7A, 0x7A, 0x7A),
             hover: Color32::from_rgb(0xE6, 0xE6, 0xE6),
             checked: Color32::from_rgb(0xDC, 0xE8, 0xF7),
             accent: APP_COLOR,
@@ -65,6 +79,8 @@ impl Tokens {
             border: Color32::from_rgb(0x3A, 0x3A, 0x3A),
             text: Color32::from_rgb(0xEE, 0xEE, 0xEE),
             text_dim: Color32::from_rgb(0xC8, 0xC8, 0xC8),
+            text_disabled: Color32::from_rgb(0xAC, 0xAC, 0xAC),
+            control_border: Color32::from_rgb(0x8A, 0x8A, 0x8A),
             hover: Color32::from_rgb(0x3D, 0x3D, 0x3D),
             checked: Color32::from_rgb(0x1E, 0x35, 0x52),
             accent: Color32::from_rgb(0x6F, 0xA8, 0xEE),
@@ -78,5 +94,109 @@ impl Tokens {
 
     pub fn for_dark(dark: bool) -> Self {
         if dark { Self::dark() } else { Self::light() }
+    }
+
+    /// The surfaces text and icons are drawn on.
+    pub fn surfaces(&self) -> [Color32; 10] {
+        [self.title_bar, self.ribbon, self.tab_strip, self.rail, self.panel, self.list, self.reading, self.hover, self.checked, self.status_bar]
+    }
+
+    /// Puts the tokens into egui's own widgets, so text egui colours itself (labels, buttons,
+    /// checkboxes, the placeholder of a text field, a widget that is disabled) is as readable as
+    /// the text the app colours: every text colour is `text` or `text_dim`, a disabled widget
+    /// keeps [`DISABLED_ALPHA`] of its colour, and controls get a visible border.
+    pub fn style(&self, visuals: &mut egui::Visuals) {
+        for w in [
+            &mut visuals.widgets.noninteractive,
+            &mut visuals.widgets.inactive,
+            &mut visuals.widgets.hovered,
+            &mut visuals.widgets.active,
+            &mut visuals.widgets.open,
+        ] {
+            w.fg_stroke.color = self.text;
+        }
+        visuals.weak_text_color = Some(self.text_dim);
+        visuals.disabled_alpha = DISABLED_ALPHA;
+        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, self.control_border);
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, self.text_dim);
+        visuals.widgets.active.bg_stroke = Stroke::new(1.0, self.text);
+        visuals.widgets.open.bg_stroke = Stroke::new(1.0, self.control_border);
+    }
+}
+
+/// How much of its colour a disabled egui widget keeps; chosen so greyed text still reads at
+/// 4.5:1 on every surface while plainly differing from enabled text.
+pub const DISABLED_ALPHA: f32 = 0.72;
+
+/// Gives both of egui's themes the app's readable colours. Once, at start; the choice between
+/// light and dark is made separately with `set_theme`.
+pub fn install(ctx: &egui::Context) {
+    for (theme, tokens) in [(egui::Theme::Light, Tokens::light()), (egui::Theme::Dark, Tokens::dark())] {
+        ctx.style_mut_of(theme, |style| tokens.style(&mut style.visuals));
+    }
+}
+
+/// The WCAG 2.2 contrast ratio between two opaque colours, from 1 (the same) to 21 (black on
+/// white). Text needs 4.5 for level AA, large text, icons and control borders 3.
+pub fn contrast(a: Color32, b: Color32) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    let (hi, lo) = if la > lb { (la, lb) } else { (lb, la) };
+    (hi + 0.05) / (lo + 0.05)
+}
+
+/// `fg` drawn at `alpha` over `bg`, as the screen shows it.
+pub fn over(fg: Color32, bg: Color32, alpha: f32) -> Color32 {
+    let mix = |f: u8, b: u8| (f as f32 * alpha + b as f32 * (1.0 - alpha)).round() as u8;
+    Color32::from_rgb(mix(fg.r(), bg.r()), mix(fg.g(), bg.g()), mix(fg.b(), bg.b()))
+}
+
+/// Relative luminance as WCAG defines it, for sRGB.
+fn luminance(c: Color32) -> f32 {
+    let channel = |v: u8| {
+        let s = f32::from(v) / 255.0;
+        if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * channel(c.r()) + 0.7152 * channel(c.g()) + 0.0722 * channel(c.b())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hex(c: Color32) -> String {
+        format!("#{:02X}{:02X}{:02X}", c.r(), c.g(), c.b())
+    }
+
+    #[test]
+    fn contrast_follows_the_wcag_formula() {
+        assert!((contrast(Color32::BLACK, Color32::WHITE) - 21.0).abs() < 0.01);
+        assert!((contrast(Color32::WHITE, Color32::WHITE) - 1.0).abs() < 0.01);
+        // #767676 on white is the classic 4.54:1 pair.
+        assert!((contrast(Color32::from_gray(0x76), Color32::WHITE) - 4.54).abs() < 0.02);
+    }
+
+    #[test]
+    fn both_themes_meet_wcag_2_2_level_aa() {
+        let mut failures = Vec::new();
+        for t in [Tokens::light(), Tokens::dark()] {
+            let theme = if t.dark { "dark" } else { "light" };
+            let mut need = |what: &str, fg: Color32, bg: Color32, least: f32| {
+                let ratio = contrast(fg, bg);
+                if ratio < least {
+                    failures.push(format!("{theme}: {what} {} on {} is {ratio:.2}:1, needs {least}:1", hex(fg), hex(bg)));
+                }
+            };
+            for bg in t.surfaces() {
+                for (what, fg) in [("text", t.text), ("text_dim", t.text_dim), ("text_disabled", t.text_disabled), ("accent_text", t.accent_text)] {
+                    need(what, fg, bg, 4.5);
+                }
+                need("disabled widget text", over(t.text, bg, DISABLED_ALPHA), bg, 4.5);
+                for (what, fg) in [("accent icon", t.accent), ("flag icon", t.flag), ("control border", t.control_border)] {
+                    need(what, fg, bg, 3.0);
+                }
+            }
+            need("on_accent", t.on_accent, t.accent, 4.5);
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 }
