@@ -13,6 +13,10 @@ use crate::{MailApp, Tokens};
 /// Longest file name written, in characters.
 const MAX_NAME: usize = 120;
 
+/// The button after the attachment chips of a message with several, Outlook's "Alle bijlagen
+/// opslaan".
+pub const SAVE_ALL: &str = "↓ Alle bijlagen opslaan";
+
 /// `name` as a plain file name: no directories, no control characters, no leading dot, no
 /// Windows-reserved characters, bounded; `bijlage` when nothing is left.
 pub fn safe_filename(name: &str) -> String {
@@ -59,6 +63,22 @@ pub fn save_to(dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<PathBuf>
     Err(std::io::Error::other("too many files with this name"))
 }
 
+/// Writes every attachment into `dir`, each under its own name (a taken name gets ` (2)`…).
+/// Returns how many were written and the first problem, so the rest still go in.
+pub fn save_all(dir: &Path, list: &[Attachment]) -> (usize, Option<String>) {
+    let mut saved = 0;
+    let mut problem = None;
+    for a in list {
+        match save_to(dir, &a.name, &a.bytes) {
+            Ok(_) => saved += 1,
+            Err(e) => {
+                problem.get_or_insert_with(|| format!("{} niet opgeslagen: {e}", a.name));
+            }
+        }
+    }
+    (saved, problem)
+}
+
 /// The person's Downloads folder, else their home folder.
 pub fn downloads_dir() -> Option<PathBuf> {
     let dirs = directories::UserDirs::new()?;
@@ -94,6 +114,28 @@ mod tests {
         assert_eq!(c.file_name().unwrap(), "verslag (3).pdf");
         assert_eq!(std::fs::read(&a).unwrap(), b"one");
         assert_eq!(c.parent().unwrap(), dir);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saving_all_writes_each_file_and_keeps_going_after_a_problem() {
+        let dir = std::env::temp_dir().join(format!("mailcraft-att-all-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = |name: &str, bytes: &[u8]| Attachment {
+            name: name.into(),
+            mime: "application/octet-stream".into(),
+            size: bytes.len(),
+            bytes: bytes.into(),
+        };
+        let (n, problem) = save_all(&dir, &[file("verslag.pdf", b"one"), file("verslag.pdf", b"two"), file("foto.png", b"png")]);
+        assert_eq!((n, problem), (3, None));
+        let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names, ["foto.png", "verslag (2).pdf", "verslag.pdf"]);
+        let (n, problem) = save_all(&dir.join("bestaat-niet"), &[file("a.txt", b"a"), file("b.txt", b"b")]);
+        assert_eq!(n, 0);
+        assert!(problem.is_some_and(|p| p.starts_with("a.txt niet opgeslagen: ")), "the first problem is named");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
@@ -137,6 +179,17 @@ impl MailApp {
                 Err(e) => format!("Bijlage niet opgeslagen: {e}"),
             },
             None => "Bijlage niet opgeslagen: geen map Downloads gevonden.".into(),
+        });
+    }
+
+    /// Saves every attachment of the message under Downloads and says how it went.
+    pub fn save_attachments(&mut self, list: &[Attachment]) {
+        self.notice = Some(match downloads_dir() {
+            Some(dir) => match save_all(&dir, list) {
+                (n, None) => format!("{n} bijlagen opgeslagen in {}", dir.display()),
+                (n, Some(problem)) => format!("{n} van {} bijlagen opgeslagen in {}; {problem}", list.len(), dir.display()),
+            },
+            None => "Bijlagen niet opgeslagen: geen map Downloads gevonden.".into(),
         });
     }
 }
