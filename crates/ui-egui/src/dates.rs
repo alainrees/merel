@@ -40,6 +40,11 @@ pub fn long(ts: i64) -> String {
     format!("{d} {} {y} {h:02}:{min:02}", month(m))
 }
 
+/// "woensdag 21 oktober", the way a due day is named.
+pub fn day_name(d: NaiveDate) -> String {
+    format!("{} {} {}", crate::calendar::weekday_name(d), d.day(), crate::calendar::month_name(d.month()))
+}
+
 /// The group a message of `ts` falls in when the list is grouped by date, seen from `today`:
 /// the headings Outlook puts over the list.
 pub fn date_group(ts: i64, today: NaiveDate) -> &'static str {

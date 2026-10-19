@@ -1032,7 +1032,11 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     let on = selected.as_deref() == Some(m.id.as_str()) || app.engine.session.marked.contains(&m.id);
                     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click_and_drag());
                     r.dnd_set_drag_payload(DraggedMessage(m.id.clone()));
-                    let r = r.on_hover_text(&m.subject);
+                    let hover = match app.engine.session.follow_up(&m.id).and_then(mailcraft_engine::followup::due_day) {
+                        Some(d) => format!("{}\nOpvolgen vóór {}", m.subject, dates::day_name(d)),
+                        None => m.subject.clone(),
+                    };
+                    let r = r.on_hover_text(hover);
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &m.subject));
                     let known_sender = app.engine.session.contact_with_email(m.from.email()).is_some();
                     let in_junk = app.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk);
@@ -1217,6 +1221,29 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     ui.label(RichText::new(&m.subject).size(20.0).strong().color(t.text));
     ui.add_space(10.0);
+    if m.flags.flagged {
+        // The follow-up strip, as Outlook puts it over a flagged message: the due day, red once
+        // it has passed, and the way to mark it done.
+        let today = chrono::Local::now().date_naive();
+        let due = app.engine.session.follow_up(&m.id).and_then(mailcraft_engine::followup::due_day);
+        let (text, late) = match due {
+            Some(d) if d < today => (format!("⚑ Opvolgen: verlopen op {}", dates::day_name(d)), true),
+            Some(d) if d == today => ("⚑ Opvolgen: vandaag".to_string(), false),
+            Some(d) => (format!("⚑ Opvolgen vóór {}", dates::day_name(d)), false),
+            None => ("⚑ Gemarkeerd voor opvolging".to_string(), false),
+        };
+        let mut done = false;
+        egui::Frame::new().fill(if late { t.flag.gamma_multiply(0.15) } else { t.checked }).corner_radius(4).inner_margin(8).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(text).color(if late { t.flag } else { t.text }));
+                done = ui.small_button("Voltooid").on_hover_text("Haalt de vlag en de datum weg.").clicked();
+            });
+        });
+        ui.add_space(8.0);
+        if done {
+            app.run("message.flag", Value::Null);
+        }
+    }
     let in_junk = app.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk);
     if in_junk {
         // A message in the Junk folder: a warning, the links, attachments and pictures switched
@@ -1925,6 +1952,27 @@ mod tests {
         h.get_by_label("Start").click();
         h.run();
         assert!(h.query_by_label("Vandaag").is_none());
+    }
+
+    #[test]
+    fn a_message_is_flagged_for_tomorrow_from_the_menu_and_marked_done_from_the_strip() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Planning voor donderdag").click_secondary();
+        h.run();
+        h.get_by_label_contains("Opvolgen").click();
+        h.run();
+        h.get_by_label("Morgen").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert!(s.message("m1").unwrap().flags.flagged);
+        let tomorrow = chrono::Local::now().date_naive().succ_opt().unwrap();
+        assert_eq!(s.follow_up("m1").and_then(mailcraft_engine::followup::due_day), Some(tomorrow));
+        h.get_by_label(format!("⚑ Opvolgen vóór {}", dates::day_name(tomorrow)).as_str());
+        h.get_by_label("Voltooid").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert!(!s.message("m1").unwrap().flags.flagged && s.follow_up("m1").is_none());
     }
 
     #[test]

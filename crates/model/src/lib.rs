@@ -466,6 +466,18 @@ pub struct IgnoredConversation {
     pub subject: String,
 }
 
+/// A follow-up flag with a date, Outlook's "Opvolgen": the day a flagged message is due. The
+/// flag itself is on the server; the date is this computer's, filed under `key` (the
+/// message's Message-ID, else its id) so a move between folders keeps it. `due` is an ISO
+/// day, "2026-10-21"; `subject` is the subject as it was, for showing.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FollowUp {
+    pub key: String,
+    pub due: String,
+    #[serde(default)]
+    pub subject: String,
+}
+
 /// `s` cut to [`MAX_TEXT`] characters with control characters (other than tab) removed, so a
 /// header cannot smuggle line breaks or terminal escapes into the UI or a log.
 pub fn clean_text(s: &str) -> String {
