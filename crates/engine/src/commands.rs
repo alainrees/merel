@@ -86,6 +86,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "quickstep.save", label: "Save quick step", run: crate::quicksteps::save },
     CommandSpec { id: "quickstep.delete", label: "Delete quick step", run: crate::quicksteps::delete },
     CommandSpec { id: "quickstep.run", label: "Run quick step", run: crate::quicksteps::run },
+    CommandSpec { id: "group.save", label: "Save contact group", run: crate::groups::save },
+    CommandSpec { id: "group.delete", label: "Delete contact group", run: crate::groups::delete },
     CommandSpec { id: "reminder.dismiss", label: "Close a reminder", run: crate::reminders::dismiss },
     CommandSpec { id: "reminder.snooze", label: "Put a reminder off", run: crate::reminders::snooze },
     CommandSpec { id: "appointment.delete", label: "Delete appointment", run: crate::calendar::delete },

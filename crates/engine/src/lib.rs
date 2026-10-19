@@ -18,6 +18,7 @@ pub mod contacts;
 pub mod drafts;
 pub mod folders;
 pub mod followup;
+pub mod groups;
 pub mod ignore;
 pub mod junk;
 pub mod quicksteps;
@@ -41,8 +42,8 @@ use std::time::{Duration, Instant};
 use mailcraft_mailbox::{Flag, Item};
 pub use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
 use mailcraft_model::{
-    Account, Appointment, Auth, Calendar, Category, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, QuickStep, Rule, StoredDraft, Task,
-    clean_text,
+    Account, Appointment, Auth, Calendar, Category, Contact, ContactGroup, Draft, Flags, Folder, FolderKind, MessageHeader, QuickStep, Rule,
+    StoredDraft, Task, clean_text,
 };
 use mailcraft_secrets::{Secret, SecretStore};
 use serde::{Deserialize, Serialize};
@@ -433,6 +434,10 @@ pub struct Session {
     pub quick_steps: Vec<QuickStep>,
     quick_steps_dirty: bool,
     next_quick_step_id: u64,
+    /// Contact groups (distribution lists), kept on this computer in `contact_groups.json`.
+    pub groups: Vec<ContactGroup>,
+    groups_dirty: bool,
+    next_group_id: u64,
     /// Messages the rules changed since the UI last asked.
     rule_hits: usize,
     next_rule_id: u64,
@@ -570,6 +575,8 @@ impl Session {
             fresh.follow_ups_dirty = self.follow_ups_dirty;
             fresh.rules_dirty = self.rules_dirty;
             fresh.quick_steps_dirty = self.quick_steps_dirty;
+            fresh.groups = std::mem::take(&mut self.groups);
+            fresh.groups_dirty = self.groups_dirty;
             fresh.ignored_dirty = self.ignored_dirty;
             *self = fresh;
         }
@@ -1063,6 +1070,8 @@ impl Engine {
         let steps =
             engine.config_path.as_deref().map(|p| config::load_json::<quicksteps::QuickStepsFile>(&config::quick_steps_path(p))).unwrap_or_default();
         engine.session.set_quick_steps(steps.quick_steps);
+        let groups = engine.config_path.as_deref().map(|p| config::load_json::<groups::GroupsFile>(&config::groups_path(p))).unwrap_or_default();
+        engine.session.set_groups(groups.groups);
         engine.dispatch();
         engine
     }
@@ -1079,6 +1088,7 @@ impl Engine {
             self.session.take_follow_ups_dirty();
             self.session.take_categories_dirty();
             self.session.take_quick_steps_dirty();
+            self.session.take_groups_dirty();
             return Ok(());
         };
         if self.session.take_calendar_dirty() {
@@ -1107,6 +1117,9 @@ impl Engine {
         }
         if self.session.take_quick_steps_dirty() {
             config::save_json(&config::quick_steps_path(&path), &self.session.quick_steps_data()).map_err(|e| CommandError::Store(e.to_string()))?;
+        }
+        if self.session.take_groups_dirty() {
+            config::save_json(&config::groups_path(&path), &self.session.groups_data()).map_err(|e| CommandError::Store(e.to_string()))?;
         }
         Ok(())
     }
