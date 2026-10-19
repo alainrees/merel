@@ -1634,6 +1634,9 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             return;
         }
     }
+    if let Some(e) = body.as_ref().and_then(|b| b.encrypted.as_ref()) {
+        signature::encryption_strip(ui, t, e);
+    }
     if let Some(sig) = body.as_ref().and_then(|b| b.signature.as_ref()) {
         signature::strip(ui, t, sig, m.from.email());
     }
@@ -2758,6 +2761,20 @@ mod tests {
         }
         h.run();
         h.get_by_label(signature::BROKEN);
+    }
+
+    #[test]
+    fn an_encrypted_message_says_so_over_its_text() {
+        let mut h = harness();
+        {
+            let s = &mut h.state_mut().engine.session;
+            let body =
+                mailcraft_engine::Body { text: "Het contract".into(), encrypted: Some(mailcraft_mime::Encryption::Opened), ..Default::default() };
+            s.bodies.insert("m3".into(), body);
+            s.selected_message = Some("m3".into());
+        }
+        h.run();
+        h.get_by_label(signature::ENCRYPTED);
     }
 
     #[test]
