@@ -13,6 +13,9 @@ use crate::{ComposeKind, MailApp, Module, Tokens};
 pub struct State {
     pub query: String,
     pub editor: Option<Editor>,
+    /// The contact group whose card is shown, if any; a contact click clears it.
+    pub group: Option<String>,
+    pub group_editor: Option<crate::groups::Editor>,
 }
 
 /// The search box's widget id, so Ctrl+E can put the cursor there.
@@ -152,6 +155,9 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.add_space(8.0);
             let selected = app.engine.session.selected_contact.clone();
             let list: Vec<Contact> = app.engine.session.contacts_matching(&app.contacts.query).into_iter().cloned().collect();
+            let groups: Vec<mailcraft_model::ContactGroup> = app.engine.session.groups_sorted().into_iter().cloned().collect();
+            let selected_group = app.contacts.group.clone();
+            let mut group_pick = None;
             if list.is_empty() {
                 ui.label(
                     RichText::new(if app.contacts.query.is_empty() { "Nog geen contacten." } else { "Geen contact gevonden." }).color(t.text_dim),
@@ -186,9 +192,15 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         pick = Some(c.id.clone());
                     }
                 }
+                group_pick = crate::groups::section(ui, t, &groups, selected_group.as_deref());
             });
             if let Some(id) = pick {
                 app.run("contact.select", json!({ "id": id }));
+                app.contacts.editor = None;
+                app.contacts.group = None;
+            }
+            if let Some(id) = group_pick {
+                app.contacts.group = Some(id);
                 app.contacts.editor = None;
             }
         });
@@ -304,6 +316,8 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading).inner_margin(Margin::same(24))).show(ui, |ui| {
         if app.contacts.editor.is_some() {
             form(app, ui, t);
+        } else if let Some(id) = app.contacts.group.clone() {
+            crate::groups::card(app, ui, t, &id);
         } else {
             card(app, ui, t);
         }
@@ -316,6 +330,9 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let has_mail = app.engine.session.selected_contact().is_some_and(|c| !c.emails.is_empty());
     if crate::ribbon_action_hint(ui, t, "👤", "Nieuw contact", true, Some(&crate::key_hint("Shift+C"))) {
         app.new_contact();
+    }
+    if crate::ribbon_action(ui, t, "👥", crate::groups::NEW, true) {
+        app.new_group();
     }
     ui.separator();
     if crate::ribbon_action(ui, t, "✎", "Bewerken", has) {
@@ -344,13 +361,22 @@ pub fn complete_addresses(ui: &mut Ui, t: &Tokens, session: &mailcraft_engine::S
     if tail.is_empty() {
         return;
     }
+    // A contact group's name offers all its members at once, as Outlook expands a group.
+    let groups: Vec<(String, String)> =
+        session.groups_matching(tail).into_iter().take(3).map(|g| (crate::groups::label(g), g.address_line())).collect();
     let suggestions = session.suggest_addresses(tail, 5);
-    if suggestions.is_empty() {
+    if suggestions.is_empty() && groups.is_empty() {
         return;
     }
     let mut picked = None;
     ui.horizontal_wrapped(|ui| {
         ui.add_space(84.0);
+        for (label, line) in &groups {
+            let b = egui::Button::new(RichText::new(label).size(12.0).color(t.text)).fill(t.checked).corner_radius(CornerRadius::same(10));
+            if ui.add(b).on_hover_text(line).clicked() {
+                picked = Some(line.clone());
+            }
+        }
         for a in &suggestions {
             let label = if a.display() == a.email() { a.email().to_string() } else { format!("{} <{}>", a.display(), a.email()) };
             let b = egui::Button::new(RichText::new(&label).size(12.0).color(t.text)).fill(t.hover).corner_radius(CornerRadius::same(10));

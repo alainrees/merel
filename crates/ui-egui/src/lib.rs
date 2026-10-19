@@ -14,6 +14,7 @@ mod compose;
 pub mod contacts;
 mod dates;
 pub mod folders;
+pub mod groups;
 pub mod help;
 mod html;
 pub mod importance;
@@ -310,6 +311,7 @@ impl MailApp {
         let ctx = ui.ctx().clone();
         compose::show(self, &ctx, &t);
         calendar::window(self, &ctx, &t);
+        groups::window(self, &ctx, &t);
         reminders::window(self, &ctx, &t);
         rules::window(self, &ctx, &t);
         junk::window(self, &ctx, &t);
@@ -1992,6 +1994,38 @@ mod tests {
         h.get_by_label("Verzenden").click();
         h.run();
         h.get_by_label(meeting::BAD_ADDRESSES);
+    }
+
+    #[test]
+    fn a_contact_group_is_made_mailed_and_offered_while_an_address_is_typed() {
+        let mut h = harness();
+        h.state_mut().module = Module::People;
+        h.run();
+        h.get_by_label(groups::NEW).click();
+        h.run();
+        {
+            let e = h.state_mut().contacts.group_editor.as_mut().expect("the group window");
+            e.name = "Team ontwerp".into();
+            e.members = "Sanne <sanne@example.org>\nravi@example.org".into();
+        }
+        h.get_by_label("Opslaan").click();
+        h.run();
+        let groups = h.state().engine.session.groups.clone();
+        assert_eq!(groups.len(), 1);
+        assert_eq!((groups[0].name.as_str(), groups[0].members.len()), ("Team ontwerp", 2));
+        assert!(h.state().contacts.group_editor.is_none());
+        assert_eq!(h.state().contacts.group.as_deref(), Some(groups[0].id.as_str()), "the new group is shown");
+        h.get_by_label("👥 Team ontwerp (2)");
+        h.get_by_label(groups::MAIL).click();
+        h.run();
+        assert_eq!(h.state().compose.as_ref().map(|c| c.to.as_str()), Some("Sanne <sanne@example.org>; ravi@example.org; "));
+        // Typing the group's name in an address field offers its members.
+        h.state_mut().module = Module::Mail;
+        h.state_mut().compose.as_mut().expect("the compose window").to = "tea".into();
+        h.run();
+        h.get_by_label("👥 Team ontwerp (2)").click();
+        h.run();
+        assert_eq!(h.state().compose.as_ref().map(|c| c.to.as_str()), Some("Sanne <sanne@example.org>; ravi@example.org; "));
     }
 
     #[test]
