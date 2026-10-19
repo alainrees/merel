@@ -15,6 +15,7 @@ mod dates;
 pub mod folders;
 pub mod help;
 mod html;
+pub mod message_menu;
 pub mod print;
 pub mod quicksteps;
 pub mod reminders;
@@ -928,6 +929,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let selected = app.engine.session.selected_message.clone();
                 let rows = list_rows(list, app.view.conversations, &app.expanded, selected.as_deref());
                 let mut toggle: Option<String> = None;
+                let mut menu_pick: Option<(mailcraft_model::MessageHeader, message_menu::Pick)> = None;
                 for row in rows {
                     let m = row.m;
                     let on = selected.as_deref() == Some(m.id.as_str());
@@ -935,6 +937,9 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     r.dnd_set_drag_payload(DraggedMessage(m.id.clone()));
                     let r = r.on_hover_text(&m.subject);
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &m.subject));
+                    if let Some(p) = message_menu::menu(&r, m) {
+                        menu_pick = Some((m.clone(), p));
+                    }
                     // The fold control is its own widget, drawn over the row's left edge.
                     if let Some(fold) = &row.fold {
                         let box_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 16.0, rect.top() + 14.0), vec2(18.0, 18.0));
@@ -1024,6 +1029,9 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     && !app.expanded.remove(&key)
                 {
                     app.expanded.insert(key);
+                }
+                if let Some((m, p)) = menu_pick {
+                    app.act_on_message(&m, p);
                 }
                 let selected = app.engine.session.selected_folder.clone();
                 if !searching && let Some(folder) = selected {
@@ -1515,6 +1523,23 @@ mod tests {
         h.get_by_label("Verwijderen").click();
         h.run();
         assert!(h.state().engine.session.appointments.iter().all(|a| a.title != "Tandarts"));
+    }
+
+    #[test]
+    fn the_right_click_menu_on_a_message_makes_a_task_of_it() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Planning voor donderdag").click_secondary();
+        h.run();
+        assert!(h.query_by_label("Afspraak maken van dit bericht").is_some(), "the menu is open");
+        h.get_by_label("Taak maken van dit bericht").click();
+        h.run();
+        assert!(h.state().module == Module::Tasks, "the tasks module shows the new form");
+        assert_eq!(h.state().tasks.editor.as_ref().map(|e| e.title.as_str()), Some("Planning voor donderdag"));
+        assert_eq!(h.state().engine.session.selected_message.as_deref(), Some("m1"));
+        h.get_by_label("Opslaan").click();
+        h.run();
+        assert!(h.state().engine.session.tasks.iter().any(|t| t.title == "Planning voor donderdag" && t.notes.starts_with("Van: Sanne")));
     }
 
     #[test]
