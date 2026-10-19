@@ -231,6 +231,11 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 }
                 app.tab = Tab::Home;
             }
+            // Outlook's "Opslaan als": the open message as an .eml file in Downloads; Ctrl+S too.
+            if item(ui, crate::eml::SAVE_AS) {
+                app.save_as_file();
+                app.tab = Tab::Home;
+            }
             if item(ui, "Ongewenste e-mail") {
                 app.junk = Some(crate::junk::Options::default());
                 app.tab = Tab::Home;
