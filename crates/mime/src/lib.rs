@@ -1,16 +1,22 @@
 //! Message parsing: RFC 5322 headers and MIME bodies, through `mail-parser`.
 //!
 //! Everything that comes out of here is bounded and cleaned: names and subjects go through
-//! [`mailcraft_model::clean_text`], addresses through [`Address::new`], and HTML is reduced
-//! to plain text (no scripts, no styles, no remote loads can survive that).
+//! [`mailcraft_model::clean_text`], addresses through [`Address::new`], and HTML goes through
+//! `mailcraft_html` into a small layout tree (no scripts, no styles, no remote loads can
+//! survive that), with a plain-text rendering next to it for previews and replies.
+
+use std::sync::Arc;
 
 use mail_parser::{MessageParser, MimeHeaders};
+use mailcraft_html::Document;
 use mailcraft_model::{Address, clean_text};
 
 /// Longest message body (bytes) that is parsed; the rest is dropped with a note.
 pub const MAX_BODY: usize = 8 * 1024 * 1024;
 /// Width the HTML-to-text layout wraps at.
 const TEXT_WIDTH: usize = 100;
+/// Largest picture embedded in a message that is kept for display.
+pub const MAX_INLINE_IMAGE: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ParsedHeader {
@@ -30,12 +36,26 @@ pub struct Attachment {
     pub size: usize,
 }
 
+/// A picture that travels inside the message and that its HTML refers to by content id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InlineImage {
+    /// The Content-ID without its angle brackets.
+    pub cid: String,
+    pub mime: String,
+    pub bytes: Arc<[u8]>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Body {
-    /// The text shown in the reading pane.
+    /// The text of the message: the plain part, else the HTML reduced to text. Previews,
+    /// replies and the reading pane without HTML use it.
     pub text: String,
     /// True when `text` was derived from an HTML part.
     pub from_html: bool,
+    /// The HTML part as a layout tree, when the message has one with content.
+    pub rich: Option<Document>,
+    /// The embedded pictures `rich` refers to.
+    pub images: Vec<InlineImage>,
     pub attachments: Vec<Attachment>,
 }
 
@@ -64,25 +84,38 @@ pub fn parse_body(bytes: &[u8]) -> Body {
     };
     // `body_text` quietly falls back to a converted HTML part, so look at the parts by kind.
     let plain = m.text_bodies().find(|p| p.is_text() && !p.is_text_html()).and_then(|p| p.text_contents());
-    let (mut text, from_html) = match plain {
-        Some(t) => (t.to_string(), false),
-        None => match m.html_bodies().find_map(|p| p.text_contents()) {
-            Some(h) => (html_to_text(h), true),
-            None => (String::new(), false),
-        },
+    // `html_bodies` falls back to plain parts; only a real HTML part gets a layout tree.
+    let html = m.html_bodies().find(|p| p.is_text_html()).and_then(|p| p.text_contents());
+    let (mut text, from_html) = match (plain, html) {
+        (Some(t), _) => (t.to_string(), false),
+        (None, Some(h)) => (html_to_text(h), true),
+        (None, None) => (String::new(), false),
     };
+    let rich = html.map(mailcraft_html::parse).filter(|d| !d.is_empty());
     if truncated {
         text.push_str("\n\n[Bericht afgekapt: te groot om volledig te tonen.]");
     }
+    let wanted = rich.as_ref().map(Document::inline_image_ids).unwrap_or_default();
+    let cid_of = |p: &mail_parser::MessagePart<'_>| p.content_id().map(|c| c.trim().trim_matches(['<', '>']).to_string());
+    let mut images: Vec<InlineImage> = Vec::new();
+    for p in &m.parts {
+        let Some(cid) = cid_of(p).filter(|c| wanted.contains(c)) else { continue };
+        let mime = mime_of(p);
+        if mime.starts_with("image/") && p.contents().len() <= MAX_INLINE_IMAGE && !images.iter().any(|i| i.cid == cid) {
+            images.push(InlineImage { cid, mime, bytes: p.contents().into() });
+        }
+    }
+    // A picture shown in the body is not listed as an attachment as well.
     let attachments = m
         .attachments()
-        .map(|p| Attachment {
-            name: clean_text(p.attachment_name().unwrap_or("bijlage")),
-            mime: p.content_type().map(|c| format!("{}/{}", c.ctype(), c.subtype().unwrap_or(""))).unwrap_or_default(),
-            size: p.contents().len(),
-        })
+        .filter(|p| !cid_of(p).is_some_and(|c| images.iter().any(|i| i.cid == c)))
+        .map(|p| Attachment { name: clean_text(p.attachment_name().unwrap_or("bijlage")), mime: mime_of(p), size: p.contents().len() })
         .collect();
-    Body { text, from_html, attachments }
+    Body { text, from_html, rich, images, attachments }
+}
+
+fn mime_of(p: &mail_parser::MessagePart<'_>) -> String {
+    p.content_type().map(|c| format!("{}/{}", c.ctype(), c.subtype().unwrap_or("")).to_ascii_lowercase()).unwrap_or_default()
 }
 
 /// Plain text from HTML: tags, scripts, styles and remote references are all dropped.
@@ -136,6 +169,22 @@ mod tests {
         assert!(b.text.contains("Hallo"));
         assert!(!b.text.contains("alert"));
         assert!(!b.text.contains("t.example"));
+        let rich = b.rich.expect("layout tree");
+        assert_eq!((rich.blocks.len(), rich.remote_images), (2, 1), "a paragraph and the picture");
+        assert!(parse_body(MSG).rich.is_none(), "a plain message has no layout tree");
+    }
+
+    #[test]
+    fn embedded_pictures_leave_the_attachment_list() {
+        let msg = b"Content-Type: multipart/related; boundary=b\r\n\r\n--b\r\nContent-Type: text/html\r\n\r\n<p>Logo: <img src=\"cid:logo@x\" alt=\"Logo\"></p>\r\n--b\r\nContent-Type: image/png; name=\"logo.png\"\r\nContent-ID: <logo@x>\r\nContent-Disposition: inline; filename=\"logo.png\"\r\n\r\nPNGDATA\r\n--b\r\nContent-Type: image/png; name=\"other.png\"\r\nContent-ID: <other@x>\r\nContent-Disposition: attachment; filename=\"other.png\"\r\n\r\nPNG2\r\n--b--\r\n";
+        let b = parse_body(msg);
+        assert_eq!(b.images.len(), 1);
+        assert_eq!((b.images[0].cid.as_str(), b.images[0].mime.as_str(), &b.images[0].bytes[..]), ("logo@x", "image/png", &b"PNGDATA"[..]));
+        assert_eq!(
+            b.attachments.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+            vec!["other.png"],
+            "the unreferenced picture stays an attachment"
+        );
     }
 
     #[test]

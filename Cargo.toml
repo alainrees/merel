@@ -21,6 +21,7 @@ mailcraft-mailbox = { path = "crates/mailbox" }
 mailcraft-exchange = { path = "crates/exchange" }
 mailcraft-google = { path = "crates/google" }
 mailcraft-graph = { path = "crates/graph" }
+mailcraft-html = { path = "crates/html" }
 
 # foundation
 thiserror = "2"
@@ -36,6 +37,8 @@ imap = { version = "3.0.0-alpha.15", default-features = false, features = ["rust
 mail-parser = "0.11"
 imap-proto = "0.16"
 html2text = "0.17"
+# The HTML5 parser behind html2text, used directly to build the reading pane's layout tree.
+html5ever = "0.40"
 keyring = "4"
 # OAuth 2.0 token exchange over HTTPS, same TLS stack as the mail protocols.
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier", "json"] }
@@ -58,6 +61,9 @@ iana-time-zone = "0.1"
 egui = "0.36"
 eframe = { version = "0.36", default-features = false }
 egui_kittest = "0.36"
+# Image decoding for pictures embedded in mail (no SVG: no text rendering engine, no scripts).
+egui_extras = { version = "0.36", default-features = false, features = ["image", "gif", "webp"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
