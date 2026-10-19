@@ -316,6 +316,7 @@ pub fn appointment_of(event: &Component, id: String) -> Option<Appointment> {
         all_day,
         location: event.text("LOCATION"),
         notes: event.text("DESCRIPTION"),
+        recurrence: None,
     }
     .validated()
     .ok()
