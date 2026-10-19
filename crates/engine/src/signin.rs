@@ -131,6 +131,7 @@ pub fn account(protocol: Protocol, name: &str, email: &str, client_id: &str) -> 
         auth: Auth::OAuth2 { client_id: client_id.to_string(), auth_url: preset.auth_url, token_url: preset.token_url, scope: preset.scope },
         incoming: Some(preset.incoming),
         outgoing: preset.outgoing,
+        dav: None,
     })
 }
 

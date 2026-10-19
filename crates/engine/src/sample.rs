@@ -26,6 +26,7 @@ fn build() -> Option<Session> {
         auth: mailcraft_model::Auth::Password,
         incoming: Some(Server { host: "imap.example.org".into(), port: 993, tls: Tls::Implicit }),
         outgoing: Some(Server { host: "smtp.example.org".into(), port: 465, tls: Tls::Implicit }),
+        dav: None,
     };
     let folders = [
         ("inbox", "Postvak IN", FolderKind::Inbox),

@@ -109,6 +109,43 @@ pub struct Account {
     pub auth: Auth,
     pub incoming: Option<Server>,
     pub outgoing: Option<Server>,
+    /// A CalDAV/CardDAV server next to an IMAP account, for its calendar, contacts and tasks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dav: Option<Dav>,
+}
+
+/// Where an IMAP account's calendars and address books live (CalDAV and CardDAV); the same
+/// user name and password sign in there.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Dav {
+    /// The server's `https://` address; discovery starts at its `/.well-known/caldav`.
+    pub calendar: String,
+    /// The CardDAV server, when it is another one (iCloud, Fastmail).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contacts: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum DavError {
+    #[error("a DAV address starts with https:// and names a server")]
+    BadUrl,
+}
+
+impl Dav {
+    /// Checks both addresses: `https://`, a host, no spaces or control characters, bounded.
+    pub fn new(calendar: &str, contacts: &str) -> Result<Dav, DavError> {
+        fn check(url: &str) -> Result<String, DavError> {
+            let url = url.trim();
+            let host = url.strip_prefix("https://").ok_or(DavError::BadUrl)?;
+            let ok = host.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+                && url.chars().count() <= 512
+                && !url.chars().any(|c| c.is_control() || c.is_whitespace() || c == '"' || c == '<' || c == '>');
+            if ok { Ok(url.to_string()) } else { Err(DavError::BadUrl) }
+        }
+        let calendar = check(calendar)?;
+        let contacts = if contacts.trim().is_empty() { None } else { Some(check(contacts)?) };
+        Ok(Dav { calendar, contacts })
+    }
 }
 
 impl Auth {
