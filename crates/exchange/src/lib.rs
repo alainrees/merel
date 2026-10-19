@@ -283,6 +283,20 @@ impl EwsClient {
         })
     }
 
+    /// The current change key of a folder, which `UpdateFolder` insists on.
+    fn folder_change_key(&self, id: &str) -> Result<String> {
+        let xml = self.call(&format!(
+            "<m:GetFolder><m:FolderShape><t:BaseShape>IdOnly</t:BaseShape></m:FolderShape><m:FolderIds><t:FolderId Id=\"{}\"/></m:FolderIds></m:GetFolder>",
+            esc(id)
+        ))?;
+        let doc = parse(&xml)?;
+        response_messages(&doc, false)?;
+        find(doc.root_element(), "FolderId")
+            .and_then(|n| n.attribute("ChangeKey"))
+            .map(str::to_string)
+            .ok_or_else(|| MailboxError::Protocol("no change key".into()))
+    }
+
     /// The current change key of an item, which `UpdateItem` insists on.
     fn change_key(&self, id: &str) -> Result<String> {
         let xml = self.call(&format!(
@@ -461,6 +475,46 @@ impl Mailbox for EwsClient {
             "<m:MoveItem><m:ToFolderId><t:FolderId Id=\"{dest}\"/></m:ToFolderId><m:ItemIds><t:ItemId Id=\"{id}\"/></m:ItemIds></m:MoveItem>",
             dest = esc(dest),
             id = esc(id)
+        ))?;
+        response_messages(&parse(&xml)?, false).map(drop)
+    }
+
+    fn create_folder(&mut self, parent: Option<&str>, name: &str) -> Result<()> {
+        let parent = match parent {
+            Some(id) => format!("<t:FolderId Id=\"{}\"/>", esc(id)),
+            None => "<t:DistinguishedFolderId Id=\"msgfolderroot\"/>".to_string(),
+        };
+        let xml = self.call(&format!(
+            concat!(
+                "<m:CreateFolder><m:ParentFolderId>{parent}</m:ParentFolderId>",
+                "<m:Folders><t:Folder><t:FolderClass>IPF.Note</t:FolderClass><t:DisplayName>{name}</t:DisplayName></t:Folder></m:Folders></m:CreateFolder>"
+            ),
+            parent = parent,
+            name = esc(name)
+        ))?;
+        response_messages(&parse(&xml)?, false).map(drop)
+    }
+
+    fn rename_folder(&mut self, folder: &str, name: &str) -> Result<()> {
+        let key = self.folder_change_key(folder)?;
+        let xml = self.call(&format!(
+            concat!(
+                "<m:UpdateFolder><m:FolderChanges><t:FolderChange><t:FolderId Id=\"{id}\" ChangeKey=\"{key}\"/><t:Updates>",
+                "<t:SetFolderField><t:FieldURI FieldURI=\"folder:DisplayName\"/><t:Folder><t:DisplayName>{name}</t:DisplayName></t:Folder></t:SetFolderField>",
+                "</t:Updates></t:FolderChange></m:FolderChanges></m:UpdateFolder>"
+            ),
+            id = esc(folder),
+            key = esc(&key),
+            name = esc(name)
+        ))?;
+        response_messages(&parse(&xml)?, false).map(drop)
+    }
+
+    fn delete_folder(&mut self, folder: &str) -> Result<()> {
+        // Soft: the folder leaves the mailbox but the server can still recover it for a while.
+        let xml = self.call(&format!(
+            "<m:DeleteFolder DeleteType=\"SoftDelete\"><m:FolderIds><t:FolderId Id=\"{}\"/></m:FolderIds></m:DeleteFolder>",
+            esc(folder)
         ))?;
         response_messages(&parse(&xml)?, false).map(drop)
     }

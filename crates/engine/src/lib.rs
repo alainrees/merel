@@ -14,6 +14,7 @@ mod commands;
 pub mod config;
 pub mod contacts;
 pub mod drafts;
+pub mod folders;
 pub mod reminders;
 pub mod rules;
 mod sample;
@@ -120,6 +121,22 @@ pub enum Job {
         account_id: String,
         id: String,
     },
+    /// Make a folder under `parent` (a folder path; `None` for the top of the mailbox), then
+    /// list the folders again.
+    CreateFolder {
+        account_id: String,
+        parent: Option<String>,
+        name: String,
+    },
+    RenameFolder {
+        account_id: String,
+        path: String,
+        name: String,
+    },
+    DeleteFolder {
+        account_id: String,
+        path: String,
+    },
 }
 
 impl Job {
@@ -134,11 +151,15 @@ impl Job {
             | Job::Send { account_id, .. }
             | Job::Sync { account_id, .. }
             | Job::SaveItem { account_id, .. }
-            | Job::DeleteItem { account_id, .. } => account_id,
+            | Job::DeleteItem { account_id, .. }
+            | Job::CreateFolder { account_id, .. }
+            | Job::RenameFolder { account_id, .. }
+            | Job::DeleteFolder { account_id, .. } => account_id,
         }
     }
 
-    /// Whether the job changes something on the server, so it must not be lost offline.
+    /// Whether the job changes something on the server, so it must not be lost offline. A
+    /// folder change is not kept: the person sees the folder list, so it needs the server now.
     pub fn is_change(&self) -> bool {
         matches!(self, Job::Flag { .. } | Job::Move { .. } | Job::SaveItem { .. } | Job::DeleteItem { .. })
     }
@@ -152,6 +173,11 @@ pub enum Event {
         folders: Vec<RemoteFolder>,
         /// Whether the store also keeps appointments, contacts and tasks.
         syncs_items: bool,
+    },
+    /// The folders of an account, listed again after one was made, renamed or removed.
+    Folders {
+        account_id: String,
+        folders: Vec<RemoteFolder>,
     },
     /// The items of an account's store, replacing what the session had of it.
     Synced {
@@ -453,6 +479,7 @@ impl Session {
     pub fn concerns_current(&self, event: &Event) -> bool {
         match event {
             Event::Connected { account_id, .. }
+            | Event::Folders { account_id, .. }
             | Event::Synced { account_id, .. }
             | Event::ItemSaved { account_id, .. }
             | Event::Failed { account_id, .. }
@@ -594,23 +621,7 @@ impl Session {
                     self.item_accounts.insert(account_id.clone());
                     self.request_sync(&account_id);
                 }
-                self.folders.retain(|f| f.account_id != account_id);
-                let mut new: Vec<Folder> = folders
-                    .into_iter()
-                    .filter(|f| f.selectable)
-                    .map(|f| Folder {
-                        id: format!("{account_id}/{}", f.path),
-                        account_id: account_id.clone(),
-                        name: f.kind.dutch_name().map(str::to_string).unwrap_or_else(|| clean_text(&f.name)),
-                        path: f.path,
-                        kind: f.kind,
-                        unread: 0,
-                    })
-                    .collect();
-                new.sort_by(|a, b| a.kind.rank().cmp(&b.kind.rank()).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
-                self.folders.extend(new);
-                // Messages of folders that no longer exist (they came from the cache) go.
-                self.messages.retain(|m| !m.folder_id.starts_with(&format!("{account_id}/")) || self.folders.iter().any(|f| f.id == m.folder_id));
+                self.set_folders(&account_id, folders);
                 match self.selected_folder.clone().filter(|id| self.folder(id).is_some_and(|f| f.account_id == account_id)) {
                     // The selected folder came from the cache: its list is refreshed.
                     Some(selected) => self.request_headers(&selected),
@@ -621,6 +632,20 @@ impl Session {
                             self.selected_folder = Some(inbox.clone());
                             self.request_headers(&inbox);
                         }
+                    }
+                }
+            }
+            Event::Folders { account_id, folders } => {
+                let selected = self.selected_folder.clone().filter(|id| id.starts_with(&format!("{account_id}/")));
+                self.set_folders(&account_id, folders);
+                // The selected folder was renamed or removed: the inbox takes its place.
+                if let Some(selected) = selected
+                    && self.folder(&selected).is_none()
+                {
+                    self.selected_folder = self.folder_of_kind(&account_id, FolderKind::Inbox).map(|f| f.id.clone());
+                    self.selected_message = None;
+                    if let Some(inbox) = self.selected_folder.clone() {
+                        self.request_headers(&inbox);
                     }
                 }
             }
@@ -725,6 +750,28 @@ impl Session {
                 self.outbox.insert(draft_id, state);
             }
         }
+    }
+
+    /// Replaces the folders of an account with what the server lists, sorted the Outlook way;
+    /// messages of folders that are gone go with them.
+    fn set_folders(&mut self, account_id: &str, folders: Vec<RemoteFolder>) {
+        self.folders.retain(|f| f.account_id != account_id);
+        let mut new: Vec<Folder> = folders
+            .into_iter()
+            .filter(|f| f.selectable)
+            .map(|f| Folder {
+                id: format!("{account_id}/{}", f.path),
+                account_id: account_id.to_string(),
+                name: f.kind.dutch_name().map(str::to_string).unwrap_or_else(|| clean_text(&f.name)),
+                path: f.path,
+                kind: f.kind,
+                unread: 0,
+            })
+            .collect();
+        new.sort_by(|a, b| a.kind.rank().cmp(&b.kind.rank()).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+        self.folders.extend(new);
+        self.messages.retain(|m| !m.folder_id.starts_with(&format!("{account_id}/")) || self.folders.iter().any(|f| f.id == m.folder_id));
+        self.recount_unread();
     }
 
     fn request_headers(&mut self, folder_id: &str) {
