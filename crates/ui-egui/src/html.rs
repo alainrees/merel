@@ -1,8 +1,8 @@
 //! Draws the layout tree of an HTML message with egui's own text engine: paragraphs,
 //! headings, lists, quotes, tables, links and pictures, nothing else. There is no browser
 //! here, so nothing in a message can run or load; a link opens in the system browser only
-//! when clicked, and its real target shows on hover. Pictures on the internet are not
-//! fetched, they get a placeholder.
+//! when clicked, and its real target shows on hover. Pictures on the internet get a
+//! placeholder until the person asks for them (see [`crate::remote`]).
 
 use egui::{Color32, CornerRadius, Margin, RichText, Sense, Stroke, Ui, vec2};
 
@@ -10,6 +10,7 @@ use mailcraft_html::{Block, Cell, Document, Image, ImageSource, Inline, Style};
 use mailcraft_mime::InlineImage;
 
 use crate::Tokens;
+use crate::remote::{Load, Loads};
 
 /// Body text size, in points.
 const TEXT_SIZE: f32 = 14.0;
@@ -28,13 +29,16 @@ struct Painter<'a> {
     images: &'a [InlineImage],
     /// Keeps the image cache of one message apart from the next.
     key: &'a str,
+    /// Pictures on the internet the person asked for; `None` keeps them all blocked.
+    remote: Option<&'a Loads>,
     data_images: usize,
+    remote_images: usize,
     clicked: Option<Clicked>,
 }
 
 /// Draws `doc`. `key` names the message, so its pictures are cached under their own names.
-pub fn show(ui: &mut Ui, t: &Tokens, doc: &Document, images: &[InlineImage], key: &str) -> Option<Clicked> {
-    let mut p = Painter { t, images, key, data_images: 0, clicked: None };
+pub fn show(ui: &mut Ui, t: &Tokens, doc: &Document, images: &[InlineImage], key: &str, remote: Option<&Loads>) -> Option<Clicked> {
+    let mut p = Painter { t, images, key, remote, data_images: 0, remote_images: 0, clicked: None };
     p.blocks(ui, &doc.blocks);
     if doc.truncated {
         ui.label(RichText::new("[Bericht afgekapt: te groot om volledig te tonen.]").color(t.text_dim).size(12.0));
@@ -175,7 +179,15 @@ impl Painter<'_> {
                 self.data_images += 1;
                 (format!("bytes://mailcraft/{}/data/{}", self.key, self.data_images), bytes.clone())
             }
-            ImageSource::Remote(_) => return self.placeholder(ui, "🖼 Afbeelding van internet geblokkeerd", &image.alt),
+            ImageSource::Remote(url) => match self.remote.and_then(|r| r.get(url)) {
+                None => return self.placeholder(ui, "🖼 Afbeelding van internet geblokkeerd", &image.alt),
+                Some(Load::Pending) => return self.placeholder(ui, "🖼 Afbeelding laden…", &image.alt),
+                Some(Load::Failed) => return self.placeholder(ui, "🖼 Afbeelding kon niet worden geladen", &image.alt),
+                Some(Load::Ready(bytes)) => {
+                    self.remote_images += 1;
+                    (format!("bytes://mailcraft/{}/remote/{}", self.key, self.remote_images), bytes.clone())
+                }
+            },
         };
         let width = ui.available_width().min(MAX_IMAGE);
         let widget = egui::Image::from_bytes(uri, bytes).fit_to_original_size(1.0).max_width(width).corner_radius(CornerRadius::same(2));
@@ -219,7 +231,7 @@ mod tests {
         let seen = clicked.clone();
         let t = Tokens::light();
         let mut h = egui_kittest::Harness::builder().with_size(vec2(900.0, 700.0)).build_ui(move |ui| {
-            if let Some(c) = show(ui, &t, &doc, &[], "m1") {
+            if let Some(c) = show(ui, &t, &doc, &[], "m1", None) {
                 *seen.borrow_mut() = Some(c);
             }
         });
@@ -231,5 +243,22 @@ mod tests {
         h.get_by_label("mail Sanne").click();
         h.run();
         assert_eq!(*clicked.borrow(), Some(Clicked::Mailto("sanne@example.org".into())));
+    }
+
+    #[test]
+    fn remote_pictures_follow_what_the_loader_knows() {
+        let doc =
+            mailcraft_html::parse(r#"<p><img src="https://t.example/a.png" alt="eerste"> <img src="https://t.example/b.png" alt="tweede"></p>"#);
+        let mut loads = Loads::new();
+        loads.insert("https://t.example/a.png".into(), Load::Pending);
+        loads.insert("https://t.example/b.png".into(), Load::Failed);
+        let t = Tokens::light();
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(600.0, 300.0)).build_ui(move |ui| {
+            show(ui, &t, &doc, &[], "m2", Some(&loads));
+        });
+        h.run();
+        assert!(h.query_by_label_contains("laden…: eerste").is_some());
+        assert!(h.query_by_label_contains("kon niet worden geladen: tweede").is_some());
+        assert!(h.query_by_label_contains("geblokkeerd").is_none());
     }
 }
