@@ -8,6 +8,7 @@
 //! [`Job`] behind; the [`Engine`] hands jobs to a background [`worker`] and feeds the
 //! [`Event`]s that come back into [`Session::apply`]. That keeps the session pure and testable.
 
+pub mod cache;
 pub mod calendar;
 mod commands;
 pub mod config;
@@ -134,9 +135,11 @@ pub enum Event {
     },
     Body {
         message_id: String,
-        body: Body,
+        body: Box<Body>,
         /// The envelope as the raw message carries it; fills in what the listing left out.
         header: mailcraft_mime::ParsedHeader,
+        /// The message as the server sent it, for the offline cache (empty when served from it).
+        raw: Vec<u8>,
     },
     Failed {
         account_id: String,
@@ -343,11 +346,19 @@ impl Session {
                     .collect();
                 new.sort_by(|a, b| a.kind.rank().cmp(&b.kind.rank()).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
                 self.folders.extend(new);
-                if self.selected_folder.is_none()
-                    && let Some(inbox) = self.folder_of_kind(&account_id, FolderKind::Inbox).map(|f| f.id.clone())
-                {
-                    self.selected_folder = Some(inbox.clone());
-                    self.request_headers(&inbox);
+                // Messages of folders that no longer exist (they came from the cache) go.
+                self.messages.retain(|m| !m.folder_id.starts_with(&format!("{account_id}/")) || self.folders.iter().any(|f| f.id == m.folder_id));
+                match self.selected_folder.clone().filter(|id| self.folder(id).is_some_and(|f| f.account_id == account_id)) {
+                    // The selected folder came from the cache: its list is refreshed.
+                    Some(selected) => self.request_headers(&selected),
+                    None => {
+                        if self.selected_folder.is_none()
+                            && let Some(inbox) = self.folder_of_kind(&account_id, FolderKind::Inbox).map(|f| f.id.clone())
+                        {
+                            self.selected_folder = Some(inbox.clone());
+                            self.request_headers(&inbox);
+                        }
+                    }
                 }
             }
             Event::Headers { folder_id, headers } => {
@@ -376,7 +387,7 @@ impl Session {
                 }
                 self.recount_unread();
             }
-            Event::Body { message_id, body, header } => {
+            Event::Body { message_id, body, header, .. } => {
                 self.loading.remove(&message_id);
                 if let Some(m) = self.messages.iter_mut().find(|m| m.id == message_id) {
                     m.preview = mailcraft_mime::preview(&body.text, 120);
@@ -384,7 +395,7 @@ impl Session {
                         m.to = header.to;
                     }
                 }
-                self.bodies.insert(message_id, body);
+                self.bodies.insert(message_id, *body);
             }
             Event::Failed { account_id, what } => {
                 self.loading.clear();
@@ -443,6 +454,7 @@ pub struct Engine {
     events: Receiver<Event>,
     secrets: Arc<dyn SecretStore>,
     config_path: Option<std::path::PathBuf>,
+    cache: cache::Cache,
 }
 
 impl Engine {
@@ -455,6 +467,7 @@ impl Engine {
             events: rx,
             secrets: Arc::new(mailcraft_secrets::MemoryStore::default()),
             config_path: None,
+            cache: cache::Cache::none(),
         }
     }
 
@@ -465,11 +478,14 @@ impl Engine {
         let (tx, rx) = channel();
         let worker = worker::Worker::new(tx);
         let calendar = config_path.as_deref().map(|p| config::load_json::<calendar::CalendarFile>(&config::calendar_path(p))).unwrap_or_default();
-        let mut engine = Engine { session: Session::default(), worker: Some(worker), events: rx, secrets, config_path };
+        let mut engine = Engine { session: Session::default(), worker: Some(worker), events: rx, secrets, config_path, cache: cache::Cache::none() };
         if accounts.is_empty() {
             engine.session = Session::sample();
         } else {
             engine.session = Session::with_accounts(accounts);
+            // What the accounts showed last time, until the servers answer.
+            engine.cache = cache::Cache::open(engine.config_path.as_deref(), &*engine.secrets);
+            engine.cache.restore(&mut engine.session);
             engine.spawn_accounts();
         }
         if !calendar.appointments.is_empty() || !calendar.calendars.is_empty() {
@@ -590,9 +606,16 @@ impl Engine {
 
     pub fn run(&mut self, id: &str, params: &serde_json::Value) -> Result<(), CommandError> {
         let r = self.session.run(id, params);
+        self.cache.note_commands(&self.session);
         self.dispatch();
         self.persist()?;
+        self.cache.save(&self.session, false);
         r
+    }
+
+    /// Writes the offline cache now; for when the window closes.
+    pub fn flush(&mut self) {
+        self.cache.save(&self.session, true);
     }
 
     /// Queues `draft` for sending; see [`Session::send`].
@@ -610,6 +633,7 @@ impl Engine {
                 Event::SignedIn { result: Ok(a) } => Some(a.id.clone()),
                 _ => None,
             };
+            self.cache.note_event(&self.session, &e);
             self.session.apply(e);
             if let Some(id) = signed_in {
                 if let Err(e) = self.save_accounts() {
@@ -620,11 +644,13 @@ impl Engine {
             changed = true;
         }
         self.dispatch();
+        self.cache.save(&self.session, false);
         changed
     }
 
     fn dispatch(&mut self) {
         let jobs = self.session.take_jobs();
+        let jobs = self.cache.serve(&mut self.session, jobs);
         let Some(worker) = &self.worker else { return };
         for j in jobs {
             if j.account_id() != SAMPLE_ACCOUNT {

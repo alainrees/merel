@@ -33,7 +33,10 @@ addresses from it and from the mail you have seen. The tasks module keeps a loca
 (`tasks.json`) with due days, priorities and an open/done filter. An Exchange, Microsoft 365 or Gmail account
 brings its own calendar, contacts and tasks along (Google Calendar, People and Tasks for Gmail): they
 appear next to the local ones, changes go straight to the server, and a new item asks whether
-it belongs on this computer or in the account. Next up: CalDAV/CardDAV and an offline cache.
+it belongs on this computer or in the account. Everything an account showed is kept in an
+encrypted offline cache, so the window fills at once on the next start and mail you opened
+before can be read without a connection. Next up: CalDAV/CardDAV and an offline queue for
+changes made without a connection.
 
 ## Build
 
