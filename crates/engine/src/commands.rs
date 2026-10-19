@@ -55,6 +55,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         },
     },
     CommandSpec { id: "message.select", label: "Open message", run: message_select },
+    CommandSpec { id: "message.select_more", label: "Select this message too", run: message_select_more },
+    CommandSpec { id: "message.select_many", label: "Select these messages", run: message_select_many },
     CommandSpec { id: "message.mark_read", label: "Mark as Read", run: |s, _| set_seen(s, true) },
     CommandSpec { id: "message.mark_unread", label: "Mark as Unread", run: |s, _| set_seen(s, false) },
     CommandSpec { id: "message.flag", label: "Flag", run: toggle_flag },
@@ -99,9 +101,10 @@ impl Session {
     /// Runs command `id` with `params` (a JSON object, or null when it takes none).
     pub fn run(&mut self, id: &str, params: &Value) -> Result<(), CommandError> {
         let spec = COMMANDS.iter().find(|c| c.id == id).ok_or_else(|| CommandError::Unknown(id.chars().take(64).collect()))?;
-        (spec.run)(self, params)?;
+        let result = (spec.run)(self, params);
+        self.prune_marked();
         self.recount_unread();
-        Ok(())
+        result
     }
 }
 
@@ -114,6 +117,7 @@ fn folder_select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     s.folder(&id).ok_or(CommandError::NotFound)?;
     s.selected_folder = Some(id.clone());
     s.selected_message = None;
+    s.marked.clear();
     let loaded = s.messages.iter().any(|m| m.folder_id == id);
     if !loaded {
         s.request_headers(&id);
@@ -134,59 +138,136 @@ fn folder_refresh(s: &mut Session, _: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// `message.select { id }`: the one selected message; whatever was marked with the previous
+/// one is let go.
 fn message_select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let id = str_param(params, "id")?.to_string();
     s.message(&id).ok_or(CommandError::NotFound)?;
+    s.marked.clear();
     s.selected_message = Some(id.clone());
     s.request_body(&id);
-    set_seen(s, true)
+    set_seen_one(s, &id, true)
 }
 
-fn selected_mut(s: &mut Session) -> Result<&mut mailcraft_model::MessageHeader, CommandError> {
-    let id = s.selected_message.clone().ok_or(CommandError::NoSelection)?;
+/// `message.select_more { id }` (Ctrl-click): the message joins the selection, or leaves it
+/// when it was in it. Without a selected message it simply becomes the selected one.
+fn message_select_more(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let id = str_param(params, "id")?.to_string();
+    s.message(&id).ok_or(CommandError::NotFound)?;
+    if s.selected_message.is_none() {
+        return message_select(s, params);
+    }
+    if s.selected_message.as_deref() == Some(id.as_str()) {
+        // The selected one leaves: the first marked message takes its place, if there is one.
+        if !s.marked.is_empty() {
+            let next = s.marked.remove(0);
+            s.selected_message = Some(next.clone());
+            s.request_body(&next);
+        }
+    } else if let Some(i) = s.marked.iter().position(|m| *m == id) {
+        s.marked.remove(i);
+    } else {
+        s.marked.push(id);
+    }
+    Ok(())
+}
+
+/// `message.select_many { ids }` (Shift-click, Ctrl+A): exactly these messages are selected;
+/// the selected message stays selected when it is among them, else the first one takes over.
+fn message_select_many(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let ids: Vec<String> = params
+        .get("ids")
+        .and_then(Value::as_array)
+        .ok_or(CommandError::Param("ids"))?
+        .iter()
+        .map(|v| v.as_str().map(str::to_string).ok_or(CommandError::Param("ids")))
+        .collect::<Result<_, _>>()?;
+    if ids.iter().any(|id| s.message(id).is_none()) {
+        return Err(CommandError::NotFound);
+    }
+    let Some(first) = ids.first().cloned() else { return Err(CommandError::Param("ids")) };
+    if !s.selected_message.as_ref().is_some_and(|sel| ids.contains(sel)) {
+        s.selected_message = Some(first.clone());
+        s.request_body(&first);
+        set_seen_one(s, &first, true)?;
+    }
+    s.marked.clear();
+    for id in ids {
+        if s.selected_message.as_deref() != Some(id.as_str()) && !s.marked.contains(&id) {
+            s.marked.push(id);
+        }
+    }
+    Ok(())
+}
+
+/// The selected message and the ones marked with it, or `NoSelection`.
+fn selection(s: &Session) -> Result<Vec<String>, CommandError> {
+    let ids = s.selection();
+    if ids.is_empty() { Err(CommandError::NoSelection) } else { Ok(ids) }
+}
+
+fn header_mut<'a>(s: &'a mut Session, id: &str) -> Result<&'a mut mailcraft_model::MessageHeader, CommandError> {
     s.messages.iter_mut().find(|m| m.id == id).ok_or(CommandError::NoSelection)
 }
 
-/// The account id, folder path and server id of the selected message, for a remote job.
-fn remote(s: &Session) -> Option<(String, String, String)> {
-    let m = s.selected()?;
+/// The account id, folder path and server id of a message, for a remote job.
+fn remote(s: &Session, message_id: &str) -> Option<(String, String, String)> {
+    let m = s.message(message_id)?;
     let f = s.folder(&m.folder_id)?;
     (f.account_id != crate::SAMPLE_ACCOUNT).then(|| (f.account_id.clone(), f.path.clone(), m.remote_id.clone()))
 }
 
-fn set_flag(s: &mut Session, flag: Flag, on: bool) {
-    if let Some((account_id, path, id)) = remote(s) {
+fn set_flag(s: &mut Session, message_id: &str, flag: Flag, on: bool) {
+    if let Some((account_id, path, id)) = remote(s, message_id) {
         s.pending.push(Job::Flag { account_id, path, id, flag, on });
     }
 }
 
-fn set_seen(s: &mut Session, seen: bool) -> Result<(), CommandError> {
-    let m = selected_mut(s)?;
+fn set_seen_one(s: &mut Session, message_id: &str, seen: bool) -> Result<(), CommandError> {
+    let m = header_mut(s, message_id)?;
     if m.flags.seen == seen {
         return Ok(());
     }
     m.flags.seen = seen;
-    set_flag(s, Flag::Seen, seen);
+    set_flag(s, message_id, Flag::Seen, seen);
     Ok(())
 }
 
+/// Marks the whole selection read or unread.
+fn set_seen(s: &mut Session, seen: bool) -> Result<(), CommandError> {
+    for id in selection(s)? {
+        set_seen_one(s, &id, seen)?;
+    }
+    Ok(())
+}
+
+/// Flags the whole selection, or takes the flag off all of it when the selected message has
+/// one, as Outlook does.
 fn toggle_flag(s: &mut Session, _: &Value) -> Result<(), CommandError> {
-    let m = selected_mut(s)?;
-    m.flags.flagged = !m.flags.flagged;
-    let on = m.flags.flagged;
-    set_flag(s, Flag::Flagged, on);
+    let ids = selection(s)?;
+    let on = !s.selected().is_some_and(|m| m.flags.flagged);
+    for id in ids {
+        let m = header_mut(s, &id)?;
+        if m.flags.flagged != on {
+            m.flags.flagged = on;
+            set_flag(s, &id, Flag::Flagged, on);
+        }
+    }
     Ok(())
 }
 
-/// `message.delete`: the selected message goes to the Deleted folder; one that is there already
+/// `message.delete`: the selection goes to the Deleted folder; a message that is there already
 /// goes for good, the way Outlook has it (the window asks first).
 fn message_delete(s: &mut Session, _: &Value) -> Result<(), CommandError> {
-    let m = s.selected().ok_or(CommandError::NoSelection)?;
-    if s.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Deleted) {
-        let id = m.id.clone();
-        return delete_message(s, &id);
+    for id in selection(s)? {
+        let in_deleted = s.message(&id).and_then(|m| s.folder(&m.folder_id)).is_some_and(|f| f.kind == FolderKind::Deleted);
+        if in_deleted {
+            delete_message(s, &id)?;
+        } else {
+            move_to_kind(s, &id, FolderKind::Deleted, "Deleted Items")?;
+        }
     }
-    move_selected(s, FolderKind::Deleted, "Deleted Items")
+    Ok(())
 }
 
 /// Removes one message for good: out of the session and, for a real account, off the server.
@@ -198,6 +279,7 @@ pub(crate) fn delete_message(s: &mut Session, message_id: &str) -> Result<(), Co
     }
     s.messages.retain(|h| h.id != message_id);
     s.bodies.remove(message_id);
+    s.marked.retain(|id| id != message_id);
     if s.selected_message.as_deref() == Some(message_id) {
         s.selected_message = None;
     }
@@ -205,31 +287,46 @@ pub(crate) fn delete_message(s: &mut Session, message_id: &str) -> Result<(), Co
     Ok(())
 }
 
-fn move_selected(s: &mut Session, kind: FolderKind, what: &'static str) -> Result<(), CommandError> {
-    let m = s.selected().ok_or(CommandError::NoSelection)?;
+/// Moves one message to its account's folder of `kind`.
+fn move_to_kind(s: &mut Session, message_id: &str, kind: FolderKind, what: &'static str) -> Result<(), CommandError> {
+    let m = s.message(message_id).ok_or(CommandError::NotFound)?;
     let account = s.folder(&m.folder_id).map(|f| f.account_id.clone()).ok_or(CommandError::NotFound)?;
     let target = s.folder_of_kind(&account, kind).map(|f| f.id.clone()).ok_or(CommandError::NoFolder(what))?;
-    let id = m.id.clone();
-    move_message(s, &id, &target)
+    move_message(s, message_id, &target)
 }
 
-/// `message.junk`: the selected message goes to the Junk folder, and the server hears that the
-/// person called it junk, so its own filter learns.
+/// Moves the whole selection to each message's folder of `kind`.
+fn move_selected(s: &mut Session, kind: FolderKind, what: &'static str) -> Result<(), CommandError> {
+    for id in selection(s)? {
+        move_to_kind(s, &id, kind, what)?;
+    }
+    Ok(())
+}
+
+/// `message.junk`: the selection goes to the Junk folder, and the server hears that the person
+/// called it junk, so its own filter learns.
 fn message_junk(s: &mut Session, _: &Value) -> Result<(), CommandError> {
-    let m = s.selected().ok_or(CommandError::NoSelection)?;
-    let account = s.folder(&m.folder_id).map(|f| f.account_id.clone()).ok_or(CommandError::NotFound)?;
-    s.folder_of_kind(&account, FolderKind::Junk).ok_or(CommandError::NoFolder("Junk"))?;
-    let id = m.id.clone();
-    crate::junk::report(s, &id, true);
-    move_selected(s, FolderKind::Junk, "Junk")
+    for id in selection(s)? {
+        let account = s.message(&id).and_then(|m| s.folder(&m.folder_id)).map(|f| f.account_id.clone()).ok_or(CommandError::NotFound)?;
+        s.folder_of_kind(&account, FolderKind::Junk).ok_or(CommandError::NoFolder("Junk"))?;
+        crate::junk::report(s, &id, true);
+        move_to_kind(s, &id, FolderKind::Junk, "Junk")?;
+    }
+    Ok(())
 }
 
-/// `message.move { folder_id, id? }`: moves the given message (else the selected one) to a
+/// `message.move { folder_id, id? }`: moves the given message (else the whole selection) to a
 /// folder of its own account. The folder it is in already is refused.
 fn message_move(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let target = str_param(params, "folder_id")?.to_string();
-    let id = params.get("id").and_then(Value::as_str).map(str::to_string).or_else(|| s.selected_message.clone()).ok_or(CommandError::NoSelection)?;
-    move_message(s, &id, &target)
+    let ids = match params.get("id").and_then(Value::as_str) {
+        Some(id) => vec![id.to_string()],
+        None => selection(s)?,
+    };
+    for id in ids {
+        move_message(s, &id, &target)?;
+    }
+    Ok(())
 }
 
 /// Moves one message: the header changes folder in the session and the server gets the job.
@@ -246,6 +343,7 @@ pub(crate) fn move_message(s: &mut Session, message_id: &str, target_id: &str) -
     if let Some(h) = s.messages.iter_mut().find(|h| h.id == message_id) {
         h.folder_id = target.id;
     }
+    s.marked.retain(|id| id != message_id);
     if s.selected_message.as_deref() == Some(message_id) {
         s.selected_message = None;
     }
@@ -279,6 +377,45 @@ mod tests {
         let folder = s.message(&id).unwrap().folder_id.clone();
         assert_eq!(s.folder(&folder).unwrap().kind, FolderKind::Deleted);
         assert!(s.selected_message.is_none());
+    }
+
+    #[test]
+    fn several_messages_are_selected_together_and_the_commands_take_them_all() {
+        let mut s = Session::sample();
+        let ids: Vec<String> = s.visible_messages().iter().take(4).map(|m| m.id.clone()).collect();
+        s.run("message.select", &json!({ "id": ids[0] })).unwrap();
+        s.run("message.select_more", &json!({ "id": ids[1] })).unwrap();
+        assert_eq!(s.selection(), [ids[0].clone(), ids[1].clone()]);
+        // Ctrl-click on a marked message takes it out again; on the selected one, the next steps up.
+        s.run("message.select_more", &json!({ "id": ids[1] })).unwrap();
+        assert_eq!(s.selection(), [ids[0].clone()]);
+        s.run("message.select_many", &json!({ "ids": [ids[0], ids[1], ids[2]] })).unwrap();
+        s.run("message.select_more", &json!({ "id": ids[0] })).unwrap();
+        assert_eq!(s.selected_message.as_deref(), Some(ids[1].as_str()));
+        assert_eq!(s.marked, [ids[2].clone()]);
+        // A range that leaves the selected message out makes the first of it the selected one.
+        s.run("message.select_many", &json!({ "ids": [ids[2], ids[3]] })).unwrap();
+        assert_eq!(s.selection(), [ids[2].clone(), ids[3].clone()]);
+        assert!(s.message(&ids[2]).unwrap().flags.seen, "opening it marks it read");
+
+        s.run("message.mark_unread", &Value::Null).unwrap();
+        assert!([&ids[2], &ids[3]].iter().all(|id| !s.message(id).unwrap().flags.seen));
+        s.run("message.flag", &Value::Null).unwrap();
+        assert!([&ids[2], &ids[3]].iter().all(|id| s.message(id).unwrap().flags.flagged));
+        s.run("message.flag", &Value::Null).unwrap();
+        assert!([&ids[2], &ids[3]].iter().all(|id| !s.message(id).unwrap().flags.flagged), "the second press takes every flag off");
+        s.run("message.delete", &Value::Null).unwrap();
+        for id in [&ids[2], &ids[3]] {
+            let folder = s.message(id).unwrap().folder_id.clone();
+            assert_eq!(s.folder(&folder).unwrap().kind, FolderKind::Deleted);
+        }
+        assert!(s.selected_message.is_none() && s.marked.is_empty(), "nothing stays selected after the move");
+        // A plain click lets the others go.
+        s.run("message.select_many", &json!({ "ids": [ids[0], ids[1]] })).unwrap();
+        s.run("message.select", &json!({ "id": ids[1] })).unwrap();
+        assert_eq!(s.selection(), [ids[1].clone()]);
+        assert_eq!(s.run("message.select_many", &json!({ "ids": ["missing"] })), Err(CommandError::NotFound));
+        assert_eq!(s.run("message.select_many", &json!({ "ids": [] })), Err(CommandError::Param("ids")));
     }
 
     #[test]

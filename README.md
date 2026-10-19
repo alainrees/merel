@@ -137,11 +137,16 @@ page of its own (sender, recipients, date, subject, attachment names and the bod
 with embedded pictures and without anything from the internet or any script) to one file in the
 temporary folder and opens it, and the browser's print dialog does the rest.
 
+Several messages can be selected at once, as in Outlook: Ctrl+click (Cmd on a Mac) adds a message to the
+selection or takes it out, Shift+click selects the run from the open message to the clicked one and Ctrl+A
+takes the whole list. The reading pane then says how many are selected, and Delete, Archive, Junk, Move,
+Mark read or unread and Flag act on all of them.
+
 Keyboard shortcuts in the mail module follow Outlook (Cmd instead of Ctrl on a Mac): arrow keys
 walk the message list, Delete removes the selected message, Backspace archives it (on a Mac, where Backspace is
 the delete key, Ctrl+E archives, as in Outlook for Mac), Ctrl+N starts a new message, Ctrl+R
 replies, Ctrl+Shift+R replies to all, Ctrl+F forwards, Ctrl+Shift+V moves to a folder, Ctrl+Q and Ctrl+U mark read or unread,
-Ctrl+E puts the cursor in the search box, Ctrl+P prints, Ctrl+Shift+1 to 9 run the account's quick steps, Esc clears a
+Ctrl+A selects every message in the list, Ctrl+E puts the cursor in the search box, Ctrl+P prints, Ctrl+Shift+1 to 9 run the account's quick steps, Esc clears a
 search and F5 refreshes the folder. From every module, Ctrl+Shift+M, Ctrl+Shift+A, Ctrl+Shift+C and Ctrl+Shift+K start a
 new message, appointment, contact or task, as in Outlook (the contact and task forms open in their own module). None
 of them fires while you are typing in a text field or writing a message. A right click on a message opens a menu with

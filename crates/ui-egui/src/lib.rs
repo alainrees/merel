@@ -145,6 +145,9 @@ pub fn window_title(inbox_unread: u32) -> String {
 /// A message being dragged from the list, to drop on a folder.
 struct DraggedMessage(String);
 
+/// What the reading pane says while several messages are selected.
+pub(crate) const MULTI_HINT: &str = "Verwijderen, Archiveren, Ongewenst, Verplaatsen, Gelezen of Ongelezen en Vlag gelden voor alle geselecteerde berichten. Klik zonder toets om er weer één te openen.";
+
 /// One row of the message list: a message, indented when it sits inside an unfolded
 /// conversation, with the fold control when it heads a conversation of several messages.
 struct Row<'a> {
@@ -434,6 +437,8 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
             command = Some("message.mark_read");
         } else if i.consume_key(Modifiers::COMMAND, Key::U) {
             command = Some("message.mark_unread");
+        } else if i.consume_key(Modifiers::COMMAND, Key::A) {
+            command = Some("message.select_all");
         } else if i.consume_key(Modifiers::NONE, Key::F5) {
             command = Some("folder.refresh");
         } else if i.consume_key(Modifiers::NONE, Key::ArrowDown) {
@@ -457,6 +462,12 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
     match command {
         Some("search.clear") => app.engine.session.search.clear(),
         Some("folder.refresh") => app.run("folder.refresh", Value::Null),
+        Some("message.select_all") => {
+            let ids: Vec<String> = app.engine.session.visible_messages().iter().map(|m| m.id.clone()).collect();
+            if !ids.is_empty() {
+                app.run("message.select_many", json!({ "ids": ids }));
+            }
+        }
         Some("message.move_window") if has => app.move_to = true,
         Some("message.print") if app.can_print() => app.print_selected(),
         Some(id) if has => app.run(id, Value::Null),
@@ -1001,6 +1012,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let row_height = if compact { 48.0 } else { 68.0 };
                 let selected = app.engine.session.selected_message.clone();
                 let rows = list_rows(list, app.view.conversations, &app.expanded, selected.as_deref());
+                let row_ids: Vec<String> = rows.iter().map(|r| r.m.id.clone()).collect();
                 let mut toggle: Option<String> = None;
                 let mut menu_pick: Option<(mailcraft_model::MessageHeader, message_menu::Pick)> = None;
                 // Date groups, as Outlook heads the list, while the list is in date order.
@@ -1017,7 +1029,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                             group_heading(ui, t, group);
                         }
                     }
-                    let on = selected.as_deref() == Some(m.id.as_str());
+                    let on = selected.as_deref() == Some(m.id.as_str()) || app.engine.session.marked.contains(&m.id);
                     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click_and_drag());
                     r.dnd_set_drag_payload(DraggedMessage(m.id.clone()));
                     let r = r.on_hover_text(&m.subject);
@@ -1110,7 +1122,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         );
                     }
                     if r.clicked() {
-                        pick = Some(m.id.clone());
+                        pick = Some((m.id.clone(), click_modifiers(ui), row_ids.clone()));
                     }
                 }
                 if let Some(key) = toggle
@@ -1138,8 +1150,8 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     }
                 }
             });
-            if let Some(id) = pick {
-                app.run("message.select", json!({ "id": id }));
+            if let Some((id, mods, row_ids)) = pick {
+                select_row(app, &row_ids, id, mods);
             }
             if older {
                 app.run("folder.older", Value::Null);
@@ -1148,11 +1160,61 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
 }
 
+/// The modifiers held during this frame's click: those on the button-up event, which is what
+/// makes a click, else the ones held now.
+fn click_modifiers(ui: &Ui) -> egui::Modifiers {
+    ui.input(|i| {
+        i.events
+            .iter()
+            .rev()
+            .find_map(|e| match e {
+                egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: false, modifiers, .. } => Some(*modifiers),
+                _ => None,
+            })
+            .unwrap_or(i.modifiers)
+    })
+}
+
+/// A click on a row of the list: plain selects the message, Ctrl (Cmd on a Mac) adds it to or
+/// takes it out of the selection, Shift selects everything from the selected message to it.
+fn select_row(app: &mut MailApp, row_ids: &[String], id: String, mods: egui::Modifiers) {
+    let anchor = app.engine.session.selected_message.as_deref().and_then(|s| row_ids.iter().position(|r| r == s));
+    let clicked = row_ids.iter().position(|r| *r == id);
+    if mods.shift
+        && let (Some(a), Some(c)) = (anchor, clicked)
+    {
+        let (from, to) = if a <= c { (a, c) } else { (c, a) };
+        let mut ids: Vec<String> = row_ids[from..=to].to_vec();
+        // The selected message stays where it is: first in the list, so it keeps the reading pane.
+        if let Some(sel) = app.engine.session.selected_message.clone() {
+            ids.retain(|r| *r != sel);
+            ids.insert(0, sel);
+        }
+        app.run("message.select_many", json!({ "ids": ids }));
+    } else if mods.command {
+        app.run("message.select_more", json!({ "id": id }));
+    } else {
+        app.run("message.select", json!({ "id": id }));
+    }
+}
+
 fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let Some(m) = app.engine.session.selected().cloned() else {
         ui.centered_and_justified(|ui| ui.label(RichText::new("Selecteer een bericht om het te lezen.").color(t.text_dim).size(15.0)));
         return;
     };
+    if !app.engine.session.marked.is_empty() {
+        // Several messages are selected: the pane says so, as Outlook does, and the ribbon's
+        // actions take them all.
+        let n = app.engine.session.marked.len() + 1;
+        ui.vertical_centered(|ui| {
+            ui.add_space(40.0);
+            ui.label(RichText::new(format!("{n} berichten geselecteerd")).size(18.0).strong().color(t.text));
+            ui.add_space(8.0);
+            ui.label(RichText::new(MULTI_HINT).color(t.text_dim));
+        });
+        return;
+    }
     ui.label(RichText::new(&m.subject).size(20.0).strong().color(t.text));
     ui.add_space(10.0);
     let in_junk = app.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk);
@@ -1863,6 +1925,45 @@ mod tests {
         h.get_by_label("Start").click();
         h.run();
         assert!(h.query_by_label("Vandaag").is_none());
+    }
+
+    #[test]
+    fn several_messages_are_selected_with_ctrl_shift_and_ctrl_a_and_deleted_together() {
+        use egui::{Key, Modifiers};
+        let mut h = harness();
+        h.run();
+        let ids: Vec<String> = h.state().engine.session.visible_messages().iter().map(|m| m.id.clone()).collect();
+        h.get_by_label("Planning voor donderdag").click();
+        h.run();
+        assert_eq!(h.state().engine.session.selected_message.as_deref(), Some("m1"));
+        h.get_by_label("Wat er deze maand speelt").click_modifiers(Modifiers::COMMAND);
+        h.run();
+        assert_eq!(h.state().engine.session.marked, ["m3"]);
+        h.get_by_label("2 berichten geselecteerd");
+        h.get_by_label(MULTI_HINT);
+
+        // Shift-click selects everything between the selected message and the clicked one.
+        let (a, c) = (ids.iter().position(|i| i == "m1").unwrap(), ids.iter().position(|i| i == "m3").unwrap());
+        h.get_by_label("Wat er deze maand speelt").click_modifiers(Modifiers::SHIFT);
+        h.run();
+        assert_eq!(h.state().engine.session.selection().len(), a.abs_diff(c) + 1);
+        assert_eq!(h.state().engine.session.selected_message.as_deref(), Some("m1"), "the selected message keeps the reading pane");
+
+        h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+        h.run();
+        assert_eq!(h.state().engine.session.selection().len(), ids.len());
+        h.key_press(Key::Delete);
+        h.run();
+        let s = &h.state().engine.session;
+        assert!(ids.iter().all(|id| s.message(id).unwrap().folder_id == "deleted"), "Delete takes every selected message");
+        assert!(s.selected_message.is_none() && s.marked.is_empty());
+
+        // A plain click opens one message again.
+        h.get_by_label("Verwijderde items").click();
+        h.run();
+        h.get_by_label("Planning voor donderdag").click();
+        h.run();
+        assert_eq!(h.state().engine.session.selection(), ["m1"]);
     }
 
     #[test]
