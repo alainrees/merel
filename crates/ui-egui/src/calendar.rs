@@ -614,11 +614,18 @@ fn side_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.add_space(14.0);
             ui.label(RichText::new("Mijn agenda's").size(12.0).strong().color(t.text_dim));
             ui.add_space(4.0);
-            for c in &app.engine.session.calendars {
+            let calendars: Vec<(String, String, [u8; 3])> =
+                app.engine.session.calendars.iter().map(|c| (c.id.clone(), c.name.clone(), c.color)).collect();
+            for (id, name, color) in calendars {
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
-                    ui.painter().rect_filled(rect, CornerRadius::same(3), Color32::from_rgb(c.color[0], c.color[1], c.color[2]));
-                    ui.label(RichText::new(&c.name).color(t.text));
+                    ui.painter().rect_filled(rect, CornerRadius::same(3), Color32::from_rgb(color[0], color[1], color[2]));
+                    let mut shown = app.view.calendar_shown(&id);
+                    if ui.checkbox(&mut shown, RichText::new(name).color(t.text)).on_hover_text(CALENDAR_TICK_HINT).changed() {
+                        app.view.set_calendar_shown(&id, shown);
+                        let ctx = ui.ctx().clone();
+                        app.save_view(&ctx);
+                    }
                 });
             }
             task_list(app, ui, t);
@@ -627,6 +634,14 @@ fn side_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 
 /// How many open tasks the calendar's side pane lists.
 const SIDE_TASKS: usize = 12;
+
+/// Hover text of a calendar's tick box in the side pane.
+pub const CALENDAR_TICK_HINT: &str = "Vinkje weg verbergt de afspraken van deze agenda in de weergaven; herinneringen komen wel.";
+
+/// The occurrences of calendars whose tick box is on, in the order given.
+pub(crate) fn shown(app: &MailApp, list: Vec<Appointment>) -> Vec<Appointment> {
+    list.into_iter().filter(|a| app.view.calendar_shown(&a.calendar_id)).collect()
+}
 
 /// The open tasks under the calendars, each a drag source: dropped on a day or an hour, a task
 /// becomes a new appointment. A click opens the task in the tasks module.
@@ -871,7 +886,7 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     pick_day = Some(day);
                 }
                 if let (Some(from), Some(to)) = (midnight(day), midnight(add_days(day, 1))) {
-                    let items = app.engine.session.appointments_between(from, to);
+                    let items = shown(app, app.engine.session.appointments_between(from, to));
                     let room = ((rect.height() - 26.0) / 20.0).floor().max(0.0) as usize;
                     let shown = if items.len() > room { room.saturating_sub(1) } else { items.len() };
                     for (i, a) in items.iter().take(shown).enumerate() {
@@ -971,7 +986,8 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
             }
             ui.painter().rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
             if let (Some(from), Some(to)) = (midnight(d), midnight(add_days(d, 1))) {
-                let items: Vec<Appointment> = app.engine.session.appointments_between(from, to).into_iter().filter(|a| a.all_day).collect();
+                let items: Vec<Appointment> =
+                    shown(app, app.engine.session.appointments_between(from, to)).into_iter().filter(|a| a.all_day).collect();
                 if let Some(a) = items.first() {
                     let label = if items.len() > 1 { format!("{} (+{})", chip_title(a), items.len() - 1) } else { chip_title(a) };
                     let chip_rect = rect.shrink2(vec2(2.0, 3.0));
@@ -1043,7 +1059,7 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                 }
             }
             let (Some(from), Some(to)) = (midnight(d), midnight(add_days(d, 1))) else { continue };
-            let items: Vec<Appointment> = app.engine.session.appointments_between(from, to).into_iter().filter(|a| !a.all_day).collect();
+            let items: Vec<Appointment> = shown(app, app.engine.session.appointments_between(from, to)).into_iter().filter(|a| !a.all_day).collect();
             for a in &items {
                 // While its bottom edge is dragged, the block shows the end it would get.
                 let end = resizing.as_ref().filter(|r| r.id == a.id).map_or(a.end, |r| r.end);
@@ -1164,7 +1180,7 @@ fn search_results(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let (Some(from), Some(to)) = (midnight(add_days(today, -SEARCH_BACK_DAYS)), midnight(add_days(today, SEARCH_AHEAD_DAYS))) else {
         return;
     };
-    let list = app.engine.session.appointments_matching(app.calendar.query.trim(), from, to);
+    let list = shown(app, app.engine.session.appointments_matching(app.calendar.query.trim(), from, to));
     let count = list.len();
     let summary = match count {
         0 => "Geen afspraak gevonden in het afgelopen jaar en de twee jaar hierna.".to_string(),

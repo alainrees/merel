@@ -303,7 +303,7 @@ impl MailApp {
         let from = calendar::to_timestamp(first.and_hms_opt(0, 0, 0).unwrap_or_default()).unwrap_or(i64::MIN);
         let after = last.checked_add_days(Days::new(1)).unwrap_or(last);
         let to = calendar::to_timestamp(after.and_hms_opt(0, 0, 0).unwrap_or_default()).unwrap_or(i64::MAX);
-        let list = self.engine.session.appointments_between(from, to);
+        let list = calendar::shown(self, self.engine.session.appointments_between(from, to));
         let html = calendar_page(&calendar::period_title(self.calendar.view, self.calendar.focus), first, last, &list);
         let path = page_path();
         self.notice = Some(match write_and_open(&path, &html) {
