@@ -49,6 +49,10 @@ const SEARCH_AHEAD_DAYS: i64 = 731;
 
 /// Pixels per hour in the week and day views.
 const HOUR_HEIGHT: f32 = 44.0;
+/// The height of the day headers above the hour grid: weekday and day number.
+const DAY_HEADER: f32 = 50.0;
+/// The hour the hour grid opens at; earlier hours are a scroll up.
+const FIRST_HOUR: f32 = 7.0;
 
 /// The checkbox on the Beeld tab that shades the hours outside the working day.
 pub const WORK_HOURS: &str = "Werkuren";
@@ -539,26 +543,25 @@ fn side_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::Panel::left("calendar-side")
         .default_size(240.0)
         .resizable(true)
-        .frame(egui::Frame::NONE.fill(t.panel).inner_margin(Margin::symmetric(10, 10)).stroke(Stroke::new(1.0, t.border)))
+        .show_separator_line(false)
+        .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin { left: 4, right: 12, top: 4, bottom: 10 }))
         .show(ui, |ui| {
             let focus = app.calendar.focus;
             ui.horizontal(|ui| {
-                if ui.add(egui::Button::new(RichText::new("◀").color(t.text)).frame(false)).on_hover_text("Vorige maand").clicked() {
-                    app.calendar.focus = add_months(focus, -1);
-                }
-                ui.centered_and_justified(|ui| {
-                    ui.label(RichText::new(format!("{} {}", month_name(focus.month()), focus.year())).strong().color(t.text));
+                ui.label(RichText::new(format!("{} {}", month_name(focus.month()), focus.year())).size(14.0).strong().color(t.text));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    helder::quiet(ui, t, |ui| {
+                        if nav_button(ui, t, Icon::ChevronRight, "Volgende maand").clicked() {
+                            app.calendar.focus = add_months(focus, 1);
+                        }
+                        if nav_button(ui, t, Icon::ChevronLeft, "Vorige maand").clicked() {
+                            app.calendar.focus = add_months(focus, -1);
+                        }
+                    });
                 });
             });
-            // The next-month button sits at the right; egui lays out left to right, so it comes last.
-            let r = ui.put(
-                Rect::from_min_size(pos2(ui.max_rect().right() - 24.0, ui.max_rect().top()), vec2(24.0, 20.0)),
-                egui::Button::new(RichText::new("▶").color(t.text)).frame(false),
-            );
-            if r.clicked() {
-                app.calendar.focus = add_months(focus, 1);
-            }
             ui.add_space(4.0);
+            let (shown_from, shown_to) = period(app.calendar.view, focus);
             let cell = (ui.available_width() / 7.0).floor().clamp(20.0, 34.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -584,6 +587,10 @@ fn side_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                             )
                         });
                         let p = ui.painter();
+                        // The days the big view shows, softly marked, as the design has it.
+                        if app.calendar.view != View::Month && day >= shown_from && day <= shown_to && day != today {
+                            p.circle_filled(rect.center(), cell / 2.0 - 2.0, t.checked);
+                        }
                         if day == today {
                             p.circle_filled(rect.center(), cell / 2.0 - 2.0, t.accent);
                         } else if day == focus {
@@ -612,7 +619,7 @@ fn side_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     app.calendar.view = View::Day;
                 }
             }
-            ui.add_space(14.0);
+            ui.add_space(16.0);
             ui.label(RichText::new("Mijn agenda's").size(12.0).strong().color(t.text_dim));
             ui.add_space(4.0);
             let calendars: Vec<(String, String, [u8; 3])> =
@@ -657,21 +664,21 @@ fn task_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.add_space(4.0);
     let mut pick = None;
     for task in &tasks {
-        let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click_and_drag());
+        // Each task a small card with an open circle, ready to be dragged into the calendar.
+        let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click_and_drag());
         r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &task.title));
         r.dnd_set_drag_payload(DraggedTask(task.id.clone()));
-        if r.hovered() {
-            ui.painter().rect_filled(rect, CornerRadius::same(3), t.hover);
-        }
         let p = ui.painter();
-        p.rect_stroke(
-            Rect::from_center_size(pos2(rect.left() + 9.0, rect.center().y), vec2(12.0, 12.0)),
-            CornerRadius::same(2),
-            Stroke::new(1.2, t.text_dim),
+        p.rect(
+            rect,
+            CornerRadius::same(helder::CONTROL_RADIUS),
+            if r.hovered() { t.hover } else { t.card },
+            Stroke::new(1.0, t.card_border),
             egui::StrokeKind::Inside,
         );
-        let text_rect = Rect::from_min_max(pos2(rect.left() + 22.0, rect.top()), rect.right_bottom());
-        let galley = p.layout_no_wrap(task.title.clone(), FontId::proportional(12.5), t.text);
+        p.circle_stroke(pos2(rect.left() + 18.0, rect.center().y), 7.0, Stroke::new(1.5, t.text_dim));
+        let text_rect = Rect::from_min_max(pos2(rect.left() + 34.0, rect.top()), rect.right_bottom() - vec2(8.0, 0.0));
+        let galley = p.layout_no_wrap(task.title.clone(), FontId::proportional(13.0), t.text);
         p.with_clip_rect(text_rect).galley(pos2(text_rect.left(), rect.center().y - galley.size().y / 2.0), galley, t.text);
         if r.clicked() {
             pick = Some(task.id.clone());
@@ -769,20 +776,41 @@ fn chip_title(a: &Appointment) -> String {
     s + &a.title
 }
 
-/// A clickable block for one appointment, a drag source when `drag` is given. Returns true
-/// when clicked.
-/// The block's look for a free/busy status, as Outlook draws them: a free appointment is a
-/// pale block with the calendar's colour as its border, a tentative one half-transparent with
-/// that border, a busy one solid and an out-of-office one purple.
-fn chip_paint(fill: Color32, show_as: ShowAs, hovered: bool, text: Color32) -> (Color32, Option<Stroke>, Color32) {
-    let with_alpha = |c: Color32, a: u8| Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a);
+/// How an appointment block is painted.
+struct ChipPaint {
+    fill: Color32,
+    border: Option<Stroke>,
+    text: Color32,
+    /// The calendar's colour as a bar down the left edge.
+    stripe: Option<Color32>,
+}
+
+/// The block's look for a free/busy status, in the Helder style: a soft tint of the calendar's
+/// colour with dark text and a bar of the full colour at the left. A free appointment is the
+/// card's own white with the colour as a border, a tentative one a lighter tint with that
+/// border, a busy one the tint with the bar, an out-of-office one the same in purple.
+fn chip_paint(color: Color32, show_as: ShowAs, hovered: bool, t: &Tokens) -> ChipPaint {
+    let strength = match (t.dark, hovered) {
+        (false, false) => 0.18,
+        (false, true) => 0.26,
+        (true, false) => 0.22,
+        (true, true) => 0.28,
+    };
+    let tint = |c: Color32, f: f32| crate::theme::over(c, t.card, f);
     match show_as {
-        ShowAs::Free => (with_alpha(fill, if hovered { 70 } else { 40 }), Some(Stroke::new(1.5, fill)), text),
-        ShowAs::Tentative => (with_alpha(fill, if hovered { 170 } else { 130 }), Some(Stroke::new(1.5, fill)), Color32::WHITE),
-        ShowAs::Busy => (with_alpha(fill, if hovered { 255 } else { 220 }), None, Color32::WHITE),
-        ShowAs::Oof => (with_alpha(OOF_COLOR, if hovered { 255 } else { 220 }), None, Color32::WHITE),
+        ShowAs::Free => {
+            ChipPaint { fill: if hovered { tint(color, 0.08) } else { t.card }, border: Some(Stroke::new(1.5, color)), text: t.text, stripe: None }
+        }
+        ShowAs::Tentative => {
+            ChipPaint { fill: tint(color, strength / 2.0), border: Some(Stroke::new(1.0, color)), text: t.text, stripe: Some(color) }
+        }
+        ShowAs::Busy => ChipPaint { fill: tint(color, strength), border: None, text: t.text, stripe: Some(color) },
+        ShowAs::Oof => ChipPaint { fill: tint(OOF_COLOR, strength), border: None, text: t.text, stripe: Some(OOF_COLOR) },
     }
 }
+
+/// The width of the coloured bar at the left of a block.
+const STRIPE: f32 = 3.0;
 
 /// A clickable block for one appointment, a drag source when `drag` is given. Returns true
 /// when clicked.
@@ -795,18 +823,39 @@ fn chip(ui: &mut Ui, rect: Rect, label: &str, fill: Color32, show_as: ShowAs, se
         r.dnd_set_drag_payload(payload);
     }
     let p = ui.painter();
-    let (fill, border, text) = chip_paint(fill, show_as, r.hovered(), t.text);
-    p.rect_filled(rect, CornerRadius::same(3), fill);
-    if let Some(border) = border {
-        p.rect_stroke(rect, CornerRadius::same(3), border, egui::StrokeKind::Inside);
-    }
+    let look = chip_paint(fill, show_as, r.hovered(), t);
+    paint_block(p, rect, &look);
     if selected {
-        p.rect_stroke(rect, CornerRadius::same(3), Stroke::new(2.0, t.text), egui::StrokeKind::Inside);
+        p.rect_stroke(rect, CornerRadius::same(6), Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
     }
-    let text_rect = rect.shrink2(vec2(5.0, 1.0));
-    let galley = p.layout(label.to_string(), FontId::proportional(11.5), text, text_rect.width());
-    p.with_clip_rect(text_rect).galley(text_rect.left_top(), galley, text);
+    let text_rect = rect.shrink2(vec2(if look.stripe.is_some() { 8.0 } else { 6.0 }, 2.0));
+    let galley = p.layout(label.to_string(), FontId::proportional(12.0), look.text, text_rect.width());
+    p.with_clip_rect(text_rect).galley(text_rect.left_top(), galley, look.text);
     r.clicked()
+}
+
+/// A quiet square button with a chevron, for the previous or next day, week or month.
+fn nav_button(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str) -> egui::Response {
+    let r = ui.add(
+        egui::Button::image(icon.image(helder::ICON, t.text))
+            .frame_when_inactive(false)
+            .corner_radius(helder::CONTROL_RADIUS)
+            .min_size(vec2(32.0, 32.0)),
+    );
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    r.on_hover_text(label)
+}
+
+/// The rounded block with its fill, border and bar.
+fn paint_block(p: &egui::Painter, rect: Rect, look: &ChipPaint) {
+    p.rect_filled(rect, CornerRadius::same(6), look.fill);
+    if let Some(stripe) = look.stripe {
+        let bar = Rect::from_min_size(rect.min, vec2(STRIPE, rect.height()));
+        p.rect_filled(bar, CornerRadius { nw: 6, sw: 6, ne: 0, se: 0 }, stripe);
+    }
+    if let Some(border) = look.border {
+        p.rect_stroke(rect, CornerRadius::same(6), border, egui::StrokeKind::Inside);
+    }
 }
 
 fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
@@ -870,7 +919,7 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         t.list
                     },
                 );
-                p.rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                p.rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
                 let number_pos = pos2(rect.right() - 14.0, rect.top() + 12.0);
                 if day == today {
                     p.circle_filled(number_pos, 11.0, t.accent);
@@ -952,20 +1001,22 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         if app.view.week_numbers {
-            week_cell(ui, t, vec2(gutter, 36.0), first);
+            week_cell(ui, t, vec2(gutter, DAY_HEADER), first);
         } else {
-            ui.allocate_exact_size(vec2(gutter, 36.0), Sense::hover());
+            ui.allocate_exact_size(vec2(gutter, DAY_HEADER), Sense::hover());
         }
         for i in 0..days {
             let d = add_days(first, i);
-            let (rect, _) = ui.allocate_exact_size(vec2(col_w, 36.0), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(vec2(col_w, DAY_HEADER), Sense::hover());
             let p = ui.painter();
-            let label = format!("{} {}", WEEKDAYS_SHORT[d.weekday().num_days_from_monday() as usize], d.day());
-            let color = if d == today { t.accent_text } else { t.text };
-            p.text(rect.center(), Align2::CENTER_CENTER, label, FontId::proportional(13.0), color);
+            // The weekday small and grey over the day's number, today tinted in the app colour.
             if d == today {
-                p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(2.0, t.accent));
+                p.rect_filled(rect.shrink(2.0), CornerRadius::same(helder::CONTROL_RADIUS), t.checked);
             }
+            let (name_color, day_color) = if d == today { (t.accent_text, t.accent_text) } else { (t.text_dim, t.text) };
+            let left = rect.left() + 10.0;
+            p.text(pos2(left, rect.top() + 6.0), Align2::LEFT_TOP, weekday_name(d), FontId::proportional(12.0), name_color);
+            p.text(pos2(left, rect.top() + 21.0), Align2::LEFT_TOP, d.day().to_string(), FontId::proportional(20.0), day_color);
         }
     });
     // All-day strip.
@@ -985,7 +1036,7 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                 Some(Dropped::Task(id)) => task_drop = Some((id, d, None)),
                 None => {}
             }
-            ui.painter().rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
             if let (Some(from), Some(to)) = (midnight(d), midnight(add_days(d, 1))) {
                 let items: Vec<Appointment> =
                     shown(app, app.engine.session.appointments_between(from, to)).into_iter().filter(|a| a.all_day).collect();
@@ -1008,7 +1059,12 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
             }
         }
     });
-    egui::ScrollArea::vertical().auto_shrink(false).id_salt("hours").show(ui, |ui| {
+    let mut hours = egui::ScrollArea::vertical().auto_shrink(false).id_salt("hours");
+    if egui::scroll_area::State::load(ui.ctx(), ui.make_persistent_id("hours")).is_none() {
+        // The first time, the working day is in view rather than the night.
+        hours = hours.vertical_scroll_offset(FIRST_HOUR * HOUR_HEIGHT);
+    }
+    hours.show(ui, |ui| {
         let (grid, _) = ui.allocate_exact_size(vec2(gutter + col_w * days as f32, HOUR_HEIGHT * 24.0), Sense::hover());
         let p = ui.painter();
         if app.view.work_hours {
@@ -1025,14 +1081,14 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
         }
         for hour in 0..24 {
             let y = grid.top() + hour as f32 * HOUR_HEIGHT;
-            p.line_segment([pos2(grid.left() + gutter, y), pos2(grid.right(), y)], Stroke::new(1.0, t.border));
+            p.line_segment([pos2(grid.left() + gutter, y), pos2(grid.right(), y)], Stroke::new(1.0, t.card_border));
             p.text(pos2(grid.left() + gutter - 6.0, y + 2.0), Align2::RIGHT_TOP, format!("{hour:02}:00"), FontId::proportional(11.0), t.text_dim);
         }
         for i in 0..days {
             let d = add_days(first, i);
             let x = grid.left() + gutter + i as f32 * col_w;
             let column = Rect::from_min_size(pos2(x, grid.top()), vec2(col_w, grid.height()));
-            ui.painter().line_segment([column.left_top(), column.left_bottom()], Stroke::new(1.0, t.border));
+            ui.painter().line_segment([column.left_top(), column.left_bottom()], Stroke::new(1.0, t.card_border));
             let r = ui.interact(column, ui.make_persistent_id(("column", i)), Sense::click());
             r.widget_info(|| {
                 egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{} {} {}", weekday_name(d), d.day(), month_name(d.month())))
@@ -1068,7 +1124,13 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                 let bottom = ((end.min(to) - from) as f32 / 3600.0) * HOUR_HEIGHT;
                 let block =
                     Rect::from_min_max(pos2(x + 2.0, grid.top() + top + 1.0), pos2(x + col_w - 2.0, grid.top() + bottom.max(top + 18.0) - 1.0));
-                let label = format!("{} {}\n{}", hm(a.start), hm(end), chip_title(a));
+                // A short block keeps the title on one line with the start, a longer one puts the
+                // times under the title.
+                let label = if block.height() < 34.0 {
+                    format!("{} {}", chip_title(a), hm(a.start))
+                } else {
+                    format!("{}\n{} – {}", chip_title(a), hm(a.start), hm(end))
+                };
                 if chip(ui, block, &label, appointment_color(app, a, t), a.show_as, selected.as_deref() == Some(a.id.as_str()), draggable(a), t) {
                     open = Some((a.id.clone(), a.start));
                 }
@@ -1136,31 +1198,30 @@ pub fn drag_preview(app: &MailApp, ctx: &egui::Context, t: &Tokens) {
 /// The calendar module's panes; the ribbon and the window are drawn by the caller.
 pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     side_pane(app, ui, t);
-    egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading).inner_margin(Margin::same(12))).show(ui, |ui| {
+    // The calendar itself is a white card on the window's ground.
+    let frame = helder::card_frame(t).inner_margin(Margin::same(12)).outer_margin(Margin { left: 0, right: 12, top: 0, bottom: 12 });
+    egui::CentralPanel::default().frame(frame).show(ui, |ui| {
         ui.horizontal(|ui| {
-            if ui.add(egui::Button::new(RichText::new("◀").color(t.text)).min_size(vec2(28.0, 26.0))).on_hover_text("Vorige").clicked() {
-                app.calendar.focus = step(app.calendar.view, app.calendar.focus, -1);
-            }
-            if ui.add(egui::Button::new(RichText::new("▶").color(t.text)).min_size(vec2(28.0, 26.0))).on_hover_text("Volgende").clicked() {
-                app.calendar.focus = step(app.calendar.view, app.calendar.focus, 1);
-            }
+            helder::quiet(ui, t, |ui| {
+                if nav_button(ui, t, Icon::ChevronLeft, "Vorige").clicked() {
+                    app.calendar.focus = step(app.calendar.view, app.calendar.focus, -1);
+                }
+                if nav_button(ui, t, Icon::ChevronRight, "Volgende").clicked() {
+                    app.calendar.focus = step(app.calendar.view, app.calendar.focus, 1);
+                }
+            });
             ui.add_space(8.0);
             let title = if app.calendar.is_searching() { "Zoekresultaten".to_string() } else { period_title(app.calendar.view, app.calendar.focus) };
-            ui.label(RichText::new(title).size(18.0).strong().color(t.text));
+            ui.label(RichText::new(title).size(helder::TITLE_TEXT).strong().color(t.text));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if app.calendar.is_searching() && ui.small_button("✕").on_hover_text("Zoekopdracht wissen").clicked() {
                     app.calendar.query.clear();
                 }
-                let width = ui.available_width().clamp(80.0, 240.0);
-                ui.add(
-                    egui::TextEdit::singleline(&mut app.calendar.query)
-                        .id(egui::Id::new(SEARCH_BOX))
-                        .hint_text("Zoeken in agenda")
-                        .desired_width(width),
-                );
+                let width = ui.available_width().clamp(80.0, 280.0);
+                helder::search_field(ui, t, &mut app.calendar.query, egui::Id::new(SEARCH_BOX), "Zoeken in agenda", width);
             });
         });
-        ui.add_space(8.0);
+        ui.add_space(10.0);
         if app.calendar.is_searching() {
             search_results(app, ui, t);
             return;
@@ -1440,9 +1501,9 @@ fn day_preview(ui: &mut Ui, t: &Tokens, editor: &Editor, day: NaiveDate, busy: &
     };
     for b in busy.iter().filter(|b| !b.all_day) {
         if let Some(r) = block(y_of(b.start), y_of(b.end), rect.left() + gutter + 4.0, planned_right) {
-            let (fill, stroke, text) = chip_paint(b.color, b.show_as, false, t.text);
-            p.rect(r, CornerRadius::same(6), fill, stroke.unwrap_or(Stroke::NONE), egui::StrokeKind::Inside);
-            label(r, &b.title, text);
+            let look = chip_paint(b.color, b.show_as, false, t);
+            paint_block(&p, r, &look);
+            label(r, &b.title, look.text);
         }
     }
     if !editor.all_day
@@ -1836,13 +1897,41 @@ mod tests {
         assert_eq!(Editor::from_appointment(&free, None).show_as, ShowAs::Free);
         assert_eq!((show_as_label(ShowAs::Free), show_as_label(ShowAs::Tentative), show_as_label(ShowAs::Oof)), ("Vrij", "Voorlopig", "Afwezig"));
         let blue = Color32::from_rgb(0, 0, 255);
-        let (fill, border, _) = chip_paint(blue, ShowAs::Free, false, Color32::BLACK);
-        assert!(fill.a() < 80 && border.is_some(), "a free block is pale with a border");
-        let (fill, border, _) = chip_paint(blue, ShowAs::Busy, false, Color32::BLACK);
-        assert!(fill.a() > 200 && border.is_none(), "a busy block is solid");
-        assert_eq!(chip_paint(blue, ShowAs::Oof, true, Color32::BLACK).0, OOF_COLOR, "out of office is purple, whatever the calendar's colour");
+        let t = Tokens::light();
+        let free = chip_paint(blue, ShowAs::Free, false, &t);
+        assert!(free.fill == t.card && free.border.is_some(), "a free block is the card's white with a border");
+        let busy = chip_paint(blue, ShowAs::Busy, false, &t);
+        assert!(busy.fill != t.card && busy.border.is_none() && busy.stripe == Some(blue), "a busy block is tinted with a bar");
+        assert_eq!(chip_paint(blue, ShowAs::Oof, true, &t).stripe, Some(OOF_COLOR), "out of office is purple, whatever the calendar's colour");
         assert_eq!(chip_title(&Appointment { recurrence: Some(Recurrence::every(Frequency::Weekly)), ..a.clone() }), "🔒 🔁 Dokter");
         assert_eq!(chip_title(&Appointment { private: false, ..a }), "Dokter");
+    }
+
+    #[test]
+    fn appointment_text_meets_wcag_aa_on_every_block() {
+        // Calendar colours as servers and Mailcraft hand them out, from pale to deep.
+        let colors = [
+            Color32::from_rgb(31, 111, 201),
+            Color32::from_rgb(46, 125, 91),
+            Color32::from_rgb(255, 200, 0),
+            Color32::from_rgb(220, 40, 40),
+            Color32::from_rgb(255, 140, 0),
+            Color32::from_rgb(0, 0, 255),
+            Color32::from_rgb(160, 160, 160),
+            Color32::WHITE,
+            Color32::BLACK,
+        ];
+        for t in [Tokens::light(), Tokens::dark()] {
+            for c in colors {
+                for show_as in [ShowAs::Free, ShowAs::Tentative, ShowAs::Busy, ShowAs::Oof] {
+                    for hovered in [false, true] {
+                        let look = chip_paint(c, show_as, hovered, &t);
+                        let ratio = crate::theme::contrast(look.text, look.fill);
+                        assert!(ratio >= 4.5, "{c:?} {show_as:?} hovered {hovered} dark {}: {ratio}", t.dark);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

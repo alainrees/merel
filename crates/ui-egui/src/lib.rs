@@ -714,9 +714,10 @@ fn calendar_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if ribbon_action_hint(ui, t, "↪", calendar::GOTO, true, Some(&key_hint("G"))) {
         app.open_goto();
     }
+    ui.separator();
     for (glyph, label, view) in [("▯", "Dag", View::Day), ("▤", "Werkweek", View::WorkWeek), ("▥", "Week", View::Week), ("▦", "Maand", View::Month)]
     {
-        if ribbon_action(ui, t, glyph, label, app.calendar.view != view) {
+        if ribbon_toggle(ui, t, glyph, label, app.calendar.view == view) {
             app.calendar.view = view;
         }
     }
@@ -760,6 +761,19 @@ pub(crate) fn ribbon_action(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, e
 /// [`ribbon_action`] with the keyboard shortcut shown on hover. In the Helder style a ribbon
 /// button is one line: a line icon and its label; a label without an icon keeps its glyph.
 fn ribbon_action_hint(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool, shortcut: Option<&str>) -> bool {
+    ribbon_draw(ui, t, glyph, label, enabled, shortcut, None)
+}
+
+/// A ribbon button that stays lit while `on`, such as the calendar's current view.
+fn ribbon_toggle(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, on: bool) -> bool {
+    ribbon_draw(ui, t, glyph, label, true, None, Some(on))
+}
+
+/// Draws a ribbon button; `on` is set for a button that can stay lit. "Nieuwe e-mail" and the
+/// other "new" buttons are the blue main button of their ribbon.
+fn ribbon_draw(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool, shortcut: Option<&str>, on: Option<bool>) -> bool {
+    let primary = enabled && helder::ribbon_primary(label);
+    let lit = on == Some(true);
     let icon = helder::ribbon_icon(label, glyph);
     // Like the simplified ribbon of the new Outlook, the everyday actions show only their icon.
     let icon_only = icon.is_some() && helder::ribbon_icon_only(label);
@@ -769,18 +783,38 @@ fn ribbon_action_hint(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled
     let gap = if icon_only { 0.0 } else { RIBBON_ICON_GAP };
     let width = (lead + gap + label_width + 2.0 * RIBBON_LABEL_PADDING).max(RIBBON_BUTTON_WIDTH);
     let (rect, r) = ui.allocate_exact_size(vec2(width, helder::BUTTON_HEIGHT), if enabled { Sense::click() } else { Sense::hover() });
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    r.widget_info(|| match on {
+        Some(on) => egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, label),
+        None => egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label),
+    });
     let r = match shortcut {
         Some(s) => r.on_hover_text(format!("{label} ({s})")),
         None if icon_only => r.on_hover_text(label),
         None => r,
     };
-    let color = if enabled { t.text } else { t.text_disabled };
-    if r.hovered() && enabled {
-        ui.painter().rect_filled(rect, CornerRadius::same(helder::CONTROL_RADIUS), t.hover);
+    let color = if primary {
+        t.on_accent
+    } else if lit {
+        t.accent_text
+    } else if enabled {
+        t.text
+    } else {
+        t.text_disabled
+    };
+    let fill = if primary {
+        Some(t.accent)
+    } else if lit {
+        Some(t.checked)
+    } else if r.hovered() && enabled {
+        Some(t.hover)
+    } else {
+        None
+    };
+    if let Some(fill) = fill {
+        ui.painter().rect_filled(rect, CornerRadius::same(helder::CONTROL_RADIUS), fill);
     }
     let left = if icon_only { rect.center().x - helder::ICON / 2.0 } else { rect.left() + RIBBON_LABEL_PADDING };
-    let lead_color = if enabled { t.accent_text } else { color };
+    let lead_color = if primary || lit || !enabled { color } else { t.accent_text };
     match icon {
         Some(icon) => icon
             .image(helder::ICON, lead_color)
@@ -1146,8 +1180,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     let hint = if session.search_all { "Zoeken in alle mappen" } else { "Zoeken in deze map" };
                     let menu_w = if recents.is_empty() { 0.0 } else { 30.0 };
                     let width = (ui.available_width() - menu_w - if searching { 240.0 } else { 150.0 }).max(80.0);
-                    let box_r = ui
-                        .add(egui::TextEdit::singleline(&mut session.search).id(egui::Id::new(SEARCH_BOX)).hint_text(hint).desired_width(width))
+                    let box_r = helder::search_field(ui, &t, &mut session.search, egui::Id::new(SEARCH_BOX), hint, width)
                         .on_hover_text(mailcraft_engine::search::HINT);
                     // Leaving the box (Enter, a click elsewhere) is when the words count as a search.
                     if box_r.lost_focus() && !session.search.trim().is_empty() {
