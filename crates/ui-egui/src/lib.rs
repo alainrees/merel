@@ -2026,6 +2026,29 @@ mod tests {
     }
 
     #[test]
+    fn weeknummers_on_the_beeld_tab_number_the_weeks_of_the_calendar() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.run();
+        let week = calendar::week_label(chrono::Local::now().date_naive());
+        assert!(h.query_by_label(&week).is_none(), "off by default, as in Outlook");
+        h.get_by_label("Beeld").click();
+        h.run();
+        h.get_by_label("Weeknummers").click();
+        h.run();
+        assert!(h.state().view.week_numbers);
+        assert!(h.query_all_by_label(&week).count() >= 1, "the month view numbers the week of today");
+        h.get_by_label("Start").click();
+        h.run();
+        h.get_by_label("Week").click();
+        h.run();
+        h.get_by_label(&week);
+        h.get_by_label("Dag").click();
+        h.run();
+        h.get_by_label(&week);
+    }
+
+    #[test]
     fn calendar_shows_sample_appointments_and_saves_new_ones() {
         let mut h = harness();
         h.state_mut().module = Module::Calendar;
