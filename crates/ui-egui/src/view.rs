@@ -5,7 +5,6 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use egui::RichText;
 use mailcraft_engine::view::{Filter, Sort};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -358,12 +357,12 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
 /// A ribbon group: its controls in a row, its name in small print underneath, like Outlook.
 /// A ribbon group: its buttons in a row with the group's name under them, as Outlook and Word
 /// caption their ribbon groups.
-pub(crate) fn group(ui: &mut egui::Ui, t: &Tokens, name: &str, add: impl FnOnce(&mut egui::Ui)) {
-    ui.vertical(|ui| {
-        ui.horizontal(add);
-        ui.add_space(2.0);
-        ui.label(RichText::new(name).size(11.0).color(t.text_dim));
-    });
+pub(crate) fn group(ui: &mut egui::Ui, _t: &Tokens, name: &str, add: impl FnOnce(&mut egui::Ui)) {
+    // The Helder ribbon is one line, so the name is not drawn; a screen reader still hears it.
+    let (_, r) = ui.allocate_exact_size(egui::Vec2::ZERO, egui::Sense::hover());
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, name));
+    // The ribbon row is already horizontal; a nested row would sit lower than its neighbours.
+    add(ui);
 }
 
 #[cfg(test)]
