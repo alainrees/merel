@@ -12,7 +12,7 @@
 
 use chrono::{DateTime, Datelike, Local, TimeZone, Utc};
 use mailcraft_mailbox::{Item, ItemStore, MailboxError, Result};
-use mailcraft_model::{Address, Appointment, Contact, Frequency, Priority, Recurrence, Task, clean_text};
+use mailcraft_model::{Address, Appointment, Contact, Frequency, Priority, Recurrence, ShowAs, Task, clean_text};
 use roxmltree::Node;
 
 use crate::{EwsClient, child, esc, find, parse, parse_datetime, response_messages, text};
@@ -64,6 +64,12 @@ fn appointment_of(node: Node<'_, '_>) -> Option<Appointment> {
         recurrence: None,
         reminder: (text(node, "ReminderIsSet") == Some("true")).then(|| text(node, "ReminderMinutesBeforeStart")?.trim().parse().ok()).flatten(),
         private: matches!(text(node, "Sensitivity"), Some("Private" | "Confidential")),
+        show_as: match text(node, "LegacyFreeBusyStatus") {
+            Some("Free") => ShowAs::Free,
+            Some("Tentative") => ShowAs::Tentative,
+            Some("OOF") => ShowAs::Oof,
+            _ => ShowAs::Busy,
+        },
     }
     .validated()
     .ok()
@@ -201,6 +207,13 @@ fn appointment_fields(a: &Appointment) -> Fields {
     f.put("calendar:Start", format!("<t:Start>{}</t:Start>", time(a.start)));
     f.put("calendar:End", format!("<t:End>{}</t:End>", time(a.end)));
     f.put("calendar:IsAllDayEvent", format!("<t:IsAllDayEvent>{}</t:IsAllDayEvent>", a.all_day));
+    let busy = match a.show_as {
+        ShowAs::Free => "Free",
+        ShowAs::Tentative => "Tentative",
+        ShowAs::Busy => "Busy",
+        ShowAs::Oof => "OOF",
+    };
+    f.put("calendar:LegacyFreeBusyStatus", format!("<t:LegacyFreeBusyStatus>{busy}</t:LegacyFreeBusyStatus>"));
     f.put("calendar:Location", format!("<t:Location>{}</t:Location>", esc(&a.location)));
     if let Some(r) = &a.recurrence {
         f.put("calendar:Recurrence", recurrence_xml(r, a.start));
@@ -372,6 +385,7 @@ impl ItemStore for EwsClient {
             "calendar:Start",
             "calendar:End",
             "calendar:IsAllDayEvent",
+            "calendar:LegacyFreeBusyStatus",
             "calendar:Location",
         ]);
         self.fetch(&ids, &props, appointment_of)
@@ -549,16 +563,19 @@ mod tests {
             "<t:CalendarItem><t:ItemId Id=\"AAk1\" ChangeKey=\"x\"/><t:Subject>Overleg</t:Subject><t:Body BodyType=\"Text\">Agenda:\n- punt 1</t:Body>",
             "<t:ReminderIsSet>true</t:ReminderIsSet><t:ReminderMinutesBeforeStart>30</t:ReminderMinutesBeforeStart>",
             "<t:Start>2026-10-14T17:46:40Z</t:Start><t:End>2026-10-14T18:46:40Z</t:End><t:IsAllDayEvent>false</t:IsAllDayEvent>",
-            "<t:Location>Studio</t:Location></t:CalendarItem>",
+            "<t:LegacyFreeBusyStatus>Tentative</t:LegacyFreeBusyStatus><t:Location>Studio</t:Location></t:CalendarItem>",
         ));
         let a = first(&xml, appointment_of).unwrap();
         assert_eq!((a.id.as_str(), a.title.as_str(), a.location.as_str(), a.notes.as_str()), ("AAk1", "Overleg", "Studio", "Agenda:\n- punt 1"));
         assert_eq!((a.start, a.end, a.all_day, a.reminder), (1_792_000_000, 1_792_003_600, false, Some(30)));
+        assert_eq!(a.show_as, ShowAs::Tentative);
         let off = reply(concat!(
             "<t:CalendarItem><t:ItemId Id=\"A4\"/><t:ReminderIsSet>false</t:ReminderIsSet><t:ReminderMinutesBeforeStart>15</t:ReminderMinutesBeforeStart>",
             "<t:Start>2026-10-14T17:46:40Z</t:Start><t:End>2026-10-14T18:46:40Z</t:End></t:CalendarItem>"
         ));
-        assert_eq!(first(&off, appointment_of).unwrap().reminder, None, "minutes without the switch mean no reminder");
+        let off = first(&off, appointment_of).unwrap();
+        assert_eq!(off.reminder, None, "minutes without the switch mean no reminder");
+        assert_eq!(off.show_as, ShowAs::Busy, "no status means busy");
 
         let untitled =
             reply("<t:CalendarItem><t:ItemId Id=\"A2\"/><t:Start>2026-10-14T17:46:40Z</t:Start><t:End>2026-10-14T17:46:40Z</t:End></t:CalendarItem>");
@@ -613,6 +630,7 @@ mod tests {
             recurrence: None,
             reminder: Some(15),
             private: false,
+            show_as: mailcraft_model::ShowAs::Busy,
         };
         let xml = appointment_fields(&a).create();
         assert_eq!(
@@ -620,9 +638,12 @@ mod tests {
             concat!(
                 "<t:CalendarItem><t:Subject>A &amp; B</t:Subject><t:Sensitivity>Normal</t:Sensitivity><t:Body BodyType=\"Text\"></t:Body>",
                 "<t:ReminderIsSet>true</t:ReminderIsSet><t:ReminderMinutesBeforeStart>15</t:ReminderMinutesBeforeStart><t:Start>2026-10-14T17:46:40Z</t:Start>",
-                "<t:End>2026-10-14T18:46:40Z</t:End><t:IsAllDayEvent>false</t:IsAllDayEvent><t:Location>&lt;Studio&gt;</t:Location></t:CalendarItem>"
+                "<t:End>2026-10-14T18:46:40Z</t:End><t:IsAllDayEvent>false</t:IsAllDayEvent><t:LegacyFreeBusyStatus>Busy</t:LegacyFreeBusyStatus>",
+                "<t:Location>&lt;Studio&gt;</t:Location></t:CalendarItem>"
             )
         );
+        let free = appointment_fields(&Appointment { show_as: ShowAs::Free, ..a.clone() }).create();
+        assert!(free.contains("<t:LegacyFreeBusyStatus>Free</t:LegacyFreeBusyStatus>"), "{free}");
         let whole = Appointment { all_day: true, ..a.clone() };
         let xml = appointment_fields(&whole).create();
         // An all-day appointment is sent as local wall-clock time with its offset.
