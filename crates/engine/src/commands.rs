@@ -73,6 +73,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "junk.level", label: "Junk filter level", run: crate::junk::level },
     CommandSpec { id: "conversation.ignore", label: "Ignore conversation", run: crate::ignore::ignore },
     CommandSpec { id: "conversation.unignore", label: "Stop ignoring conversation", run: crate::ignore::unignore },
+    CommandSpec { id: "conversation.cleanup", label: "Clean up conversation", run: crate::cleanup::conversation },
+    CommandSpec { id: "folder.cleanup", label: "Clean up folder", run: crate::cleanup::folder },
     CommandSpec { id: "appointment.select", label: "Open appointment", run: crate::calendar::select },
     CommandSpec { id: "appointment.save", label: "Save appointment", run: crate::calendar::save },
     CommandSpec { id: "appointment.skip", label: "Skip one occurrence", run: crate::calendar::skip },
