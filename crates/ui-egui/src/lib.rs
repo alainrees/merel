@@ -135,9 +135,16 @@ impl MailApp {
         // Decoders for pictures embedded in mail; a no-op after the first frame.
         egui_extras::install_image_loaders(ui.ctx());
         self.engine.poll();
-        if self.engine.session.has_pending() {
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+        let arrivals = self.engine.session.take_arrivals();
+        if arrivals > 0 {
+            self.notice =
+                Some(if arrivals == 1 { "1 nieuw bericht ontvangen.".to_string() } else { format!("{arrivals} nieuwe berichten ontvangen.") });
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
         }
+        // Wake up now and then so the engine's refresh timer runs while nothing happens; faster
+        // while something is on its way.
+        let wake = if self.engine.session.has_pending() { std::time::Duration::from_millis(250) } else { std::time::Duration::from_secs(5) };
+        ui.ctx().request_repaint_after(wake);
         ribbon(self, ui, &t);
         status_bar(self, ui, &t);
         let ctx = ui.ctx().clone();
@@ -641,7 +648,11 @@ fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let unread = list.iter().filter(|m| !m.flags.seen).count();
                 ui.label(RichText::new(format!("Items: {}   Ongelezen: {}", list.len(), unread)).size(12.0).color(t.text_dim));
                 if let Some(n) = &app.notice {
-                    let col = if n.ends_with("verzonden.") { t.accent_text } else { t.flag };
+                    let col = if n.ends_with("verzonden.") || n.ends_with("ontvangen.") || n.starts_with("Bijlage opgeslagen") {
+                        t.accent_text
+                    } else {
+                        t.flag
+                    };
                     ui.label(RichText::new(n).size(12.0).color(col));
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
