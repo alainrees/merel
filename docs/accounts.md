@@ -100,6 +100,13 @@ Let op: Mailcraft meldt zich aan met *Basic authentication* over TLS. Veel serve
 EWS alleen NTLM of Kerberos toe; Mailcraft zegt dat dan en de beheerder kan Basic voor EWS
 inschakelen. Voor Exchange Online (Microsoft 365) gebruik je de soort **Microsoft 365**.
 
+## Handtekening
+
+Bestand › Accounts, bij het account **Handtekening instellen** (later **Handtekening bewerken**).
+De tekst komt onder elk nieuw bericht, antwoord en doorgestuurd bericht van dat account, boven
+het aangehaalde bericht, met de gebruikelijke `-- ` ervoor zodat andere mailprogramma's hem
+herkennen. Elk account heeft zijn eigen handtekening; leeg betekent geen.
+
 ## Account verwijderen
 
 Bestand › Accounts, bij het account de knop **Account verwijderen**, en dan **Ja, verwijderen**.

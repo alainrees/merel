@@ -208,6 +208,7 @@ mod tests {
             incoming: Some(Server { host: "mail.example.org".into(), port: 443, tls: Tls::Implicit }),
             outgoing: None,
             dav: None,
+            signature: String::new(),
         }
     }
 
