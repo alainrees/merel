@@ -1583,6 +1583,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     if let Some(b) = body.as_ref().filter(|b| !b.attachments.is_empty()) {
         let mut save = None;
+        let mut save_all = false;
         ui.horizontal_wrapped(|ui| {
             for a in &b.attachments {
                 let chip = egui::Button::new(RichText::new(format!("📎 {}  ({})", a.name, size_text(a.size))).size(12.0).color(t.text))
@@ -1596,9 +1597,22 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     save = Some(a.clone());
                 }
             }
+            // Several attachments: one click saves them all, as Outlook's "Alle bijlagen opslaan".
+            if !in_junk
+                && b.attachments.len() > 1
+                && ui
+                    .small_button(attachments::SAVE_ALL)
+                    .on_hover_text("Zet alle bijlagen van dit bericht in je map Downloads, elk onder zijn eigen naam.")
+                    .clicked()
+            {
+                save_all = true;
+            }
         });
         if let Some(a) = save {
             app.save_attachment(&a);
+        }
+        if save_all {
+            app.save_attachments(&b.attachments);
         }
         // Thumbnails of the pictures, as Outlook previews them; a click opens the full picture.
         // Not in Junk, where nothing of a message is decoded beyond its text.
@@ -2184,6 +2198,7 @@ mod tests {
         h.state_mut().engine.session.selected_message = Some("inbox#phish".into());
         h.run();
         h.get_by_label(PHISHING_TITLE);
+        assert!(h.query_by_label(attachments::SAVE_ALL).is_none(), "one attachment needs no save-all button");
         let expected = [
             Warning::Impersonation { name: "Sanne de Vries".into() },
             Warning::LookalikeDomain { domain: "examp1e.org".into(), like: "example.org".into() },
@@ -2224,6 +2239,7 @@ mod tests {
         h.state_mut().engine.session.selected_message = Some("m3".into());
         h.run();
         h.get_by_label_contains("📎 bon.pdf");
+        h.get_by_label(attachments::SAVE_ALL);
         assert!(h.query_by_label("Voorbeeld van bon.pdf").is_none(), "a PDF is only saved, never decoded");
         h.get_by_label("foto.png").click();
         h.run();
