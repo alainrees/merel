@@ -134,6 +134,9 @@ pub struct Editor {
     pub calendar_id: Option<String>,
     pub title: String,
     pub location: String,
+    /// The addresses to invite, as typed; "Verzenden" then saves the appointment and mails them
+    /// a meeting request from the calendar's account. Empty for an appointment of your own.
+    pub attendees: String,
     pub all_day: bool,
     pub start_date: String,
     pub start_time: String,
@@ -186,6 +189,7 @@ impl Editor {
             calendar_id: None,
             title: String::new(),
             location: String::new(),
+            attendees: String::new(),
             all_day: false,
             start_date: start.format(DATE_FORMAT).to_string(),
             start_time: start.format(TIME_FORMAT).to_string(),
@@ -1104,6 +1108,18 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     egui::Window::new(title).collapsible(false).resizable(false).default_width(420.0).show(ctx, |ui| {
         field(ui, t, "Titel", &mut editor.title, 300.0);
         field(ui, t, "Locatie", &mut editor.location, 300.0);
+        field(ui, t, crate::meeting::FIELD, &mut editor.attendees, 300.0);
+        crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut editor.attendees);
+        if !editor.attendees.trim().is_empty() {
+            ui.horizontal(|ui| {
+                ui.add_space(94.0);
+                ui.label(
+                    RichText::new("Verzenden slaat de afspraak op en mailt de genodigden een uitnodiging voor hun agenda.")
+                        .size(12.0)
+                        .color(t.text_dim),
+                );
+            });
+        }
         // Which calendar: a choice for a new appointment when there is one, a fact otherwise.
         if calendars.len() > 1 {
             let current = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _)| id.clone()));
@@ -1183,7 +1199,8 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            save = ui.add(egui::Button::new(RichText::new("Opslaan").color(t.on_accent)).fill(t.accent).min_size(vec2(90.0, 26.0))).clicked();
+            let label = if editor.attendees.trim().is_empty() { "Opslaan" } else { "Verzenden" };
+            save = ui.add(egui::Button::new(RichText::new(label).color(t.on_accent)).fill(t.accent).min_size(vec2(90.0, 26.0))).clicked();
             if editor.id.is_some() {
                 if editor.occurrence.is_some() {
                     skip = ui
@@ -1204,11 +1221,32 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         }
     }
     if save {
-        match editor.params() {
-            Ok(params) => match app.engine.run("appointment.save", &params) {
-                Ok(()) => close = true,
-                Err(e) => editor.error = Some(describe(&e)),
-            },
+        match editor.params().and_then(|p| crate::meeting::attendees(&editor.attendees).map(|a| (p, a))) {
+            Ok((mut params, attendees)) => {
+                // An invitation goes out from the calendar's account; without a real one the
+                // appointment is not saved either, so nothing half happens.
+                let calendar = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _)| id.clone()));
+                let account = if attendees.is_empty() { None } else { crate::meeting::account_for(&app.engine.session, calendar.as_deref()) };
+                if !attendees.is_empty() && account.is_none() {
+                    editor.error = Some(crate::meeting::NO_ACCOUNT.to_string());
+                } else {
+                    if !attendees.is_empty() {
+                        params["notes"] = json!(crate::meeting::noted(&editor.notes, &attendees));
+                    }
+                    match app.engine.run("appointment.save", &params) {
+                        Ok(()) => {
+                            if let Some(account) = account
+                                && let Some(a) = app.engine.session.selected_appointment().cloned()
+                            {
+                                let draft = crate::meeting::draft(&a, &account.address, attendees);
+                                app.engine.send(&account.id, draft);
+                            }
+                            close = true;
+                        }
+                        Err(e) => editor.error = Some(describe(&e)),
+                    }
+                }
+            }
             Err(e) => editor.error = Some(e),
         }
     }

@@ -19,6 +19,7 @@ mod html;
 pub mod importance;
 pub mod invitation;
 pub mod junk;
+pub mod meeting;
 pub mod message_menu;
 pub mod print;
 pub mod quicksteps;
@@ -1966,6 +1967,27 @@ mod tests {
         h.get_by_label("Verwijderen").click();
         h.run();
         assert!(h.state().engine.session.appointments.iter().all(|a| a.title != "Tandarts"));
+    }
+
+    #[test]
+    fn an_appointment_with_attendees_offers_verzenden_and_needs_a_real_account() {
+        let mut h = harness();
+        let mut e = calendar::Editor::new_at(chrono::Local::now().naive_local());
+        e.title = "Overleg met Sanne".into();
+        e.attendees = "Sanne <sanne@example.org>".into();
+        h.state_mut().calendar.editor = Some(e);
+        h.run();
+        assert!(h.query_by_label("Opslaan").is_none(), "with attendees the button sends");
+        h.get_by_label("Verzenden").click();
+        h.run();
+        h.get_by_label(meeting::NO_ACCOUNT);
+        assert!(h.state().calendar.editor.is_some(), "the window stays open");
+        assert!(h.state().engine.session.appointments.iter().all(|a| a.title != "Overleg met Sanne"), "nothing was saved");
+        h.state_mut().calendar.editor.as_mut().expect("editor").attendees = "sanne@".into();
+        h.run();
+        h.get_by_label("Verzenden").click();
+        h.run();
+        h.get_by_label(meeting::BAD_ADDRESSES);
     }
 
     #[test]
