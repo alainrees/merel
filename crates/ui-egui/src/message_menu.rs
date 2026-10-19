@@ -18,6 +18,8 @@ pub enum Pick {
     Move,
     Task,
     Appointment,
+    /// The sender's card, or the form for a new contact with the sender's name and address.
+    Sender,
 }
 
 /// How much of a message's text goes into the notes of a task or an appointment.
@@ -25,12 +27,13 @@ const NOTES_CHARS: usize = 2000;
 
 /// Draws the menu on `r` for message `m`; what was clicked comes back once, to be run by
 /// [`MailApp::act_on_message`].
-pub fn menu(r: &Response, m: &MessageHeader) -> Option<Pick> {
+pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool) -> Option<Pick> {
     let mut pick = None;
     r.context_menu(|ui| {
         let read = if m.flags.seen { ("Als ongelezen markeren", "message.mark_unread") } else { ("Als gelezen markeren", "message.mark_read") };
         let flag = if m.flags.flagged { "Vlag weghalen" } else { "Vlag" };
-        let items: [(&str, Pick); 11] = [
+        let sender = if known_sender { "Afzender openen in contacten" } else { "Afzender toevoegen aan contacten" };
+        let items: [(&str, Pick); 12] = [
             ("Beantwoorden", Pick::Compose(ComposeKind::Reply)),
             ("Allen beantwoorden", Pick::Compose(ComposeKind::ReplyAll)),
             ("Doorsturen", Pick::Compose(ComposeKind::Forward)),
@@ -42,6 +45,7 @@ pub fn menu(r: &Response, m: &MessageHeader) -> Option<Pick> {
             ("Verwijderen", Pick::Command("message.delete")),
             ("Taak maken van dit bericht", Pick::Task),
             ("Afspraak maken van dit bericht", Pick::Appointment),
+            (sender, Pick::Sender),
         ];
         for (i, (label, p)) in items.into_iter().enumerate() {
             if matches!(i, 3 | 9) {
@@ -79,6 +83,7 @@ impl MailApp {
             Pick::Move => self.move_to = true,
             Pick::Task => self.task_from_message(m),
             Pick::Appointment => self.appointment_from_message(m),
+            Pick::Sender => self.open_or_add_sender(&m.from),
         }
     }
 
