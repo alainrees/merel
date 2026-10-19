@@ -357,6 +357,8 @@ pub struct Session {
     /// Which messages of the folder the list shows, and in what order ("Beeld" tab).
     pub filter: view::Filter,
     pub sort: view::Sort,
+    /// Only messages with this category are listed, when set ("Beeld" tab).
+    pub category_filter: Option<String>,
     /// What the server found for the last search asked of it: the folder, the words, and the
     /// ids of the messages (now listed) it named. Shown next to the local matches while the
     /// search box still holds those words and that folder is selected.
@@ -558,6 +560,7 @@ impl Session {
                 }
             })
             .filter(|m| self.filter.keeps(m))
+            .filter(|m| self.category_filter.as_deref().is_none_or(|c| m.categories.iter().any(|x| x.eq_ignore_ascii_case(c))))
             .collect();
         list.sort_by(|a, b| self.sort.order(a, b));
         list

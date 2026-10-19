@@ -67,7 +67,7 @@ recoverable on the server for a while, as they do for Outlook.
 
 Rules sort incoming mail: "Regels" in the ribbon opens a window where a rule says which part of a
 message (sender, recipient, subject or the whole envelope) must contain which text, and what then
-happens (move to a folder, mark as read, flag). Rules run over the mail a refresh finds new in an
+happens (move to a folder, mark as read, flag, give one or more categories). Rules run over the mail a refresh finds new in an
 account's inbox, also while offline (the change waits in the queue like any other), and "Regels nu
 uitvoeren op deze map" runs them over the open folder at once; "Regel voor deze afzender" starts one
 from the selected message. Rules are kept in `rules.json`.
@@ -80,7 +80,7 @@ them as the item's categories, IMAP as keywords (spaces become `_`), so other cl
 too; a category another client set shows in grey until you give it a colour here.
 
 The "Beeld" tab chooses what the list shows and how: only unread, flagged or mail with
-attachments; sorted newest or oldest first, by sender or by subject; the reading pane to the
+attachments, or only mail with a chosen category; sorted newest or oldest first, by sender or by subject; the reading pane to the
 right or below the list; compact rows without the preview line; and a light, dark or system
 theme. The choices are kept in `view.json` next to the accounts file.
 

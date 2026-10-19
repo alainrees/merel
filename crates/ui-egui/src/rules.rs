@@ -25,6 +25,7 @@ pub struct Form {
     pub move_to: Option<String>,
     pub mark_read: bool,
     pub flag: bool,
+    pub categories: Vec<String>,
     pub enabled: bool,
     pub error: Option<String>,
 }
@@ -44,6 +45,7 @@ impl Form {
             move_to: r.move_to.clone(),
             mark_read: r.mark_read,
             flag: r.flag,
+            categories: r.categories.clone(),
             enabled: r.enabled,
             error: None,
         }
@@ -59,6 +61,7 @@ impl Form {
             "move_to": self.move_to,
             "mark_read": self.mark_read,
             "flag": self.flag,
+            "categories": self.categories,
             "enabled": self.enabled,
         });
         if let Some(id) = &self.id {
@@ -79,6 +82,9 @@ pub fn describe(r: &Rule, folder_name: Option<&str>) -> String {
     }
     if r.flag {
         actions.push("vlag zetten".to_string());
+    }
+    if !r.categories.is_empty() {
+        actions.push(format!("categorie {}", r.categories.join(", ")));
     }
     format!("{} bevat “{}” → {}", r.field.dutch_name(), r.contains, actions.join(", "))
 }
@@ -103,7 +109,10 @@ fn save_error(e: &mailcraft_engine::CommandError) -> String {
     use mailcraft_engine::CommandError;
     match e {
         CommandError::Param("contains") => "Vul in waar de regel op moet letten.".into(),
-        CommandError::Param("move_to") => "Kies wat de regel moet doen: verplaatsen, markeren als gelezen of een vlag zetten.".into(),
+        CommandError::Param("move_to") => {
+            "Kies wat de regel moet doen: verplaatsen, markeren als gelezen, een vlag zetten of een categorie geven.".into()
+        }
+        CommandError::Param("categories") => "Kies categorieën uit de lijst.".into(),
         CommandError::Param("account_id") => "Kies een account.".into(),
         CommandError::Store(m) => format!("Opslaan is mislukt: {m}"),
         e => e.to_string(),
@@ -173,6 +182,25 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
         ui.checkbox(&mut form.mark_read, "markeren als gelezen");
         ui.checkbox(&mut form.flag, "vlag zetten");
     });
+    let known: Vec<String> = app.engine.session.categories.iter().map(|c| c.name.clone()).collect();
+    if !known.is_empty() {
+        ui.horizontal(|ui| {
+            label(ui, "Categorie");
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(300.0);
+                for name in &known {
+                    let mut on = form.categories.iter().any(|c| c.eq_ignore_ascii_case(name));
+                    if ui.checkbox(&mut on, name).changed() {
+                        if on {
+                            form.categories.push(name.clone());
+                        } else {
+                            form.categories.retain(|c| !c.eq_ignore_ascii_case(name));
+                        }
+                    }
+                }
+            });
+        });
+    }
     if let Some(e) = &form.error {
         ui.label(RichText::new(e).color(t.flag));
     }
@@ -337,9 +365,12 @@ mod tests {
             move_to: Some("a/Facturen".into()),
             mark_read: true,
             flag: false,
+            categories: Vec::new(),
             enabled: true,
         };
         assert_eq!(describe(&r, Some("Facturen")), "Onderwerp bevat “factuur” → naar Facturen, markeren als gelezen");
+        let labelled = Rule { categories: vec!["Rood".into(), "Werk".into()], ..r.clone() };
+        assert_eq!(describe(&labelled, Some("Facturen")), "Onderwerp bevat “factuur” → naar Facturen, markeren als gelezen, categorie Rood, Werk");
         let f = Form::from_rule(&r);
         assert_eq!(f.params()["move_to"], "a/Facturen");
         assert_eq!(f.params()["field"], "subject");

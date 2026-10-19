@@ -40,6 +40,9 @@ pub struct Rule {
     pub mark_read: bool,
     #[serde(default)]
     pub flag: bool,
+    /// Categories a matching message gets, by name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<String>,
     #[serde(default = "yes")]
     pub enabled: bool,
 }
@@ -67,7 +70,15 @@ impl Rule {
         if self.contains.is_empty() {
             return Err(RuleError::NoText);
         }
-        if self.move_to.as_deref().is_none_or(str::is_empty) && !self.mark_read && !self.flag {
+        let mut categories: Vec<String> = Vec::new();
+        for c in &self.categories {
+            let c: String = clean_text(c).trim().chars().take(crate::MAX_CATEGORY_NAME).collect();
+            if !c.is_empty() && !categories.iter().any(|x| x.eq_ignore_ascii_case(&c)) {
+                categories.push(c);
+            }
+        }
+        self.categories = categories;
+        if self.move_to.as_deref().is_none_or(str::is_empty) && !self.mark_read && !self.flag && self.categories.is_empty() {
             return Err(RuleError::NoAction);
         }
         if self.account_id.is_empty() {
@@ -160,5 +171,7 @@ mod tests {
         assert_eq!(Rule { account_id: String::new(), ..rule(RuleField::From, "x") }.validated(), Err(RuleError::NoAccount));
         let moved = Rule { mark_read: false, move_to: Some("a/Archive".into()), name: "Archief".into(), ..rule(RuleField::From, "x") };
         assert_eq!(moved.validated().unwrap().name, "Archief");
+        let labelled = Rule { mark_read: false, categories: vec![" Rood ".into(), "rood".into(), " ".into()], ..rule(RuleField::From, "x") };
+        assert_eq!(labelled.validated().unwrap().categories, vec!["Rood".to_string()], "a category is an action too, cleaned and listed once");
     }
 }
