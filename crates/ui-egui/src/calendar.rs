@@ -34,6 +34,8 @@ const TIME_FORMAT: &str = "%H:%M";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum View {
     Day,
+    /// Monday to Friday, Outlook's "Werkweek".
+    WorkWeek,
     Week,
     Month,
 }
@@ -384,13 +386,14 @@ impl MailApp {
     }
 }
 
-/// The title above the view: "oktober 2026", "19 – 25 oktober 2026", "maandag 19 oktober 2026".
+/// The title above the view: "oktober 2026", "19 – 25 oktober 2026" (19 – 23 for the work
+/// week), "maandag 19 oktober 2026".
 fn period_title(view: View, focus: NaiveDate) -> String {
     match view {
         View::Month => format!("{} {}", month_name(focus.month()), focus.year()),
-        View::Week => {
+        View::Week | View::WorkWeek => {
             let a = week_start(focus);
-            let b = add_days(a, 6);
+            let b = add_days(a, if view == View::Week { 6 } else { 4 });
             if a.month() == b.month() {
                 format!("{} – {} {} {}", a.day(), b.day(), month_name(b.month()), b.year())
             } else {
@@ -404,7 +407,7 @@ fn period_title(view: View, focus: NaiveDate) -> String {
 fn step(view: View, focus: NaiveDate, n: i64) -> NaiveDate {
     match view {
         View::Month => add_months(focus, n as i32),
-        View::Week => add_days(focus, 7 * n),
+        View::Week | View::WorkWeek => add_days(focus, 7 * n),
         View::Day => add_days(focus, n),
     }
 }
@@ -751,7 +754,7 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 
 /// The week and day views: an all-day strip, then the hours.
 fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
-    let first = if days == 7 { week_start(app.calendar.focus) } else { app.calendar.focus };
+    let first = if days > 1 { week_start(app.calendar.focus) } else { app.calendar.focus };
     let today = today();
     let selected = app.engine.session.selected_appointment.clone();
     let gutter = 48.0;
@@ -957,6 +960,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         match app.calendar.view {
             View::Month => month_view(app, ui, t),
             View::Week => time_grid(app, ui, t, 7),
+            View::WorkWeek => time_grid(app, ui, t, 5),
             View::Day => time_grid(app, ui, t, 1),
         }
     });
@@ -1289,6 +1293,9 @@ mod tests {
         assert_eq!(period_title(View::Month, focus), "oktober 2026");
         assert_eq!(period_title(View::Week, focus), "19 – 25 oktober 2026");
         assert_eq!(period_title(View::Week, d(2026, 10, 30)), "26 oktober – 1 november 2026");
+        assert_eq!(period_title(View::WorkWeek, focus), "19 – 23 oktober 2026");
+        assert_eq!(period_title(View::WorkWeek, d(2026, 11, 1)), "26 – 30 oktober 2026", "a Sunday belongs to the work week before it");
+        assert_eq!(step(View::WorkWeek, focus, 1), d(2026, 10, 28));
         assert_eq!(period_title(View::Day, focus), "woensdag 21 oktober 2026");
         assert_eq!(step(View::Month, d(2026, 1, 31), 1), d(2026, 2, 28));
         assert_eq!(step(View::Week, focus, -1), d(2026, 10, 14));
