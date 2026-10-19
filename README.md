@@ -89,7 +89,8 @@ walk the message list, Delete removes the selected message, Ctrl+N starts a new 
 replies, Ctrl+Shift+R replies to all, Ctrl+F forwards, Ctrl+Shift+V moves to a folder, Ctrl+Q and Ctrl+U mark read or unread,
 Ctrl+E puts the cursor in the search box, Esc clears a search and F5 refreshes the folder. None
 of them fires while you are typing in a text field or writing a message. Hovering a ribbon button
-shows its shortcut.
+shows its shortcut, and the "Help" tab lists them all in one window; the same tab opens the folder
+that holds your settings and cache, the project page, and "Over Mailcraft" with the version.
 
 ## Build
 
