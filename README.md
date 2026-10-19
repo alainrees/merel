@@ -72,6 +72,11 @@ account's inbox, also while offline (the change waits in the queue like any othe
 uitvoeren op deze map" runs them over the open folder at once; "Regel voor deze afzender" starts one
 from the selected message. Rules are kept in `rules.json`.
 
+The "Beeld" tab chooses what the list shows and how: only unread, flagged or mail with
+attachments; sorted newest or oldest first, by sender or by subject; the reading pane to the
+right or below the list; compact rows without the preview line; and a light, dark or system
+theme. The choices are kept in `view.json` next to the accounts file.
+
 Keyboard shortcuts in the mail module follow Outlook (Cmd instead of Ctrl on a Mac): arrow keys
 walk the message list, Delete removes the selected message, Ctrl+N starts a new message, Ctrl+R
 replies, Ctrl+Shift+R replies to all, Ctrl+F forwards, Ctrl+Shift+V moves to a folder, Ctrl+Q and Ctrl+U mark read or unread,

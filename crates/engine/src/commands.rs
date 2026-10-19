@@ -39,6 +39,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "folder.delete", label: "Delete folder", run: crate::folders::delete },
     CommandSpec { id: "folder.empty", label: "Empty folder", run: crate::folders::empty },
     CommandSpec { id: "folder.mark_all_read", label: "Mark all as read", run: crate::folders::mark_all_read },
+    CommandSpec { id: "view.filter", label: "Show only…", run: crate::view::filter },
+    CommandSpec { id: "view.sort", label: "Sort by…", run: crate::view::sort },
     CommandSpec {
         id: "search.server",
         label: "Search on the server",

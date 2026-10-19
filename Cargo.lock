@@ -2545,6 +2545,7 @@ dependencies = [
  "mailcraft-model",
  "mailcraft-secrets",
  "rfd",
+ "serde",
  "serde_json",
  "ureq",
  "zeroize",
