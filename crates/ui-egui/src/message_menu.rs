@@ -22,6 +22,10 @@ pub enum Pick {
     Appointment,
     /// The sender's card, or the form for a new contact with the sender's name and address.
     Sender,
+    /// The rules window with a new rule for the sender's address filled in.
+    Rule,
+    /// The search box set to the sender's address, over every folder.
+    FromSender,
 }
 
 /// How much of a message's text goes into the notes of a task or an appointment.
@@ -38,7 +42,7 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
         let sender = if known_sender { "Afzender openen in contacten" } else { "Afzender toevoegen aan contacten" };
         let junk = if in_junk { ("Geen ongewenst", "junk.trust") } else { ("Afzender blokkeren", "junk.block") };
         let ignore = if ignored { ("Gesprek niet meer negeren", "conversation.unignore") } else { ("Gesprek negeren", "conversation.ignore") };
-        let items: [(&str, Pick); 13] = [
+        let items: [(&str, Pick); 15] = [
             ("Beantwoorden", Pick::Compose(ComposeKind::Reply)),
             ("Allen beantwoorden", Pick::Compose(ComposeKind::ReplyAll)),
             ("Doorsturen", Pick::Compose(ComposeKind::Forward)),
@@ -52,9 +56,11 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
             ("Taak maken van dit bericht", Pick::Task),
             ("Afspraak maken van dit bericht", Pick::Appointment),
             (sender, Pick::Sender),
+            ("Alles van deze afzender zoeken", Pick::FromSender),
+            ("Regel maken voor deze afzender…", Pick::Rule),
         ];
         for (i, (label, p)) in items.into_iter().enumerate() {
-            if matches!(i, 3 | 10) {
+            if matches!(i, 3 | 10 | 13) {
                 ui.separator();
             }
             if i == 4 {
@@ -113,6 +119,14 @@ impl MailApp {
             Pick::Task => self.task_from_message(m),
             Pick::Appointment => self.appointment_from_message(m),
             Pick::Sender => self.open_or_add_sender(&m.from),
+            Pick::Rule => self.open_rules(true),
+            Pick::FromSender => {
+                // Outlook's "related messages from sender": the search box takes the address,
+                // over every folder of every account.
+                self.drafts_for = None;
+                self.engine.session.search = m.from.email().to_string();
+                self.engine.session.search_all = true;
+            }
         }
     }
 
@@ -164,5 +178,18 @@ mod tests {
         let e = app.calendar.editor.as_ref().expect("appointment window");
         assert_eq!((e.id.as_deref(), e.title.as_str(), e.all_day), (None, "Planning voor donderdag", false));
         assert!(e.notes.starts_with("Van: "));
+    }
+
+    #[test]
+    fn the_sender_items_search_the_address_everywhere_and_start_a_rule_for_it() {
+        let mut app = MailApp::new(Engine::sample());
+        let m = app.engine.session.message("m1").expect("sample mail").clone();
+        app.act_on_message(&m, Pick::FromSender);
+        assert_eq!(app.engine.session.search, "sanne@example.org");
+        assert!(app.engine.session.search_all);
+        assert!(app.engine.session.visible_messages().iter().all(|h| h.from.email() == "sanne@example.org"));
+        app.act_on_message(&m, Pick::Rule);
+        let form = app.rules.as_ref().and_then(|r| r.form.as_ref()).expect("the rules window with a new rule");
+        assert_eq!((form.contains.as_str(), form.field), ("sanne@example.org", mailcraft_model::RuleField::From));
     }
 }
