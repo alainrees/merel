@@ -150,6 +150,9 @@ impl MailApp {
         let ctx = ui.ctx().clone();
         compose::show(self, &ctx, &t);
         calendar::window(self, &ctx, &t);
+        if self.tab == Tab::Home && self.module == Module::Mail {
+            shortcuts(self, &ctx);
+        }
         if self.tab == Tab::File {
             backstage::show(self, ui, &t);
             return;
@@ -167,6 +170,79 @@ impl MailApp {
             contacts::show(self, ui, &t);
         } else {
             tasks::show(self, ui, &t);
+        }
+    }
+}
+
+/// The search box's widget id, so a shortcut can put the cursor there.
+const SEARCH_BOX: &str = "message_search_box";
+
+/// Keyboard shortcuts for the mail module, the way Outlook has them. They work while no text
+/// field has the keyboard and no message is being written, so typing never triggers one;
+/// Ctrl+E (Cmd+E on a Mac) is the exception, as it moves the cursor to the search box.
+fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
+    use egui::{Key, Modifiers};
+    if app.compose.is_some() {
+        return;
+    }
+    if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::E)) {
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new(SEARCH_BOX)));
+        return;
+    }
+    if ctx.egui_wants_keyboard_input() {
+        return;
+    }
+    let has = app.engine.session.selected_message.is_some();
+    let mut compose = None;
+    let mut command = None;
+    let mut step = 0;
+    ctx.input_mut(|i| {
+        if i.consume_key(Modifiers::COMMAND, Key::N) {
+            compose = Some(ComposeKind::New);
+        } else if i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::R) {
+            compose = Some(ComposeKind::ReplyAll);
+        } else if i.consume_key(Modifiers::COMMAND, Key::R) {
+            compose = Some(ComposeKind::Reply);
+        } else if i.consume_key(Modifiers::COMMAND, Key::F) {
+            compose = Some(ComposeKind::Forward);
+        } else if i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace) {
+            command = Some("message.delete");
+        } else if i.consume_key(Modifiers::COMMAND, Key::Q) {
+            command = Some("message.mark_read");
+        } else if i.consume_key(Modifiers::COMMAND, Key::U) {
+            command = Some("message.mark_unread");
+        } else if i.consume_key(Modifiers::NONE, Key::F5) {
+            command = Some("folder.refresh");
+        } else if i.consume_key(Modifiers::NONE, Key::ArrowDown) {
+            step = 1;
+        } else if i.consume_key(Modifiers::NONE, Key::ArrowUp) {
+            step = -1;
+        } else if i.consume_key(Modifiers::NONE, Key::Escape) && app.engine.session.is_searching() {
+            command = Some("search.clear");
+        }
+    });
+    if let Some(kind) = compose {
+        if kind == ComposeKind::New || has {
+            app.open_compose(kind);
+        }
+        return;
+    }
+    match command {
+        Some("search.clear") => app.engine.session.search.clear(),
+        Some("folder.refresh") => app.run("folder.refresh", Value::Null),
+        Some(id) if has => app.run(id, Value::Null),
+        _ => {}
+    }
+    if step != 0 {
+        let ids: Vec<String> = app.engine.session.visible_messages().iter().map(|m| m.id.clone()).collect();
+        let current = app.engine.session.selected_message.as_deref().and_then(|s| ids.iter().position(|id| id == s));
+        let next = match (current, step) {
+            (None, _) => ids.first(),
+            (Some(i), 1) => ids.get(i + 1),
+            (Some(i), _) => i.checked_sub(1).and_then(|j| ids.get(j)),
+        };
+        if let Some(id) = next.cloned() {
+            app.run("message.select", serde_json::json!({ "id": id }));
         }
     }
 }
@@ -198,34 +274,34 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 Tab::Home => {
                     let has = app.engine.session.selected_message.is_some();
                     let mut open: Option<ComposeKind> = None;
-                    if ribbon_action(ui, t, "✉", "Nieuwe e-mail", true) {
+                    if ribbon_action_hint(ui, t, "✉", "Nieuwe e-mail", true, Some(&key_hint("N"))) {
                         open = Some(ComposeKind::New);
                     }
                     ui.separator();
-                    if ribbon_action(ui, t, "↩", "Beantwoorden", has) {
+                    if ribbon_action_hint(ui, t, "↩", "Beantwoorden", has, Some(&key_hint("R"))) {
                         open = Some(ComposeKind::Reply);
                     }
-                    if ribbon_action(ui, t, "↞", "Allen beantwoorden", has) {
+                    if ribbon_action_hint(ui, t, "↞", "Allen beantwoorden", has, Some(&key_hint("Shift+R"))) {
                         open = Some(ComposeKind::ReplyAll);
                     }
-                    if ribbon_action(ui, t, "↪", "Doorsturen", has) {
+                    if ribbon_action_hint(ui, t, "↪", "Doorsturen", has, Some(&key_hint("F"))) {
                         open = Some(ComposeKind::Forward);
                     }
                     if let Some(kind) = open {
                         app.open_compose(kind);
                     }
                     ui.separator();
-                    ribbon_button(app, ui, t, "🗑", "Verwijderen", Some("message.delete"), has);
-                    ribbon_button(app, ui, t, "🗄", "Archiveren", Some("message.archive"), has);
-                    ribbon_button(app, ui, t, "⚠", "Ongewenst", Some("message.junk"), has);
+                    ribbon_button(app, ui, t, "🗑", "Verwijderen", ("message.delete", Some("Delete")), has);
+                    ribbon_button(app, ui, t, "🗄", "Archiveren", ("message.archive", None), has);
+                    ribbon_button(app, ui, t, "⚠", "Ongewenst", ("message.junk", None), has);
                     ui.separator();
-                    ribbon_button(app, ui, t, "◉", "Gelezen", Some("message.mark_read"), has);
-                    ribbon_button(app, ui, t, "○", "Ongelezen", Some("message.mark_unread"), has);
-                    ribbon_button(app, ui, t, "⚑", "Vlag", Some("message.flag"), has);
+                    ribbon_button(app, ui, t, "◉", "Gelezen", ("message.mark_read", Some(&key_hint("Q"))), has);
+                    ribbon_button(app, ui, t, "○", "Ongelezen", ("message.mark_unread", Some(&key_hint("U"))), has);
+                    ribbon_button(app, ui, t, "⚑", "Vlag", ("message.flag", None), has);
                 }
                 Tab::SendReceive => {
                     let can = !app.engine.session.is_sample() && app.engine.session.selected_folder.is_some();
-                    ribbon_button(app, ui, t, "⟳", "Vernieuwen", Some("folder.refresh"), can);
+                    ribbon_button(app, ui, t, "⟳", "Vernieuwen", ("folder.refresh", Some("F5")), can);
                 }
                 _ => {
                     ui.label(RichText::new("Nog niet beschikbaar").color(t.text_dim));
@@ -260,11 +336,26 @@ fn calendar_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
 }
 
+/// "Cmd+N" on a Mac, "Ctrl+N" elsewhere.
+fn key_hint(key: &str) -> String {
+    let modifier = if cfg!(target_os = "macos") { "Cmd" } else { "Ctrl" };
+    format!("{modifier}+{key}")
+}
+
 /// A large ribbon button: glyph above label, drawn by hand as one widget so a screen reader
 /// sees a single button named `label`. Returns true when clicked.
 pub(crate) fn ribbon_action(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool) -> bool {
+    ribbon_action_hint(ui, t, glyph, label, enabled, None)
+}
+
+/// [`ribbon_action`] with the keyboard shortcut shown on hover.
+fn ribbon_action_hint(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool, shortcut: Option<&str>) -> bool {
     let (rect, r) = ui.allocate_exact_size(vec2(72.0, 56.0), if enabled { Sense::click() } else { Sense::hover() });
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    let r = match shortcut {
+        Some(s) => r.on_hover_text(format!("{label} ({s})")),
+        None => r,
+    };
     let color = if enabled { t.text } else { t.text_dim.gamma_multiply(0.6) };
     let p = ui.painter();
     if r.hovered() && enabled {
@@ -281,11 +372,12 @@ pub(crate) fn ribbon_action(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, e
     enabled && r.clicked()
 }
 
-/// A ribbon button that runs a command. `command` `None` draws it disabled (not built yet).
-fn ribbon_button(app: &mut MailApp, ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, command: Option<&str>, enabled: bool) {
-    let enabled = enabled && command.is_some();
-    if let (true, Some(id)) = (ribbon_action(ui, t, glyph, label, enabled), command) {
-        app.run(id, Value::Null);
+/// A ribbon button that runs a command; `action` is the command id with the shortcut shown
+/// on hover, if it has one.
+fn ribbon_button(app: &mut MailApp, ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, action: (&str, Option<&str>), enabled: bool) {
+    let (command, shortcut) = action;
+    if ribbon_action_hint(ui, t, glyph, label, enabled, shortcut) {
+        app.run(command, Value::Null);
     }
 }
 
@@ -401,7 +493,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     let session = &mut app.engine.session;
                     let hint = if session.search_all { "Zoeken in alle mappen" } else { "Zoeken in deze map" };
                     let width = (ui.available_width() - 150.0).max(80.0);
-                    ui.add(egui::TextEdit::singleline(&mut session.search).hint_text(hint).desired_width(width));
+                    ui.add(egui::TextEdit::singleline(&mut session.search).id(egui::Id::new(SEARCH_BOX)).hint_text(hint).desired_width(width));
                     if searching && ui.small_button("✕").on_hover_text("Zoekopdracht wissen").clicked() {
                         session.search.clear();
                     }
@@ -783,6 +875,53 @@ mod tests {
         h.get_by_label("Jaaroverzicht");
         h.get_by_label("De server vond 1 bericht in deze map.");
         assert!(h.query_by_label("Zoek op de server").is_none());
+    }
+
+    #[test]
+    fn keyboard_shortcuts_walk_the_list_reply_delete_and_find() {
+        use egui::{Key, Modifiers};
+        let mut h = harness();
+        h.run();
+        let ids: Vec<String> = h.state().engine.session.visible_messages().iter().map(|m| m.id.clone()).collect();
+        assert!(ids.len() >= 2);
+        h.state_mut().engine.session.selected_message = None;
+        h.key_press(Key::ArrowDown);
+        h.run();
+        assert_eq!(h.state().engine.session.selected_message.as_deref(), Some(ids[0].as_str()), "Down selects the first message");
+        h.key_press(Key::ArrowDown);
+        h.run();
+        assert_eq!(h.state().engine.session.selected_message.as_deref(), Some(ids[1].as_str()));
+        h.key_press(Key::ArrowUp);
+        h.run();
+        assert_eq!(h.state().engine.session.selected_message.as_deref(), Some(ids[0].as_str()));
+
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::R);
+        h.run();
+        let c = h.state().compose.as_ref().expect("reply all opens");
+        assert!(c.subject.starts_with("Re:") && !c.to.is_empty());
+        h.key_press(Key::Delete);
+        h.run();
+        assert_eq!(h.state().engine.session.selected_message.as_deref(), Some(ids[0].as_str()), "keys do nothing while a message is being written");
+        h.state_mut().compose = None;
+        h.key_press_modifiers(Modifiers::COMMAND, Key::N);
+        h.run();
+        assert!(h.state().compose.as_ref().is_some_and(|c| c.subject.is_empty()), "Ctrl+N starts a new message");
+        h.state_mut().compose = None;
+
+        h.key_press(Key::Delete);
+        h.run();
+        let moved = h.state().engine.session.message(&ids[0]).map(|m| m.folder_id.clone()).unwrap_or_default();
+        assert!(moved.to_lowercase().contains("deleted") || moved.contains("Trash"), "{moved}");
+
+        h.key_press_modifiers(Modifiers::COMMAND, Key::E);
+        h.run();
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new(SEARCH_BOX)), "Ctrl+E puts the cursor in the search box");
+        h.ctx.memory_mut(|m| m.surrender_focus(egui::Id::new(SEARCH_BOX)));
+        h.state_mut().engine.session.search = "planning".into();
+        h.run();
+        h.key_press(Key::Escape);
+        h.run();
+        assert!(h.state().engine.session.search.is_empty(), "Escape clears the search");
     }
 
     #[test]
