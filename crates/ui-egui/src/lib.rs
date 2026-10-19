@@ -1907,6 +1907,35 @@ mod tests {
     }
 
     #[test]
+    fn a_task_dragged_onto_the_calendar_opens_an_appointment_for_it() {
+        use chrono::Datelike;
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.state_mut().calendar.view = calendar::View::Day;
+        h.state_mut().calendar.focus = calendar::today();
+        h.run();
+        let from = h.get_by_label("Portfolio bijwerken").rect().center();
+        let today = calendar::today();
+        let column =
+            h.get_by_label(format!("{} {} {}", calendar::weekday_name(today), today.day(), calendar::month_name(today.month())).as_str()).rect();
+        // 09:10 in the hour grid: nine hours of 44 px below the column's midnight.
+        let to = egui::pos2(column.center().x, column.top() + 9.0 * 44.0 + 7.0);
+        h.drag_at(from);
+        h.run();
+        for step in 1..=4 {
+            h.hover_at(from.lerp(to, step as f32 / 4.0));
+            h.run();
+        }
+        // Let go over the column; the pointer stays where it is, as a mouse does.
+        h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run();
+        let e = h.state().calendar.editor.as_ref().expect("the appointment window opens");
+        assert_eq!((e.id.as_deref(), e.title.as_str(), e.all_day), (None, "Portfolio bijwerken", false));
+        assert_eq!((e.start_time.as_str(), e.end_time.as_str()), ("09:00", "10:00"));
+        assert_eq!(e.start_date, today.format("%d-%m-%Y").to_string());
+    }
+
+    #[test]
     fn dragging_the_bottom_edge_of_an_appointment_changes_its_end() {
         let mut h = harness();
         h.state_mut().module = Module::Calendar;
