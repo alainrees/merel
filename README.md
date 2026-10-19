@@ -241,6 +241,14 @@ window with a rule for that address filled in. Hovering a ribbon button
 shows its shortcut, and the "Help" tab lists them all in one window; the same tab opens the folder
 that holds your settings and cache, the project page, and "Over Mailcraft" with the version.
 
+## Readability
+
+Every colour pair the window draws meets WCAG 2.2 level AA: text at 4.5:1 or better on each
+surface it can sit on, including captions, previews, placeholders and disabled controls (AA
+exempts the last two; Mailcraft does not), and icons and control borders at 3:1 or better, in
+the light and the dark theme. `theme::contrast` measures the ratios and a test holds both themes
+to them, so a colour change that drops below the bar fails the build.
+
 ## Fonts
 
 The window draws its text with [Inter](https://github.com/rsms/inter) (SIL Open Font License) and
