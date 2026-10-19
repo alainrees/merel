@@ -9,12 +9,12 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use base64::Engine;
-use chrono::{Local, TimeZone};
+use chrono::{Datelike, Days, Local, NaiveDate, TimeZone};
 use mailcraft_html::{Block, Document, Image, ImageSource, Inline, Style};
 use mailcraft_mime::{Body, InlineImage};
-use mailcraft_model::{Address, MessageHeader};
+use mailcraft_model::{Address, Appointment, MessageHeader};
 
-use crate::MailApp;
+use crate::{MailApp, calendar};
 
 /// The one file the print page is written to, in the system's temporary folder; each print
 /// overwrites it, so no trail of messages is left behind.
@@ -169,7 +169,65 @@ table.head{border-collapse:collapse;margin:1em 0}table.head th{text-align:left;p
 table.head td{padding:.15em 0}h1.subject{font-size:16pt;margin:.2em 0 .6em}hr.sep{border:0;border-top:1px solid #999;margin:1em 0}\
 .body table{border-collapse:collapse}.body td,.body th{border:1px solid #bbb;padding:.2em .5em;vertical-align:top}blockquote{border-left:3px solid #bbb;margin:.5em 0;padding-left:.8em;color:#444}\
 pre{white-space:pre-wrap;font-family:Menlo,Consolas,monospace;font-size:10pt}img{max-width:100%}.missing{color:#888;font-style:italic}a{color:#1a4d8f}\
+h2.day{font-size:12pt;margin:1.2em 0 .3em;padding-bottom:.15em;border-bottom:1px solid #999}table.cal{border-collapse:collapse;width:100%}\
+table.cal td{padding:.25em .8em .25em 0;vertical-align:top}table.cal td.time{white-space:nowrap;color:#555;width:9em}table.cal td.where{color:#555}\
 @media print{.hint{display:none}body{margin:0;max-width:none}}";
+
+/// The page for a stretch of the calendar: a heading per day that has appointments, with each
+/// one's time, title and place. `first` and `last` are the days shown, both included;
+/// `list` holds the occurrences touching them, as `appointments_between` gives them.
+pub fn calendar_page(title: &str, first: NaiveDate, last: NaiveDate, list: &[Appointment]) -> String {
+    let mut out = String::new();
+    out.push_str("<!doctype html>\n<html lang=\"nl\"><head><meta charset=\"utf-8\">\n");
+    out.push_str("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\">\n");
+    let _ = writeln!(out, "<title>Agenda {}</title>", esc(title));
+    let _ = writeln!(out, "<style>{STYLE}</style></head><body>");
+    out.push_str("<p class=\"hint\">Afdrukpagina van Mailcraft. Druk af met Ctrl+P (Cmd+P op een Mac); deze regel komt niet mee.</p>\n");
+    let _ = writeln!(out, "<h1 class=\"subject\">Agenda: {}</h1>", esc(title));
+    let mut day = first;
+    let mut any = false;
+    while day <= last {
+        let from = calendar::to_timestamp(day.and_hms_opt(0, 0, 0).unwrap_or_default()).unwrap_or(i64::MIN);
+        let next = day.checked_add_days(Days::new(1)).unwrap_or(day);
+        let to = calendar::to_timestamp(next.and_hms_opt(0, 0, 0).unwrap_or_default()).unwrap_or(i64::MAX);
+        let today: Vec<&Appointment> = list.iter().filter(|a| a.start < to && a.end > from).collect();
+        if !today.is_empty() {
+            any = true;
+            let _ = writeln!(out, "<h2 class=\"day\">{} {} {}</h2>", calendar::weekday_name(day), day.day(), calendar::month_name(day.month()));
+            out.push_str("<table class=\"cal\">\n");
+            for a in today {
+                let where_ =
+                    if a.location.trim().is_empty() { String::new() } else { format!(" <td class=\"where\">{}</td>", esc(a.location.trim())) };
+                let _ = writeln!(out, "<tr><td class=\"time\">{}</td><td>{}</td>{where_}</tr>", esc(&time_cell(a, from, to)), esc(a.title.trim()));
+            }
+            out.push_str("</table>\n");
+        }
+        if next == day {
+            break;
+        }
+        day = next;
+    }
+    if !any {
+        out.push_str("<p class=\"missing\">Geen afspraken in deze periode.</p>\n");
+    }
+    out.push_str("</body></html>\n");
+    out
+}
+
+/// The time column for one day: "Hele dag", "10:00–11:30", or where a longer appointment
+/// starts or ends on another day, "10:00 – verder" and "tot 11:30".
+fn time_cell(a: &Appointment, day_start: i64, day_end: i64) -> String {
+    if a.all_day {
+        return "Hele dag".to_string();
+    }
+    let clock = |ts: i64| calendar::to_local(ts).format("%H:%M").to_string();
+    match (a.start >= day_start, a.end <= day_end) {
+        (true, true) => format!("{}–{}", clock(a.start), clock(a.end)),
+        (true, false) => format!("{} – verder", clock(a.start)),
+        (false, true) => format!("tot {}", clock(a.end)),
+        (false, false) => "Hele dag".to_string(),
+    }
+}
 
 /// The whole page for a message: a header block with sender, recipients, date, subject and
 /// attachments, a separator, then the body (the layout tree when the message had HTML, else the
@@ -238,6 +296,25 @@ impl MailApp {
         self.engine.session.selected().is_some() && self.engine.session.selected_body().is_some()
     }
 
+    /// "Afdrukken" in the calendar: the days of the open view (day, work week, week or month)
+    /// with their appointments, as a page in the browser.
+    pub fn print_calendar(&mut self) {
+        let (first, last) = calendar::period(self.calendar.view, self.calendar.focus);
+        let from = calendar::to_timestamp(first.and_hms_opt(0, 0, 0).unwrap_or_default()).unwrap_or(i64::MIN);
+        let after = last.checked_add_days(Days::new(1)).unwrap_or(last);
+        let to = calendar::to_timestamp(after.and_hms_opt(0, 0, 0).unwrap_or_default()).unwrap_or(i64::MAX);
+        let list = self.engine.session.appointments_between(from, to);
+        let html = calendar_page(&calendar::period_title(self.calendar.view, self.calendar.focus), first, last, &list);
+        let path = page_path();
+        self.notice = Some(match write_and_open(&path, &html) {
+            Ok(()) => "Afdrukpagina geopend in de browser; druk daar af met Ctrl+P (Cmd+P op een Mac).".to_string(),
+            Err(e) => {
+                log::warn!("print page {}: {e}", path.display());
+                format!("Afdrukken is niet gelukt: {e}")
+            }
+        });
+    }
+
     /// "Afdrukken": the open message as a page in the browser, to print from there.
     pub fn print_selected(&mut self) {
         let Some(h) = self.engine.session.selected().cloned() else { return };
@@ -282,6 +359,48 @@ mod tests {
             categories: Vec::new(),
             importance: Default::default(),
         }
+    }
+
+    #[test]
+    fn the_calendar_page_groups_the_appointments_by_day_and_escapes_them() {
+        let d = |y, m, day| chrono::NaiveDate::from_ymd_opt(y, m, day).unwrap();
+        let at = |day: chrono::NaiveDate, h, min| calendar::to_timestamp(day.and_hms_opt(h, min, 0).unwrap()).unwrap();
+        let appointment = |id: &str, title: &str, start: i64, end: i64, all_day: bool, location: &str| Appointment {
+            id: id.into(),
+            calendar_id: "local".into(),
+            title: title.into(),
+            start,
+            end,
+            all_day,
+            location: location.into(),
+            notes: String::new(),
+            recurrence: None,
+            reminder: None,
+        };
+        let mon = d(2026, 10, 19);
+        let tue = d(2026, 10, 20);
+        let list = [
+            appointment("a", "Overleg <ontwerp>", at(mon, 10, 0), at(mon, 11, 30), false, "Kamer 2 & 3"),
+            appointment("b", "Studiedag", at(tue, 0, 0), at(d(2026, 10, 21), 0, 0), true, ""),
+            appointment("c", "Beurs", at(tue, 15, 0), at(d(2026, 10, 21), 12, 0), false, "Utrecht"),
+        ];
+        let html = calendar_page("19 – 23 oktober 2026", mon, d(2026, 10, 23), &list);
+        assert!(html.contains("<title>Agenda 19 – 23 oktober 2026</title>") && html.contains("default-src 'none'"), "{html}");
+        assert!(html.contains("<h2 class=\"day\">maandag 19 oktober</h2>"), "{html}");
+        assert!(
+            html.contains("<td class=\"time\">10:00–11:30</td><td>Overleg &lt;ontwerp&gt;</td> <td class=\"where\">Kamer 2 &amp; 3</td>"),
+            "{html}"
+        );
+        assert!(html.contains("<td class=\"time\">Hele dag</td><td>Studiedag</td></tr>"), "{html}");
+        assert!(html.contains("<td class=\"time\">15:00 – verder</td><td>Beurs</td>"), "the start day of a two-day appointment");
+        assert!(
+            html.contains("<h2 class=\"day\">woensdag 21 oktober</h2>") && html.contains("<td class=\"time\">tot 12:00</td><td>Beurs</td>"),
+            "{html}"
+        );
+        assert!(!html.contains("donderdag 22 oktober"), "a day without appointments is left out");
+        assert!(!html.contains("<script"));
+        let empty = calendar_page("vrijdag 23 oktober 2026", d(2026, 10, 23), d(2026, 10, 23), &[]);
+        assert!(empty.contains("Geen afspraken in deze periode."));
     }
 
     #[test]

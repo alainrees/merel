@@ -222,7 +222,9 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.add_space(12.0);
             // Printing lives here, as in Outlook's File menu; Ctrl+P on the Start tab does the same.
             if item(ui, "Afdrukken") {
-                if app.can_print() {
+                if app.module == crate::Module::Calendar {
+                    app.print_calendar();
+                } else if app.can_print() {
                     app.print_selected();
                 } else {
                     app.notice = Some("Open eerst een bericht om af te drukken.".into());
