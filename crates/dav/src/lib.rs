@@ -109,6 +109,14 @@ impl Mailbox for DavMailbox {
         Mailbox::delete_folder(&mut self.imap, folder)
     }
 
+    fn delete_message(&mut self, folder: &str, id: &str) -> Result<()> {
+        Mailbox::delete_message(&mut self.imap, folder, id)
+    }
+
+    fn empty_folder(&mut self, folder: &str) -> Result<()> {
+        Mailbox::empty_folder(&mut self.imap, folder)
+    }
+
     fn items(&mut self) -> Option<&mut dyn ItemStore> {
         Some(&mut self.items)
     }

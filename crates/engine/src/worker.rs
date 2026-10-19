@@ -305,6 +305,14 @@ fn run(c: &mut dyn Mailbox, account: &Account, job: &Job) -> Result<Option<Event
             c.move_to(path, id, dest)?;
             None
         }
+        Job::Delete { path, id, .. } => {
+            c.delete_message(path, id)?;
+            None
+        }
+        Job::Empty { path, .. } => {
+            c.empty_folder(path)?;
+            None
+        }
         Job::CreateFolder { account_id, parent, name } => {
             c.create_folder(parent.as_deref(), name)?;
             Some(Event::Folders { account_id: account_id.clone(), folders: c.folders()? })
