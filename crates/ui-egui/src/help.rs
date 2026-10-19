@@ -20,6 +20,8 @@ pub enum HelpWindow {
 pub fn shortcut_list() -> Vec<(String, &'static str)> {
     vec![
         ("↑ / ↓".to_string(), "Vorig of volgend bericht in de lijst"),
+        (format!("{} / Shift+klik", key_hint("klik")), "Meer berichten selecteren, los of als reeks; de acties gelden dan voor alle"),
+        (key_hint("A"), "Alle berichten in de lijst selecteren"),
         ("Delete".to_string(), "Geselecteerd bericht verwijderen"),
         ("Ctrl+Delete".to_string(), "Gesprek negeren: dit en volgende berichten erin naar Verwijderde items"),
         (if cfg!(target_os = "macos") { "Ctrl+E" } else { "Backspace" }.to_string(), "Geselecteerd bericht archiveren"),
@@ -125,7 +127,7 @@ mod tests {
     #[test]
     fn the_shortcut_list_names_every_key_the_mail_module_takes() {
         let list = shortcut_list();
-        assert_eq!(list.len(), 20);
+        assert_eq!(list.len(), 22);
         assert!(list.iter().any(|(k, _)| k.ends_with("+Shift+V")));
         assert!(list.iter().all(|(k, what)| !k.is_empty() && !what.is_empty()));
     }
