@@ -319,6 +319,7 @@ mod tests {
                 bytes: Arc::from(&b"abc"[..]),
             }],
             authentication: Vec::new(),
+            unsubscribe: Vec::new(),
         };
         let html = page(&header(), Some(&body));
         assert!(html.contains("<title>Offerte &lt;script&gt;alert(1)&lt;/script&gt;</title>"), "{html}");
