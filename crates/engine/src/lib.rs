@@ -364,6 +364,10 @@ pub struct Session {
     arrivals: usize,
     pub selected_folder: Option<String>,
     pub selected_message: Option<String>,
+    /// Messages selected alongside `selected_message` (Ctrl- or Shift-click in the list); the
+    /// message commands act on these as well. Never holds `selected_message` or a message that
+    /// is gone: [`Session::run`] prunes it after every command.
+    pub marked: Vec<String>,
     /// What the person typed in the search box; empty shows the selected folder as it is.
     pub search: String,
     /// Whether a search covers every folder of every account, or the selected folder only.
@@ -696,6 +700,23 @@ impl Session {
     /// Unread mail in the inbox of every account together, for the window title.
     pub fn inbox_unread(&self) -> u32 {
         self.folders.iter().filter(|f| f.kind == FolderKind::Inbox).map(|f| f.unread).fold(0, u32::saturating_add)
+    }
+
+    /// The selected message followed by the ones marked with it, for a command that acts on
+    /// the whole selection.
+    pub fn selection(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.selected_message.iter().cloned().collect();
+        ids.extend(self.marked.iter().filter(|id| self.selected_message.as_ref() != Some(id)).cloned());
+        ids
+    }
+
+    /// Drops marked messages that are gone or became the selected one.
+    pub(crate) fn prune_marked(&mut self) {
+        if self.selected_message.is_none() {
+            self.marked.clear();
+            return;
+        }
+        self.marked.retain(|id| self.selected_message.as_ref() != Some(id) && self.messages.iter().any(|m| &m.id == id));
     }
 
     fn recount_unread(&mut self) {
