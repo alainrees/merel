@@ -272,6 +272,9 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
     let mut step = 0;
     let mut quick: Option<usize> = None;
     const DIGITS: [Key; 9] = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9];
+    // On a Mac the big delete key is Backspace, so there Backspace deletes and Ctrl+E archives,
+    // as in Outlook for Mac; elsewhere Backspace archives and Delete deletes, as in Outlook.
+    const MAC: bool = cfg!(target_os = "macos");
     ctx.input_mut(|i| {
         if let Some(n) = DIGITS.iter().position(|k| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, *k)) {
             quick = Some(n);
@@ -285,8 +288,10 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
             compose = Some(ComposeKind::Forward);
         } else if i.consume_key(Modifiers::COMMAND, Key::P) {
             command = Some("message.print");
-        } else if i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace) {
+        } else if i.consume_key(Modifiers::NONE, Key::Delete) || (MAC && i.consume_key(Modifiers::NONE, Key::Backspace)) {
             command = Some("message.delete");
+        } else if (!MAC && i.consume_key(Modifiers::NONE, Key::Backspace)) || (MAC && i.consume_key(Modifiers::CTRL, Key::E)) {
+            command = Some("message.archive");
         } else if i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::V) {
             command = Some("message.move_window");
         } else if i.consume_key(Modifiers::COMMAND, Key::Q) {
@@ -380,7 +385,15 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     }
                     ui.separator();
                     ribbon_button(app, ui, t, "🗑", "Verwijderen", ("message.delete", Some("Delete")), has);
-                    ribbon_button(app, ui, t, "🗄", "Archiveren", ("message.archive", None), has);
+                    ribbon_button(
+                        app,
+                        ui,
+                        t,
+                        "🗄",
+                        "Archiveren",
+                        ("message.archive", Some(if cfg!(target_os = "macos") { "Ctrl+E" } else { "Backspace" })),
+                        has,
+                    );
                     ribbon_button(app, ui, t, "⚠", "Ongewenst", ("message.junk", None), has);
                     if ribbon_action_hint(ui, t, "📂", "Verplaatsen", has, Some(&key_hint("Shift+V"))) {
                         app.move_to = true;
@@ -1222,6 +1235,15 @@ mod tests {
         h.run();
         let moved = h.state().engine.session.message(&ids[0]).map(|m| m.folder_id.clone()).unwrap_or_default();
         assert!(moved.to_lowercase().contains("deleted") || moved.contains("Trash"), "{moved}");
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            h.state_mut().engine.session.selected_message = Some(ids[1].clone());
+            h.key_press(Key::Backspace);
+            h.run();
+            let moved = h.state().engine.session.message(&ids[1]).map(|m| m.folder_id.clone()).unwrap_or_default();
+            assert!(moved.to_lowercase().contains("archive"), "Backspace archives, as in Outlook: {moved}");
+        }
 
         h.key_press_modifiers(Modifiers::COMMAND, Key::E);
         h.run();
