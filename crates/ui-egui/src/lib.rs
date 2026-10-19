@@ -309,6 +309,9 @@ fn module_shortcuts(app: &mut MailApp, ctx: &egui::Context) {
     if app.compose.is_some() {
         return;
     }
+    if !ctx.egui_wants_keyboard_input() && new_item_shortcuts(app, ctx) {
+        return;
+    }
     let (box_id, query) = match app.module {
         Module::Mail => return,
         Module::Calendar => (calendar::SEARCH_BOX, &mut app.calendar.query),
@@ -320,6 +323,31 @@ fn module_shortcuts(app: &mut MailApp, ctx: &egui::Context) {
     } else if !ctx.egui_wants_keyboard_input() && !query.trim().is_empty() && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
         query.clear();
     }
+}
+
+/// Outlook's keys for a new item, from every module: Ctrl+Shift+M a message, Ctrl+Shift+A an
+/// appointment (the next full hour of today), Ctrl+Shift+C a contact and Ctrl+Shift+K a task
+/// (Cmd on a Mac). The contact and task forms live in their module, so those two switch to it.
+/// Returns whether one fired.
+fn new_item_shortcuts(app: &mut MailApp, ctx: &egui::Context) -> bool {
+    use chrono::Timelike;
+    use egui::{Key, Modifiers};
+    let keys = Modifiers::COMMAND | Modifiers::SHIFT;
+    if ctx.input_mut(|i| i.consume_key(keys, Key::M)) {
+        app.open_compose(ComposeKind::New);
+    } else if ctx.input_mut(|i| i.consume_key(keys, Key::A)) {
+        let now = chrono::Local::now();
+        app.new_appointment(now.date_naive(), (now.hour() + 1).min(23));
+    } else if ctx.input_mut(|i| i.consume_key(keys, Key::C)) {
+        app.module = Module::People;
+        app.new_contact();
+    } else if ctx.input_mut(|i| i.consume_key(keys, Key::K)) {
+        app.module = Module::Tasks;
+        app.new_task();
+    } else {
+        return false;
+    }
+    true
 }
 
 /// Keyboard shortcuts for the mail module, the way Outlook has them. They work while no text
@@ -335,6 +363,9 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
         return;
     }
     if ctx.egui_wants_keyboard_input() {
+        return;
+    }
+    if new_item_shortcuts(app, ctx) {
         return;
     }
     let has = app.engine.session.selected_message.is_some();
@@ -497,7 +528,7 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 
 fn calendar_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     use calendar::View;
-    if ribbon_action(ui, t, "📅", "Nieuwe afspraak", true) {
+    if ribbon_action_hint(ui, t, "📅", "Nieuwe afspraak", true, Some(&key_hint("Shift+A"))) {
         let date = app.calendar.focus;
         app.new_appointment(date, 9);
     }
@@ -1484,6 +1515,39 @@ mod tests {
         h.get_by_label("Verwijderen").click();
         h.run();
         assert!(h.state().engine.session.appointments.iter().all(|a| a.title != "Tandarts"));
+    }
+
+    #[test]
+    fn a_new_item_starts_from_every_module_with_outlooks_keys() {
+        use egui::{Key, Modifiers};
+        let keys = Modifiers::COMMAND | Modifiers::SHIFT;
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.run();
+        h.key_press_modifiers(keys, Key::M);
+        h.run();
+        assert!(h.state().compose.as_ref().is_some_and(|c| c.subject.is_empty()), "Ctrl+Shift+M writes a new message from the calendar");
+        h.state_mut().compose = None;
+        h.key_press_modifiers(keys, Key::K);
+        h.run();
+        assert!(
+            h.state().module == Module::Tasks && h.state().tasks.editor.as_ref().is_some_and(|e| e.id.is_none()),
+            "Ctrl+Shift+K: a new task in its module"
+        );
+        h.state_mut().tasks.editor = None;
+        h.key_press_modifiers(keys, Key::C);
+        h.run();
+        assert!(
+            h.state().module == Module::People && h.state().contacts.editor.as_ref().is_some_and(|e| e.id.is_none()),
+            "Ctrl+Shift+C: a new contact in its module"
+        );
+        h.state_mut().contacts.editor = None;
+        h.state_mut().module = Module::Mail;
+        h.run();
+        h.key_press_modifiers(keys, Key::A);
+        h.run();
+        assert!(h.state().calendar.editor.as_ref().is_some_and(|e| e.id.is_none()), "Ctrl+Shift+A opens a new appointment from the mail module");
+        assert!(h.state().module == Module::Mail, "the appointment window needs no module switch");
     }
 
     #[test]
