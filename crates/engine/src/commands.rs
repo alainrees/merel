@@ -65,6 +65,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "appointment.select", label: "Open appointment", run: crate::calendar::select },
     CommandSpec { id: "appointment.save", label: "Save appointment", run: crate::calendar::save },
     CommandSpec { id: "appointment.skip", label: "Skip one occurrence", run: crate::calendar::skip },
+    CommandSpec { id: "appointment.move", label: "Move appointment", run: crate::calendar::move_to },
     CommandSpec { id: "rule.save", label: "Save rule", run: crate::rules::save },
     CommandSpec { id: "rule.delete", label: "Delete rule", run: crate::rules::delete },
     CommandSpec { id: "rule.run", label: "Run rules now", run: crate::rules::run },
