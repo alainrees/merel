@@ -9,6 +9,7 @@ mod attachments;
 mod backstage;
 pub mod calendar;
 pub mod categories;
+pub mod cleanup;
 mod compose;
 pub mod contacts;
 mod dates;
@@ -125,6 +126,7 @@ pub struct MailApp {
     pub folder_edit: Option<folders::FolderEdit>,
     /// The "Afmelden" question, while it is open.
     pub unsubscribe: Option<unsubscribe::Confirm>,
+    pub cleanup: Option<cleanup::Confirm>,
     /// The "Alle categorieën" window, while it is open.
     pub categories: Option<categories::Manager>,
     /// The open help window ("Help" tab), if any.
@@ -219,6 +221,7 @@ impl MailApp {
             tasks: tasks::State::default(),
             notice: None,
             unsubscribe: None,
+            cleanup: None,
             shown_message: None,
             remote: remote::RemoteImages::default(),
             drafts_for: None,
@@ -300,6 +303,7 @@ impl MailApp {
         move_window(self, &ctx, &t);
         folders::window(self, &ctx, &t);
         unsubscribe::window(self, &ctx, &t);
+        cleanup::window(self, &ctx, &t);
         categories::window(self, &ctx, &t);
         help::window(self, &ctx, &t);
         drag_preview(self, &ctx, &t);
@@ -2146,6 +2150,48 @@ mod tests {
         h.run();
         assert!(h.state().view.favorites.is_empty());
         assert!(h.query_by_label("★ Favorieten").is_none());
+    }
+
+    #[test]
+    fn a_conversation_is_cleaned_up_from_the_menu_after_the_question_says_how_many_go() {
+        let mut h = harness();
+        use mailcraft_model::{Flags, MessageHeader};
+        {
+            let s = &mut h.state_mut().engine.session;
+            let newest = s.message("m2").expect("sample mail").clone();
+            let older = |id: &str, subject: &str, hours: i64| MessageHeader {
+                id: id.into(),
+                subject: subject.into(),
+                date: newest.date - hours * 3600,
+                flags: Flags { seen: true, ..Flags::default() },
+                has_attachments: false,
+                categories: Vec::new(),
+                message_id: Some(format!("<{id}@example.org>")),
+                ..newest.clone()
+            };
+            s.messages.push(older("m8", "Offerte drukwerk", 30));
+            s.messages.push(older("m9", "Re: offerte drukwerk", 20));
+            s.messages
+                .push(MessageHeader { flags: Flags { seen: true, flagged: true, answered: false }, ..older("m10", "RE: Offerte drukwerk", 10) });
+        }
+        h.run();
+        h.get_by_label("Re: Offerte drukwerk").click_secondary();
+        h.run();
+        h.get_by_label("Gesprek opruimen…").click();
+        h.run();
+        assert_eq!(h.state().cleanup.as_ref().map(|c| c.count), Some(2), "the newest and the flagged one stay");
+        h.get_by_label_contains("2 oudere berichten uit het gesprek");
+        h.get_by_label("Annuleren").click();
+        h.run();
+        assert!(h.state().cleanup.is_none() && h.state().engine.session.message("m8").unwrap().folder_id == "inbox");
+        h.state_mut().ask_cleanup_conversation("m2");
+        h.run();
+        h.get_by_label("Ja, opruimen").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert!(h.state().cleanup.is_none());
+        assert_eq!((s.message("m8").unwrap().folder_id.as_str(), s.message("m9").unwrap().folder_id.as_str()), ("deleted", "deleted"));
+        assert_eq!((s.message("m10").unwrap().folder_id.as_str(), s.message("m2").unwrap().folder_id.as_str()), ("inbox", "inbox"));
     }
 
     #[test]

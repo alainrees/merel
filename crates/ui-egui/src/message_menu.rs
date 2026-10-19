@@ -26,6 +26,8 @@ pub enum Pick {
     Rule,
     /// The search box set to the sender's address, over every folder.
     FromSender,
+    /// The question before cleaning up the message's conversation.
+    Cleanup,
 }
 
 /// How much of a message's text goes into the notes of a task or an appointment.
@@ -42,7 +44,7 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
         let sender = if known_sender { "Afzender openen in contacten" } else { "Afzender toevoegen aan contacten" };
         let junk = if in_junk { ("Geen ongewenst", "junk.trust") } else { ("Afzender blokkeren", "junk.block") };
         let ignore = if ignored { ("Gesprek niet meer negeren", "conversation.unignore") } else { ("Gesprek negeren", "conversation.ignore") };
-        let items: [(&str, Pick); 15] = [
+        let items: [(&str, Pick); 16] = [
             ("Beantwoorden", Pick::Compose(ComposeKind::Reply)),
             ("Allen beantwoorden", Pick::Compose(ComposeKind::ReplyAll)),
             ("Doorsturen", Pick::Compose(ComposeKind::Forward)),
@@ -53,6 +55,7 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
             (junk.0, Pick::Command(junk.1)),
             ("Verwijderen", Pick::Command("message.delete")),
             (ignore.0, Pick::Command(ignore.1)),
+            ("Gesprek opruimen…", Pick::Cleanup),
             ("Taak maken van dit bericht", Pick::Task),
             ("Afspraak maken van dit bericht", Pick::Appointment),
             (sender, Pick::Sender),
@@ -60,7 +63,7 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
             ("Regel maken voor deze afzender…", Pick::Rule),
         ];
         for (i, (label, p)) in items.into_iter().enumerate() {
-            if matches!(i, 3 | 10 | 13) {
+            if matches!(i, 3 | 11 | 14) {
                 ui.separator();
             }
             if i == 4 {
@@ -120,6 +123,7 @@ impl MailApp {
             Pick::Appointment => self.appointment_from_message(m),
             Pick::Sender => self.open_or_add_sender(&m.from),
             Pick::Rule => self.open_rules(true),
+            Pick::Cleanup => self.ask_cleanup_conversation(&m.id),
             Pick::FromSender => {
                 // Outlook's "related messages from sender": the search box takes the address,
                 // over every folder of every account.
