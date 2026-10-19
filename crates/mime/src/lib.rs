@@ -62,6 +62,9 @@ pub struct Body {
     /// The `Authentication-Results` headers the receiving servers added (SPF, DKIM, DMARC), as
     /// text, for the phishing check.
     pub authentication: Vec<String>,
+    /// The ways out a `List-Unsubscribe` header offers: `mailto:` and `https:` targets, without
+    /// their angle brackets, in the header's order. Empty for mail that is not a list's.
+    pub unsubscribe: Vec<String>,
 }
 
 fn addresses(a: Option<&mail_parser::Address<'_>>) -> Vec<Address> {
@@ -116,6 +119,16 @@ pub fn parse_body(bytes: &[u8]) -> Body {
         .filter(|h| h.name.as_str().eq_ignore_ascii_case("Authentication-Results"))
         .filter_map(|h| h.value.as_text().map(clean_text).or_else(|| h.value.as_text_list().map(|l| clean_text(&l.join(" ")))))
         .collect();
+    // The parser reads this header as addresses, which loses the web targets; the raw text keeps them.
+    let unsubscribe = m
+        .headers_raw()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("List-Unsubscribe"))
+        .flat_map(|(_, v)| v.replace(['\r', '\n'], "").split(',').map(|t| t.trim().trim_matches(['<', '>']).trim().to_string()).collect::<Vec<_>>())
+        .filter(|t| {
+            let lower = t.to_ascii_lowercase();
+            (lower.starts_with("mailto:") || lower.starts_with("https://")) && t.len() <= 2048 && !t.chars().any(char::is_control)
+        })
+        .collect();
     // A picture shown in the body is not listed as an attachment as well.
     let attachments = m
         .attachments()
@@ -127,7 +140,7 @@ pub fn parse_body(bytes: &[u8]) -> Body {
             bytes: p.contents().into(),
         })
         .collect();
-    Body { text, from_html, rich, images, attachments, authentication }
+    Body { text, from_html, rich, images, attachments, authentication, unsubscribe }
 }
 
 fn mime_of(p: &mail_parser::MessagePart<'_>) -> String {
@@ -174,6 +187,14 @@ mod tests {
     }
 
     const MSG: &[u8] = b"From: Sanne de Vries <sanne@example.org>\r\nTo: jij@example.org\r\nSubject: =?UTF-8?Q?Planning_voor_donderdag?=\r\nDate: Wed, 14 Oct 2026 16:16:00 +0200\r\nMessage-ID: <m1@example.org>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nZullen we om tien uur beginnen?\r\n";
+
+    #[test]
+    fn the_list_unsubscribe_header_gives_its_mailto_and_https_targets() {
+        let raw = b"From: news@example.org\r\nList-Unsubscribe: <mailto:leave@example.org?subject=unsubscribe>,\r\n <https://example.org/u?id=7>, <http://plain.example/u>\r\nSubject: x\r\nContent-Type: text/plain\r\n\r\nHallo\r\n";
+        let b = parse_body(raw);
+        assert_eq!(b.unsubscribe, ["mailto:leave@example.org?subject=unsubscribe", "https://example.org/u?id=7"], "plain http is left out");
+        assert!(parse_body(b"From: a@example.org\r\n\r\nHallo").unsubscribe.is_empty());
+    }
 
     #[test]
     fn parses_headers_and_decodes_encoded_words() {

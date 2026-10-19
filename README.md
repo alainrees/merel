@@ -144,6 +144,11 @@ date stays on this computer (`follow_ups.json`, filed under the message's Messag
 the open message a strip names the day, turns red once it has passed, and "Voltooid" takes flag and date off;
 the hover text of a row in the list names the day too.
 
+A newsletter (mail with a `List-Unsubscribe` header) shows "Afmelden…" over the message, as Outlook does. Nothing
+happens by itself: a window first says what will be done, a mail to the list's address from the account the message
+came in on (preferred, since it tells the sender nothing new) or the list's web page in the browser (which does tell
+the sender the mail was read), and the person decides. Mail in the Junk folder gets no such offer.
+
 Several messages can be selected at once, as in Outlook: Ctrl+click (Cmd on a Mac) adds a message to the
 selection or takes it out, Shift+click selects the run from the open message to the clicked one and Ctrl+A
 takes the whole list. The reading pane then says how many are selected, and Delete, Archive, Junk, Move,
