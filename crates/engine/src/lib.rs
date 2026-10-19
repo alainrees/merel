@@ -21,6 +21,7 @@ mod sample;
 pub mod signin;
 pub mod sync;
 pub mod tasks;
+pub mod view;
 pub mod worker;
 
 pub use commands::{COMMANDS, CommandError, CommandSpec};
@@ -333,6 +334,9 @@ pub struct Session {
     pub search: String,
     /// Whether a search covers every folder of every account, or the selected folder only.
     pub search_all: bool,
+    /// Which messages of the folder the list shows, and in what order ("Beeld" tab).
+    pub filter: view::Filter,
+    pub sort: view::Sort,
     /// What the server found for the last search asked of it: the folder, the words, and the
     /// ids of the messages (now listed) it named. Shown next to the local matches while the
     /// search box still holds those words and that folder is selected.
@@ -530,8 +534,9 @@ impl Session {
                     ((in_folder || self.search_all) && matches(m, &needle)) || hits.is_some_and(|ids| ids.contains(&m.id))
                 }
             })
+            .filter(|m| self.filter.keeps(m))
             .collect();
-        list.sort_by_key(|m| std::cmp::Reverse(m.date));
+        list.sort_by(|a, b| self.sort.order(a, b));
         list
     }
 
@@ -874,6 +879,11 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// Where the accounts file is, and next to it the other local files; `None` in tests.
+    pub fn config_path(&self) -> Option<&std::path::Path> {
+        self.config_path.as_deref()
+    }
+
     /// Sample mail only, no worker: for tests and previews.
     pub fn sample() -> Self {
         let (_tx, rx) = channel();
