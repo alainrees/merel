@@ -124,7 +124,7 @@ pub(crate) fn when_text(ts: i64) -> String {
     format!("{} {} {} om {:02}:{:02}", calendar::weekday_name(d), d.day(), calendar::month_name(d.month()), t.hour(), t.minute())
 }
 
-fn join(list: &[Address]) -> String {
+pub(crate) fn join(list: &[Address]) -> String {
     list.iter()
         .map(|a| match &a.name {
             Some(n) => format!("{n} <{}>", a.email()),
