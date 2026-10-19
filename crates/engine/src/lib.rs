@@ -13,6 +13,7 @@ pub mod calendar;
 mod commands;
 pub mod config;
 pub mod contacts;
+pub mod drafts;
 mod sample;
 pub mod signin;
 pub mod sync;
@@ -29,7 +30,9 @@ use std::time::{Duration, Instant};
 
 use mailcraft_mailbox::{Flag, Item};
 pub use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
-use mailcraft_model::{Account, Appointment, Auth, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, Task, clean_text};
+use mailcraft_model::{
+    Account, Appointment, Auth, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, StoredDraft, Task, clean_text,
+};
 use mailcraft_secrets::{Secret, SecretStore};
 use serde::{Deserialize, Serialize};
 
@@ -297,6 +300,11 @@ pub struct Session {
     pub search_error: Option<String>,
     /// Drafts handed to `send`, by draft id.
     pub outbox: HashMap<u64, SendState>,
+    /// Messages being written that were put aside, every account's together.
+    pub drafts: Vec<StoredDraft>,
+    /// The id `draft.save` gave or kept, for the window that saved it.
+    pub last_draft: Option<String>,
+    next_stored_draft: u64,
     /// A browser sign-in in progress (`Some(None)`), or how the last one ended.
     pub sign_in: Option<Option<Result<(), String>>>,
     pub calendars: Vec<Calendar>,
@@ -387,6 +395,7 @@ impl Session {
         self.bodies.retain(|id, _| !id.starts_with(&prefix));
         self.loading.retain(|id| !id.starts_with(&prefix) && *id != format!("sync/{account_id}"));
         self.complete_folders.retain(|id| !id.starts_with(&prefix));
+        self.drafts.retain(|d| d.account_id != account_id);
         if self.server_hits.as_ref().is_some_and(|h| h.folder_id.starts_with(&prefix)) {
             self.server_hits = None;
         }
@@ -1079,7 +1088,7 @@ mod tests {
 
     use super::*;
 
-    fn account(id: &str) -> Account {
+    pub(crate) fn account(id: &str) -> Account {
         Account {
             id: id.into(),
             name: id.into(),

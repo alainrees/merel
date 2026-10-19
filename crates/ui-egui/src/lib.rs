@@ -96,6 +96,8 @@ pub struct MailApp {
     shown_message: Option<String>,
     /// Pictures on the internet, fetched for the open message only when asked.
     pub remote: remote::RemoteImages,
+    /// The account whose drafts the message list shows instead of a folder, if any.
+    pub drafts_for: Option<String>,
 }
 
 impl MailApp {
@@ -112,6 +114,7 @@ impl MailApp {
             notice: None,
             shown_message: None,
             remote: remote::RemoteImages::default(),
+            drafts_for: None,
         }
     }
 
@@ -419,6 +422,7 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .frame(egui::Frame::NONE.fill(t.panel).inner_margin(Margin::symmetric(8, 10)).stroke(Stroke::new(1.0, t.border)))
         .show(ui, |ui| {
             let mut pick = None;
+            let mut pick_drafts = None;
             let mut open_accounts = false;
             for account in &app.engine.session.accounts {
                 ui.horizontal(|ui| {
@@ -453,6 +457,25 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         pick = Some(f.id.clone());
                     }
                 }
+                // Messages put aside on this computer, next to the server's folders.
+                let drafts = app.engine.session.drafts_of(&account.id).len();
+                if drafts > 0 {
+                    let on = app.drafts_for.as_deref() == Some(account.id.as_str());
+                    let r = ui.add_sized(
+                        [ui.available_width(), 28.0],
+                        egui::Button::new("").fill(if on { t.checked } else { Color32::TRANSPARENT }).frame_when_inactive(on),
+                    );
+                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Concepten op deze computer"));
+                    let r = r.on_hover_text("Berichten die je opzij hebt gezet; ze staan alleen op deze computer.");
+                    let rect = r.rect.shrink2(vec2(8.0, 0.0));
+                    let p = ui.painter();
+                    let font = egui::FontId::proportional(13.5);
+                    p.text(rect.left_center(), egui::Align2::LEFT_CENTER, "📝  Concepten (deze computer)", font.clone(), t.text);
+                    p.text(rect.right_center(), egui::Align2::RIGHT_CENTER, drafts.to_string(), font, t.text_dim);
+                    if r.clicked() {
+                        pick_drafts = Some(account.id.clone());
+                    }
+                }
             }
             ui.add_space(12.0);
             if ui.add(egui::Button::new(RichText::new("＋ Account toevoegen").color(t.accent_text)).frame(false)).clicked() {
@@ -462,15 +485,77 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 app.tab = Tab::File;
             }
             if let Some(id) = pick {
+                app.drafts_for = None;
                 app.run("folder.select", json!({ "id": id }));
             }
+            if let Some(id) = pick_drafts {
+                app.drafts_for = Some(id);
+            }
         });
+}
+
+/// The drafts of one account in place of the message list: open one to go on writing, or drop it.
+fn drafts_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens, account_id: &str) {
+    let drafts: Vec<mailcraft_model::StoredDraft> = app.engine.session.drafts_of(account_id).into_iter().cloned().collect();
+    egui::Frame::NONE.inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
+        ui.label(RichText::new(format!("Concepten ({})", drafts.len())).size(18.0).strong().color(t.text));
+        ui.label(
+            RichText::new("Berichten die je opzij hebt gezet. Ze staan alleen op deze computer, in de versleutelde offline kopie.")
+                .size(12.0)
+                .color(t.text_dim),
+        );
+    });
+    let mut open = None;
+    let mut delete = None;
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        if drafts.is_empty() {
+            ui.add_space(24.0);
+            ui.vertical_centered(|ui| ui.label(RichText::new("Geen concepten.").color(t.text_dim)));
+        }
+        for d in &drafts {
+            egui::Frame::NONE.inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let subject = if d.subject.is_empty() { "(Geen onderwerp)" } else { d.subject.as_str() };
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(clip(subject, 48)).strong().color(t.text));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(dates::short(d.updated)).size(12.0).color(t.text_dim));
+                    });
+                });
+                let to = if d.to.trim().is_empty() { "(nog geen ontvanger)" } else { d.to.as_str() };
+                ui.label(RichText::new(format!("Aan: {}", clip(to, 56))).size(12.0).color(t.text_dim));
+                let preview: String = d.body.lines().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
+                if !preview.is_empty() {
+                    ui.label(RichText::new(clip(&preview, 72)).size(12.0).color(t.text_dim));
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("Openen").clicked() {
+                        open = Some(d.id.clone());
+                    }
+                    if ui.button("Concept verwijderen").clicked() {
+                        delete = Some(d.id.clone());
+                    }
+                });
+            });
+            ui.separator();
+        }
+    });
+    if let Some(id) = open {
+        app.open_draft(&id);
+    }
+    if let Some(id) = delete {
+        app.run("draft.delete", json!({ "id": id }));
+    }
 }
 
 fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::Panel::left("messages").default_size(360.0).resizable(true).frame(egui::Frame::NONE.fill(t.list).stroke(Stroke::new(1.0, t.border))).show(
         ui,
         |ui| {
+            if let Some(account_id) = app.drafts_for.clone() {
+                drafts_list(app, ui, t, &account_id);
+                return;
+            }
             let folder_name = app
                 .engine
                 .session
@@ -774,7 +859,11 @@ fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let unread = list.iter().filter(|m| !m.flags.seen).count();
                 ui.label(RichText::new(format!("Items: {}   Ongelezen: {}", list.len(), unread)).size(12.0).color(t.text_dim));
                 if let Some(n) = &app.notice {
-                    let col = if n.ends_with("verzonden.") || n.ends_with("ontvangen.") || n.starts_with("Bijlage opgeslagen") {
+                    let col = if n.ends_with("verzonden.")
+                        || n.ends_with("ontvangen.")
+                        || n.starts_with("Bijlage opgeslagen")
+                        || n.starts_with("Concept bewaard")
+                    {
                         t.accent_text
                     } else {
                         t.flag
@@ -875,6 +964,42 @@ mod tests {
         h.get_by_label("Jaaroverzicht");
         h.get_by_label("De server vond 1 bericht in deze map.");
         assert!(h.query_by_label("Zoek op de server").is_none());
+    }
+
+    #[test]
+    fn a_closed_message_is_kept_as_a_draft_and_can_be_reopened() {
+        let mut h = harness();
+        h.run();
+        h.state_mut().open_compose(ComposeKind::New);
+        h.run();
+        h.get_by_label("Opslaan als concept").click();
+        h.run();
+        assert!(h.state().compose.is_none() && h.state().engine.session.drafts.is_empty(), "an untouched window leaves nothing");
+        h.state_mut().open_compose(ComposeKind::New);
+        h.run();
+        if let Some(c) = h.state_mut().compose.as_mut() {
+            c.subject = "Plan voor morgen".into();
+            c.to = "sanne@".into();
+        }
+        h.get_by_label("Opslaan als concept").click();
+        h.run();
+        assert!(h.state().compose.is_none());
+        assert_eq!(h.state().engine.session.drafts.len(), 1);
+        assert!(h.state().notice.as_deref().is_some_and(|n| n.starts_with("Concept bewaard")));
+        h.get_by_label("Concepten op deze computer").click();
+        h.run();
+        assert!(h.state().drafts_for.is_some());
+        h.get_by_label("Plan voor morgen");
+        h.get_by_label("Openen").click();
+        h.run();
+        let c = h.state().compose.as_ref().expect("the draft opens");
+        assert_eq!((c.subject.as_str(), c.to.as_str()), ("Plan voor morgen", "sanne@"));
+        assert!(c.stored.is_some());
+        h.state_mut().compose = None;
+        h.get_by_label("Concept verwijderen").click();
+        h.run();
+        assert!(h.state().engine.session.drafts.is_empty());
+        h.get_by_label("Geen concepten.");
     }
 
     #[test]

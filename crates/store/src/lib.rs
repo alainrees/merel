@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use aws_lc_rs::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
 use base64::Engine as _;
-use mailcraft_model::{Appointment, Calendar, Contact, Folder, MessageHeader, Task};
+use mailcraft_model::{Appointment, Calendar, Contact, Folder, MessageHeader, StoredDraft, Task};
 use mailcraft_secrets::{Secret, SecretStore};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
@@ -66,6 +66,9 @@ pub struct AccountCache {
     pub appointments: Vec<Appointment>,
     pub contacts: Vec<Contact>,
     pub tasks: Vec<Task>,
+    /// Messages being written that were put aside.
+    #[serde(default)]
+    pub drafts: Vec<StoredDraft>,
 }
 
 impl AccountCache {

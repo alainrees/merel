@@ -296,6 +296,56 @@ impl DraftAttachment {
     }
 }
 
+/// How long the text of a draft put aside may be, in characters.
+pub const MAX_DRAFT_BODY: usize = 200_000;
+
+/// A message being written that was put aside. The address lines are kept as typed, so an
+/// unfinished one survives; the account's encrypted offline cache holds it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredDraft {
+    /// Empty for one that has not been put aside yet; the engine then gives it one.
+    #[serde(default)]
+    pub id: String,
+    /// Empty means the current account.
+    #[serde(default)]
+    pub account_id: String,
+    #[serde(default)]
+    pub to: String,
+    #[serde(default)]
+    pub cc: String,
+    #[serde(default)]
+    pub subject: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub in_reply_to: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<DraftAttachment>,
+    /// Seconds since the Unix epoch when it was last put aside.
+    #[serde(default)]
+    pub updated: i64,
+}
+
+impl StoredDraft {
+    /// Cleans the free text so it is safe to store and show; the body keeps its line breaks.
+    pub fn cleaned(mut self) -> Self {
+        self.to = clean_text(self.to.trim());
+        self.cc = clean_text(self.cc.trim());
+        self.subject = clean_text(self.subject.trim());
+        self.body = self.body.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).take(MAX_DRAFT_BODY).collect();
+        self
+    }
+
+    /// Whether there is nothing in it worth keeping.
+    pub fn is_blank(&self) -> bool {
+        self.to.trim().is_empty()
+            && self.cc.trim().is_empty()
+            && self.subject.trim().is_empty()
+            && self.body.trim().is_empty()
+            && self.attachments.is_empty()
+    }
+}
+
 /// The media type that goes with a file name's extension.
 pub fn mime_of(name: &str) -> &'static str {
     let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
