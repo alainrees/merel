@@ -241,6 +241,13 @@ window with a rule for that address filled in. Hovering a ribbon button
 shows its shortcut, and the "Help" tab lists them all in one window; the same tab opens the folder
 that holds your settings and cache, the project page, and "Over Mailcraft" with the version.
 
+## Fonts
+
+The window draws its text with [Inter](https://github.com/rsms/inter) (SIL Open Font License) and
+its arrows and shapes with DejaVu Sans (Bitstream Vera licence); both are embedded in the binary
+from `crates/ui-egui/assets/fonts`, where their licences sit next to them. egui's own emoji fonts
+stay as the fallback for the pictographs.
+
 ## Build
 
 ```

@@ -15,6 +15,7 @@ pub mod contacts;
 mod dates;
 pub mod eml;
 pub mod folders;
+mod fonts;
 pub mod groups;
 pub mod help;
 mod html;
@@ -291,6 +292,7 @@ impl MailApp {
 
     pub fn ui(&mut self, ui: &mut Ui) {
         if !self.theme_applied {
+            ui.ctx().set_fonts(fonts::definitions());
             ui.ctx().set_theme(self.view.theme.preference());
             self.theme_applied = true;
         }
@@ -591,6 +593,7 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::Panel::top("ribbon")
         .frame(egui::Frame::NONE.fill(t.ribbon).inner_margin(Margin::symmetric(10, 8)).stroke(Stroke::new(1.0, t.border)))
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = RIBBON_SPACING;
             ui.horizontal(|ui| match app.tab {
                 Tab::Home if app.module == Module::Calendar => calendar_ribbon(app, ui, t),
                 Tab::Home if app.module == Module::People => contacts::ribbon(app, ui, t),
@@ -598,48 +601,58 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 Tab::Home => {
                     let has = app.engine.session.selected_message.is_some();
                     let mut open: Option<ComposeKind> = None;
-                    if ribbon_action_hint(ui, t, "✉", "Nieuwe e-mail", true, Some(&key_hint("N"))) {
-                        open = Some(ComposeKind::New);
-                    }
+                    view::group(ui, t, "Nieuw", |ui| {
+                        if ribbon_action_hint(ui, t, "✉", "Nieuwe e-mail", true, Some(&key_hint("N"))) {
+                            open = Some(ComposeKind::New);
+                        }
+                    });
                     ui.separator();
-                    if ribbon_action_hint(ui, t, "↩", "Beantwoorden", has, Some(&key_hint("R"))) {
-                        open = Some(ComposeKind::Reply);
-                    }
-                    if ribbon_action_hint(ui, t, "↞", "Allen beantwoorden", has, Some(&key_hint("Shift+R"))) {
-                        open = Some(ComposeKind::ReplyAll);
-                    }
-                    if ribbon_action_hint(ui, t, "↪", "Doorsturen", has, Some(&key_hint("F"))) {
-                        open = Some(ComposeKind::Forward);
-                    }
+                    view::group(ui, t, "Reageren", |ui| {
+                        if ribbon_action_hint(ui, t, "↩", "Beantwoorden", has, Some(&key_hint("R"))) {
+                            open = Some(ComposeKind::Reply);
+                        }
+                        if ribbon_action_hint(ui, t, "↞", "Allen beantwoorden", has, Some(&key_hint("Shift+R"))) {
+                            open = Some(ComposeKind::ReplyAll);
+                        }
+                        if ribbon_action_hint(ui, t, "↪", "Doorsturen", has, Some(&key_hint("F"))) {
+                            open = Some(ComposeKind::Forward);
+                        }
+                    });
                     if let Some(kind) = open {
                         app.open_compose(kind);
                     }
                     ui.separator();
-                    ribbon_button(app, ui, t, "🗑", "Verwijderen", ("message.delete", Some("Delete")), has);
-                    ribbon_button(
-                        app,
-                        ui,
-                        t,
-                        "🗄",
-                        "Archiveren",
-                        ("message.archive", Some(if cfg!(target_os = "macos") { "Ctrl+E" } else { "Backspace" })),
-                        has,
-                    );
-                    ribbon_button(app, ui, t, "⚠", "Ongewenst", ("message.junk", None), has);
-                    if ribbon_action_hint(ui, t, "📂", "Verplaatsen", has, Some(&key_hint("Shift+V"))) {
-                        app.move_to = true;
-                    }
+                    view::group(ui, t, "Opschonen", |ui| {
+                        ribbon_button(app, ui, t, "🗑", "Verwijderen", ("message.delete", Some("Delete")), has);
+                        ribbon_button(
+                            app,
+                            ui,
+                            t,
+                            "🗄",
+                            "Archiveren",
+                            ("message.archive", Some(if cfg!(target_os = "macos") { "Ctrl+E" } else { "Backspace" })),
+                            has,
+                        );
+                        ribbon_button(app, ui, t, "⚠", "Ongewenst", ("message.junk", None), has);
+                    });
                     ui.separator();
-                    ribbon_button(app, ui, t, "◉", "Gelezen", ("message.mark_read", Some(&key_hint("Q"))), has);
-                    ribbon_button(app, ui, t, "○", "Ongelezen", ("message.mark_unread", Some(&key_hint("U"))), has);
-                    ribbon_button(app, ui, t, "⚑", "Vlag", ("message.flag", None), has);
+                    view::group(ui, t, "Ordenen", |ui| {
+                        if ribbon_action_hint(ui, t, "📂", "Verplaatsen", has, Some(&key_hint("Shift+V"))) {
+                            app.move_to = true;
+                        }
+                        if ribbon_action_hint(ui, t, "⚙", "Regels", true, Some("Mail automatisch verplaatsen of markeren")) {
+                            app.open_rules(false);
+                        }
+                    });
+                    ui.separator();
+                    view::group(ui, t, "Labels", |ui| {
+                        ribbon_button(app, ui, t, "◉", "Gelezen", ("message.mark_read", Some(&key_hint("Q"))), has);
+                        ribbon_button(app, ui, t, "○", "Ongelezen", ("message.mark_unread", Some(&key_hint("U"))), has);
+                        ribbon_button(app, ui, t, "⚑", "Vlag", ("message.flag", None), has);
+                    });
                     categories::menu(app, ui, t);
                     ui.separator();
                     quicksteps::ribbon(app, ui, t);
-                    ui.separator();
-                    if ribbon_action_hint(ui, t, "⚙", "Regels", true, Some("Mail automatisch verplaatsen of markeren")) {
-                        app.open_rules(false);
-                    }
                 }
                 Tab::Folder if app.module == Module::Mail => folders::ribbon(app, ui, t),
                 Tab::View => view::ribbon(app, ui, t),
@@ -691,6 +704,18 @@ pub(crate) fn key_hint(key: &str) -> String {
     format!("{modifier}+{key}")
 }
 
+/// The least width of a large ribbon button; a longer label makes its button wider.
+const RIBBON_BUTTON_WIDTH: f32 = 60.0;
+/// The space between ribbon buttons and groups; egui's default of 8 wastes the width of a
+/// 1280 px window.
+const RIBBON_SPACING: f32 = 4.0;
+/// Room left and right of a ribbon button's label.
+const RIBBON_LABEL_PADDING: f32 = 6.0;
+/// The font of a ribbon button's label.
+fn ribbon_label_font() -> egui::FontId {
+    egui::FontId::proportional(12.0)
+}
+
 /// A large ribbon button: glyph above label, drawn by hand as one widget so a screen reader
 /// sees a single button named `label`. Returns true when clicked.
 pub(crate) fn ribbon_action(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool) -> bool {
@@ -699,7 +724,9 @@ pub(crate) fn ribbon_action(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, e
 
 /// [`ribbon_action`] with the keyboard shortcut shown on hover.
 fn ribbon_action_hint(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool, shortcut: Option<&str>) -> bool {
-    let (rect, r) = ui.allocate_exact_size(vec2(72.0, 56.0), if enabled { Sense::click() } else { Sense::hover() });
+    let label_width = ui.painter().layout_no_wrap(label.to_owned(), ribbon_label_font(), Color32::WHITE).size().x;
+    let width = (label_width + 2.0 * RIBBON_LABEL_PADDING).max(RIBBON_BUTTON_WIDTH);
+    let (rect, r) = ui.allocate_exact_size(vec2(width, 56.0), if enabled { Sense::click() } else { Sense::hover() });
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     let r = match shortcut {
         Some(s) => r.on_hover_text(format!("{label} ({s})")),
@@ -717,7 +744,7 @@ fn ribbon_action_hint(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled
         egui::FontId::proportional(22.0),
         if enabled { t.accent } else { color },
     );
-    p.text(egui::pos2(rect.center().x, rect.bottom() - 10.0), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(12.0), color);
+    p.text(egui::pos2(rect.center().x, rect.bottom() - 10.0), egui::Align2::CENTER_CENTER, label, ribbon_label_font(), color);
     enabled && r.clicked()
 }
 
@@ -870,7 +897,7 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.add_space(12.0);
             // Outlook's "Zoekmappen": the saved searches, under the accounts.
             search_folders::section(app, ui, t);
-            if ui.add(egui::Button::new(RichText::new("＋ Account toevoegen").color(t.accent_text)).frame(false)).clicked() {
+            if ui.add(egui::Button::new(RichText::new("+ Account toevoegen").color(t.accent_text)).frame(false)).clicked() {
                 open_accounts = true;
             }
             if open_accounts {
@@ -3062,6 +3089,56 @@ mod tests {
         h.state_mut().engine.session.selected_message = Some("m0".into());
         h.run();
         assert!(h.query_by_label("Offerte drukwerk").is_none(), "folded again once the selection has left it");
+    }
+
+    #[test]
+    fn every_symbol_the_ui_draws_has_a_glyph_in_the_apps_fonts() {
+        let mut h = harness();
+        h.run();
+        h.step();
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
+        // The atlas rectangle a character is drawn from. A character no font has gets the
+        // replacement box, so the same rectangle as a CJK character means an empty box on screen.
+        let drawn = |h: &mut egui_kittest::Harness<'static, MailApp>, c: char| {
+            h.ctx.fonts_mut(|f| f.layout_no_wrap(c.to_string(), egui::FontId::proportional(14.0), Color32::WHITE)).rows[0].row.glyphs[0].uv_rect
+        };
+        let replacement = drawn(&mut h, '\u{4E00}');
+        assert_eq!(drawn(&mut h, '\u{4E01}'), replacement, "two characters no font has draw the same box");
+        assert_ne!(drawn(&mut h, 'a'), replacement);
+        let mut missing = std::collections::BTreeSet::new();
+        for entry in std::fs::read_dir(dir).expect("source directory") {
+            let path = entry.expect("entry").path();
+            if path.extension().is_some_and(|e| e == "rs") {
+                let text = std::fs::read_to_string(&path).expect("source file");
+                for c in text.chars().filter(|c| !c.is_ascii() && !matches!(c, '\u{200D}' | '\u{FE0F}')) {
+                    if drawn(&mut h, c) == replacement {
+                        missing.insert(c);
+                    }
+                }
+            }
+        }
+        assert!(missing.is_empty(), "these characters would draw as empty boxes: {missing:?}");
+    }
+
+    #[test]
+    fn ribbon_buttons_are_as_wide_as_their_labels_and_the_ribbons_fit_the_window() {
+        let mut h = harness();
+        h.run();
+        h.step();
+        let reply = h.get_by_label("Beantwoorden").rect();
+        let all = h.get_by_label("Allen beantwoorden").rect();
+        let forward = h.get_by_label("Doorsturen").rect();
+        assert!(reply.max.x <= all.min.x && all.max.x <= forward.min.x, "the three buttons sit side by side without overlap");
+        assert!(all.width() > reply.width(), "the longer label gets the wider button");
+        let label = h.ctx.fonts_mut(|f| f.layout_no_wrap("Allen beantwoorden".to_owned(), egui::FontId::proportional(12.0), Color32::WHITE));
+        assert!(all.width() >= label.size().x + 2.0 * RIBBON_LABEL_PADDING, "the label fits inside its button");
+        assert!(h.query_by_label("Reageren").is_some() && h.query_by_label("Labels").is_some(), "the groups carry their names");
+        for (tab, last) in [(Tab::Home, "Snelle stappen"), (Tab::View, "Thema"), (Tab::Folder, "Opruimen")] {
+            h.state_mut().tab = tab;
+            h.run();
+            let rect = h.get_by_label_contains(last).rect();
+            assert!(rect.max.x <= 1280.0, "{last} on the {tab:?} tab ends at {} and falls off a 1280 px window", rect.max.x);
+        }
     }
 
     #[test]

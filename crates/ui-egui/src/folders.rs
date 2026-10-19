@@ -141,7 +141,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
         .as_deref()
         .map(|id| (app.engine.session.messages.iter().any(|m| m.folder_id == id), app.engine.session.folder(id).is_some_and(|f| f.unread > 0)))
         .unwrap_or((false, false));
-    if ribbon_action_hint(ui, t, "🧹", "Map leegmaken", has_mail, Some("Alle berichten in de geselecteerde map definitief verwijderen"))
+    if ribbon_action_hint(ui, t, "🗑", "Map leegmaken", has_mail, Some("Alle berichten in de geselecteerde map definitief verwijderen"))
         && let Some(id) = selected.clone()
     {
         app.empty_folder(id);
