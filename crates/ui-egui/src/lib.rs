@@ -389,6 +389,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 .unwrap_or_default();
             let searching = app.engine.session.is_searching();
             let count = if searching { Some(app.engine.session.visible_messages().len()) } else { None };
+            let mut server_search = false;
             egui::Frame::NONE.inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
                 let title = match count {
                     Some(n) => format!("Zoekresultaten ({n})"),
@@ -407,7 +408,38 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ui.checkbox(&mut session.search_all, "Alle mappen")
                         .on_hover_text("Zoek in alle mappen van alle accounts, in de berichten die Mailcraft al heeft opgehaald.");
                 });
+                // The server can look where Mailcraft has not: older mail, and the text itself.
+                let session = &app.engine.session;
+                if session.can_search_server() {
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        let busy = session.searching_server();
+                        match session.current_hits() {
+                            Some(hits) => {
+                                let n = hits.ids.len();
+                                let found = if n == 1 { "1 bericht".to_string() } else { format!("{n} berichten") };
+                                ui.label(RichText::new(format!("De server vond {found} in deze map.")).size(12.0).color(t.text_dim));
+                            }
+                            None => {
+                                let label = if busy { "Zoeken op de server…" } else { "Zoek op de server" };
+                                if ui
+                                    .add_enabled(!busy, egui::Button::new(label))
+                                    .on_hover_text("Laat de mailserver in deze map zoeken: ook in berichten die Mailcraft nog niet heeft opgehaald en in de tekst van de berichten.")
+                                    .clicked()
+                                {
+                                    server_search = true;
+                                }
+                            }
+                        }
+                    });
+                    if let Some(e) = &session.search_error {
+                        ui.label(RichText::new(format!("Zoeken op de server is mislukt. {e}")).size(12.0).color(t.flag));
+                    }
+                }
             });
+            if server_search {
+                let _ = app.engine.run("search.server", &serde_json::Value::Null);
+            }
             let mut pick = None;
             let mut older = false;
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
@@ -415,7 +447,9 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let loading = app.engine.session.selected_folder.as_deref().is_some_and(|f| app.engine.session.loading.contains(f));
                 if list.is_empty() {
                     ui.add_space(24.0);
-                    let msg = if searching {
+                    let msg = if searching && app.engine.session.current_hits().is_some() {
+                        "Geen berichten gevonden, ook niet op de server."
+                    } else if searching {
                         "Geen berichten gevonden. Mailcraft zoekt in de berichten die het al heeft opgehaald."
                     } else if loading {
                         "Berichten ophalen…"
@@ -700,6 +734,55 @@ mod tests {
         egui_kittest::Harness::builder()
             .with_size(vec2(1280.0, 800.0))
             .build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(Engine::sample()))
+    }
+
+    #[test]
+    fn the_server_can_be_asked_to_search_a_connected_folder() {
+        use mailcraft_engine::{Event, RemoteFolder, RemoteHeader};
+        let mut engine = Engine::sample();
+        let account = {
+            let mut f = crate::backstage::AccountForm::default();
+            f.email = "alain@voorbeeld.nl".into();
+            f.password = "x".into();
+            f.suggest();
+            f.account().expect("account")
+        };
+        let id = account.id.clone();
+        engine.add_account(account, mailcraft_secrets::Secret::new("x")).expect("add");
+        engine.session.apply(Event::Connected {
+            account_id: id.clone(),
+            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: mailcraft_model::FolderKind::Inbox, selectable: true }],
+            syncs_items: false,
+        });
+        // Connecting queued a fetch of the inbox; pretend it came back empty.
+        engine.session.take_jobs();
+        engine.session.loading.clear();
+        let folder = format!("{id}/INBOX");
+        engine.session.selected_folder = Some(folder.clone());
+        engine.session.search = "factuur".into();
+        let mut h =
+            egui_kittest::Harness::builder().with_size(vec2(1280.0, 800.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(engine));
+        h.run();
+        h.get_by_label("Zoek op de server").click();
+        // The list repaints on a timer while a fetch is in flight, so a bounded number of steps.
+        h.run_steps(2);
+        assert!(h.state().engine.session.searching_server());
+        h.get_by_label("Zoeken op de server…");
+        let hit = RemoteHeader {
+            id: "7".into(),
+            seen: false,
+            flagged: false,
+            answered: false,
+            size: 1,
+            has_attachments: false,
+            header: mailcraft_mime::parse_header(b"From: boekhouding@voorbeeld.nl\r\nSubject: Jaaroverzicht\r\n\r\n"),
+            date: 1_700_000_000,
+        };
+        h.state_mut().engine.session.apply(Event::Found { folder_id: folder, query: "factuur".into(), result: Ok(vec![hit]) });
+        h.run_steps(2);
+        h.get_by_label("Jaaroverzicht");
+        h.get_by_label("De server vond 1 bericht in deze map.");
+        assert!(h.query_by_label("Zoek op de server").is_none());
     }
 
     #[test]

@@ -420,6 +420,21 @@ impl GraphClient {
     }
 }
 
+/// The fields a listing asks for per message.
+const MESSAGE_FIELDS: &str = "id,subject,from,toRecipients,receivedDateTime,isRead,flag,hasAttachments,internetMessageId";
+
+/// The request for the messages of `folder` that Graph's `$search` finds for `query`; `None`
+/// for an empty query. Graph takes the query as a quoted string (quotes and backslashes
+/// escaped) and allows no `$orderby` or `$skip` next to it; `$top` is at most 250 there.
+fn search_path(folder: &str, query: &str, limit: u32) -> Option<String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return None;
+    }
+    let quoted = format!("\"{}\"", query.replace('\\', "\\\\").replace('"', "\\\""));
+    Some(format!("/me/mailFolders/{}/messages?$search={}&$top={}&$select={MESSAGE_FIELDS}", encode(folder), encode(&quoted), limit.clamp(1, 250)))
+}
+
 impl Mailbox for GraphClient {
     fn folders(&mut self) -> Result<Vec<RemoteFolder>> {
         let select = "$select=id,displayName,childFolderCount";
@@ -446,7 +461,7 @@ impl Mailbox for GraphClient {
 
     fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> Result<Vec<RemoteHeader>> {
         let path = format!(
-            "/me/mailFolders/{}/messages?$top={}&$skip={offset}&$orderby=receivedDateTime%20desc&$select=id,subject,from,toRecipients,receivedDateTime,isRead,flag,hasAttachments,internetMessageId",
+            "/me/mailFolders/{}/messages?$top={}&$skip={offset}&$orderby=receivedDateTime%20desc&$select={MESSAGE_FIELDS}",
             encode(folder),
             limit.clamp(1, PAGE)
         );
@@ -454,6 +469,16 @@ impl Mailbox for GraphClient {
         let mut out: Vec<RemoteHeader> =
             page.get("value").and_then(Value::as_array).map(|l| l.iter().filter_map(header_of).collect()).unwrap_or_default();
         out.reverse();
+        Ok(out)
+    }
+
+    fn search(&mut self, folder: &str, query: &str, limit: u32) -> Result<Vec<RemoteHeader>> {
+        let Some(path) = search_path(folder, query, limit) else { return Ok(Vec::new()) };
+        let page = self.call("GET", &path, None)?;
+        let mut out: Vec<RemoteHeader> =
+            page.get("value").and_then(Value::as_array).map(|l| l.iter().filter_map(header_of).collect()).unwrap_or_default();
+        // Search results come by relevance; the listing wants them by date, newest last.
+        out.sort_by_key(|h| h.date);
         Ok(out)
     }
 
@@ -544,6 +569,14 @@ impl ItemStore for GraphClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_search_quotes_the_words_and_drops_the_ordering() {
+        let path = search_path("AAMk=", "fac\"tuur 2026", 999).unwrap();
+        assert!(path.starts_with("/me/mailFolders/AAMk%3D/messages?$search=%22fac%5C%22tuur%202026%22&$top=250&$select=id,"), "{path}");
+        assert!(!path.contains("$orderby") && !path.contains("$skip"));
+        assert!(search_path("AAMk=", "  ", 10).is_none());
+    }
 
     #[test]
     fn times_and_encoding() {

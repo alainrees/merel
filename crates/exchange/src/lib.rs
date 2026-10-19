@@ -346,6 +346,44 @@ fn header_of(item: Node<'_, '_>) -> RemoteHeader {
     }
 }
 
+/// A `FindItem` for one page of a folder, newest first; with `query`, only the messages
+/// Exchange's search finds for it (every word required, as the server interprets it).
+fn find_item_request(folder: &str, offset: u32, limit: u32, query: Option<&str>) -> String {
+    let query = query.map(|q| format!("<m:QueryString>{}</m:QueryString>", esc(q))).unwrap_or_default();
+    format!(
+        concat!(
+            "<m:FindItem Traversal=\"Shallow\"><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape><t:AdditionalProperties>",
+            "<t:FieldURI FieldURI=\"item:Subject\"/><t:FieldURI FieldURI=\"item:DateTimeReceived\"/>",
+            "<t:FieldURI FieldURI=\"item:HasAttachments\"/><t:FieldURI FieldURI=\"item:Size\"/>",
+            "<t:FieldURI FieldURI=\"message:From\"/><t:FieldURI FieldURI=\"message:IsRead\"/>",
+            "<t:FieldURI FieldURI=\"message:InternetMessageId\"/>{flag}{verb}",
+            "</t:AdditionalProperties></m:ItemShape>",
+            "<m:IndexedPageItemView MaxEntriesReturned=\"{limit}\" Offset=\"{offset}\" BasePoint=\"Beginning\"/>",
+            "<m:SortOrder><t:FieldOrder Order=\"Descending\"><t:FieldURI FieldURI=\"item:DateTimeReceived\"/></t:FieldOrder></m:SortOrder>",
+            "<m:ParentFolderIds><t:FolderId Id=\"{folder}\"/></m:ParentFolderIds>{query}</m:FindItem>"
+        ),
+        flag = extended_field(PR_FLAG_STATUS),
+        verb = extended_field(PR_LAST_VERB_EXECUTED),
+        limit = limit.clamp(1, 1000),
+        offset = offset,
+        folder = esc(folder),
+        query = query
+    )
+}
+
+impl EwsClient {
+    /// Runs a `FindItem` and reads the messages out of it, newest last.
+    fn find_items(&mut self, request: &str) -> Result<Vec<RemoteHeader>> {
+        let xml = self.call(request)?;
+        let doc = parse(&xml)?;
+        response_messages(&doc, false)?;
+        let Some(items) = find(doc.root_element(), "Items") else { return Ok(Vec::new()) };
+        let mut out: Vec<RemoteHeader> = items.children().filter(|n| n.is_element()).map(header_of).filter(|h| !h.id.is_empty()).collect();
+        out.reverse();
+        Ok(out)
+    }
+}
+
 impl Mailbox for EwsClient {
     fn folders(&mut self) -> Result<Vec<RemoteFolder>> {
         let xml = self.call(&format!(
@@ -378,30 +416,15 @@ impl Mailbox for EwsClient {
     }
 
     fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> Result<Vec<RemoteHeader>> {
-        let xml = self.call(&format!(
-            concat!(
-                "<m:FindItem Traversal=\"Shallow\"><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape><t:AdditionalProperties>",
-                "<t:FieldURI FieldURI=\"item:Subject\"/><t:FieldURI FieldURI=\"item:DateTimeReceived\"/>",
-                "<t:FieldURI FieldURI=\"item:HasAttachments\"/><t:FieldURI FieldURI=\"item:Size\"/>",
-                "<t:FieldURI FieldURI=\"message:From\"/><t:FieldURI FieldURI=\"message:IsRead\"/>",
-                "<t:FieldURI FieldURI=\"message:InternetMessageId\"/>{flag}{verb}",
-                "</t:AdditionalProperties></m:ItemShape>",
-                "<m:IndexedPageItemView MaxEntriesReturned=\"{limit}\" Offset=\"{offset}\" BasePoint=\"Beginning\"/>",
-                "<m:SortOrder><t:FieldOrder Order=\"Descending\"><t:FieldURI FieldURI=\"item:DateTimeReceived\"/></t:FieldOrder></m:SortOrder>",
-                "<m:ParentFolderIds><t:FolderId Id=\"{folder}\"/></m:ParentFolderIds></m:FindItem>"
-            ),
-            flag = extended_field(PR_FLAG_STATUS),
-            verb = extended_field(PR_LAST_VERB_EXECUTED),
-            limit = limit.clamp(1, 1000),
-            offset = offset,
-            folder = esc(folder)
-        ))?;
-        let doc = parse(&xml)?;
-        response_messages(&doc, false)?;
-        let Some(items) = find(doc.root_element(), "Items") else { return Ok(Vec::new()) };
-        let mut out: Vec<RemoteHeader> = items.children().filter(|n| n.is_element()).map(header_of).filter(|h| !h.id.is_empty()).collect();
-        out.reverse();
-        Ok(out)
+        self.find_items(&find_item_request(folder, offset, limit, None))
+    }
+
+    fn search(&mut self, folder: &str, query: &str, limit: u32) -> Result<Vec<RemoteHeader>> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.find_items(&find_item_request(folder, 0, limit, Some(query)))
     }
 
     fn body(&mut self, _folder: &str, id: &str) -> Result<Vec<u8>> {
@@ -463,6 +486,15 @@ impl Mailbox for EwsClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_search_is_a_find_item_with_a_query_string() {
+        let plain = find_item_request("AAMk", 200, 50, None);
+        assert!(plain.contains("Offset=\"200\"") && plain.contains("MaxEntriesReturned=\"50\"") && !plain.contains("QueryString"));
+        let search = find_item_request("AAMk", 0, 5000, Some("factuur <2026>"));
+        assert!(search.ends_with("</m:ParentFolderIds><m:QueryString>factuur &lt;2026&gt;</m:QueryString></m:FindItem>"), "{search}");
+        assert!(search.contains("MaxEntriesReturned=\"1000\""), "the page size is capped");
+    }
 
     #[test]
     fn escaping_covers_the_special_characters_and_drops_controls() {
