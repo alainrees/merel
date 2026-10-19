@@ -60,7 +60,9 @@ too: while it holds words, a list of the matching appointments of the past year 
 appointment. An appointment can be dragged to another day in the month view, or to another day and half
 hour in the week and day views; it keeps its length and everything else, in an account's calendar the move
 goes to the server, and a repeating series is changed through its window instead. In the week and day views
-the bottom edge of an appointment can be dragged too, to make it longer or shorter by the half hour. In all three modules Ctrl+E goes to the search box and Esc clears it, as in the mail module. An Exchange, Microsoft 365 or Gmail account
+the bottom edge of an appointment can be dragged too, to make it longer or shorter by the half hour. The calendar's
+side pane lists the open tasks; drag one onto a day or an hour and the appointment window opens for it, with the
+task's title and notes filled in, so planning a task is one drag and "Opslaan". In all three modules Ctrl+E goes to the search box and Esc clears it, as in the mail module. An Exchange, Microsoft 365 or Gmail account
 brings its own calendar, contacts and tasks along (Google Calendar, People and Tasks for Gmail), and so
 does an IMAP account with a CalDAV/CardDAV server next to it (Fastmail, iCloud, Nextcloud and the like): they
 appear next to the local ones, changes go straight to the server, and a new item asks whether
