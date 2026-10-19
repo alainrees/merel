@@ -6,7 +6,7 @@ use serde_json::json;
 use mailcraft_engine::CommandError;
 use mailcraft_model::Contact;
 
-use crate::{ComposeKind, MailApp, Tokens};
+use crate::{ComposeKind, MailApp, Module, Tokens};
 
 /// What the contacts module remembers between frames.
 #[derive(Default)]
@@ -93,6 +93,20 @@ pub(crate) fn store_name(session: &mailcraft_engine::Session, account_id: Option
 }
 
 impl MailApp {
+    /// Opens the contacts module on the contact that has `from`'s address, or on the form for
+    /// a new contact named after the sender, so an address from the mail is kept in one click.
+    pub fn open_or_add_sender(&mut self, from: &mailcraft_model::Address) {
+        self.module = Module::People;
+        if let Some(c) = self.engine.session.contact_with_email(from.email()) {
+            let id = c.id.clone();
+            self.run("contact.select", json!({ "id": id }));
+            self.contacts.editor = None;
+            return;
+        }
+        let name = if from.display() == from.email() { String::new() } else { from.display().to_string() };
+        self.contacts.editor = Some(Editor { name, emails: from.email().to_string(), ..Editor::default() });
+    }
+
     pub fn new_contact(&mut self) {
         self.contacts.editor = Some(Editor::default());
     }
