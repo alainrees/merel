@@ -47,6 +47,9 @@ pub struct Compose {
     pub send_at: Option<i64>,
     /// Outlook's "Hoge urgentie" or "Lage urgentie"; normal unless chosen.
     pub importance: Importance,
+    /// Outlook's "Leesbevestiging vragen": the reader's program is asked to say when the message
+    /// was read.
+    pub read_receipt: bool,
     /// What Send found worth a second look, with the moment chosen if "Later verzenden" was
     /// pressed; the window shows it and waits for "Toch verzenden" or a change to the message.
     pub check: Option<Check>,
@@ -153,6 +156,7 @@ impl Compose {
             stored: None,
             send_at: None,
             importance: Importance::Normal,
+            read_receipt: false,
             check: None,
             initial: String::new(),
             draft_id: None,
@@ -212,6 +216,7 @@ impl Compose {
         c.stored = Some(d.id.clone());
         c.send_at = d.send_at;
         c.importance = d.importance;
+        c.read_receipt = d.read_receipt;
         c
     }
 
@@ -240,6 +245,7 @@ impl Compose {
             updated: 0,
             send_at: self.send_at,
             importance: self.importance,
+            read_receipt: self.read_receipt,
         }
     }
 
@@ -470,6 +476,9 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                         pick = true;
                     }
                     crate::importance::chooser(ui, t, &mut c.importance);
+                    ui.checkbox(&mut c.read_receipt, crate::receipt::ASK).on_hover_text(
+                        "Vraagt het mailprogramma van de ontvanger om je te laten weten dat het bericht is geopend; de ontvanger beslist zelf of dat gebeurt.",
+                    );
                     template = crate::templates::menu(ui, &app.engine.session.templates_sorted());
                     if sending {
                         ui.label(RichText::new("Verzenden…").color(t.text_dim));
@@ -744,6 +753,9 @@ mod tests {
         h.get_by_label("! Hoge urgentie");
         assert_eq!(h.state().compose.as_ref().map(|c| c.as_stored().importance), Some(Importance::High));
         assert_eq!(h.state().compose.as_ref().and_then(|c| c.as_stored().to_draft().ok()).map(|d| d.importance), None, "no recipient yet");
+        h.get_by_label(crate::receipt::ASK).click();
+        h.run();
+        assert_eq!(h.state().compose.as_ref().map(|c| (c.read_receipt, c.as_stored().read_receipt)), Some((true, true)));
     }
 
     #[test]
@@ -949,13 +961,15 @@ mod tests {
         assert!(!written.is_blank());
         written.attachments.push(DraftAttachment::new("a.txt", b"x".to_vec()));
         written.importance = Importance::Low;
+        written.read_receipt = true;
         let stored = written.as_stored();
-        assert_eq!(stored.importance, Importance::Low);
+        assert_eq!((stored.importance, stored.read_receipt), (Importance::Low, true));
         assert_eq!((stored.id.as_str(), stored.account_id.as_str(), stored.to.as_str()), ("", "acc", "Sanne <sanne@example.org>"));
         assert_eq!(stored.in_reply_to.as_deref(), Some("<x@example.org>"));
         let again = Compose::from_stored(&StoredDraft { id: "d-1".into(), ..stored });
         assert_eq!((again.stored.as_deref(), again.subject.as_str(), again.attachments.len()), (Some("d-1"), "Re: Planning", 1));
         assert_eq!(again.importance, Importance::Low, "the urgency comes back with the draft");
+        assert!(again.read_receipt, "so does the request for a read receipt");
         assert!(again.body.starts_with("Prima."));
         let mut emptied = again;
         emptied.to.clear();
