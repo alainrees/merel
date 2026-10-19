@@ -3065,6 +3065,24 @@ mod tests {
     }
 
     #[test]
+    fn unticking_a_calendar_hides_its_appointments_until_it_is_ticked_again() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.state_mut().calendar.query = "sanne".into();
+        h.run();
+        assert!(h.query_by_label("Lunch met Sanne").is_some(), "the appointment shows while its calendar is ticked");
+        h.get_by_label("Mijn agenda").click();
+        h.run();
+        assert_eq!(h.state().view.hidden_calendars, vec!["local".to_string()], "the calendar is remembered as hidden");
+        assert!(h.query_by_label("Lunch met Sanne").is_none(), "the appointment is gone while its calendar is unticked");
+        assert!(h.query_by_label_contains("Geen afspraak gevonden").is_some());
+        h.get_by_label("Mijn agenda").click();
+        h.run();
+        assert!(h.state().view.hidden_calendars.is_empty());
+        assert!(h.query_by_label("Lunch met Sanne").is_some(), "ticking the calendar again brings the appointment back");
+    }
+
+    #[test]
     fn the_calendar_and_tasks_search_boxes_narrow_what_is_shown() {
         use egui::{Key, Modifiers};
         let mut h = harness();
