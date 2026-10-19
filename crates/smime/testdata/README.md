@@ -12,3 +12,8 @@ All are valid from 19 October 2026 for a hundred years.
   "Ec Tester" <ec@example.org> (ECDSA P-256); `signed-tampered.eml` is the first with its text changed afterwards.
 - `encrypted-openssl.eml`, `encrypted-oaep.eml`: mail for "Jij Tester" encrypted by OpenSSL with AES-256-CBC, the key
   wrapped with RSAES-PKCS1-v1_5 and with RSAES-OAEP.
+- `ca.der`, `jij.der`: the test CA and "Jij Tester" as DER. `sub-ca.der`: "Mailcraft Test Sub CA", an intermediate
+  issued by the test CA; `sanne.der`: "Sanne Tester" <sanne@example.org>, issued by the intermediate.
+  `forged.der`: a self-signed certificate claiming "Jij Tester" <jij@example.org>, which no trusted issuer made.
+- `signed-chain.eml`: signed by Sanne with the intermediate enclosed; `signed-forged.eml`: signed with the forged
+  certificate, From jij@example.org.

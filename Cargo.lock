@@ -2577,6 +2577,7 @@ dependencies = [
  "mailcraft-smime",
  "mailcraft-smtp",
  "mailcraft-store",
+ "rustls-native-certs 0.8.5",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
