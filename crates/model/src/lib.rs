@@ -339,9 +339,30 @@ pub struct StoredDraft {
     /// Seconds since the Unix epoch when it was last put aside.
     #[serde(default)]
     pub updated: i64,
+    /// Set for a message that waits to go out at this moment (seconds since the Unix epoch),
+    /// the way Outlook's "Bezorging uitstellen" keeps a message in the Outbox until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_at: Option<i64>,
 }
 
 impl StoredDraft {
+    /// The message as it would go out: the address lines parsed, at least one recipient.
+    pub fn to_draft(&self) -> Result<Draft, String> {
+        let to = parse_address_list(&self.to).map_err(|_| "Controleer de adressen bij Aan.".to_string())?;
+        let cc = parse_address_list(&self.cc).map_err(|_| "Controleer de adressen bij CC.".to_string())?;
+        if to.is_empty() {
+            return Err("Vul ten minste één ontvanger in bij Aan.".into());
+        }
+        Ok(Draft {
+            to,
+            cc,
+            subject: self.subject.clone(),
+            body: self.body.clone(),
+            in_reply_to: self.in_reply_to.clone(),
+            attachments: self.attachments.clone(),
+        })
+    }
+
     /// Cleans the free text so it is safe to store and show; the body keeps its line breaks.
     pub fn cleaned(mut self) -> Self {
         self.to = clean_text(self.to.trim());
