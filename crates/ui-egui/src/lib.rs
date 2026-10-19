@@ -389,6 +389,12 @@ impl MailApp {
 /// The search box's widget id, so a shortcut can put the cursor there.
 const SEARCH_BOX: &str = "message_search_box";
 
+/// The button under the blocked-pictures notice that puts the sender on the safe senders list,
+/// so their pictures load from then on without asking, as Outlook does for Safe Senders.
+pub(crate) const ALWAYS_FROM_SENDER: &str = "Altijd van deze afzender";
+pub(crate) const SAFE_IMAGES_NOTICE: &str =
+    "🛡 De afbeeldingen van internet worden geladen omdat de afzender op je lijst met veilige afzenders staat.";
+
 /// The two search keys in the calendar, contacts and tasks modules: Ctrl+E (Cmd+E on a Mac)
 /// puts the cursor in the module's search box, and Esc, once no text field has the keyboard,
 /// clears it.
@@ -1615,10 +1621,22 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     let rich = body.as_ref().and_then(|b| b.rich.as_ref());
     let blocked = rich.map(|d| d.remote_images).unwrap_or(0);
+    // A sender the person put on the safe senders list gets their pictures without asking, as
+    // Outlook does for its Safe Senders; contacts do not count, this list is chosen on purpose.
+    let safe_sender = app.engine.session.junk.is_safe(m.from.email());
+    if blocked > 0
+        && !in_junk
+        && safe_sender
+        && !app.remote.allowed(&message_id)
+        && let Some(doc) = rich
+    {
+        app.remote.allow(ui.ctx(), &message_id, doc);
+    }
     let allowed = app.remote.allowed(&message_id);
     // Privacy: nothing in a message runs or loads; pictures on the internet stay blocked until
     // the person asks for them, for this one message.
     let notice = match (rich, body.as_ref().is_some_and(|b| b.from_html)) {
+        (Some(_), _) if blocked > 0 && allowed && safe_sender => Some(SAFE_IMAGES_NOTICE),
         (Some(_), _) if blocked > 0 && allowed => Some("🛡 De afbeeldingen van internet in dit bericht worden geladen omdat je daarom vroeg."),
         (Some(_), _) if blocked > 0 => Some("🛡 Afbeeldingen van internet zijn geblokkeerd om je privacy te beschermen."),
         (Some(_), _) => None,
@@ -1627,6 +1645,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     };
     if let Some(notice) = notice {
         let mut load = false;
+        let mut always = false;
         egui::Frame::NONE.fill(t.checked).corner_radius(CornerRadius::same(4)).inner_margin(Margin::symmetric(10, 6)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(notice).size(12.0).color(t.text));
@@ -1635,10 +1654,21 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         .small_button("Afbeeldingen laden")
                         .on_hover_text("Haalt de afbeeldingen van dit ene bericht op van internet. De afzender kan daaraan zien dat je het bericht hebt geopend.")
                         .clicked();
+                    always = ui
+                        .small_button(ALWAYS_FROM_SENDER)
+                        .on_hover_text(
+                            "Zet de afzender op je lijst met veilige afzenders (venster Ongewenste e-mail) en laadt de afbeeldingen van die afzender voortaan zonder te vragen.",
+                        )
+                        .clicked();
                 }
             });
         });
-        if load && let Some(doc) = rich {
+        if always {
+            app.run("junk.trust", serde_json::json!({ "id": message_id }));
+        }
+        if (load || always)
+            && let Some(doc) = rich
+        {
             app.remote.allow(ui.ctx(), &message_id, doc);
         }
         ui.add_space(8.0);
@@ -2433,6 +2463,33 @@ mod tests {
     }
 
     #[test]
+    fn pictures_from_a_safe_sender_load_without_asking_once_the_person_says_always() {
+        let mut h = harness();
+        let body = mailcraft_engine::Body {
+            rich: Some(mailcraft_html::parse(r#"<p><img src="https://t.example/p.gif" alt="pixel"></p>"#)),
+            ..Default::default()
+        };
+        h.state_mut().engine.session.bodies.insert("m1".into(), body);
+        h.state_mut().engine.session.selected_message = Some("m1".into());
+        h.run();
+        h.get_by_label("Afbeeldingen laden");
+        h.get_by_label(ALWAYS_FROM_SENDER).click();
+        h.run();
+        let from = h.state().engine.session.message("m1").expect("sample mail").from.email().to_string();
+        assert!(h.state().engine.session.junk.is_safe(&from), "the sender is on the safe list");
+        assert!(h.state().remote.allowed("m1"));
+        h.get_by_label_contains(SAFE_IMAGES_NOTICE);
+        // Another message, then back: the pictures load without a click.
+        h.state_mut().engine.session.selected_message = Some("m2".into());
+        h.run();
+        assert!(!h.state().remote.allowed("m1"));
+        h.state_mut().engine.session.selected_message = Some("m1".into());
+        h.run();
+        assert!(h.state().remote.allowed("m1"), "a safe sender's pictures load on their own");
+        assert!(h.query_by_label("Afbeeldingen laden").is_none());
+    }
+
+    #[test]
     fn links_attachments_and_pictures_are_switched_off_in_the_junk_folder() {
         use egui_kittest::kittest::NodeT;
         let mut h = harness();
@@ -2468,7 +2525,9 @@ mod tests {
         h.run();
         assert!(h.query_by_label(JUNK_NOTICE).is_none());
         assert!(!h.get_by_label_contains("bon.pdf").accesskit_node().is_disabled());
-        assert!(h.query_by_label("Afbeeldingen laden").is_some());
+        // "Geen ongewenst" put the sender on the safe list, so the pictures now load unasked.
+        assert!(h.query_by_label("Afbeeldingen laden").is_none());
+        h.get_by_label_contains(SAFE_IMAGES_NOTICE);
     }
 
     #[test]

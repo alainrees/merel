@@ -20,7 +20,7 @@ The Outlook-style window (ribbon, module rail, folder pane, message list, readin
 built-in sample mail, and reading mail from an IMAP account: add it under File › Accounts,
 browse folders, open messages (plain text, or HTML drawn with its headings, lists, tables, links
 and embedded pictures, while pictures on the internet stay blocked until you click "Afbeeldingen
-laden" for that one message; a click on an attachment saves it to your Downloads folder ("Alle bijlagen opslaan" after the
+laden" for that one message, or "Altijd van deze afzender", which puts the sender on the safe senders list so their pictures load from then on without asking, as Outlook does for Safe Senders; a click on an attachment saves it to your Downloads folder ("Alle bijlagen opslaan" after the
 attachments saves every one of a message with several, each under its own name, as in Outlook), and a picture attachment
 also shows a thumbnail that opens a preview window, as in Outlook; a meeting invitation (a `text/calendar` part)
 gets a strip with the appointment, its time, place and organiser and "Aan agenda toevoegen", which opens the
