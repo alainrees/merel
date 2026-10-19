@@ -128,7 +128,7 @@ The "Beeld" tab chooses what the list shows and how: only unread, flagged or mai
 attachments, or only mail with a chosen category; sorted newest or oldest first, by sender or by subject; the reading pane to the
 right or below the list; compact rows without the preview line; "Gesprekken", which folds the messages on one
 subject (whatever their "Re:" or "Fwd:" prefixes) behind the one that stands first in the list, with an arrow to
-unfold them; and a light, dark or system theme. The choices are kept in `view.json` next to the accounts file.
+unfold them; and a light, dark or system theme. "Groepen" (on by default) heads the list with "Vandaag", "Gisteren", "Deze week", "Vorige week", "Deze maand", "Vorige maand" and "Ouder" while it is sorted by date, as Outlook does. The choices are kept in `view.json` next to the accounts file.
 
 "Afdrukken" under "Bestand" (or Ctrl+P) prints the open message by way of the system browser: Mailcraft writes a
 page of its own (sender, recipients, date, subject, attachment names and the body as it drew it,
