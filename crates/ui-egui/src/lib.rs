@@ -24,6 +24,7 @@ pub mod remote;
 pub mod rules;
 pub mod tasks;
 mod theme;
+pub mod unsubscribe;
 pub mod view;
 
 use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
@@ -122,6 +123,8 @@ pub struct MailApp {
     pub move_to: bool,
     /// The window for a new, renamed or removed folder, while it is open.
     pub folder_edit: Option<folders::FolderEdit>,
+    /// The "Afmelden" question, while it is open.
+    pub unsubscribe: Option<unsubscribe::Confirm>,
     /// The "Alle categorieën" window, while it is open.
     pub categories: Option<categories::Manager>,
     /// The open help window ("Help" tab), if any.
@@ -215,6 +218,7 @@ impl MailApp {
             contacts: contacts::State::default(),
             tasks: tasks::State::default(),
             notice: None,
+            unsubscribe: None,
             shown_message: None,
             remote: remote::RemoteImages::default(),
             drafts_for: None,
@@ -295,6 +299,7 @@ impl MailApp {
         quicksteps::window(self, &ctx, &t);
         move_window(self, &ctx, &t);
         folders::window(self, &ctx, &t);
+        unsubscribe::window(self, &ctx, &t);
         categories::window(self, &ctx, &t);
         help::window(self, &ctx, &t);
         drag_preview(self, &ctx, &t);
@@ -1370,6 +1375,25 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             return;
         }
     }
+    // A list's mail offers the way off it, as Outlook does; not in the Junk folder, where the
+    // header is not to be trusted.
+    if !in_junk && let Some(targets) = body.as_ref().map(|b| b.unsubscribe.as_slice()).filter(|u| !u.is_empty()) {
+        let mut ask = false;
+        egui::Frame::new().fill(t.checked).corner_radius(4).inner_margin(8).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(unsubscribe::STRIP).color(t.text));
+                ask = ui
+                    .small_button("Afmelden…")
+                    .on_hover_text("Vraagt eerst wat er gebeurt: een e-mail aan de afzender of een pagina in de browser.")
+                    .clicked();
+            });
+        });
+        ui.add_space(8.0);
+        if ask {
+            let targets = targets.to_vec();
+            app.ask_unsubscribe(&message_id, m.from.display(), &targets);
+        }
+    }
     let rich = body.as_ref().and_then(|b| b.rich.as_ref());
     let blocked = rich.map(|d| d.remote_images).unwrap_or(0);
     let allowed = app.remote.allowed(&message_id);
@@ -1966,6 +1990,37 @@ mod tests {
         h.get_by_label("Start").click();
         h.run();
         assert!(h.query_by_label("Vandaag").is_none());
+    }
+
+    #[test]
+    fn a_newsletter_offers_afmelden_and_asks_before_the_mail_goes_out() {
+        let mut h = harness();
+        {
+            let s = &mut h.state_mut().engine.session;
+            let body = mailcraft_engine::Body {
+                text: "Nieuws".into(),
+                unsubscribe: vec!["https://example.org/u".into(), "mailto:leave@example.org?subject=stop".into()],
+                ..Default::default()
+            };
+            s.bodies.insert("m3".into(), body);
+            s.selected_message = Some("m3".into());
+        }
+        h.run();
+        h.get_by_label(unsubscribe::STRIP);
+        h.get_by_label("Afmelden…").click();
+        h.run();
+        let c = h.state().unsubscribe.clone().expect("the question is open");
+        assert!(matches!(c.way, unsubscribe::Way::Mail { ref subject, .. } if subject == "stop"), "mail comes before the web page");
+        h.get_by_label("Annuleren").click();
+        h.run();
+        assert!(h.state().unsubscribe.is_none() && h.state().engine.session.outbox.is_empty());
+        h.get_by_label("Afmelden…").click();
+        h.run();
+        h.get_by_label("Ja, afmelden").click();
+        h.run();
+        assert!(h.state().unsubscribe.is_none());
+        assert_eq!(h.state().engine.session.outbox.len(), 1, "the request was handed to the outbox");
+        assert!(h.state().notice.is_some(), "the sample account cannot send, and the person hears so");
     }
 
     #[test]
