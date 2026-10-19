@@ -658,6 +658,11 @@ impl Session {
         self.folders.iter().find(|f| f.account_id == account_id && f.kind == kind)
     }
 
+    /// Unread mail in the inbox of every account together, for the window title.
+    pub fn inbox_unread(&self) -> u32 {
+        self.folders.iter().filter(|f| f.kind == FolderKind::Inbox).map(|f| f.unread).fold(0, u32::saturating_add)
+    }
+
     fn recount_unread(&mut self) {
         for f in &mut self.folders {
             let n = self.messages.iter().filter(|m| m.folder_id == f.id && !m.flags.seen).count();
@@ -1267,6 +1272,21 @@ mod tests {
             date: i64::from(n),
             categories: Vec::new(),
         }
+    }
+
+    #[test]
+    fn the_inbox_unread_count_sums_every_account_and_follows_the_flags() {
+        let mut s = Session::sample();
+        let before = s.inbox_unread();
+        assert!(before > 0, "the sample inbox has unread mail");
+        assert_eq!(before, s.folder("inbox").map(|f| f.unread).unwrap_or(0));
+        let other: Vec<String> = s.folders.iter().filter(|f| f.kind != FolderKind::Inbox).map(|f| f.id.clone()).collect();
+        for id in &other {
+            s.run("folder.mark_all_read", &serde_json::json!({ "id": id })).unwrap();
+        }
+        assert_eq!(s.inbox_unread(), before, "other folders do not count");
+        s.run("folder.mark_all_read", &serde_json::json!({ "id": "inbox" })).unwrap();
+        assert_eq!(s.inbox_unread(), 0);
     }
 
     #[test]
