@@ -9,10 +9,10 @@ use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate, NaiveDateTime, 
 use egui::{Align2, Color32, CornerRadius, FontId, Margin, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
-use mailcraft_engine::CommandError;
-use mailcraft_model::{Appointment, Frequency, Recurrence, describe_recurrence};
+use mailcraft_engine::{CommandError, tasks::TaskFilter};
+use mailcraft_model::{Appointment, Frequency, Recurrence, Task, describe_recurrence};
 
-use crate::{MailApp, Tokens};
+use crate::{MailApp, Module, Tokens};
 
 pub const MONTHS: [&str; 12] =
     ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"];
@@ -74,11 +74,11 @@ pub fn today() -> NaiveDate {
     Local::now().date_naive()
 }
 
-fn month_name(m: u32) -> &'static str {
+pub(crate) fn month_name(m: u32) -> &'static str {
     MONTHS.get(m.saturating_sub(1) as usize).copied().unwrap_or("")
 }
 
-fn weekday_name(d: NaiveDate) -> &'static str {
+pub(crate) fn weekday_name(d: NaiveDate) -> &'static str {
     WEEKDAYS[d.weekday().num_days_from_monday() as usize]
 }
 
@@ -352,6 +352,14 @@ impl MailApp {
         self.notice = self.engine.run("appointment.move", &json!({ "id": id, "start": start })).err().map(|e| describe(&e));
     }
 
+    /// A task was dropped on `day` (at `time` in the hour grid): the appointment window opens
+    /// for it, filled in from the task, to be saved by the person.
+    pub fn plan_task(&mut self, id: &str, day: NaiveDate, time: Option<NaiveTime>) {
+        let Some(task) = self.engine.session.task(id) else { return };
+        self.calendar.focus = day;
+        self.calendar.editor = Some(planned(task, day, time));
+    }
+
     /// The bottom edge of `id` was let go: the end it was dragged to becomes the appointment's,
     /// unless nothing changed. What went wrong becomes a notice.
     pub fn finish_resize(&mut self, id: &str) {
@@ -489,7 +497,57 @@ fn side_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ui.label(RichText::new(&c.name).color(t.text));
                 });
             }
+            task_list(app, ui, t);
         });
+}
+
+/// How many open tasks the calendar's side pane lists.
+const SIDE_TASKS: usize = 12;
+
+/// The open tasks under the calendars, each a drag source: dropped on a day or an hour, a task
+/// becomes a new appointment. A click opens the task in the tasks module.
+fn task_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let tasks: Vec<Task> = app.engine.session.tasks_filtered(TaskFilter::Open).into_iter().take(SIDE_TASKS).cloned().collect();
+    if tasks.is_empty() {
+        return;
+    }
+    ui.add_space(14.0);
+    ui.label(RichText::new("Taken").size(12.0).strong().color(t.text_dim))
+        .on_hover_text("Sleep een taak naar een dag of uur om er een afspraak voor in te plannen.");
+    ui.add_space(4.0);
+    let mut pick = None;
+    for task in &tasks {
+        let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click_and_drag());
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &task.title));
+        r.dnd_set_drag_payload(DraggedTask(task.id.clone()));
+        if r.hovered() {
+            ui.painter().rect_filled(rect, CornerRadius::same(3), t.hover);
+        }
+        let p = ui.painter();
+        p.rect_stroke(
+            Rect::from_center_size(pos2(rect.left() + 9.0, rect.center().y), vec2(12.0, 12.0)),
+            CornerRadius::same(2),
+            Stroke::new(1.2, t.text_dim),
+            egui::StrokeKind::Inside,
+        );
+        let text_rect = Rect::from_min_max(pos2(rect.left() + 22.0, rect.top()), rect.right_bottom());
+        let galley = p.layout_no_wrap(task.title.clone(), FontId::proportional(12.5), t.text);
+        p.with_clip_rect(text_rect).galley(pos2(text_rect.left(), rect.center().y - galley.size().y / 2.0), galley, t.text);
+        if r.clicked() {
+            pick = Some(task.id.clone());
+        }
+    }
+    if let Some(id) = pick {
+        app.run("task.select", json!({ "id": id }));
+        app.module = Module::Tasks;
+    }
+}
+
+/// The appointment window for `task` on `day`: at `time` for an hour when the drop named one
+/// (a spot in the hour grid), else the whole day. The task's title and notes come along.
+fn planned(task: &Task, day: NaiveDate, time: Option<NaiveTime>) -> Editor {
+    let start = day.and_time(time.unwrap_or_else(|| NaiveTime::from_hms_opt(9, 0, 0).unwrap_or(NaiveTime::MIN)));
+    Editor { title: task.title.clone(), notes: task.notes.clone(), all_day: time.is_none(), ..Editor::new_at(start) }
 }
 
 fn appointment_color(app: &MailApp, a: &Appointment, t: &Tokens) -> Color32 {
@@ -498,6 +556,32 @@ fn appointment_color(app: &MailApp, a: &Appointment, t: &Tokens) -> Color32 {
 
 /// What is being dragged: one appointment, by id. A series is never dragged.
 pub(crate) struct DraggedAppointment(String);
+
+/// A task dragged from the side pane, by id, to plan it as an appointment.
+pub(crate) struct DraggedTask(String);
+
+/// What was let go over a drop target.
+enum Dropped {
+    Appointment(String),
+    Task(String),
+}
+
+/// Whether something that can land on a day or an hour is held over `r`.
+fn drop_hover(r: &egui::Response) -> bool {
+    r.dnd_hover_payload::<DraggedAppointment>().is_some() || r.dnd_hover_payload::<DraggedTask>().is_some()
+}
+
+/// What was dropped on `r` this frame. The payload's type is looked at before it is taken:
+/// taking it as the wrong type would throw it away, and a target accepts both kinds.
+fn dropped(r: &egui::Response) -> Option<Dropped> {
+    if egui::DragAndDrop::has_payload_of_type::<DraggedAppointment>(&r.ctx) {
+        r.dnd_release_payload::<DraggedAppointment>().map(|a| Dropped::Appointment(a.0.clone()))
+    } else if egui::DragAndDrop::has_payload_of_type::<DraggedTask>(&r.ctx) {
+        r.dnd_release_payload::<DraggedTask>().map(|t| Dropped::Task(t.0.clone()))
+    } else {
+        None
+    }
+}
 
 /// The drag payload for a block, when the appointment can be dragged.
 fn draggable(a: &Appointment) -> Option<DraggedAppointment> {
@@ -577,6 +661,7 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let mut open: Option<(String, i64)> = None;
     let mut pick_day: Option<NaiveDate> = None;
     let mut drop: Option<(String, NaiveDate)> = None;
+    let mut task_drop: Option<(String, NaiveDate)> = None;
     let mut day = start;
     for _ in 0..6 {
         ui.horizontal(|ui| {
@@ -591,9 +676,11 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     )
                 });
                 let in_month = day.month() == focus.month();
-                let drop_here = r.dnd_hover_payload::<DraggedAppointment>().is_some();
-                if let Some(dragged) = r.dnd_release_payload::<DraggedAppointment>() {
-                    drop = Some((dragged.0.clone(), day));
+                let drop_here = drop_hover(&r);
+                match dropped(&r) {
+                    Some(Dropped::Appointment(id)) => drop = Some((id, day)),
+                    Some(Dropped::Task(id)) => task_drop = Some((id, day)),
+                    None => {}
                 }
                 let p = ui.painter();
                 p.rect_filled(
@@ -650,7 +737,9 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
         });
     }
-    if let Some((id, day)) = drop {
+    if let Some((id, day)) = task_drop {
+        app.plan_task(&id, day, None);
+    } else if let Some((id, day)) = drop {
         app.drop_appointment(&id, day, None);
     } else if let Some((id, start)) = open {
         app.open_appointment(&id, start);
@@ -669,6 +758,7 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
     let mut open: Option<(String, i64)> = None;
     let mut new_at: Option<(NaiveDate, u32)> = None;
     let mut drop: Option<(String, NaiveDate, Option<NaiveTime>)> = None;
+    let mut task_drop: Option<(String, NaiveDate, Option<NaiveTime>)> = None;
     let mut resize: Option<Resizing> = None;
     let mut resized: Option<String> = None;
     let resizing = app.calendar.resizing.clone();
@@ -698,11 +788,13 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
         for i in 0..days {
             let d = add_days(first, i);
             let (rect, r) = ui.allocate_exact_size(vec2(col_w, strip_h), Sense::hover());
-            if r.dnd_hover_payload::<DraggedAppointment>().is_some() {
+            if drop_hover(&r) {
                 ui.painter().rect_filled(rect, CornerRadius::ZERO, t.hover);
             }
-            if let Some(dragged) = r.dnd_release_payload::<DraggedAppointment>() {
-                drop = Some((dragged.0.clone(), d, None));
+            match dropped(&r) {
+                Some(Dropped::Appointment(id)) => drop = Some((id, d, None)),
+                Some(Dropped::Task(id)) => task_drop = Some((id, d, None)),
+                None => {}
             }
             ui.painter().rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
             if let (Some(from), Some(to)) = (midnight(d), midnight(add_days(d, 1))) {
@@ -741,7 +833,7 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                 new_at = Some((d, hour));
             }
             let pointer = ui.input(|i| i.pointer.latest_pos());
-            if r.dnd_hover_payload::<DraggedAppointment>().is_some()
+            if drop_hover(&r)
                 && let Some(pos) = pointer
             {
                 // The half hour the block would land in.
@@ -749,10 +841,12 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                 let y = grid.top() + (tm.hour() as f32 + tm.minute() as f32 / 60.0) * HOUR_HEIGHT;
                 ui.painter().rect_filled(Rect::from_min_size(pos2(x, y), vec2(col_w, HOUR_HEIGHT / 2.0)), CornerRadius::ZERO, t.hover);
             }
-            if let Some(dragged) = r.dnd_release_payload::<DraggedAppointment>()
-                && let Some(pos) = pointer
-            {
-                drop = Some((dragged.0.clone(), d, Some(grid_time(pos.y, grid.top()))));
+            if let Some(pos) = pointer {
+                match dropped(&r) {
+                    Some(Dropped::Appointment(id)) => drop = Some((id, d, Some(grid_time(pos.y, grid.top())))),
+                    Some(Dropped::Task(id)) => task_drop = Some((id, d, Some(grid_time(pos.y, grid.top())))),
+                    None => {}
+                }
             }
             let (Some(from), Some(to)) = (midnight(d), midnight(add_days(d, 1))) else { continue };
             let items: Vec<Appointment> = app.engine.session.appointments_between(from, to).into_iter().filter(|a| !a.all_day).collect();
@@ -799,6 +893,8 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
     }
     if let Some(id) = resized {
         app.finish_resize(&id);
+    } else if let Some((id, day, time)) = task_drop {
+        app.plan_task(&id, day, time);
     } else if let Some((id, day, time)) = drop {
         app.drop_appointment(&id, day, time);
     } else if let Some((id, start)) = open {
@@ -809,14 +905,19 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
     }
 }
 
-/// A small label that follows the pointer while an appointment is dragged.
+/// A small label that follows the pointer while an appointment or a task is dragged.
 pub fn drag_preview(app: &MailApp, ctx: &egui::Context, t: &Tokens) {
-    let Some(dragged) = egui::DragAndDrop::payload::<DraggedAppointment>(ctx) else { return };
+    let text = if let Some(dragged) = egui::DragAndDrop::payload::<DraggedAppointment>(ctx) {
+        format!("📅 {}", app.engine.session.appointment(&dragged.0).map(|a| a.title.clone()).unwrap_or_default())
+    } else if let Some(task) = egui::DragAndDrop::payload::<DraggedTask>(ctx) {
+        format!("✔ {}", app.engine.session.task(&task.0).map(|a| a.title.clone()).unwrap_or_default())
+    } else {
+        return;
+    };
     let Some(pos) = ctx.pointer_interact_pos() else { return };
-    let title = app.engine.session.appointment(&dragged.0).map(|a| a.title.clone()).unwrap_or_default();
     egui::Area::new(egui::Id::new("appointment-drag-preview")).fixed_pos(pos + vec2(12.0, 12.0)).order(egui::Order::Tooltip).show(ctx, |ui| {
         egui::Frame::popup(ui.style()).fill(t.list).show(ui, |ui| {
-            ui.label(RichText::new(format!("📅 {title}")).color(t.text));
+            ui.label(RichText::new(text).color(t.text));
         });
     });
 }
@@ -1172,6 +1273,12 @@ mod tests {
 
         let at = |h, m| NaiveTime::from_hms_opt(h, m, 0).unwrap();
         assert_eq!(resized_end(&a, d(2026, 10, 21), at(15, 30)), Some(base + 2 * 3_600), "the end of the half hour under the pointer");
+        let task = Task { id: "t".into(), title: "Offerte".into(), notes: "voor Ravi".into(), ..Task::default() };
+        let e = planned(&task, d(2026, 10, 23), Some(at(9, 30)));
+        assert_eq!((e.title.as_str(), e.notes.as_str(), e.all_day), ("Offerte", "voor Ravi", false));
+        assert_eq!((e.start_date.as_str(), e.start_time.as_str(), e.end_time.as_str()), ("23-10-2026", "09:30", "10:30"), "an hour at the drop");
+        let e = planned(&task, d(2026, 10, 23), None);
+        assert!(e.all_day && e.start_date == "23-10-2026" && e.id.is_none(), "a day drop plans the whole day");
         assert_eq!(resized_end(&a, d(2026, 10, 21), at(14, 0)), Some(base + 1_800), "shortened to the first half hour");
         assert_eq!(resized_end(&a, d(2026, 10, 21), at(9, 0)), Some(base + 1_800), "never before half an hour after the start");
     }
