@@ -8,6 +8,7 @@
 //! own, at growing intervals, until it is back.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread;
 use std::time::Duration;
@@ -21,6 +22,7 @@ use mailcraft_mailbox::{Mailbox, MailboxError};
 use mailcraft_model::{Account, Protocol, Server};
 use mailcraft_smtp::SmtpError;
 
+use crate::certificates::{Identities, sign_if_asked};
 use crate::signin::Credentials;
 use crate::{Event, Job};
 
@@ -32,11 +34,13 @@ const MAX_RETRY: Duration = Duration::from_secs(5 * 60);
 pub struct Worker {
     events: Sender<Event>,
     accounts: HashMap<String, Sender<Job>>,
+    identities: Identities,
 }
 
 impl Worker {
-    pub fn new(events: Sender<Event>) -> Self {
-        Worker { events, accounts: HashMap::new() }
+    /// `identities` are the accounts' S/MIME certificates, read when a message goes out.
+    pub fn new(events: Sender<Event>, identities: Identities) -> Self {
+        Worker { events, accounts: HashMap::new(), identities }
     }
 
     /// A sender for events from threads the engine starts itself.
@@ -50,7 +54,8 @@ impl Worker {
         let events = self.events.clone();
         let id = account.id.clone();
         let name = format!("mailbox-{id}");
-        if thread::Builder::new().name(name).spawn(move || serve(account, credentials, rx, events)).is_ok() {
+        let identities = Arc::clone(&self.identities);
+        if thread::Builder::new().name(name).spawn(move || serve(account, credentials, identities, rx, events)).is_ok() {
             self.accounts.insert(id, tx);
         } else {
             let _ = self.events.send(Event::Failed { account_id: id, what: "Kon geen achtergrondtaak starten.".into() });
@@ -119,7 +124,7 @@ fn longer(wait: Option<Duration>) -> Option<Duration> {
     Some(wait.map_or(FIRST_RETRY, |w| (w * 2).min(MAX_RETRY)))
 }
 
-fn serve(account: Account, mut credentials: Credentials, jobs: Receiver<Job>, events: Sender<Event>) {
+fn serve(account: Account, mut credentials: Credentials, identities: Identities, jobs: Receiver<Job>, events: Sender<Event>) {
     let Some(server) = account.incoming.clone() else {
         let _ = events.send(Event::Failed { account_id: account.id, what: "Dit account heeft geen inkomende server.".into() });
         return;
@@ -140,7 +145,7 @@ fn serve(account: Account, mut credentials: Credentials, jobs: Receiver<Job>, ev
                     // Nobody asked for anything; see whether the server is back. Connecting
                     // reports the folders, and the engine replays the offline queue.
                     match connect(&account, &server, &mut credentials) {
-                        Ok(mut c) => match run(c.as_mut(), &account, &Job::Connect { account_id: account.id.clone() }) {
+                        Ok(mut c) => match run(c.as_mut(), &account, &identities, &Job::Connect { account_id: account.id.clone() }) {
                             Ok(ev) => {
                                 if let Some(ev) = ev {
                                     let _ = events.send(ev);
@@ -167,7 +172,7 @@ fn serve(account: Account, mut credentials: Credentials, jobs: Receiver<Job>, ev
         if let Job::Send { draft_id, draft, sent_path, .. } = &job
             && account.outgoing.is_some()
         {
-            let result = send_smtp(&account, &mut credentials, draft).map(|raw| {
+            let result = send_smtp(&account, &mut credentials, &identities, draft).map(|raw| {
                 // A copy in Sent is nice to have; a failure there must not undo a successful send.
                 if let (Some(path), Some(c)) = (sent_path, client.as_mut())
                     && let Err(e) = c.append(path, &raw)
@@ -195,7 +200,7 @@ fn serve(account: Account, mut credentials: Credentials, jobs: Receiver<Job>, ev
                 }
             }
             let Some(c) = client.as_mut() else { break };
-            match run(c.as_mut(), &account, &job) {
+            match run(c.as_mut(), &account, &identities, &job) {
                 Ok(Some(ev)) => {
                     retry = None;
                     let _ = events.send(ev);
@@ -225,13 +230,15 @@ fn serve(account: Account, mut credentials: Credentials, jobs: Receiver<Job>, ev
     }
 }
 
-/// Builds and sends `draft` over SMTP; returns the bytes that went out, for the Sent folder.
-fn send_smtp(account: &Account, credentials: &mut Credentials, draft: &mailcraft_model::Draft) -> Result<Vec<u8>, String> {
+/// Builds, signs when asked, and sends `draft` over SMTP; returns the bytes that went out, for
+/// the Sent folder.
+fn send_smtp(account: &Account, credentials: &mut Credentials, identities: &Identities, draft: &mailcraft_model::Draft) -> Result<Vec<u8>, String> {
     let server = account.outgoing.as_ref().ok_or_else(|| "Dit account heeft geen uitgaande server.".to_string())?;
     let message = mailcraft_smtp::build(&account.address, draft).map_err(|e| describe_smtp(&e))?;
+    let raw = sign_if_asked(identities, account, draft.sign, message.formatted())?;
     let credential = credentials.smtp()?;
-    mailcraft_smtp::send(server, &account.username, &credential, &message).map_err(|e| describe_smtp(&e))?;
-    Ok(message.formatted())
+    mailcraft_smtp::send_raw(server, &account.username, &credential, &message, &raw).map_err(|e| describe_smtp(&e))?;
+    Ok(raw)
 }
 
 fn connect(account: &Account, server: &Server, credentials: &mut Credentials) -> Result<Box<dyn Mailbox>, String> {
@@ -264,7 +271,7 @@ fn uses_graph(account: &Account) -> bool {
     matches!(&account.auth, mailcraft_model::Auth::OAuth2 { scope, .. } if scope.contains("graph.microsoft.com"))
 }
 
-fn run(c: &mut dyn Mailbox, account: &Account, job: &Job) -> Result<Option<Event>, MailboxError> {
+fn run(c: &mut dyn Mailbox, account: &Account, identities: &Identities, job: &Job) -> Result<Option<Event>, MailboxError> {
     Ok(match job {
         Job::Connect { account_id } => {
             let folders = c.folders()?;
@@ -338,12 +345,15 @@ fn run(c: &mut dyn Mailbox, account: &Account, job: &Job) -> Result<Option<Event
         }
         // Only reached for a store that sends itself; SMTP accounts are served in `serve`.
         Job::Send { draft_id, draft, .. } => {
-            let result = match mailcraft_smtp::build(&account.address, draft) {
-                Ok(message) => match c.send(&message.formatted())? {
+            let signed = mailcraft_smtp::build(&account.address, draft)
+                .map_err(|e| describe_smtp(&e))
+                .and_then(|message| sign_if_asked(identities, account, draft.sign, message.formatted()));
+            let result = match signed {
+                Ok(raw) => match c.send(&raw)? {
                     true => Ok(()),
                     false => Err("Dit account heeft geen uitgaande server.".to_string()),
                 },
-                Err(e) => Err(describe_smtp(&e)),
+                Err(e) => Err(e),
             };
             Some(Event::Sent { account_id: account.id.clone(), draft_id: *draft_id, result })
         }
@@ -377,7 +387,7 @@ mod tests {
     #[test]
     fn without_a_connection_changes_wait_and_reads_fail() {
         let (tx, rx) = channel();
-        let mut worker = Worker::new(tx);
+        let mut worker = Worker::new(tx, Identities::default());
         let account = unreachable();
         worker.start_account(account.clone(), Credentials::new(&account, Secret::new("pw"), None));
         let flag = Job::Flag { account_id: "a1".into(), path: "INBOX".into(), id: "7".into(), flag: Flag::Seen, on: true };

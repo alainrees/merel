@@ -308,6 +308,11 @@ pub struct Draft {
     /// "Leesbevestiging vragen"; goes out as the `Disposition-Notification-To` header.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub read_receipt: bool,
+    /// Whether to sign the message with the account's S/MIME certificate; `None` signs when
+    /// the account has one, the way Outlook's "Digitale handtekening toevoegen aan alle
+    /// uitgaande berichten" does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sign: Option<bool>,
 }
 
 impl Draft {
@@ -378,6 +383,9 @@ pub struct StoredDraft {
     pub importance: Importance,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub read_receipt: bool,
+    /// See [`Draft::sign`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sign: Option<bool>,
 }
 
 impl StoredDraft {
@@ -397,6 +405,7 @@ impl StoredDraft {
             attachments: self.attachments.clone(),
             importance: self.importance,
             read_receipt: self.read_receipt,
+            sign: self.sign,
         })
     }
 

@@ -49,6 +49,29 @@ impl Cache {
         cache
     }
 
+    /// Whether there is a cache directory with its key; without one nothing is kept.
+    pub fn has_store(&self) -> bool {
+        self.store.is_some()
+    }
+
+    /// Keeps the S/MIME certificate and key of `account_id` sealed on disk.
+    pub fn save_identity(&self, account_id: &str, plain: &[u8]) -> Result<(), String> {
+        match &self.store {
+            Some(store) => store.save_identity(account_id, plain).map_err(|e| e.to_string()),
+            None => Ok(()),
+        }
+    }
+
+    pub fn load_identity(&self, account_id: &str) -> Option<zeroize::Zeroizing<Vec<u8>>> {
+        self.store.as_ref()?.load_identity(account_id)
+    }
+
+    pub fn remove_identity(&self, account_id: &str) {
+        if let Some(store) = &self.store {
+            store.remove_identity(account_id);
+        }
+    }
+
     /// Fills `session` with the cached state of each of its accounts.
     pub fn restore(&mut self, session: &mut Session) {
         let Some(store) = &self.store else { return };

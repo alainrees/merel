@@ -11,6 +11,7 @@
 pub mod cache;
 pub mod calendar;
 pub mod categories;
+pub mod certificates;
 pub mod cleanup;
 mod commands;
 pub mod config;
@@ -999,6 +1000,8 @@ pub struct Engine {
     secrets: Arc<dyn SecretStore>,
     config_path: Option<std::path::PathBuf>,
     cache: cache::Cache,
+    /// Each account's S/MIME certificate, shared with the worker threads that sign.
+    identities: certificates::Identities,
     last_refresh: Instant,
     last_item_refresh: Instant,
 }
@@ -1028,6 +1031,7 @@ impl Engine {
             secrets: Arc::new(mailcraft_secrets::MemoryStore::default()),
             config_path: None,
             cache: cache::Cache::none(),
+            identities: certificates::Identities::default(),
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
         }
@@ -1038,7 +1042,8 @@ impl Engine {
     pub fn load(secrets: Arc<dyn SecretStore>, config_path: Option<std::path::PathBuf>) -> Self {
         let accounts = config_path.as_deref().map(config::load).unwrap_or_default();
         let (tx, rx) = channel();
-        let worker = worker::Worker::new(tx);
+        let identities = certificates::Identities::default();
+        let worker = worker::Worker::new(tx, std::sync::Arc::clone(&identities));
         let calendar = config_path.as_deref().map(|p| config::load_json::<calendar::CalendarFile>(&config::calendar_path(p))).unwrap_or_default();
         let mut engine = Engine {
             session: Session::default(),
@@ -1047,6 +1052,7 @@ impl Engine {
             secrets,
             config_path,
             cache: cache::Cache::none(),
+            identities,
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
         };
@@ -1057,6 +1063,7 @@ impl Engine {
             // What the accounts showed last time, until the servers answer.
             engine.cache = cache::Cache::open(engine.config_path.as_deref(), &*engine.secrets);
             engine.cache.restore(&mut engine.session);
+            engine.load_identities();
             engine.spawn_accounts();
         }
         if !calendar.appointments.is_empty() || !calendar.calendars.is_empty() {
@@ -1272,6 +1279,7 @@ impl Engine {
             problems.push(format!("app-registratie: {e}"));
         }
         self.cache.remove(account_id);
+        self.remove_certificate(account_id);
         self.session.remove_account(account_id);
         self.save_accounts()?;
         self.persist().map_err(|e| e.to_string())?;

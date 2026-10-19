@@ -40,6 +40,8 @@ pub struct AccountForm {
     pub editing: Option<String>,
     /// Brings the form into view once, after Edit was clicked on an account further up.
     pub scroll_to_form: bool,
+    /// A certificate file picked on an account's card, waiting for its password.
+    pub certificate: Option<crate::certificate::Import>,
 }
 
 impl Default for AccountForm {
@@ -66,6 +68,7 @@ impl Default for AccountForm {
             signature_edit: None,
             editing: None,
             scroll_to_form: false,
+            certificate: None,
         }
     }
 }
@@ -284,6 +287,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let mut remove = None;
             let confirming = app.form.confirm_remove.clone();
             let mut save_signature = None;
+            let mut certificate = None;
             for (id, name, email, oauth, status, signature) in statuses {
                 if email == "jij@example.org" {
                     continue;
@@ -346,6 +350,10 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                             app.form.signature_edit = Some((id.clone(), signature.clone()));
                         }
                     }
+                    let info = app.engine.certificate(&id);
+                    if let Some(a) = crate::certificate::section(ui, t, &mut app.form.certificate, &id, info.as_ref()) {
+                        certificate = Some(a);
+                    }
                     ui.add_space(4.0);
                     if confirming.as_deref() == Some(id.as_str()) {
                         ui.label(
@@ -372,6 +380,9 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     }
                 });
                 ui.add_space(8.0);
+            }
+            if let Some(a) = certificate {
+                app.certificate_action(a);
             }
             if let Some(id) = again {
                 app.form.notice = None;

@@ -212,6 +212,17 @@ mail ("Gelezen: subject", with the moment it was read, answering the message) fr
 on, sent only when the button is pressed; the sender learns nothing otherwise. Mail in the Junk folder gets no such
 offer.
 
+Digitally signed mail (S/MIME), as in Outlook: on an account's card under Bestand, "Certificaat importeren…" reads a
+.p12 or .pfx file with its password (from your organisation or a certificate authority; Triple DES exports from Windows
+work too). The certificate must be issued for the account's address and meant for e-mail. From then on new mail from
+that account goes out signed (`multipart/signed`, SHA-256 with RSA, the certificates enclosed so the reader can check
+the signature and later answer encrypted); the "Ondertekenen" box in the compose window turns it off for one message.
+A message that should be signed and cannot be (an expired certificate, say) is not sent unsigned: the window says why.
+The private key never lies on disk in the clear: it is sealed with ChaCha20-Poly1305 under the key of the offline
+cache, bound to the account, in `cache/<account>.identity`, and goes when the certificate or the account is removed.
+Signing is aws-lc-rs; the CMS structures come from the RustCrypto `cms` crate. Checking signed mail that comes in and
+encrypting are the next steps.
+
 A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
 hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the
 list until then and comes back unread, with a line in the status bar; the "Gesluimerd" filter on the Beeld tab shows
