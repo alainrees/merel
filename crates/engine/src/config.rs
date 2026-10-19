@@ -33,6 +33,11 @@ pub fn rules_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("rules.json")
 }
 
+/// The blocked and safe senders file that goes with an accounts file.
+pub fn junk_path(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("junk.json")
+}
+
 /// The quick steps file that goes with an accounts file.
 pub fn quick_steps_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("quick_steps.json")

@@ -26,14 +26,16 @@ pub enum Pick {
 const NOTES_CHARS: usize = 2000;
 
 /// Draws the menu on `r` for message `m`; what was clicked comes back once, to be run by
-/// [`MailApp::act_on_message`].
-pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool) -> Option<Pick> {
+/// [`MailApp::act_on_message`]. `known_sender` says whether the sender is in the contacts,
+/// `in_junk` whether the message sits in the Junk folder.
+pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool) -> Option<Pick> {
     let mut pick = None;
     r.context_menu(|ui| {
         let read = if m.flags.seen { ("Als ongelezen markeren", "message.mark_unread") } else { ("Als gelezen markeren", "message.mark_read") };
         let flag = if m.flags.flagged { "Vlag weghalen" } else { "Vlag" };
         let sender = if known_sender { "Afzender openen in contacten" } else { "Afzender toevoegen aan contacten" };
-        let items: [(&str, Pick); 12] = [
+        let junk = if in_junk { ("Geen ongewenst", "junk.trust") } else { ("Afzender blokkeren", "junk.block") };
+        let items: [(&str, Pick); 13] = [
             ("Beantwoorden", Pick::Compose(ComposeKind::Reply)),
             ("Allen beantwoorden", Pick::Compose(ComposeKind::ReplyAll)),
             ("Doorsturen", Pick::Compose(ComposeKind::Forward)),
@@ -42,13 +44,14 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool) -> Option<Pick>
             ("Verplaatsen naar…", Pick::Move),
             ("Archiveren", Pick::Command("message.archive")),
             ("Ongewenst", Pick::Command("message.junk")),
+            (junk.0, Pick::Command(junk.1)),
             ("Verwijderen", Pick::Command("message.delete")),
             ("Taak maken van dit bericht", Pick::Task),
             ("Afspraak maken van dit bericht", Pick::Appointment),
             (sender, Pick::Sender),
         ];
         for (i, (label, p)) in items.into_iter().enumerate() {
-            if matches!(i, 3 | 9) {
+            if matches!(i, 3 | 10) {
                 ui.separator();
             }
             if ui.button(label).clicked() {

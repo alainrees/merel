@@ -15,6 +15,7 @@ mod dates;
 pub mod folders;
 pub mod help;
 mod html;
+pub mod junk;
 pub mod message_menu;
 pub mod print;
 pub mod quicksteps;
@@ -113,6 +114,8 @@ pub struct MailApp {
     pub announced_reminders: std::collections::HashSet<(String, i64)>,
     /// The rules window, while it is open.
     pub rules: Option<rules::State>,
+    /// The "Ongewenste e-mail" window, while open.
+    pub junk: Option<junk::Options>,
     /// The quick steps window, when it is open.
     pub quick_steps: Option<quicksteps::State>,
     /// Whether the "Verplaatsen naar" window for the selected message is open.
@@ -205,6 +208,7 @@ impl MailApp {
             drafts_for: None,
             announced_reminders: std::collections::HashSet::new(),
             rules: None,
+            junk: None,
             quick_steps: None,
             move_to: false,
             folder_edit: None,
@@ -272,6 +276,7 @@ impl MailApp {
         calendar::window(self, &ctx, &t);
         reminders::window(self, &ctx, &t);
         rules::window(self, &ctx, &t);
+        junk::window(self, &ctx, &t);
         quicksteps::window(self, &ctx, &t);
         move_window(self, &ctx, &t);
         folders::window(self, &ctx, &t);
@@ -952,7 +957,8 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     let r = r.on_hover_text(&m.subject);
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &m.subject));
                     let known_sender = app.engine.session.contact_with_email(m.from.email()).is_some();
-                    if let Some(p) = message_menu::menu(&r, m, known_sender) {
+                    let in_junk = app.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk);
+                    if let Some(p) = message_menu::menu(&r, m, known_sender, in_junk) {
                         menu_pick = Some((m.clone(), p));
                     }
                     // The fold control is its own widget, drawn over the row's left edge.
@@ -1082,6 +1088,27 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     };
     ui.label(RichText::new(&m.subject).size(20.0).strong().color(t.text));
     ui.add_space(10.0);
+    if app.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk) {
+        // A message in the Junk folder: a warning, and the way back for a sender who is not junk.
+        let mut not_junk = false;
+        egui::Frame::new().fill(t.flag.gamma_multiply(0.15)).corner_radius(4).inner_margin(8).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new("⚠ Dit bericht staat in Ongewenste e-mail. Klik niet op links en open geen bijlagen als je de afzender niet kent.")
+                        .color(t.text),
+                );
+                not_junk = ui
+                    .small_button("Geen ongewenst")
+                    .on_hover_text("Zet het bericht terug in Postvak IN en maakt de afzender een veilige afzender.")
+                    .clicked();
+            });
+        });
+        ui.add_space(8.0);
+        if not_junk {
+            app.run("junk.trust", json!({ "id": m.id }));
+            return;
+        }
+    }
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
         ui.painter().circle_filled(rect.center(), 20.0, t.accent);
@@ -1576,6 +1603,48 @@ mod tests {
         h.get_by_label("Opslaan").click();
         h.run();
         assert_eq!(h.state().engine.session.contact_with_email("news@example.org").map(|c| c.name.as_str()), Some("Nieuwsbrief"));
+    }
+
+    #[test]
+    fn a_sender_is_blocked_from_the_menu_and_trusted_back_from_the_junk_folder() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Wat er deze maand speelt").click_secondary();
+        h.run();
+        h.get_by_label("Afzender blokkeren").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert_eq!(s.message("m3").map(|m| m.folder_id.as_str()), Some("junk"));
+        assert_eq!(s.junk.blocked, ["news@example.org"]);
+        assert!(h.state().notice.is_none());
+
+        // The window lists the sender and lets it go again.
+        h.state_mut().junk = Some(junk::Options::default());
+        h.run();
+        h.get_by_label("Weghalen").click();
+        h.run();
+        assert!(h.state().engine.session.junk.blocked.is_empty());
+        if let Some(o) = h.state_mut().junk.as_mut() {
+            o.entry = "spam.example".into();
+        }
+        h.run();
+        h.get_by_label("Blokkeren").click();
+        h.run();
+        assert_eq!(h.state().engine.session.junk.blocked, ["spam.example"]);
+        assert_eq!(h.state().junk.as_ref().map(|o| o.entry.as_str()), Some(""), "the field is cleared");
+        h.get_by_label("Sluiten").click();
+        h.run();
+        assert!(h.state().junk.is_none());
+
+        // Reading the message in the Junk folder: the strip's button brings it back and trusts the sender.
+        h.state_mut().run("folder.select", json!({ "id": "junk" }));
+        h.state_mut().run("message.select", json!({ "id": "m3" }));
+        h.run();
+        h.get_by_label("Geen ongewenst").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert_eq!(s.message("m3").map(|m| m.folder_id.as_str()), Some("inbox"));
+        assert_eq!(s.junk.safe, ["news@example.org"]);
     }
 
     #[test]
