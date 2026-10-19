@@ -39,7 +39,7 @@ pub fn chooser(ui: &mut Ui, t: &Tokens, importance: &mut Importance) {
         Importance::Low => RichText::new("↓ Lage urgentie").color(t.accent_text),
         Importance::Normal => RichText::new("Urgentie ▾"),
     };
-    ui.menu_button(label, |ui| {
+    crate::action_menu(ui, label, |ui| {
         for (value, name, hint) in [
             (Importance::High, "Hoog", "De ontvanger ziet een rood uitroepteken bij het bericht, zoals in Outlook."),
             (Importance::Normal, "Normaal", "Geen teken bij het bericht."),
@@ -51,6 +51,6 @@ pub fn chooser(ui: &mut Ui, t: &Tokens, importance: &mut Importance) {
             }
         }
     })
-    .response
+    .0
     .on_hover_text("Hoe dringend het bericht is; gaat mee als de kopteksten Importance en X-Priority.");
 }
