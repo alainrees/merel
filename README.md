@@ -20,7 +20,9 @@ The Outlook-style window (ribbon, module rail, folder pane, message list, readin
 built-in sample mail, and reading mail from an IMAP account: add it under File › Accounts,
 browse folders, open messages (plain text, or HTML drawn with its headings, lists, tables, links
 and embedded pictures, while pictures on the internet stay blocked), mark read or unread, flag,
-delete, archive and move to junk; changes go back to the server. Sending over SMTP: new mail,
+delete, archive and move to junk; changes go back to the server. A search box above the
+message list narrows it by subject, sender, recipient or preview text, in the current folder or
+across every folder of every account (it searches what Mailcraft has fetched so far). Sending over SMTP: new mail,
 reply, reply all and forward, with a copy filed in Sent. Gmail and Microsoft 365 sign in through
 the system browser (OAuth 2.0 with PKCE; XOAUTH2 on IMAP and SMTP for Gmail, Microsoft Graph
 for Microsoft 365); see [docs/accounts.md](docs/accounts.md) for the one-time app
