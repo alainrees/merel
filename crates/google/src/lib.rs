@@ -57,8 +57,8 @@ impl Mailbox for GoogleMailbox {
         Mailbox::folders(&mut self.imap)
     }
 
-    fn headers(&mut self, folder: &str, limit: u32) -> Result<Vec<RemoteHeader>> {
-        Mailbox::headers(&mut self.imap, folder, limit)
+    fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> Result<Vec<RemoteHeader>> {
+        Mailbox::headers(&mut self.imap, folder, offset, limit)
     }
 
     fn body(&mut self, folder: &str, id: &str) -> Result<Vec<u8>> {
