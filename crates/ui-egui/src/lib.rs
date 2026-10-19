@@ -578,6 +578,12 @@ fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         if app.engine.session.has_pending() && worst.1 != t.flag {
                             worst.0 = "Bezig…".to_string();
                         }
+                        let queued: usize = app.engine.session.queued.values().sum();
+                        match queued {
+                            0 => {}
+                            1 => worst = ("Geen verbinding; 1 wijziging wacht tot de verbinding terug is".to_string(), t.flag),
+                            n => worst = (format!("Geen verbinding; {n} wijzigingen wachten tot de verbinding terug is"), t.flag),
+                        }
                         worst
                     };
                     ui.label(RichText::new(txt).size(12.0).color(col));

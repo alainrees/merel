@@ -36,13 +36,15 @@ Tasks follow the same pattern: `Session::tasks` with `task.select`, `task.save`,
 
 ## Offline cache
 
-`engine::cache` keeps the `store` crate in step with the session. On start every account's cached state (folders, message list, opened messages, calendar, contacts, tasks) is put in the session before any server answers, so the window is usable at once, and stays usable without a connection; the account shows "Verbinden…" until the server answers, and whatever the server reports replaces the cached state (folders that no longer exist take their messages with them; the selected folder's list is refreshed). Opening a message the cache holds needs no connection: the raw message is parsed again as if the server had sent it. Changes made offline are not queued yet: the command fails with the connection error and the session is left as the server knows it (a later `sync` crate covers that queue). Message ids are stable across runs (`<account>/<folder path>#<server id>`), which is what makes a cached message findable.
+`engine::cache` keeps the `store` crate in step with the session. On start every account's cached state (folders, message list, opened messages, calendar, contacts, tasks) is put in the session before any server answers, so the window is usable at once, and stays usable without a connection; the account shows "Verbinden…" until the server answers, and whatever the server reports replaces the cached state (folders that no longer exist take their messages with them; the selected folder's list is refreshed). Opening a message the cache holds needs no connection: the raw message is parsed again as if the server had sent it.
+
+Changes made without a connection (flags, moves, deletions, items saved or deleted) are not lost: the worker hands a job it cannot connect for back as `Event::Deferred`, the session applies the change as if it had succeeded and counts it in `queued` (the status bar says how many changes wait), and the cache keeps the job in its `pending` list, so it survives a restart. The worker tries the server again on its own, 15 seconds after a failure and then at doubling intervals up to 5 minutes; when it connects, `Event::Connected` makes the engine put the queued jobs ahead of everything else, so they reach the server before the folder list is refreshed. A queued job that finds no connection again is queued again; one the server refuses for another reason is reported and dropped, and the next listing shows the server's state. Sending waits in no queue: a message that cannot go out is reported on the draft, and the person sends it again. Message ids are stable across runs (`<account>/<folder path>#<server id>`), which is what makes a cached message findable.
 
 ## Planned crates (mail module)
 
 | Crate | Job | Security notes |
 |---|---|---|
-| `sync` | Background sync, offline queue, conflict handling | Per-account rate limits and back-off |
+| `sync` | Background refresh of folders and items, conflict handling | Per-account rate limits and back-off |
 | `crypto` | S/MIME and OpenPGP signing, encryption and verification | Pure-Rust implementations |
 
 ## OWASP top 10 mapping

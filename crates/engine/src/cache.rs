@@ -4,7 +4,9 @@
 //! window is usable before the first server answer, and stays usable without one. Every
 //! server answer and every command marks the account dirty; the engine writes the dirty
 //! accounts a couple of seconds later and when the window closes. An opened message is served
-//! from the cache when it is there, so reading mail needs no connection.
+//! from the cache when it is there, so reading mail needs no connection. Changes that found no
+//! connection wait in the cache too (the offline queue) and are replayed when the account
+//! connects, in this run or a later one.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -54,6 +56,9 @@ impl Cache {
         for id in ids {
             if let Some(cached) = store.load(&id) {
                 session.restore(&cached);
+                if !cached.pending.is_empty() {
+                    session.queued.insert(id.clone(), cached.pending.len());
+                }
                 self.accounts.insert(id, cached);
             }
         }
@@ -71,11 +76,29 @@ impl Cache {
                 }
                 account
             }
+            Event::Deferred { account_id, job } => {
+                match serde_json::to_value(job) {
+                    Ok(value) => self.accounts.entry(account_id.clone()).or_default().pending.push(value),
+                    Err(e) => log::warn!("{account_id}: change not queued: {e}"),
+                }
+                Some(account_id.clone())
+            }
             Event::Failed { .. } | Event::Sent { .. } | Event::SignedIn { .. } => None,
         };
         if let Some(account) = account.filter(|a| a != SAMPLE_ACCOUNT) {
             self.dirty.insert(account);
         }
+    }
+
+    /// The changes waiting for `account_id`, oldest first; the queue is emptied. A change that
+    /// fails again comes back through `Event::Deferred`.
+    pub fn take_pending(&mut self, account_id: &str) -> Vec<Job> {
+        let Some(cached) = self.accounts.get_mut(account_id) else { return Vec::new() };
+        if cached.pending.is_empty() {
+            return Vec::new();
+        }
+        self.dirty.insert(account_id.to_string());
+        std::mem::take(&mut cached.pending).into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect()
     }
 
     /// Takes note that commands ran: flags, moves and items may have changed anywhere.
@@ -114,6 +137,7 @@ impl Cache {
             let mut cached = session.snapshot(&id);
             if let Some(old) = self.accounts.get_mut(&id) {
                 cached.bodies = std::mem::take(&mut old.bodies);
+                cached.pending = std::mem::take(&mut old.pending);
             }
             cached.prune_bodies();
             if let Err(e) = store.save(&cached) {
@@ -140,6 +164,7 @@ impl Session {
             folders,
             messages,
             bodies: Vec::new(),
+            pending: Vec::new(),
             syncs_items: self.item_accounts.contains(account_id),
             calendars,
             appointments,
@@ -250,6 +275,12 @@ mod tests {
         };
         cache.note_event(&s, &body);
         s.apply(body);
+        // A flag set while the connection is gone waits in the queue.
+        let flag = Job::Flag { account_id: "a1".into(), path: "INBOX".into(), id: "7".into(), flag: mailcraft_mailbox::Flag::Seen, on: true };
+        let deferred = Event::Deferred { account_id: "a1".into(), job: Box::new(flag.clone()) };
+        cache.note_event(&s, &deferred);
+        s.apply(deferred);
+        assert_eq!((s.queued.get("a1"), s.status.get("a1")), (Some(&1), Some(&crate::AccountStatus::Offline)));
         cache.save(&s, false);
         assert!(!cache.dirty.is_empty(), "a write right after a change waits");
         cache.save(&s, true);
@@ -266,6 +297,9 @@ mod tests {
         assert_eq!(s.folder("a1/INBOX").map(|f| f.unread), Some(1));
         assert!(s.item_accounts.contains("a1"));
         assert!(s.calendar("a1/calendar").is_some());
+        assert_eq!(s.queued.get("a1"), Some(&1), "the queued change survived the restart");
+        assert_eq!(cache.take_pending("a1"), vec![flag]);
+        assert!(cache.take_pending("a1").is_empty());
 
         // Opening the message needs no server.
         s.run("message.select", &json!({ "id": "a1/INBOX#7" })).unwrap();
@@ -279,6 +313,7 @@ mod tests {
         let folders = vec![RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true }];
         s.apply(Event::Connected { account_id: "a1".into(), folders, syncs_items: true });
         assert_eq!(s.folders.len(), 1);
+        assert!(s.queued.is_empty());
         let jobs = s.take_jobs();
         assert!(jobs.iter().any(|j| matches!(j, Job::Headers { folder_id, .. } if folder_id == "a1/INBOX")), "{jobs:?}");
         let _ = std::fs::remove_dir_all(dir);
