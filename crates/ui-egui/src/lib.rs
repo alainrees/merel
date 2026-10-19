@@ -590,7 +590,8 @@ fn calendar_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if ribbon_action(ui, t, "◎", "Vandaag", true) {
         app.calendar.focus = calendar::today();
     }
-    for (glyph, label, view) in [("▯", "Dag", View::Day), ("▥", "Week", View::Week), ("▦", "Maand", View::Month)] {
+    for (glyph, label, view) in [("▯", "Dag", View::Day), ("▤", "Werkweek", View::WorkWeek), ("▥", "Week", View::Week), ("▦", "Maand", View::Month)]
+    {
         if ribbon_action(ui, t, glyph, label, app.calendar.view != view) {
             app.calendar.view = view;
         }
@@ -1835,6 +1836,12 @@ mod tests {
         h.state_mut().module = Module::Calendar;
         h.run();
         assert!(h.query_by_label_contains("Overleg ontwerp").is_some(), "today's sample appointment is in the month view");
+        h.get_by_label("Werkweek").click();
+        h.run();
+        assert_eq!(h.state().calendar.view, calendar::View::WorkWeek);
+        if chrono::Datelike::weekday(&chrono::Local::now().date_naive()).num_days_from_monday() < 5 {
+            assert!(h.query_all_by_label_contains("Overleg ontwerp").count() >= 1, "today's appointment shows in the work week on a weekday");
+        }
         h.get_by_label("Week").click();
         h.run();
         assert_eq!(h.state().calendar.view, calendar::View::Week);
