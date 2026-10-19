@@ -32,6 +32,7 @@ pub mod tasks;
 pub mod templates;
 mod theme;
 pub mod unsubscribe;
+pub mod vcard;
 pub mod view;
 
 use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
