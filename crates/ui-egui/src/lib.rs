@@ -13,6 +13,7 @@ mod compose;
 pub mod contacts;
 mod dates;
 pub mod folders;
+pub mod help;
 mod html;
 pub mod reminders;
 pub mod remote;
@@ -115,6 +116,8 @@ pub struct MailApp {
     pub folder_edit: Option<folders::FolderEdit>,
     /// The "Alle categorieën" window, while it is open.
     pub categories: Option<categories::Manager>,
+    /// The open help window ("Help" tab), if any.
+    pub help: Option<help::HelpWindow>,
     /// What the "Beeld" tab chose; read from `view.json` at start.
     pub view: view::ViewPrefs,
     /// Whether the saved theme has been handed to egui yet (on the first frame).
@@ -146,6 +149,7 @@ impl MailApp {
             move_to: false,
             folder_edit: None,
             categories: None,
+            help: None,
             view,
             theme_applied: false,
         }
@@ -204,6 +208,7 @@ impl MailApp {
         move_window(self, &ctx, &t);
         folders::window(self, &ctx, &t);
         categories::window(self, &ctx, &t);
+        help::window(self, &ctx, &t);
         drag_preview(self, &ctx, &t);
         if self.tab == Tab::Home && self.module == Module::Mail {
             shortcuts(self, &ctx);
@@ -375,6 +380,7 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 }
                 Tab::Folder if app.module == Module::Mail => folders::ribbon(app, ui, t),
                 Tab::View => view::ribbon(app, ui, t),
+                Tab::Help => help::ribbon(app, ui, t),
                 Tab::SendReceive => {
                     let can = !app.engine.session.is_sample() && app.engine.session.selected_folder.is_some();
                     ribbon_button(app, ui, t, "⟳", "Vernieuwen", ("folder.refresh", Some("F5")), can);
@@ -413,7 +419,7 @@ fn calendar_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 }
 
 /// "Cmd+N" on a Mac, "Ctrl+N" elsewhere.
-fn key_hint(key: &str) -> String {
+pub(crate) fn key_hint(key: &str) -> String {
     let modifier = if cfg!(target_os = "macos") { "Cmd" } else { "Ctrl" };
     format!("{modifier}+{key}")
 }
@@ -1628,6 +1634,28 @@ mod tests {
         h.run();
         h.run();
         assert_eq!(h.ctx.theme(), egui::Theme::Light);
+    }
+
+    #[test]
+    fn the_help_tab_lists_the_shortcuts_and_tells_about_the_app() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Help").click();
+        h.run();
+        h.get_by_label("Sneltoetsen").click();
+        h.run();
+        assert_eq!(h.state().help, Some(help::HelpWindow::Shortcuts));
+        h.get_by_label("Allen beantwoorden");
+        h.get_by_label_contains("Shift+V");
+        h.get_by_label("Sluiten").click();
+        h.run();
+        assert!(h.state().help.is_none());
+        h.get_by_label("Over Mailcraft").click();
+        h.run();
+        h.get_by_label(format!("Versie {}", env!("CARGO_PKG_VERSION")).as_str());
+        h.get_by_label("Sluiten").click();
+        h.run();
+        assert!(h.state().help.is_none());
     }
 
     #[test]
