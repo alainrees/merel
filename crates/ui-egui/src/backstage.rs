@@ -219,6 +219,16 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
             ui.add_space(12.0);
             ui.label(RichText::new("   Accounts").size(13.0).color(t.on_accent.gamma_multiply(0.8)));
+            ui.add_space(12.0);
+            // Printing lives here, as in Outlook's File menu; Ctrl+P on the Start tab does the same.
+            if item(ui, "Afdrukken") {
+                if app.can_print() {
+                    app.print_selected();
+                } else {
+                    app.notice = Some("Open eerst een bericht om af te drukken.".into());
+                }
+                app.tab = Tab::Home;
+            }
         });
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading).inner_margin(Margin::same(28))).show(ui, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| {

@@ -15,6 +15,7 @@ mod dates;
 pub mod folders;
 pub mod help;
 mod html;
+pub mod print;
 pub mod quicksteps;
 pub mod reminders;
 pub mod remote;
@@ -282,6 +283,8 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
             compose = Some(ComposeKind::Reply);
         } else if i.consume_key(Modifiers::COMMAND, Key::F) {
             compose = Some(ComposeKind::Forward);
+        } else if i.consume_key(Modifiers::COMMAND, Key::P) {
+            command = Some("message.print");
         } else if i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace) {
             command = Some("message.delete");
         } else if i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::V) {
@@ -314,6 +317,7 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
         Some("search.clear") => app.engine.session.search.clear(),
         Some("folder.refresh") => app.run("folder.refresh", Value::Null),
         Some("message.move_window") if has => app.move_to = true,
+        Some("message.print") if app.can_print() => app.print_selected(),
         Some(id) if has => app.run(id, Value::Null),
         _ => {}
     }
