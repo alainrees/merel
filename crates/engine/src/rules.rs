@@ -67,6 +67,15 @@ impl Session {
             if rule.flag {
                 changed |= self.flag_message(message_id, Flag::Flagged, true, &remote);
             }
+            if !rule.categories.is_empty()
+                && let Some(current) = self.message(message_id).map(|m| m.categories.clone())
+            {
+                let mut all = current.clone();
+                all.extend(rule.categories.iter().filter(|c| !current.iter().any(|x| x.eq_ignore_ascii_case(c))).cloned());
+                if all.len() != current.len() && crate::categories::set_message_categories(self, message_id, all, Vec::new()).is_ok() {
+                    changed = true;
+                }
+            }
             if let Some(target) =
                 rule.move_to.as_deref().and_then(|id| self.folder(id)).filter(|t| t.account_id == folder.account_id && t.id != folder.id).cloned()
             {
@@ -130,9 +139,10 @@ fn str_param<'a>(params: &'a Value, key: &'static str) -> Option<&'a str> {
     params.get(key).and_then(Value::as_str)
 }
 
-/// `rule.save { id?, name?, account_id?, field?, contains, move_to?, mark_read?, flag?, enabled? }`:
+/// `rule.save { id?, name?, account_id?, field?, contains, move_to?, mark_read?, flag?, categories?, enabled? }`:
 /// creates a rule (for the given account, else the current one) or replaces the one with `id`.
-/// `field` is one of `from`, `to`, `subject`, `any`; `move_to` a folder id of the same account.
+/// `field` is one of `from`, `to`, `subject`, `any`; `move_to` a folder id of the same account;
+/// `categories` a list of names, spelled as the person's list has them when they are known.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
         Some(id) => Some(s.rule(id).ok_or(CommandError::NotFound)?.clone()),
@@ -161,6 +171,19 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
             Some(folder.id.clone())
         }
     };
+    let categories = match params.get("categories") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|v| {
+                v.as_str().map(|c| {
+                    s.categories.iter().find(|k| k.name.eq_ignore_ascii_case(c.trim())).map(|k| k.name.clone()).unwrap_or_else(|| c.to_string())
+                })
+            })
+            .collect::<Option<Vec<String>>>()
+            .ok_or(CommandError::Param("categories"))?,
+        Some(_) => return Err(CommandError::Param("categories")),
+    };
     let bool_param = |key: &str, default: bool| params.get(key).and_then(Value::as_bool).unwrap_or(default);
     let rule = Rule {
         id: existing.as_ref().map(|r| r.id.clone()).unwrap_or_else(|| s.new_rule_id()),
@@ -171,6 +194,7 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         move_to,
         mark_read: bool_param("mark_read", false),
         flag: bool_param("flag", false),
+        categories,
         enabled: bool_param("enabled", existing.as_ref().is_none_or(|r| r.enabled)),
     }
     .validated()
@@ -321,5 +345,26 @@ mod tests {
         s.run("rule.save", &json!({ "account_id": "a", "field": "from", "contains": "jan@", "flag": true })).unwrap();
         s.remove_account("a");
         assert!(s.rules.is_empty());
+    }
+
+    #[test]
+    fn a_rule_gives_a_category_once_and_tells_the_server() {
+        let mut s = connected();
+        s.apply(Event::Headers { folder_id: "a/INBOX".into(), headers: vec![header(1, "jan@example.org", "Hallo")], offset: 0, limit: HEADER_LIMIT });
+        s.run("rule.save", &json!({ "account_id": "a", "field": "from", "contains": "jan@", "categories": ["rode categorie", "Werk"] })).unwrap();
+        assert_eq!(s.rules[0].categories, vec!["Rode categorie".to_string(), "Werk".to_string()], "a known name takes the list's spelling");
+        assert_eq!(
+            s.run("rule.save", &json!({ "account_id": "a", "contains": "x", "categories": "Werk" })),
+            Err(CommandError::Param("categories")),
+            "a list, not one name"
+        );
+        s.run("rule.run", &json!({ "folder_id": "a/INBOX" })).unwrap();
+        assert_eq!(s.message("a/INBOX#1").unwrap().categories, vec!["Rode categorie".to_string(), "Werk".to_string()]);
+        assert_eq!(s.take_rule_hits(), 1);
+        let jobs = s.take_jobs();
+        assert!(matches!(&jobs[..], [Job::Categories { id, categories, removed, .. }] if id == "1" && categories.len() == 2 && removed.is_empty()));
+        s.run("rule.run", &json!({ "folder_id": "a/INBOX" })).unwrap();
+        assert_eq!(s.take_rule_hits(), 0, "the message has them already");
+        assert!(s.take_jobs().is_empty());
     }
 }

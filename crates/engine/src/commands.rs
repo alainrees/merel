@@ -45,6 +45,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "category.delete", label: "Delete category", run: crate::categories::delete },
     CommandSpec { id: "view.filter", label: "Show only…", run: crate::view::filter },
     CommandSpec { id: "view.sort", label: "Sort by…", run: crate::view::sort },
+    CommandSpec { id: "view.category", label: "Show category…", run: crate::view::category },
     CommandSpec {
         id: "search.server",
         label: "Search on the server",
