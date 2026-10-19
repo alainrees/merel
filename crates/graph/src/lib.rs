@@ -444,9 +444,9 @@ impl Mailbox for GraphClient {
         Ok(out)
     }
 
-    fn headers(&mut self, folder: &str, limit: u32) -> Result<Vec<RemoteHeader>> {
+    fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> Result<Vec<RemoteHeader>> {
         let path = format!(
-            "/me/mailFolders/{}/messages?$top={}&$orderby=receivedDateTime%20desc&$select=id,subject,from,toRecipients,receivedDateTime,isRead,flag,hasAttachments,internetMessageId",
+            "/me/mailFolders/{}/messages?$top={}&$skip={offset}&$orderby=receivedDateTime%20desc&$select=id,subject,from,toRecipients,receivedDateTime,isRead,flag,hasAttachments,internetMessageId",
             encode(folder),
             limit.clamp(1, PAGE)
         );
