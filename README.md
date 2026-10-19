@@ -248,6 +248,16 @@ mail that comes in is opened with the account's certificate (RSAES-PKCS1-v1_5 or
 "🔒 Versleuteld bericht" strip; one that cannot be opened says why in place of its text. The offline cache keeps it
 encrypted as it came.
 
+OpenPGP, for people who use GnuPG, Thunderbird or Proton: on an account's card under Bestand, "OpenPGP-sleutel
+importeren…" reads an exported private key (`gpg --export-secret-keys --armor`, .asc) with its passphrase; one of its
+addresses must be the account's. The key is kept unlocked but sealed like the S/MIME key, in `cache/<account>.pgpkey`.
+PGP/MIME mail that comes in is read with rPGP: an encrypted message (`multipart/encrypted`, GnuPG 2.4's OCB packets
+included) opens with the account's key and shows the "🔒 Versleuteld bericht" strip; a signature, made as PGP/MIME or
+inside the encryption, gets a strip saying whose key made it, a red one when the message changed. Correspondents' keys
+come the Autocrypt way: a message whose `Autocrypt` header carries a key for its sender's own address teaches it, once
+(not from the Junk folder), and it is kept in `pgp_keys.json`; a later, other key for the same address is not taken
+over by itself. Sending signed or encrypted with OpenPGP is the next step.
+
 A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
 hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the
 list until then and comes back unread, with a line in the status bar; the "Gesluimerd" filter on the Beeld tab shows

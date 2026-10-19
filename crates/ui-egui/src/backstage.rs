@@ -40,7 +40,7 @@ pub struct AccountForm {
     pub editing: Option<String>,
     /// Brings the form into view once, after Edit was clicked on an account further up.
     pub scroll_to_form: bool,
-    /// A certificate file picked on an account's card, waiting for its password.
+    /// A certificate or OpenPGP key file picked on an account's card, waiting for its password.
     pub certificate: Option<crate::certificate::Import>,
 }
 
@@ -352,6 +352,10 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     }
                     let info = app.engine.certificate(&id);
                     if let Some(a) = crate::certificate::section(ui, t, &mut app.form.certificate, &id, info.as_ref()) {
+                        certificate = Some(a);
+                    }
+                    let key = app.engine.pgp_key(&id);
+                    if let Some(a) = crate::certificate::pgp_section(ui, t, &mut app.form.certificate, &id, key.as_ref()) {
                         certificate = Some(a);
                     }
                     ui.add_space(4.0);

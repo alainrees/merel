@@ -72,6 +72,9 @@ pub struct Body {
     pub receipt_to: Option<Address>,
     /// The S/MIME signature on the message, when it is signed.
     pub signature: Option<mailcraft_smime::Signature>,
+    /// The OpenPGP signature on the message, when it is signed that way; the engine checks it,
+    /// since only it knows the keys.
+    pub pgp_signature: Option<mailcraft_pgp::Verdict>,
     /// Set for a message that came encrypted (S/MIME): whether it opened.
     pub encrypted: Option<Encryption>,
 }
@@ -173,12 +176,18 @@ pub fn parse_body(bytes: &[u8]) -> Body {
         .find(|(name, _)| name.eq_ignore_ascii_case("Disposition-Notification-To"))
         .and_then(|(_, v)| parse_address_list(&v.replace(['\r', '\n'], " ")).ok())
         .and_then(|list| list.into_iter().next());
+    let pgp_signed = m.content_type().is_some_and(|c| {
+        c.ctype().eq_ignore_ascii_case("multipart")
+            && c.subtype().is_some_and(|s| s.eq_ignore_ascii_case("signed"))
+            && c.attribute("protocol").is_some_and(|p| p.eq_ignore_ascii_case("application/pgp-signature"))
+    });
     // A picture shown in the body is not listed as an attachment as well.
     let attachments = m
         .attachments()
         .filter(|p| !cid_of(p).is_some_and(|c| images.iter().any(|i| i.cid == c)))
         // The signature itself is shown as the strip over the message, not as a file.
         .filter(|p| signature.is_none() || !matches!(mime_of(p).as_str(), "application/pkcs7-signature" | "application/x-pkcs7-signature"))
+        .filter(|p| !pgp_signed || mime_of(p) != "application/pgp-signature")
         .map(|p| Attachment {
             name: clean_text(p.attachment_name().unwrap_or("bijlage")),
             mime: mime_of(p),
@@ -186,7 +195,7 @@ pub fn parse_body(bytes: &[u8]) -> Body {
             bytes: p.contents().into(),
         })
         .collect();
-    Body { text, from_html, rich, images, attachments, authentication, unsubscribe, receipt_to, signature, encrypted: None }
+    Body { text, from_html, rich, images, attachments, authentication, unsubscribe, receipt_to, signature, pgp_signature: None, encrypted: None }
 }
 
 fn mime_of(p: &mail_parser::MessagePart<'_>) -> String {
@@ -335,5 +344,9 @@ mod tests {
         assert!(b.attachments.is_empty(), "smime.p7s is not listed");
         assert_eq!(parse_body(include_bytes!("../../smime/testdata/signed-tampered.eml")).signature, Some(mailcraft_smime::Signature::Broken));
         assert_eq!(parse_body(b"Subject: x\r\n\r\nHoi").signature, None);
+        // An OpenPGP signature is not listed either.
+        let pgp = parse_body(include_bytes!("../../pgp/testdata/signed-gpg.eml"));
+        assert!(pgp.text.starts_with("Hallo Alain"), "{}", pgp.text);
+        assert!(pgp.attachments.is_empty(), "signature.asc is not listed");
     }
 }
