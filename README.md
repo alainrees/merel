@@ -137,6 +137,12 @@ page of its own (sender, recipients, date, subject, attachment names and the bod
 with embedded pictures and without anything from the internet or any script) to one file in the
 temporary folder and opens it, and the browser's print dialog does the rest.
 
+A flag can carry a date, Outlook's "Opvolgen": the right-click menu's "Opvolgen" offers Vandaag, Morgen,
+Deze week (this week's Friday), Volgende week or Geen datum. The flag goes to the server as any flag does; the
+date stays on this computer (`follow_ups.json`, filed under the message's Message-ID so a move keeps it). Over
+the open message a strip names the day, turns red once it has passed, and "Voltooid" takes flag and date off;
+the hover text of a row in the list names the day too.
+
 Several messages can be selected at once, as in Outlook: Ctrl+click (Cmd on a Mac) adds a message to the
 selection or takes it out, Shift+click selects the run from the open message to the clicked one and Ctrl+A
 takes the whole list. The reading pane then says how many are selected, and Delete, Archive, Junk, Move,

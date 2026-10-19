@@ -60,6 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "message.mark_read", label: "Mark as Read", run: |s, _| set_seen(s, true) },
     CommandSpec { id: "message.mark_unread", label: "Mark as Unread", run: |s, _| set_seen(s, false) },
     CommandSpec { id: "message.flag", label: "Flag", run: toggle_flag },
+    CommandSpec { id: "message.follow_up", label: "Follow up", run: crate::followup::follow_up },
     CommandSpec { id: "message.move", label: "Move to folder", run: message_move },
     CommandSpec { id: "message.delete", label: "Delete", run: message_delete },
     CommandSpec { id: "message.archive", label: "Archive", run: |s, _| move_selected(s, FolderKind::Archive, "Archive") },
@@ -241,17 +242,27 @@ fn set_seen(s: &mut Session, seen: bool) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// Puts the flag on one message or takes it off, the server included; off takes the
+/// follow-up date with it.
+pub(crate) fn flag_message(s: &mut Session, message_id: &str, on: bool) -> Result<(), CommandError> {
+    let m = header_mut(s, message_id)?;
+    if m.flags.flagged != on {
+        m.flags.flagged = on;
+        set_flag(s, message_id, Flag::Flagged, on);
+    }
+    if !on {
+        s.clear_follow_up(message_id);
+    }
+    Ok(())
+}
+
 /// Flags the whole selection, or takes the flag off all of it when the selected message has
 /// one, as Outlook does.
 fn toggle_flag(s: &mut Session, _: &Value) -> Result<(), CommandError> {
     let ids = selection(s)?;
     let on = !s.selected().is_some_and(|m| m.flags.flagged);
     for id in ids {
-        let m = header_mut(s, &id)?;
-        if m.flags.flagged != on {
-            m.flags.flagged = on;
-            set_flag(s, &id, Flag::Flagged, on);
-        }
+        flag_message(s, &id, on)?;
     }
     Ok(())
 }
