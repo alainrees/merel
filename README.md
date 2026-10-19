@@ -47,6 +47,13 @@ encrypted offline cache, so the window fills at once on the next start and mail 
 before can be read without a connection, and changes you make without one (flags, moves,
 appointments, contacts, tasks) wait and reach the server when it is back, even after a restart.
 
+Keyboard shortcuts in the mail module follow Outlook (Cmd instead of Ctrl on a Mac): arrow keys
+walk the message list, Delete removes the selected message, Ctrl+N starts a new message, Ctrl+R
+replies, Ctrl+Shift+R replies to all, Ctrl+F forwards, Ctrl+Q and Ctrl+U mark read or unread,
+Ctrl+E puts the cursor in the search box, Esc clears a search and F5 refreshes the folder. None
+of them fires while you are typing in a text field or writing a message. Hovering a ribbon button
+shows its shortcut.
+
 ## Build
 
 ```
