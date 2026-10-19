@@ -13,6 +13,11 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.0.ui(ui);
     }
+
+    fn on_exit(&mut self) {
+        // The offline cache is written a moment after each change; the last changes go now.
+        self.0.engine.flush();
+    }
 }
 
 fn main() -> eframe::Result {
