@@ -10,6 +10,7 @@
 
 pub mod cache;
 pub mod calendar;
+pub mod categories;
 mod commands;
 pub mod config;
 pub mod contacts;
@@ -35,7 +36,7 @@ use std::time::{Duration, Instant};
 use mailcraft_mailbox::{Flag, Item};
 pub use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
 use mailcraft_model::{
-    Account, Appointment, Auth, Calendar, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, Rule, StoredDraft, Task, clean_text,
+    Account, Appointment, Auth, Calendar, Category, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, Rule, StoredDraft, Task, clean_text,
 };
 use mailcraft_secrets::{Secret, SecretStore};
 use serde::{Deserialize, Serialize};
@@ -109,6 +110,14 @@ pub enum Job {
         account_id: String,
         path: String,
     },
+    /// Give a message its new set of categories; `removed` are the ones it loses.
+    Categories {
+        account_id: String,
+        path: String,
+        id: String,
+        categories: Vec<String>,
+        removed: Vec<String>,
+    },
     /// Send `draft` (over SMTP, or through the store itself) and file a copy in `sent_path`.
     Send {
         account_id: String,
@@ -162,6 +171,7 @@ impl Job {
             | Job::Move { account_id, .. }
             | Job::Delete { account_id, .. }
             | Job::Empty { account_id, .. }
+            | Job::Categories { account_id, .. }
             | Job::Send { account_id, .. }
             | Job::Sync { account_id, .. }
             | Job::SaveItem { account_id, .. }
@@ -175,7 +185,16 @@ impl Job {
     /// Whether the job changes something on the server, so it must not be lost offline. A
     /// folder change is not kept: the person sees the folder list, so it needs the server now.
     pub fn is_change(&self) -> bool {
-        matches!(self, Job::Flag { .. } | Job::Move { .. } | Job::Delete { .. } | Job::Empty { .. } | Job::SaveItem { .. } | Job::DeleteItem { .. })
+        matches!(
+            self,
+            Job::Flag { .. }
+                | Job::Move { .. }
+                | Job::Delete { .. }
+                | Job::Empty { .. }
+                | Job::Categories { .. }
+                | Job::SaveItem { .. }
+                | Job::DeleteItem { .. }
+        )
     }
 }
 
@@ -273,6 +292,7 @@ fn message_of(folder_id: &str, h: RemoteHeader) -> Option<MessageHeader> {
         flags: Flags { seen: h.seen, flagged: h.flagged, answered: h.answered },
         has_attachments: h.has_attachments,
         message_id: h.header.message_id.clone(),
+        categories: h.categories,
     })
 }
 
@@ -368,6 +388,9 @@ pub struct Session {
     /// Rules for incoming mail, every account's together, in the order they run.
     pub rules: Vec<Rule>,
     rules_dirty: bool,
+    /// The categories (coloured labels) the person knows, kept in `categories.json`.
+    pub categories: Vec<Category>,
+    categories_dirty: bool,
     /// Messages the rules changed since the UI last asked.
     rule_hits: usize,
     next_rule_id: u64,
@@ -398,7 +421,7 @@ impl Session {
 
     /// A session for the configured accounts; each connects when its job is run.
     pub fn with_accounts(accounts: Vec<Account>) -> Self {
-        let mut s = Session::default();
+        let mut s = Session { categories: Category::defaults(), ..Session::default() };
         for a in accounts {
             s.add_account(a);
         }
@@ -939,6 +962,9 @@ impl Engine {
         }
         let rules = engine.config_path.as_deref().map(|p| config::load_json::<rules::RulesFile>(&config::rules_path(p))).unwrap_or_default();
         engine.session.set_rules(rules.rules);
+        let categories =
+            engine.config_path.as_deref().map(|p| config::load_json::<categories::CategoriesFile>(&config::categories_path(p))).unwrap_or_default();
+        engine.session.set_categories(categories.categories);
         engine.dispatch();
         engine
     }
@@ -950,6 +976,7 @@ impl Engine {
             self.session.take_contacts_dirty();
             self.session.take_tasks_dirty();
             self.session.take_rules_dirty();
+            self.session.take_categories_dirty();
             return Ok(());
         };
         if self.session.take_calendar_dirty() {
@@ -963,6 +990,9 @@ impl Engine {
         }
         if self.session.take_rules_dirty() {
             config::save_json(&config::rules_path(&path), &self.session.rules_data()).map_err(|e| CommandError::Store(e.to_string()))?;
+        }
+        if self.session.take_categories_dirty() {
+            config::save_json(&config::categories_path(&path), &self.session.categories_data()).map_err(|e| CommandError::Store(e.to_string()))?;
         }
         Ok(())
     }
@@ -1215,6 +1245,7 @@ mod tests {
             has_attachments: false,
             header: mailcraft_mime::parse_header(format!("From: x@y.nl\r\nSubject: Bericht {n}\r\n\r\n").as_bytes()),
             date: i64::from(n),
+            categories: Vec::new(),
         }
     }
 

@@ -432,6 +432,7 @@ mod tests {
             flags: Flags::default(),
             has_attachments: false,
             message_id: Some("<x@example.org>".into()),
+            categories: Vec::new(),
         }
     }
 

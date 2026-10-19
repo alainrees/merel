@@ -72,6 +72,13 @@ account's inbox, also while offline (the change waits in the queue like any othe
 uitvoeren op deze map" runs them over the open folder at once; "Regel voor deze afzender" starts one
 from the selected message. Rules are kept in `rules.json`.
 
+Categories, the coloured labels Outlook users know, go on a message through "Categoriseren" in
+the ribbon: Outlook's six to begin with, and "Alle categorieën…" adds, recolours or removes
+them (`categories.json`). The list shows a coloured square per category, the open message its
+chips (a click takes one off). The names travel with the mail: Exchange and Microsoft 365 keep
+them as the item's categories, IMAP as keywords (spaces become `_`), so other clients see them
+too; a category another client set shows in grey until you give it a colour here.
+
 The "Beeld" tab chooses what the list shows and how: only unread, flagged or mail with
 attachments; sorted newest or oldest first, by sender or by subject; the reading pane to the
 right or below the list; compact rows without the preview line; and a light, dark or system

@@ -260,6 +260,7 @@ mod tests {
             answered: false,
             size: 10,
             has_attachments: false,
+            categories: Vec::new(),
             header: mailcraft_mime::parse_header(RAW),
             date: 1_000,
         };

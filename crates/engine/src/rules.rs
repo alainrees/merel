@@ -226,6 +226,7 @@ mod tests {
             answered: false,
             size: 1,
             has_attachments: false,
+            categories: Vec::new(),
             header: mailcraft_mime::parse_header(format!("From: {from}\r\nSubject: {subject}\r\n\r\n").as_bytes()),
             date: i64::from(n),
         }

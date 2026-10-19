@@ -133,6 +133,11 @@ fn header_of(m: &Value) -> Option<RemoteHeader> {
         answered: false,
         size: 0,
         has_attachments: m.get("hasAttachments").and_then(Value::as_bool).unwrap_or(false),
+        categories: m
+            .get("categories")
+            .and_then(Value::as_array)
+            .map(|l| l.iter().filter_map(Value::as_str).map(clean_text).collect())
+            .unwrap_or_default(),
         header: ParsedHeader {
             from: m.get("from").and_then(address_of),
             to,
@@ -430,7 +435,7 @@ impl GraphClient {
 }
 
 /// The fields a listing asks for per message.
-const MESSAGE_FIELDS: &str = "id,subject,from,toRecipients,receivedDateTime,isRead,flag,hasAttachments,internetMessageId";
+const MESSAGE_FIELDS: &str = "id,subject,from,toRecipients,receivedDateTime,isRead,flag,hasAttachments,internetMessageId,categories";
 
 /// The request for the messages of `folder` that Graph's `$search` finds for `query`; `None`
 /// for an empty query. Graph takes the query as a quoted string (quotes and backslashes
@@ -531,6 +536,10 @@ impl Mailbox for GraphClient {
     fn delete_message(&mut self, _folder: &str, id: &str) -> Result<()> {
         // Graph moves a message in Deleted Items on to the recoverable items, like Outlook.
         self.call("DELETE", &format!("/me/messages/{}", encode(id)), None).map(drop)
+    }
+
+    fn set_categories(&mut self, _folder: &str, id: &str, categories: &[String], _removed: &[String]) -> Result<()> {
+        self.call("PATCH", &format!("/me/messages/{}", encode(id)), Some(&json!({ "categories": categories }))).map(drop)
     }
 
     fn empty_folder(&mut self, folder: &str) -> Result<()> {
