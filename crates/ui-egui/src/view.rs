@@ -97,6 +97,9 @@ pub struct ViewPrefs {
     /// The ISO week number left of each week in the calendar's month and week views, as
     /// Outlook's "Weeknummers weergeven".
     pub week_numbers: bool,
+    /// The hours outside the working day (before 8:00, from 17:00, and the weekend) shaded in
+    /// the calendar's day and week views, as Outlook shades them. On unless switched off.
+    pub work_hours: bool,
     /// The folders pinned under "Favorieten" at the top of the folder pane, by id, in order.
     pub favorites: Vec<String>,
     /// The saved searches listed under "Zoekmappen" in the folder pane.
@@ -114,6 +117,7 @@ impl Default for ViewPrefs {
             groups: true,
             sort: Sort::default(),
             week_numbers: false,
+            work_hours: true,
             favorites: Vec::new(),
             search_folders: Vec::new(),
         }
@@ -282,6 +286,13 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
             if ui
                 .checkbox(&mut app.view.week_numbers, "Weeknummers")
                 .on_hover_text("Het weeknummer links van elke week in de maand- en weekweergave, zoals in Outlook.")
+                .changed()
+            {
+                changed = true;
+            }
+            if ui
+                .checkbox(&mut app.view.work_hours, crate::calendar::WORK_HOURS)
+                .on_hover_text("De uren buiten 8:00-17:00 en het weekend grijs in de dag- en weekweergave, zoals in Outlook.")
                 .changed()
             {
                 changed = true;

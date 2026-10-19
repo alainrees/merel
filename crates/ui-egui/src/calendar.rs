@@ -45,6 +45,18 @@ const SEARCH_AHEAD_DAYS: i64 = 731;
 
 /// Pixels per hour in the week and day views.
 const HOUR_HEIGHT: f32 = 44.0;
+
+/// The checkbox on the Beeld tab that shades the hours outside the working day.
+pub const WORK_HOURS: &str = "Werkuren";
+/// The working day the shading leaves clear: from 8:00 up to 17:00, Monday to Friday, as
+/// Outlook's default.
+pub const WORK_START: u32 = 8;
+pub const WORK_END: u32 = 17;
+
+/// Whether the hour starting at `hour` on `d` falls outside the working day.
+pub fn outside_work(d: NaiveDate, hour: u32) -> bool {
+    d.weekday().num_days_from_monday() >= 5 || !(WORK_START..WORK_END).contains(&hour)
+}
 const DATE_FORMAT: &str = "%d-%m-%Y";
 
 /// The ribbon button and window that jump to a typed day, Outlook's "Ga naar datum" (Ctrl+G).
@@ -914,6 +926,18 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
     egui::ScrollArea::vertical().auto_shrink(false).id_salt("hours").show(ui, |ui| {
         let (grid, _) = ui.allocate_exact_size(vec2(gutter + col_w * days as f32, HOUR_HEIGHT * 24.0), Sense::hover());
         let p = ui.painter();
+        if app.view.work_hours {
+            // The hours outside the working day in a quieter shade, as Outlook draws them.
+            let shade = if t.dark { Color32::from_white_alpha(7) } else { Color32::from_black_alpha(11) };
+            for i in 0..days {
+                let d = add_days(first, i);
+                let x = grid.left() + gutter + i as f32 * col_w;
+                for hour in (0..24).filter(|h| outside_work(d, *h)) {
+                    let y = grid.top() + hour as f32 * HOUR_HEIGHT;
+                    p.rect_filled(Rect::from_min_size(pos2(x, y), vec2(col_w, HOUR_HEIGHT)), CornerRadius::ZERO, shade);
+                }
+            }
+        }
         for hour in 0..24 {
             let y = grid.top() + hour as f32 * HOUR_HEIGHT;
             p.line_segment([pos2(grid.left() + gutter, y), pos2(grid.right(), y)], Stroke::new(1.0, t.border));
@@ -1493,6 +1517,14 @@ mod tests {
         assert!(back.params().unwrap()["reminder"].is_null());
         assert_eq!(reminder_label(Some(1440)), "1 dag ervoor");
         assert_eq!(reminder_label(Some(45)), "45 minuten ervoor");
+    }
+
+    #[test]
+    fn the_working_day_runs_from_eight_to_five_on_weekdays() {
+        let monday = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+        let saturday = NaiveDate::from_ymd_opt(2026, 10, 24).unwrap();
+        assert!(outside_work(monday, 7) && !outside_work(monday, 8) && !outside_work(monday, 16) && outside_work(monday, 17));
+        assert!(outside_work(saturday, 10), "the weekend is shaded whole");
     }
 
     #[test]
