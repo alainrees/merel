@@ -22,6 +22,7 @@ mailcraft-exchange = { path = "crates/exchange" }
 mailcraft-google = { path = "crates/google" }
 mailcraft-graph = { path = "crates/graph" }
 mailcraft-html = { path = "crates/html" }
+mailcraft-store = { path = "crates/store" }
 
 # foundation
 thiserror = "2"
@@ -43,6 +44,8 @@ keyring = "4"
 # OAuth 2.0 token exchange over HTTPS, same TLS stack as the mail protocols.
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier", "json"] }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
+# The offline cache is sealed with ChaCha20-Poly1305 from the same crypto library rustls uses.
+aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys"] }
 open = "5"
 sha2 = "0.11"
 base64 = "0.23"
