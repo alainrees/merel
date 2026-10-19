@@ -129,6 +129,14 @@ pub struct MailApp {
     pub expanded: std::collections::HashSet<String>,
     /// Whether the saved theme has been handed to egui yet (on the first frame).
     theme_applied: bool,
+    /// The window title last handed to egui, so it is only sent when it changes.
+    title: Option<String>,
+}
+
+/// The window title: the app's name, with the unread inbox mail of every account in brackets
+/// when there is any, as Outlook shows it.
+pub fn window_title(inbox_unread: u32) -> String {
+    if inbox_unread == 0 { "Mailcraft".to_string() } else { format!("Mailcraft ({inbox_unread})") }
 }
 
 /// A message being dragged from the list, to drop on a folder.
@@ -205,6 +213,7 @@ impl MailApp {
             view,
             expanded: std::collections::HashSet::new(),
             theme_applied: false,
+            title: None,
         }
     }
 
@@ -246,6 +255,11 @@ impl MailApp {
         let hits = self.engine.session.take_rule_hits();
         if hits > 0 {
             self.notice = Some(rules::rule_notice(hits));
+        }
+        let title = window_title(self.engine.session.inbox_unread());
+        if self.title.as_deref() != Some(title.as_str()) {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title = Some(title);
         }
         // Wake up now and then so the engine's refresh timer runs while nothing happens; faster
         // while something is on its way.
@@ -1890,6 +1904,22 @@ mod tests {
         h.run();
         assert!(h.state().folder_edit.is_none());
         assert!(h.state().notice.as_deref().is_some_and(|n| n.contains("hoort bij het account")));
+    }
+
+    #[test]
+    fn the_window_title_counts_the_unread_inbox_mail_and_follows_it() {
+        assert_eq!(window_title(0), "Mailcraft");
+        assert_eq!(window_title(3), "Mailcraft (3)");
+        let mut h = harness();
+        h.run();
+        let unread = h.state().engine.session.inbox_unread();
+        assert!(unread > 0);
+        assert_eq!(h.state().title.as_deref(), Some(format!("Mailcraft ({unread})").as_str()));
+        h.get_by_label("Map").click();
+        h.run();
+        h.get_by_label("Alles gelezen").click();
+        h.run();
+        assert_eq!(h.state().title.as_deref(), Some("Mailcraft"));
     }
 
     #[test]
