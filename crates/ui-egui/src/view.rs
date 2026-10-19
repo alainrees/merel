@@ -3,6 +3,7 @@
 //! accounts file, so the window opens as it was left.
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use egui::RichText;
 use mailcraft_engine::view::{Filter, Sort};
@@ -50,11 +51,41 @@ impl ThemeChoice {
     }
 }
 
+/// When a message opened in the reading pane is marked read, as Outlook's reading-pane options:
+/// at once, after a few seconds, or not by itself.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkRead {
+    #[default]
+    Now,
+    AfterSeconds,
+    Never,
+}
+
+impl MarkRead {
+    pub const ALL: [MarkRead; 3] = [MarkRead::Now, MarkRead::AfterSeconds, MarkRead::Never];
+    /// How long a message is open before `AfterSeconds` marks it read.
+    pub const DELAY: Duration = Duration::from_secs(5);
+
+    pub fn dutch_name(self) -> &'static str {
+        match self {
+            MarkRead::Now => "Meteen",
+            MarkRead::AfterSeconds => "Na 5 seconden",
+            MarkRead::Never => "Niet vanzelf",
+        }
+    }
+}
+
+/// The menu in the Leesvenster group that holds the [`MarkRead`] choice.
+pub const MARK_READ_MENU: &str = "◉ ▾";
+
 /// What the person chose on the "Beeld" tab.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ViewPrefs {
     pub reading_pane: ReadingPane,
+    /// When a message opened in the reading pane counts as read.
+    pub mark_read: MarkRead,
     pub theme: ThemeChoice,
     /// Rows without the preview line, so more messages fit.
     pub compact: bool,
@@ -76,6 +107,7 @@ impl Default for ViewPrefs {
     fn default() -> Self {
         ViewPrefs {
             reading_pane: ReadingPane::default(),
+            mark_read: MarkRead::default(),
             theme: ThemeChoice::default(),
             compact: false,
             conversations: false,
@@ -115,6 +147,29 @@ impl MailApp {
         self.view.favorites.iter().any(|f| f == folder_id)
     }
 
+    /// Selects the message the way "Gelezen markeren" says: marked read at once, after
+    /// [`MarkRead::DELAY`] while it stays open, or not by itself.
+    pub fn select_message(&mut self, id: &str) {
+        self.run("message.select", json!({ "id": id, "mark_read": self.view.mark_read == MarkRead::Now }));
+        self.read_timer = (self.view.mark_read == MarkRead::AfterSeconds).then(|| (id.to_string(), Instant::now()));
+    }
+
+    /// Marks the open message read once it has been open for the delay; called every frame.
+    pub fn tick_read_timer(&mut self, ctx: &egui::Context) {
+        let Some((id, since)) = self.read_timer.clone() else { return };
+        if self.engine.session.selected_message.as_deref() != Some(id.as_str()) {
+            self.read_timer = None;
+            return;
+        }
+        let left = MarkRead::DELAY.saturating_sub(since.elapsed());
+        if left.is_zero() {
+            self.read_timer = None;
+            self.run("message.mark_read_one", json!({ "id": id }));
+        } else {
+            ctx.request_repaint_after(left);
+        }
+    }
+
     /// Pins the folder under "Favorieten", or takes it off again, and keeps the choice.
     pub fn toggle_favorite(&mut self, folder_id: &str, ctx: &egui::Context) {
         if self.is_favorite(folder_id) {
@@ -142,7 +197,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
             let current = app.engine.session.category_filter.clone();
             let names: Vec<String> = app.engine.session.categories.iter().map(|c| c.name.clone()).collect();
             let mut pick: Option<Option<String>> = None;
-            egui::ComboBox::from_id_salt("view-category").selected_text(current.clone().unwrap_or_else(|| "Alle".to_string())).width(150.0).show_ui(
+            egui::ComboBox::from_id_salt("view-category").selected_text(current.clone().unwrap_or_else(|| "Alle".to_string())).width(100.0).show_ui(
                 ui,
                 |ui| {
                     if ui.selectable_label(current.is_none(), "Alle").clicked() {
@@ -162,7 +217,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
         ui.separator();
         group(ui, t, "Sorteren", |ui| {
             let mut sort = app.view.sort;
-            egui::ComboBox::from_id_salt("view-sort").selected_text(sort.dutch_name()).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("view-sort").selected_text(sort.dutch_name()).width(92.0).show_ui(ui, |ui| {
                 for s in Sort::ALL {
                     ui.selectable_value(&mut sort, s, s.dutch_name());
                 }
@@ -182,6 +237,22 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
                     app.view.reading_pane = pane;
                     changed = true;
                 }
+            }
+            // When an opened message counts as read, as Outlook's reading-pane options.
+            let mut choice = app.view.mark_read;
+            ui.menu_button(MARK_READ_MENU, |ui| {
+                for m in MarkRead::ALL {
+                    if ui.selectable_label(choice == m, m.dutch_name()).clicked() {
+                        choice = m;
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text(format!("Gelezen markeren: wanneer een geopend bericht als gelezen telt. Nu: {}.", choice.dutch_name().to_lowercase()));
+            if choice != app.view.mark_read {
+                app.view.mark_read = choice;
+                changed = true;
             }
         });
         ui.separator();

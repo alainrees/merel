@@ -154,7 +154,7 @@ impl MailApp {
     /// window work on the message that was clicked.
     pub fn act_on_message(&mut self, m: &MessageHeader, pick: Pick) {
         if self.engine.session.selected_message.as_deref() != Some(m.id.as_str()) {
-            self.run("message.select", json!({ "id": m.id }));
+            self.select_message(&m.id);
         }
         match pick {
             Pick::Compose(kind) => self.open_compose(kind),
