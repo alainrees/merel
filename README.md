@@ -101,7 +101,10 @@ side pane lists the open tasks; drag one onto a day or an hour and the appointme
 task's title and notes filled in, so planning a task is one drag and "Opslaan". The appointment window also has
 "Genodigden": with addresses there the button reads "Verzenden", which saves the appointment, notes who was
 invited and mails each of them a meeting request (the appointment as a `text/calendar` attachment with the organiser
-and attendees) from the calendar's account, as Outlook does; replies are ordinary mail and nothing is tracked. In all three modules Ctrl+E goes to the search box and Esc clears it, as in the mail module. An Exchange, Microsoft 365 or Gmail account
+and attendees) from the calendar's account, as Outlook does; replies are ordinary mail and nothing is tracked. In all three modules Ctrl+E goes to the search box and Esc clears it, as in the mail module. Contacts can be gathered in a
+contact group ("Nieuwe groep" in the contacts module, like Outlook's Contactgroep): a name for a set of addresses, listed
+under the contacts, with "E-mail aan groep" on its card; typing the name in an address field offers the whole group and
+puts every member's address in the field. Groups live in `contact_groups.json` on this computer only. An Exchange, Microsoft 365 or Gmail account
 brings its own calendar, contacts and tasks along (Google Calendar, People and Tasks for Gmail), and so
 does an IMAP account with a CalDAV/CardDAV server next to it (Fastmail, iCloud, Nextcloud and the like): they
 appear next to the local ones, changes go straight to the server, and a new item asks whether

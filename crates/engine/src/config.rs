@@ -53,6 +53,11 @@ pub fn quick_steps_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("quick_steps.json")
 }
 
+/// The contact groups (distribution lists) file that goes with an accounts file.
+pub fn groups_path(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("contact_groups.json")
+}
+
 /// The categories (coloured labels) file that goes with an accounts file.
 pub fn categories_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("categories.json")
