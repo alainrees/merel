@@ -241,6 +241,7 @@ mod tests {
             has_attachments: false,
             message_id: None,
             categories: Vec::new(),
+            importance: Default::default(),
         };
         let mut c = AccountCache { account_id: "a1".into(), saved_at: 5, folders: vec![folder], messages: vec![message], ..AccountCache::default() };
         c.put_body("a1/INBOX#7", b"From: sanne@example.org\r\n\r\nHallo\r\n");

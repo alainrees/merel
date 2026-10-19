@@ -309,6 +309,7 @@ fn message_of(folder_id: &str, h: RemoteHeader) -> Option<MessageHeader> {
         has_attachments: h.has_attachments,
         message_id: h.header.message_id.clone(),
         categories: h.categories,
+        importance: h.header.importance,
     })
 }
 

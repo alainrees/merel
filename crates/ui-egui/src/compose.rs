@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use egui::{Margin, RichText, Stroke, Ui, vec2};
 
 use mailcraft_engine::SendState;
-use mailcraft_model::{Address, Draft, DraftAttachment, MAX_ATTACHMENTS, MessageHeader, StoredDraft};
+use mailcraft_model::{Address, Draft, DraftAttachment, Importance, MAX_ATTACHMENTS, MessageHeader, StoredDraft};
 
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 
@@ -42,6 +42,8 @@ pub struct Compose {
     pub error: Option<String>,
     /// The moment the message goes out, when it was put aside with "Later verzenden".
     pub send_at: Option<i64>,
+    /// Outlook's "Hoge urgentie" or "Lage urgentie"; normal unless chosen.
+    pub importance: Importance,
 }
 
 /// The moments "Later verzenden" offers, from `now`: in an hour, this (or tomorrow) evening at
@@ -103,6 +105,7 @@ impl Compose {
             account_id: String::new(),
             stored: None,
             send_at: None,
+            importance: Importance::Normal,
             initial: String::new(),
             draft_id: None,
             error: None,
@@ -160,6 +163,7 @@ impl Compose {
         c.account_id = d.account_id.clone();
         c.stored = Some(d.id.clone());
         c.send_at = d.send_at;
+        c.importance = d.importance;
         c
     }
 
@@ -187,6 +191,7 @@ impl Compose {
             attachments: self.attachments.clone(),
             updated: 0,
             send_at: self.send_at,
+            importance: self.importance,
         }
     }
 
@@ -326,7 +331,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         .frame(egui::Frame::window(&ctx.global_style()).fill(t.reading).stroke(Stroke::new(1.0, t.border)).inner_margin(Margin::same(14)))
         .show(ctx, |ui| {
             ui.add_enabled_ui(!sending, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     let b = egui::Button::new(RichText::new("Verzenden").color(t.on_accent)).fill(t.accent).min_size(vec2(110.0, 30.0));
                     if ui.add(b).clicked() {
                         send = true;
@@ -368,6 +373,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     {
                         pick = true;
                     }
+                    crate::importance::chooser(ui, t, &mut c.importance);
                     if sending {
                         ui.label(RichText::new("Verzenden…").color(t.text_dim));
                     } else if hovering {
@@ -503,6 +509,7 @@ mod tests {
             has_attachments: false,
             message_id: Some("<x@example.org>".into()),
             categories: Vec::new(),
+            importance: Default::default(),
         }
     }
 
@@ -577,6 +584,24 @@ mod tests {
     }
 
     #[test]
+    fn the_urgency_menu_marks_the_message_as_urgent_and_the_draft_carries_it() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        app.open_compose(Kind::New);
+        let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        h.run();
+        h.get_by_label("Urgentie ▾").click();
+        h.run();
+        h.get_all_by_label("Hoog").next().expect("the menu item").click();
+        h.run();
+        assert_eq!(h.state().compose.as_ref().map(|c| c.importance), Some(Importance::High));
+        h.get_by_label("! Hoge urgentie");
+        assert_eq!(h.state().compose.as_ref().map(|c| c.as_stored().importance), Some(Importance::High));
+        assert_eq!(h.state().compose.as_ref().and_then(|c| c.as_stored().to_draft().ok()).map(|d| d.importance), None, "no recipient yet");
+    }
+
+    #[test]
     fn later_verzenden_puts_the_message_aside_with_a_moment_and_can_be_undone() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
@@ -645,11 +670,14 @@ mod tests {
         written.body = format!("Prima.{}", written.body);
         assert!(!written.is_blank());
         written.attachments.push(DraftAttachment::new("a.txt", b"x".to_vec()));
+        written.importance = Importance::Low;
         let stored = written.as_stored();
+        assert_eq!(stored.importance, Importance::Low);
         assert_eq!((stored.id.as_str(), stored.account_id.as_str(), stored.to.as_str()), ("", "acc", "Sanne <sanne@example.org>"));
         assert_eq!(stored.in_reply_to.as_deref(), Some("<x@example.org>"));
         let again = Compose::from_stored(&StoredDraft { id: "d-1".into(), ..stored });
         assert_eq!((again.stored.as_deref(), again.subject.as_str(), again.attachments.len()), (Some("d-1"), "Re: Planning", 1));
+        assert_eq!(again.importance, Importance::Low, "the urgency comes back with the draft");
         assert!(again.body.starts_with("Prima."));
         let mut emptied = again;
         emptied.to.clear();
