@@ -1,14 +1,18 @@
 //! The compose window: new mail, reply, reply all and forward, with attachments picked from
-//! the computer's file dialog or dropped onto the window.
+//! the computer's file dialog or dropped onto the window. "Later verzenden" puts the message
+//! aside with a moment to go out, like Outlook's "Bezorging uitstellen"; until then it is a
+//! draft on this computer, and the engine sends it when the app runs at that moment.
 
 use std::path::{Path, PathBuf};
 
 use egui::{Margin, RichText, Stroke, Ui, vec2};
 
 use mailcraft_engine::SendState;
-use mailcraft_model::{Address, Draft, DraftAttachment, MAX_ATTACHMENTS, MessageHeader, StoredDraft, parse_address_list};
+use mailcraft_model::{Address, Draft, DraftAttachment, MAX_ATTACHMENTS, MessageHeader, StoredDraft};
 
-use crate::{MailApp, Tokens, dates};
+use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
+
+use crate::{MailApp, Tokens, calendar, dates};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -36,6 +40,36 @@ pub struct Compose {
     /// Set once Send is pressed; tracks the draft in the session's outbox.
     pub draft_id: Option<u64>,
     pub error: Option<String>,
+    /// The moment the message goes out, when it was put aside with "Later verzenden".
+    pub send_at: Option<i64>,
+}
+
+/// The moments "Later verzenden" offers, from `now`: in an hour, this (or tomorrow) evening at
+/// eight, tomorrow at eight, and Monday at eight.
+pub fn later_options(now: DateTime<Local>) -> Vec<(String, i64)> {
+    let at =
+        |date: chrono::NaiveDate, hour: u32| date.and_hms_opt(hour, 0, 0).and_then(|t| Local.from_local_datetime(&t).single()).map(|t| t.timestamp());
+    let today = now.date_naive();
+    let tomorrow = today.succ_opt().unwrap_or(today);
+    let mut out = vec![("Over een uur".to_string(), now.timestamp() + 3600)];
+    let evening = if now.hour() < 19 {
+        at(today, 20).map(|t| ("Vanavond om 20:00".to_string(), t))
+    } else {
+        at(tomorrow, 20).map(|t| ("Morgenavond om 20:00".to_string(), t))
+    };
+    out.extend(evening);
+    out.extend(at(tomorrow, 8).map(|t| ("Morgenochtend om 08:00".to_string(), t)));
+    let until_monday = (7 - i64::from(today.weekday().num_days_from_monday())) % 7;
+    let monday = today + chrono::Duration::days(if until_monday == 0 { 7 } else { until_monday });
+    out.extend(at(monday, 8).map(|t| ("Maandagochtend om 08:00".to_string(), t)));
+    out
+}
+
+/// "maandag 20 oktober om 08:00", in the computer's time zone.
+pub(crate) fn when_text(ts: i64) -> String {
+    let Some(t) = DateTime::from_timestamp(ts, 0).map(|t| t.with_timezone(&Local)) else { return dates::long(ts) };
+    let d = t.date_naive();
+    format!("{} {} {} om {:02}:{:02}", calendar::weekday_name(d), d.day(), calendar::month_name(d.month()), t.hour(), t.minute())
 }
 
 fn join(list: &[Address]) -> String {
@@ -68,6 +102,7 @@ impl Compose {
             attachments: Vec::new(),
             account_id: String::new(),
             stored: None,
+            send_at: None,
             initial: String::new(),
             draft_id: None,
             error: None,
@@ -124,6 +159,7 @@ impl Compose {
         c.attachments = d.attachments.clone();
         c.account_id = d.account_id.clone();
         c.stored = Some(d.id.clone());
+        c.send_at = d.send_at;
         c
     }
 
@@ -150,6 +186,7 @@ impl Compose {
             in_reply_to: self.in_reply_to.clone(),
             attachments: self.attachments.clone(),
             updated: 0,
+            send_at: self.send_at,
         }
     }
 
@@ -164,19 +201,7 @@ impl Compose {
     }
 
     pub fn draft(&self) -> Result<Draft, String> {
-        let to = parse_address_list(&self.to).map_err(|_| "Controleer de adressen bij Aan.".to_string())?;
-        let cc = parse_address_list(&self.cc).map_err(|_| "Controleer de adressen bij CC.".to_string())?;
-        if to.is_empty() {
-            return Err("Vul ten minste één ontvanger in bij Aan.".into());
-        }
-        Ok(Draft {
-            to,
-            cc,
-            subject: self.subject.clone(),
-            body: self.body.clone(),
-            in_reply_to: self.in_reply_to.clone(),
-            attachments: self.attachments.clone(),
-        })
+        self.as_stored().to_draft()
     }
 
     /// Reads a file from disk and adds it, or says why it cannot go along. The size is checked
@@ -288,6 +313,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
     let mut open = true;
     let mut send = false;
+    let mut schedule: Option<i64> = None;
     let mut discard = false;
     let mut put_aside = false;
     let mut pick = false;
@@ -304,6 +330,20 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     let b = egui::Button::new(RichText::new("Verzenden").color(t.on_accent)).fill(t.accent).min_size(vec2(110.0, 30.0));
                     if ui.add(b).clicked() {
                         send = true;
+                    }
+                    if c.send_at.is_none() {
+                        ui.menu_button("Later verzenden ▾", |ui| {
+                            for (label, ts) in later_options(Local::now()) {
+                                if ui.button(label).clicked() {
+                                    schedule = Some(ts);
+                                    ui.close();
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text(
+                            "Zet het bericht opzij en verstuurt het op dat moment, als Mailcraft dan draait. Tot die tijd staat het onder Concepten.",
+                        );
                     }
                     if ui
                         .add(egui::Button::new("Opslaan als concept").min_size(vec2(140.0, 30.0)))
@@ -334,6 +374,18 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                         ui.label(RichText::new("Laat los om toe te voegen").color(t.accent_text));
                     }
                 });
+                if let Some(ts) = c.send_at {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new(format!("⏰ Wordt verzonden op {}.", when_text(ts))).color(t.accent_text));
+                        if ui
+                            .small_button("Niet meer uitstellen")
+                            .on_hover_text("Het wordt weer een gewoon concept; verzend het zelf wanneer je wilt.")
+                            .clicked()
+                        {
+                            c.send_at = None;
+                        }
+                    });
+                }
                 ui.add_space(8.0);
                 field(ui, t, "Aan", &mut c.to);
                 crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut c.to);
@@ -389,6 +441,24 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         if let Some(paths) = rfd::FileDialog::new().set_title("Bijlagen kiezen").pick_files() {
             c.error = None;
             c.add_files(paths);
+        }
+    }
+    if let Some(ts) = schedule {
+        match c.draft() {
+            Ok(_) => {
+                c.send_at = Some(ts);
+                c.error = None;
+                app.notice = None;
+                app.put_aside();
+                if app.engine.session.last_draft.as_deref().and_then(|id| app.engine.session.draft(id)).is_some_and(|d| d.send_at == Some(ts)) {
+                    app.notice = Some(format!(
+                        "Het bericht wordt verzonden op {} als Mailcraft dan draait. Tot die tijd staat het onder Concepten; open het daar om dat te veranderen.",
+                        when_text(ts)
+                    ));
+                }
+                return;
+            }
+            Err(e) => c.error = Some(e),
         }
     }
     if send {
@@ -504,6 +574,66 @@ mod tests {
         let names: Vec<String> = harness.state().compose.as_ref().map(|c| c.attachments.iter().map(|a| a.name.clone()).collect()).unwrap_or_default();
         assert_eq!(names, ["foto.jpg"]);
         assert!(harness.query_by_label("📎 offerte.pdf (2 kB)").is_none());
+    }
+
+    #[test]
+    fn later_verzenden_puts_the_message_aside_with_a_moment_and_can_be_undone() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        app.open_compose(Kind::New);
+        let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        h.run();
+        h.get_by_label("Later verzenden ▾").click();
+        h.run();
+        h.get_by_label("Over een uur").click();
+        h.run();
+        let c = h.state().compose.as_ref().expect("without a recipient the window stays");
+        assert!(c.error.as_deref().is_some_and(|e| e.contains("ontvanger")) && c.send_at.is_none(), "{:?}", c.error);
+
+        if let Some(c) = h.state_mut().compose.as_mut() {
+            c.to = "sanne@example.org".into();
+            c.subject = "Later".into();
+        }
+        h.run();
+        h.get_by_label("Later verzenden ▾").click();
+        h.run();
+        h.get_by_label("Over een uur").click();
+        h.run();
+        assert!(h.state().compose.is_none(), "put aside");
+        let now = Local::now().timestamp();
+        let drafts = h.state().engine.session.drafts.clone();
+        assert_eq!(drafts.len(), 1);
+        let send_at = drafts[0].send_at.expect("a moment");
+        assert!((send_at - now - 3600).abs() < 60, "{send_at} vs {now}");
+        assert!(h.state().notice.as_deref().is_some_and(|n| n.contains("wordt verzonden op")), "{:?}", h.state().notice);
+
+        // Opened again, the moment shows and can be dropped; closing keeps it as a plain draft.
+        let id = drafts[0].id.clone();
+        h.state_mut().open_draft(&id);
+        h.run();
+        assert!(h.query_by_label("Later verzenden ▾").is_none(), "no second moment on top of the first");
+        h.get_by_label("Niet meer uitstellen").click();
+        h.run();
+        assert_eq!(h.state().compose.as_ref().and_then(|c| c.send_at), None);
+        h.state_mut().put_aside();
+        assert_eq!(h.state().engine.session.draft(&id).and_then(|d| d.send_at), None);
+    }
+
+    #[test]
+    fn the_moments_offered_are_whole_hours_ahead() {
+        let noon = Local.with_ymd_and_hms(2026, 10, 21, 12, 0, 0).single().unwrap(); // a Wednesday
+        let options = later_options(noon);
+        let labels: Vec<&str> = options.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(labels, ["Over een uur", "Vanavond om 20:00", "Morgenochtend om 08:00", "Maandagochtend om 08:00"]);
+        assert_eq!(options[0].1, noon.timestamp() + 3600);
+        assert_eq!(when_text(options[1].1), "woensdag 21 oktober om 20:00");
+        assert_eq!(when_text(options[2].1), "donderdag 22 oktober om 08:00");
+        assert_eq!(when_text(options[3].1), "maandag 26 oktober om 08:00");
+        let late = Local.with_ymd_and_hms(2026, 10, 26, 21, 30, 0).single().unwrap(); // a Monday evening
+        let labels: Vec<String> = later_options(late).into_iter().map(|(l, _)| l).collect();
+        assert_eq!(labels[1], "Morgenavond om 20:00");
+        assert_eq!(when_text(later_options(late)[3].1), "maandag 2 november om 08:00", "next Monday, not today");
     }
 
     #[test]
