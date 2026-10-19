@@ -96,6 +96,12 @@ pub fn build(from: &Address, draft: &Draft) -> Result<Message, SmtpError> {
 
 /// Sends `message` through `server` as `username`.
 pub fn send(server: &Server, username: &str, credential: &Credential, message: &Message) -> Result<(), SmtpError> {
+    send_raw(server, username, credential, message, &message.formatted())
+}
+
+/// Sends `raw` to the sender and recipients of `message`: for a message that was changed after
+/// it was built, such as a signed one.
+pub fn send_raw(server: &Server, username: &str, credential: &Credential, message: &Message, raw: &[u8]) -> Result<(), SmtpError> {
     let params = TlsParameters::new(server.host.clone()).map_err(|e| SmtpError::Connect { host: server.host.clone(), reason: e.to_string() })?;
     let tls = match server.tls {
         Tls::Implicit => SmtpTls::Wrapper(params),
@@ -112,7 +118,7 @@ pub fn send(server: &Server, username: &str, credential: &Credential, message: &
         .authentication(mechanisms)
         .timeout(Some(Duration::from_secs(30)))
         .build();
-    match transport.send(message) {
+    match transport.send_raw(message.envelope(), raw) {
         Ok(_) => Ok(()),
         Err(e) if e.is_client() || e.is_permanent() && e.to_string().to_lowercase().contains("auth") => Err(SmtpError::Login),
         Err(e) if e.is_response() || e.is_permanent() || e.is_transient() => Err(SmtpError::Refused(e.to_string())),
@@ -136,6 +142,7 @@ mod tests {
             attachments: Vec::new(),
             importance: Importance::High,
             read_receipt: true,
+            sign: None,
         };
         let m = build(&from, &draft).unwrap();
         let text = String::from_utf8(m.formatted()).unwrap();

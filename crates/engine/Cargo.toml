@@ -18,12 +18,14 @@ mailcraft-smtp = { workspace = true }
 mailcraft-oauth = { workspace = true }
 mailcraft-secrets = { workspace = true }
 mailcraft-store = { workspace = true }
+mailcraft-smime = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
 log = { workspace = true }
 directories = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+zeroize = { workspace = true }
 
 [lints]
 workspace = true

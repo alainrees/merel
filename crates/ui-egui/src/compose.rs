@@ -50,6 +50,9 @@ pub struct Compose {
     /// Outlook's "Leesbevestiging vragen": the reader's program is asked to say when the message
     /// was read.
     pub read_receipt: bool,
+    /// Whether the message is signed with the account's S/MIME certificate; `None` follows the
+    /// account: signed when it has one.
+    pub sign: Option<bool>,
     /// What Send found worth a second look, with the moment chosen if "Later verzenden" was
     /// pressed; the window shows it and waits for "Toch verzenden" or a change to the message.
     pub check: Option<Check>,
@@ -68,6 +71,8 @@ pub const NO_ATTACHMENT: &str = "Je schrijft over een bijlage, maar er zit er ge
 pub const NO_SUBJECT: &str = "Het bericht heeft geen onderwerp.";
 pub const SEND_ANYWAY: &str = "Toch verzenden";
 pub const LOOK_AGAIN: &str = "Nog even nakijken";
+/// The tick box that signs the message with the account's S/MIME certificate.
+pub const SIGN: &str = "Ondertekenen";
 
 /// Words that say an attachment is meant to be on, in Dutch and English.
 const ATTACHMENT_WORDS: &[&str] = &[
@@ -157,6 +162,7 @@ impl Compose {
             send_at: None,
             importance: Importance::Normal,
             read_receipt: false,
+            sign: None,
             check: None,
             initial: String::new(),
             draft_id: None,
@@ -217,6 +223,7 @@ impl Compose {
         c.send_at = d.send_at;
         c.importance = d.importance;
         c.read_receipt = d.read_receipt;
+        c.sign = d.sign;
         c
     }
 
@@ -246,6 +253,7 @@ impl Compose {
             send_at: self.send_at,
             importance: self.importance,
             read_receipt: self.read_receipt,
+            sign: self.sign,
         }
     }
 
@@ -401,6 +409,9 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         }
     }
     let sending = c.draft_id.is_some();
+    let account =
+        if c.account_id.is_empty() { app.engine.session.current_account().map(|a| a.id.clone()).unwrap_or_default() } else { c.account_id.clone() };
+    let certificate = app.engine.certificate(&account);
     // Files dropped onto the window become attachments; files hovering over it get a hint.
     if !sending {
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
@@ -479,6 +490,20 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     ui.checkbox(&mut c.read_receipt, crate::receipt::ASK).on_hover_text(
                         "Vraagt het mailprogramma van de ontvanger om je te laten weten dat het bericht is geopend; de ontvanger beslist zelf of dat gebeurt.",
                     );
+                    if certificate.is_some() || c.sign == Some(true) {
+                        let mut on = c.sign.unwrap_or(certificate.is_some());
+                        let hover = match &certificate {
+                            Some(info) => format!(
+                                "Zet je digitale handtekening onder het bericht (S/MIME), met het certificaat van {}, geldig tot {}. De ontvanger ziet dat het bericht van jou komt en onderweg niet is veranderd.",
+                                info.name,
+                                crate::dates::day(info.not_after)
+                            ),
+                            None => "Dit account heeft geen certificaat meer; importeer er een onder Bestand of zet dit uit.".to_string(),
+                        };
+                        if ui.checkbox(&mut on, SIGN).on_hover_text(hover).changed() {
+                            c.sign = Some(on);
+                        }
+                    }
                     template = crate::templates::menu(ui, &app.engine.session.templates_sorted());
                     if sending {
                         ui.label(RichText::new("Verzenden…").color(t.text_dim));
@@ -624,11 +649,6 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     if send {
         match c.draft() {
             Ok(draft) => {
-                let account = if c.account_id.is_empty() {
-                    app.engine.session.current_account().map(|a| a.id.clone()).unwrap_or_default()
-                } else {
-                    c.account_id.clone()
-                };
                 c.error = None;
                 c.draft_id = Some(app.engine.send(&account, draft));
             }

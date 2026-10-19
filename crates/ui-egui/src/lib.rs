@@ -9,6 +9,7 @@ mod attachments;
 mod backstage;
 pub mod calendar;
 pub mod categories;
+mod certificate;
 pub mod cleanup;
 mod compose;
 pub mod contacts;

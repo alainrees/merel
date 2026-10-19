@@ -40,6 +40,12 @@ pub fn long(ts: i64) -> String {
     format!("{d} {} {y} {h:02}:{min:02}", month(m))
 }
 
+/// "18 okt 2026".
+pub fn day(ts: i64) -> String {
+    let (y, m, d, _, _) = parts(ts);
+    format!("{d} {} {y}", month(m))
+}
+
 /// "woensdag 21 oktober", the way a due day is named.
 pub fn day_name(d: NaiveDate) -> String {
     format!("{} {} {}", crate::calendar::weekday_name(d), d.day(), crate::calendar::month_name(d.month()))
