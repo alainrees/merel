@@ -937,7 +937,8 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     r.dnd_set_drag_payload(DraggedMessage(m.id.clone()));
                     let r = r.on_hover_text(&m.subject);
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &m.subject));
-                    if let Some(p) = message_menu::menu(&r, m) {
+                    let known_sender = app.engine.session.contact_with_email(m.from.email()).is_some();
+                    if let Some(p) = message_menu::menu(&r, m, known_sender) {
                         menu_pick = Some((m.clone(), p));
                     }
                     // The fold control is its own widget, drawn over the row's left edge.
@@ -1077,9 +1078,23 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let to: Vec<&str> = m.to.iter().map(|a| a.display()).collect();
             ui.label(RichText::new(format!("Aan: {}", to.join("; "))).size(12.0).color(t.text_dim));
         });
+        let mut sender = false;
         ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
             ui.label(RichText::new(dates::long(m.date)).size(12.0).color(t.text_dim));
+            let known = app.engine.session.contact_with_email(m.from.email()).is_some();
+            let (label, hint) = if known {
+                ("Contact openen", "Deze afzender staat in je contacten; opent de kaart.")
+            } else {
+                (
+                    "Toevoegen aan contacten",
+                    "Maakt een contact met de naam en het adres van deze afzender; je kunt het nog aanvullen voor je opslaat.",
+                )
+            };
+            sender = ui.small_button(label).on_hover_text(hint).clicked();
         });
+        if sender {
+            app.open_or_add_sender(&m.from);
+        }
     });
     ui.add_space(8.0);
     let message_id = m.id.clone();
@@ -1523,6 +1538,30 @@ mod tests {
         h.get_by_label("Verwijderen").click();
         h.run();
         assert!(h.state().engine.session.appointments.iter().all(|a| a.title != "Tandarts"));
+    }
+
+    #[test]
+    fn a_sender_is_opened_or_added_as_a_contact_from_the_reading_pane() {
+        let mut h = harness();
+        h.state_mut().engine.session.selected_message = Some("m1".into());
+        h.run();
+        h.get_by_label("Contact openen").click();
+        h.run();
+        assert!(h.state().module == Module::People);
+        assert_eq!(h.state().engine.session.selected_contact().map(|c| c.name.as_str()), Some("Sanne de Vries"), "the known sender's card opens");
+        assert!(h.state().contacts.editor.is_none());
+
+        h.state_mut().module = Module::Mail;
+        h.state_mut().engine.session.selected_message = Some("m3".into());
+        h.run();
+        h.get_by_label("Toevoegen aan contacten").click();
+        h.run();
+        assert!(h.state().module == Module::People);
+        let e = h.state().contacts.editor.as_ref().expect("the form for a new contact");
+        assert_eq!((e.id.as_deref(), e.name.as_str(), e.emails.as_str()), (None, "Nieuwsbrief", "news@example.org"));
+        h.get_by_label("Opslaan").click();
+        h.run();
+        assert_eq!(h.state().engine.session.contact_with_email("news@example.org").map(|c| c.name.as_str()), Some("Nieuwsbrief"));
     }
 
     #[test]

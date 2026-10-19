@@ -49,7 +49,10 @@ it is due a window lists it with the time left, to open the appointment, close t
 it off for a while, and the app asks for attention once. Reminders travel with Exchange, Microsoft
 365, Google and CalDAV appointments as the server's own reminder or alarm. The contacts module keeps a local address
 book (`contacts.json`) with search and a contact card, and the compose window completes
-addresses from it and from the mail you have seen. The tasks module keeps a local to-do list
+addresses from it and from the mail you have seen. A sender goes into the address book in one click: "Toevoegen aan
+contacten" next to the sender in the reading pane (and "Afzender toevoegen aan contacten" in the message's right-click
+menu) opens the contact form with the name and address filled in; when the address is already known the button reads
+"Contact openen" and shows that card. The tasks module keeps a local to-do list
 (`tasks.json`) with due days, priorities, an open/done filter and a search box. The calendar has a search box
 too: while it holds words, a list of the matching appointments of the past year and the two years ahead
 (title, location or notes; one row per occurrence of a series) replaces the view, and a click opens the

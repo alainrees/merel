@@ -45,6 +45,12 @@ impl Session {
         self.selected_contact.as_deref().and_then(|id| self.contact(id))
     }
 
+    /// The contact that has `email` among its addresses, case aside.
+    pub fn contact_with_email(&self, email: &str) -> Option<&Contact> {
+        let email = email.trim();
+        self.contacts.iter().find(|c| c.emails.iter().any(|e| e.eq_ignore_ascii_case(email)))
+    }
+
     /// The contacts matching `query` (all of them when it is empty), by name.
     pub fn contacts_matching(&self, query: &str) -> Vec<&Contact> {
         let mut list: Vec<&Contact> = self.contacts.iter().filter(|c| c.matches(query)).collect();
@@ -169,6 +175,14 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_contact_is_found_by_any_of_its_addresses() {
+        let s = Session::sample();
+        assert_eq!(s.contact_with_email("SANNE@example.org").map(|c| c.name.as_str()), Some("Sanne de Vries"));
+        assert_eq!(s.contact_with_email(" ravi@example.org ").map(|c| c.name.as_str()), Some("Ravi Kumar"));
+        assert!(s.contact_with_email("news@example.org").is_none());
+    }
 
     #[test]
     fn contacts_are_saved_found_and_deleted() {
