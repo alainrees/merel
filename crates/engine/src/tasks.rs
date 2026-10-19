@@ -67,6 +67,16 @@ impl Session {
         list
     }
 
+    /// [`Self::tasks_filtered`] narrowed to the tasks whose title or notes hold every word of
+    /// `query`; an empty query narrows nothing.
+    pub fn tasks_matching(&self, filter: TaskFilter, query: &str) -> Vec<&Task> {
+        let mut list = self.tasks_filtered(filter);
+        if !query.trim().is_empty() {
+            list.retain(|t| t.matches(query));
+        }
+        list
+    }
+
     /// Whether a command changed the tasks since the last call.
     pub fn take_tasks_dirty(&mut self) -> bool {
         std::mem::take(&mut self.tasks_dirty)
@@ -184,6 +194,21 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn the_search_box_narrows_the_list_to_tasks_holding_every_word() {
+        let mut s = Session::default();
+        s.run("task.save", &json!({ "title": "Offerte drukwerk", "notes": "voor Ravi" })).unwrap();
+        s.run("task.save", &json!({ "title": "Portfolio bijwerken" })).unwrap();
+        s.run("task.save", &json!({ "title": "Offerte sturen" })).unwrap();
+        s.run("task.complete", &Value::Null).unwrap();
+        let titles = |list: Vec<&Task>| list.into_iter().map(|t| t.title.clone()).collect::<Vec<_>>();
+        assert_eq!(titles(s.tasks_matching(TaskFilter::Open, "  ")).len(), 2, "blank narrows nothing");
+        assert_eq!(titles(s.tasks_matching(TaskFilter::Open, "OFFERTE")), ["Offerte drukwerk"], "case does not matter; the filter still holds");
+        assert_eq!(titles(s.tasks_matching(TaskFilter::All, "offerte")), ["Offerte drukwerk", "Offerte sturen"]);
+        assert_eq!(titles(s.tasks_matching(TaskFilter::Open, "ravi offerte")), ["Offerte drukwerk"], "every word, title or notes");
+        assert!(s.tasks_matching(TaskFilter::Open, "belasting").is_empty());
+    }
 
     #[test]
     fn tasks_are_saved_completed_sorted_and_deleted() {

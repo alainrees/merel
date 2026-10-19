@@ -250,6 +250,13 @@ impl Recurrence {
 }
 
 impl Appointment {
+    /// Whether every word of `query` (case-insensitive) occurs in the title, the location or
+    /// the notes.
+    pub fn matches(&self, query: &str) -> bool {
+        let text = format!("{}\n{}\n{}", self.title, self.location, self.notes).to_lowercase();
+        query.split_whitespace().all(|w| text.contains(&w.to_lowercase()))
+    }
+
     /// Cleans the free text and checks the times; what comes back is safe to store and show.
     pub fn validated(mut self) -> Result<Self, AppointmentError> {
         self.title = clean_text(self.title.trim());
