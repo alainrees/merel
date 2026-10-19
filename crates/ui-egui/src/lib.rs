@@ -1177,6 +1177,53 @@ mod tests {
     }
 
     #[test]
+    fn a_weekly_appointment_shows_every_week_and_one_time_can_be_skipped() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.state_mut().calendar.view = calendar::View::Week;
+        h.run();
+        let weekly = h.state().engine.session.appointments.iter().find(|a| a.title == "Weekstart").expect("sample series").clone();
+        let series_start = weekly.start;
+        assert_eq!(h.query_all_by_label_contains("Weekstart").count(), 1, "one occurrence a week");
+        // Next week shows the series again, with its own start.
+        let focus = h.state().calendar.focus;
+        h.state_mut().calendar.focus = focus.checked_add_days(chrono::Days::new(7)).expect("next week");
+        h.run();
+        assert_eq!(h.query_all_by_label_contains("Weekstart").count(), 1);
+        h.get_by_label_contains("Weekstart").click();
+        h.run();
+        let editor = h.state().calendar.editor.as_ref().expect("the series opens");
+        assert_eq!(editor.repeat, Some(mailcraft_model::Frequency::Weekly));
+        let clicked = editor.occurrence.expect("the clicked occurrence is remembered");
+        assert!(clicked > series_start && clicked - series_start <= 8 * 86_400, "it is next week's, not the first");
+        h.get_by_label("Deze keer overslaan").click();
+        h.run();
+        assert!(h.state().calendar.editor.is_none());
+        assert!(h.query_all_by_label_contains("Weekstart").next().is_none(), "the skipped time is gone from this week");
+        let s = &h.state().engine.session;
+        assert_eq!(s.appointment(&weekly.id).unwrap().recurrence.as_ref().unwrap().skipped, vec![clicked]);
+        assert_eq!(s.appointments.iter().filter(|a| a.title == "Weekstart").count(), 1, "the series itself stays");
+
+        // A new appointment can be made to repeat; the file then holds the rule, not the copies.
+        h.get_by_label("Nieuwe afspraak").click();
+        h.run();
+        {
+            let e = h.state_mut().calendar.editor.as_mut().expect("editor");
+            e.title = "Yoga".into();
+            e.repeat = Some(mailcraft_model::Frequency::Daily);
+            e.ends = calendar::Ends::AfterCount;
+            e.count = "3".into();
+        }
+        h.run();
+        h.get_by_label("Opslaan").click();
+        h.run();
+        let s = &h.state().engine.session;
+        let yoga = s.appointments.iter().find(|a| a.title == "Yoga").expect("saved");
+        assert_eq!(yoga.recurrence.as_ref().map(|r| r.count), Some(Some(3)));
+        assert_eq!(s.appointments_between(yoga.start, yoga.start + 30 * 86_400).iter().filter(|a| a.title == "Yoga").count(), 3);
+    }
+
+    #[test]
     fn file_tab_opens_the_backstage_with_the_account_form() {
         let mut h = harness();
         h.run();

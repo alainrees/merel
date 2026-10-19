@@ -159,6 +159,7 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         all_day: e.get("isAllDay").and_then(Value::as_bool).unwrap_or(false),
         location: e.get("location").map(|l| str_of(l, "displayName")).unwrap_or("").to_string(),
         notes: body_text(e),
+        recurrence: None,
     }
     .validated()
     .ok()

@@ -1281,6 +1281,7 @@ mod tests {
                 all_day: false,
                 location: String::new(),
                 notes: String::new(),
+                recurrence: None,
             }],
             contacts: Vec::new(),
             tasks: Vec::new(),

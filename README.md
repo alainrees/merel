@@ -35,7 +35,10 @@ for Microsoft 365); see [docs/accounts.md](docs/accounts.md) for the one-time ap
 registration. Exchange Server (2013+)
 works through Exchange Web Services over HTTPS, reading and sending alike. The calendar module
 shows a month, week or day view with a local calendar: appointments are created, edited and
-deleted in a window and kept in `calendar.json`. The contacts module keeps a local address
+deleted in a window and kept in `calendar.json`. An appointment in a calendar on this computer can
+repeat (every so many days, weeks on chosen weekdays, months or years; for ever, until a date or a
+number of times): the file keeps the rule once, the views show every occurrence, and one
+occurrence can be skipped from the window without touching the rest. The contacts module keeps a local address
 book (`contacts.json`) with search and a contact card, and the compose window completes
 addresses from it and from the mail you have seen. The tasks module keeps a local to-do list
 (`tasks.json`) with due days, priorities and an open/done filter. An Exchange, Microsoft 365 or Gmail account

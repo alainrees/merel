@@ -168,6 +168,7 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         all_day,
         location: str_of(e, "location").to_string(),
         notes: str_of(e, "description").to_string(),
+        recurrence: None,
     }
     .validated()
     .ok()

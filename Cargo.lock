@@ -2468,6 +2468,8 @@ name = "mailcraft-model"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "chrono",
+ "chrono-tz",
  "serde",
  "thiserror 2.0.21",
 ]
