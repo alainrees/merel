@@ -16,6 +16,7 @@ pub mod config;
 pub mod contacts;
 pub mod drafts;
 pub mod folders;
+pub mod quicksteps;
 pub mod reminders;
 pub mod rules;
 mod sample;
@@ -36,7 +37,8 @@ use std::time::{Duration, Instant};
 use mailcraft_mailbox::{Flag, Item};
 pub use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
 use mailcraft_model::{
-    Account, Appointment, Auth, Calendar, Category, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, Rule, StoredDraft, Task, clean_text,
+    Account, Appointment, Auth, Calendar, Category, Contact, Draft, Flags, Folder, FolderKind, MessageHeader, QuickStep, Rule, StoredDraft, Task,
+    clean_text,
 };
 use mailcraft_secrets::{Secret, SecretStore};
 use serde::{Deserialize, Serialize};
@@ -393,6 +395,10 @@ pub struct Session {
     /// The categories (coloured labels) the person knows, kept in `categories.json`.
     pub categories: Vec<Category>,
     categories_dirty: bool,
+    /// Quick steps, every account's together, in the order they are shown; `quick_steps.json`.
+    pub quick_steps: Vec<QuickStep>,
+    quick_steps_dirty: bool,
+    next_quick_step_id: u64,
     /// Messages the rules changed since the UI last asked.
     rule_hits: usize,
     next_rule_id: u64,
@@ -491,6 +497,10 @@ impl Session {
         if self.rules.iter().any(|r| r.account_id == account_id) {
             self.rules.retain(|r| r.account_id != account_id);
             self.rules_dirty = true;
+        }
+        if self.quick_steps.iter().any(|q| q.account_id == account_id) {
+            self.quick_steps.retain(|q| q.account_id != account_id);
+            self.quick_steps_dirty = true;
         }
         self.appointments.retain(|a| !a.id.starts_with(&prefix));
         self.dismissed_reminders.retain(|k| !k.id.starts_with(&prefix));
@@ -968,6 +978,9 @@ impl Engine {
         let categories =
             engine.config_path.as_deref().map(|p| config::load_json::<categories::CategoriesFile>(&config::categories_path(p))).unwrap_or_default();
         engine.session.set_categories(categories.categories);
+        let steps =
+            engine.config_path.as_deref().map(|p| config::load_json::<quicksteps::QuickStepsFile>(&config::quick_steps_path(p))).unwrap_or_default();
+        engine.session.set_quick_steps(steps.quick_steps);
         engine.dispatch();
         engine
     }
@@ -980,6 +993,7 @@ impl Engine {
             self.session.take_tasks_dirty();
             self.session.take_rules_dirty();
             self.session.take_categories_dirty();
+            self.session.take_quick_steps_dirty();
             return Ok(());
         };
         if self.session.take_calendar_dirty() {
@@ -996,6 +1010,9 @@ impl Engine {
         }
         if self.session.take_categories_dirty() {
             config::save_json(&config::categories_path(&path), &self.session.categories_data()).map_err(|e| CommandError::Store(e.to_string()))?;
+        }
+        if self.session.take_quick_steps_dirty() {
+            config::save_json(&config::quick_steps_path(&path), &self.session.quick_steps_data()).map_err(|e| CommandError::Store(e.to_string()))?;
         }
         Ok(())
     }

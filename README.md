@@ -76,6 +76,12 @@ account's inbox, also while offline (the change waits in the queue like any othe
 uitvoeren op deze map" runs them over the open folder at once; "Regel voor deze afzender" starts one
 from the selected message. Rules are kept in `rules.json`.
 
+Quick steps are your own buttons on the "Start" tab, as in Outlook: "Beheren…" in the "Snelle
+stappen" group opens a window where a step gets a name and what it does to the selected message
+in one go (move to a folder, mark as read, flag, give categories). Each step is a button in the
+ribbon, and the first nine of an account also answer to Ctrl+Shift+1 to 9. They are kept in
+`quick_steps.json`.
+
 Categories, the coloured labels Outlook users know, go on a message through "Categoriseren" in
 the ribbon: Outlook's six to begin with, and "Alle categorieën…" adds, recolours or removes
 them (`categories.json`). The list shows a coloured square per category, the open message its
@@ -91,7 +97,8 @@ theme. The choices are kept in `view.json` next to the accounts file.
 Keyboard shortcuts in the mail module follow Outlook (Cmd instead of Ctrl on a Mac): arrow keys
 walk the message list, Delete removes the selected message, Ctrl+N starts a new message, Ctrl+R
 replies, Ctrl+Shift+R replies to all, Ctrl+F forwards, Ctrl+Shift+V moves to a folder, Ctrl+Q and Ctrl+U mark read or unread,
-Ctrl+E puts the cursor in the search box, Esc clears a search and F5 refreshes the folder. None
+Ctrl+E puts the cursor in the search box, Ctrl+Shift+1 to 9 run the account's quick steps, Esc clears a
+search and F5 refreshes the folder. None
 of them fires while you are typing in a text field or writing a message. Hovering a ribbon button
 shows its shortcut, and the "Help" tab lists them all in one window; the same tab opens the folder
 that holds your settings and cache, the project page, and "Over Mailcraft" with the version.
