@@ -6,7 +6,7 @@
 //! the time zone the caller passes, so a weekly 10:00 stays 10:00 across a daylight-saving
 //! change.
 
-use chrono::{Datelike, Days, Months, NaiveDateTime, TimeZone};
+use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDateTime, TimeZone};
 use serde::{Deserialize, Serialize};
 
 use crate::clean_text;
@@ -131,6 +131,41 @@ impl Recurrence {
         self.skipped.sort_unstable();
         self.skipped.dedup();
         self
+    }
+
+    /// The series as the value of an iCalendar `RRULE` (without the `RRULE:` name), as CalDAV
+    /// and Google Calendar take it. `UNTIL` is a local date for an all-day appointment, else a
+    /// UTC time, as the standard wants next to a `DTSTART` of that kind. The skipped
+    /// occurrences are not part of the rule.
+    pub fn rrule(&self, all_day: bool) -> String {
+        const DAYS: [&str; 7] = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
+        let mut parts = vec![format!(
+            "FREQ={}",
+            match self.frequency {
+                Frequency::Daily => "DAILY",
+                Frequency::Weekly => "WEEKLY",
+                Frequency::Monthly => "MONTHLY",
+                Frequency::Yearly => "YEARLY",
+            }
+        )];
+        if self.interval > 1 {
+            parts.push(format!("INTERVAL={}", self.interval));
+        }
+        if self.frequency == Frequency::Weekly && !self.weekdays.is_empty() {
+            let days: Vec<&str> = self.weekdays.iter().filter_map(|d| DAYS.get(usize::from(*d))).copied().collect();
+            parts.push(format!("BYDAY={}", days.join(",")));
+        }
+        if let Some(u) = self.until {
+            let t = DateTime::from_timestamp(u, 0).unwrap_or_default();
+            parts.push(if all_day {
+                format!("UNTIL={}", t.with_timezone(&Local).format("%Y%m%d"))
+            } else {
+                format!("UNTIL={}", t.format("%Y%m%dT%H%M%SZ"))
+            });
+        } else if let Some(c) = self.count {
+            parts.push(format!("COUNT={c}"));
+        }
+        parts.join(";")
     }
 
     /// Whether the occurrence that would start at `start` was taken out.

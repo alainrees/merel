@@ -214,10 +214,13 @@ fn reminder_of(e: &Value) -> Option<u32> {
 /// The event as the Calendar API takes it. The field not in use is cleared, so a `PATCH`
 /// that turns a timed appointment into an all-day one (or back) takes. A reminder becomes
 /// the event's own pop-up; none hands the event back to the calendar's default reminders.
-fn event_json(a: &Appointment) -> Value {
+fn event_json(a: &Appointment, zone: &str) -> Value {
     let time = |ts| {
         if a.all_day {
             json!({ "date": local_date(ts), "dateTime": null, "timeZone": null })
+        } else if a.recurrence.is_some() {
+            // A series needs the zone it repeats in, so 10:00 stays 10:00 across a DST change.
+            json!({ "dateTime": rfc3339(ts), "timeZone": zone, "date": null })
         } else {
             json!({ "dateTime": rfc3339(ts), "date": null })
         }
@@ -226,7 +229,16 @@ fn event_json(a: &Appointment) -> Value {
         Some(m) => json!({ "useDefault": false, "overrides": [{ "method": "popup", "minutes": m }] }),
         None => json!({ "useDefault": true }),
     };
-    json!({ "summary": a.title, "description": a.notes, "location": a.location, "start": time(a.start), "end": time(a.end), "reminders": reminders })
+    let mut event = json!({ "summary": a.title, "description": a.notes, "location": a.location, "start": time(a.start), "end": time(a.end), "reminders": reminders });
+    if let Some(r) = &a.recurrence {
+        event["recurrence"] = json!([format!("RRULE:{}", r.rrule(a.all_day))]);
+    }
+    event
+}
+
+/// The computer's time zone by its IANA name, for a series.
+fn local_zone() -> String {
+    iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into())
 }
 
 fn first_str<'a>(v: &'a Value, list: &str, key: &str) -> &'a str {
@@ -447,7 +459,7 @@ impl ItemStore for GoogleItems {
         let id = item.id();
         match item {
             Item::Appointment(a) => {
-                let body = event_json(a);
+                let body = event_json(a, &local_zone());
                 if id.is_empty() {
                     Self::created_id(&self.call("POST", EVENTS, Some(&without_nulls(body)))?, "id", "event:")
                 } else {
@@ -518,26 +530,34 @@ mod tests {
         let a = appointment_of(&timed).unwrap();
         assert_eq!((a.id.as_str(), a.title.as_str(), a.start, a.end, a.all_day), ("event:e1", "Overleg", 1_792_000_000, 1_792_003_600, false));
         assert_eq!(a.reminder, Some(20), "the pop-up counts, not the e-mail");
-        assert_eq!(event_json(&a)["reminders"], json!({ "useDefault": false, "overrides": [{ "method": "popup", "minutes": 20 }] }));
+        assert_eq!(
+            event_json(&a, "Europe/Amsterdam")["reminders"],
+            json!({ "useDefault": false, "overrides": [{ "method": "popup", "minutes": 20 }] })
+        );
         let whole = json!({ "id": "e2", "start": { "date": "2026-10-18" }, "end": { "date": "2026-10-19" }, "reminders": { "useDefault": true } });
         let a = appointment_of(&whole).unwrap();
         assert_eq!((a.title.as_str(), a.all_day, a.end - a.start, a.reminder), ("(Zonder titel)", true, 86_400, None));
-        assert_eq!(event_json(&a)["reminders"], json!({ "useDefault": true }), "no reminder here leaves the calendar's defaults");
+        assert_eq!(event_json(&a, "Europe/Amsterdam")["reminders"], json!({ "useDefault": true }), "no reminder here leaves the calendar's defaults");
         assert_eq!(a.start, midnight_of("2026-10-18").unwrap());
         assert!(
             appointment_of(&json!({ "id": "e3", "status": "cancelled", "start": { "date": "2026-10-18" }, "end": { "date": "2026-10-19" } }))
                 .is_none()
         );
 
-        let body = event_json(&a);
+        let body = event_json(&a, "Europe/Amsterdam");
         assert_eq!(body["start"]["date"], "2026-10-18");
         assert!(body["start"]["dateTime"].is_null());
         let stripped = without_nulls(body);
         assert!(stripped["start"].get("dateTime").is_none() && stripped["end"]["date"] == "2026-10-19");
         let mut timed = a.clone();
         timed.all_day = false;
-        let body = event_json(&timed);
+        let body = event_json(&timed, "Europe/Amsterdam");
         assert!(body["start"]["dateTime"].as_str().unwrap().ends_with('Z') && body["start"]["date"].is_null());
+        assert!(body.get("recurrence").is_none());
+        let series = Appointment { recurrence: Some(mailcraft_model::Recurrence::every(mailcraft_model::Frequency::Daily)), ..timed };
+        let body = event_json(&series, "Europe/Amsterdam");
+        assert_eq!(body["recurrence"], json!(["RRULE:FREQ=DAILY"]));
+        assert_eq!(body["start"]["timeZone"], "Europe/Amsterdam", "a series names the zone it repeats in");
     }
 
     #[test]
