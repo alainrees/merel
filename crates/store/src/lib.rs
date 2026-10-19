@@ -15,7 +15,7 @@ use base64::Engine as _;
 use mailcraft_model::{Appointment, Calendar, Contact, Folder, MessageHeader, StoredDraft, Task};
 use mailcraft_secrets::{Secret, SecretStore};
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 /// Keychain entry holding the cache key.
 pub const KEY_NAME: &str = "cache-key";
@@ -27,6 +27,7 @@ pub const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_ONE_BODY: usize = 4 * 1024 * 1024;
 
 const MAGIC: &[u8; 4] = b"MCC1";
+const IDENTITY_MAGIC: &[u8; 4] = b"MCI1";
 const KEY_LEN: usize = 32;
 
 #[derive(Debug, thiserror::Error)]
@@ -137,36 +138,85 @@ impl Store {
         }
     }
 
-    fn open_bytes(&self, account_id: &str, mut bytes: Vec<u8>) -> Option<AccountCache> {
-        if bytes.len() < MAGIC.len() + NONCE_LEN || !bytes.starts_with(MAGIC) {
+    fn open_bytes(&self, account_id: &str, bytes: Vec<u8>) -> Option<AccountCache> {
+        let plain = self.unseal(MAGIC, account_id.as_bytes(), bytes)?;
+        serde_json::from_slice(&plain).ok()
+    }
+
+    /// The plain text of a file written by [`Store::seal`] with the same tag and associated
+    /// data; `None` for anything else.
+    fn unseal(&self, magic: &[u8; 4], aad: &[u8], mut bytes: Vec<u8>) -> Option<Zeroizing<Vec<u8>>> {
+        if bytes.len() < magic.len() + NONCE_LEN || !bytes.starts_with(magic) {
             return None;
         }
-        let nonce = Nonce::try_assume_unique_for_key(bytes.get(MAGIC.len()..MAGIC.len() + NONCE_LEN)?).ok()?;
-        let body = bytes.get_mut(MAGIC.len() + NONCE_LEN..)?;
-        let plain = self.key.open_in_place(nonce, Aad::from(account_id.as_bytes()), body).ok()?;
-        serde_json::from_slice(plain).ok()
+        let nonce = Nonce::try_assume_unique_for_key(bytes.get(magic.len()..magic.len() + NONCE_LEN)?).ok()?;
+        let body = bytes.get_mut(magic.len() + NONCE_LEN..)?;
+        let plain = Zeroizing::new(self.key.open_in_place(nonce, Aad::from(aad), body).ok()?.to_vec());
+        bytes.zeroize();
+        Some(plain)
+    }
+
+    fn seal(&self, magic: &[u8; 4], aad: &[u8], mut body: Vec<u8>) -> Result<Vec<u8>, StoreError> {
+        let mut out = magic.to_vec();
+        let mut nonce = [0u8; NONCE_LEN];
+        getrandom::fill(&mut nonce).map_err(|_| StoreError::Crypto)?;
+        out.extend_from_slice(&nonce);
+        let nonce = Nonce::try_assume_unique_for_key(&nonce).map_err(|_| StoreError::Crypto)?;
+        self.key.seal_in_place_append_tag(nonce, Aad::from(aad), &mut body).map_err(|_| StoreError::Crypto)?;
+        out.extend_from_slice(&body);
+        Ok(out)
     }
 
     /// Writes the cache of `cache.account_id` through a temporary file, readable by the
     /// owner only.
     pub fn save(&self, cache: &AccountCache) -> Result<(), StoreError> {
         std::fs::create_dir_all(&self.dir)?;
-        let mut out = MAGIC.to_vec();
-        let mut nonce = [0u8; NONCE_LEN];
-        getrandom::fill(&mut nonce).map_err(|_| StoreError::Crypto)?;
-        out.extend_from_slice(&nonce);
-        let mut body = serde_json::to_vec(cache).map_err(|_| StoreError::Crypto)?;
-        let nonce = Nonce::try_assume_unique_for_key(&nonce).map_err(|_| StoreError::Crypto)?;
-        self.key.seal_in_place_append_tag(nonce, Aad::from(cache.account_id.as_bytes()), &mut body).map_err(|_| StoreError::Crypto)?;
-        out.extend_from_slice(&body);
+        let body = serde_json::to_vec(cache).map_err(|_| StoreError::Crypto)?;
+        let out = self.seal(MAGIC, cache.account_id.as_bytes(), body)?;
         let path = self.path(&cache.account_id);
         write_private(&path, &out)
     }
 
-    /// Forgets an account.
+    /// Forgets an account, its S/MIME certificate included.
     pub fn remove(&self, account_id: &str) {
         let _ = std::fs::remove_file(self.path(account_id));
+        self.remove_identity(account_id);
     }
+
+    fn identity_path(&self, account_id: &str) -> PathBuf {
+        self.path(account_id).with_extension("identity")
+    }
+
+    /// Keeps the S/MIME certificate and private key of `account_id`, sealed like the cache and
+    /// bound to the account, in a file of its own: the cache is rewritten all the time, the
+    /// key only when it changes.
+    pub fn save_identity(&self, account_id: &str, plain: &[u8]) -> Result<(), StoreError> {
+        std::fs::create_dir_all(&self.dir)?;
+        let out = self.seal(IDENTITY_MAGIC, &identity_aad(account_id), plain.to_vec())?;
+        write_private(&self.identity_path(account_id), &out)
+    }
+
+    /// What [`Store::save_identity`] kept for `account_id`; `None` when there is nothing, or
+    /// the file does not open.
+    pub fn load_identity(&self, account_id: &str) -> Option<Zeroizing<Vec<u8>>> {
+        let path = self.identity_path(account_id);
+        let bytes = std::fs::read(&path).ok()?;
+        let plain = self.unseal(IDENTITY_MAGIC, &identity_aad(account_id), bytes);
+        if plain.is_none() {
+            log::warn!("{}: certificate unreadable, ignored", path.display());
+        }
+        plain
+    }
+
+    pub fn remove_identity(&self, account_id: &str) {
+        let _ = std::fs::remove_file(self.identity_path(account_id));
+    }
+}
+
+/// Associated data of an identity file: not the bare account id, so a cache file renamed to
+/// an identity (or the other way round) does not open.
+fn identity_aad(account_id: &str) -> Vec<u8> {
+    format!("identity\0{account_id}").into_bytes()
 }
 
 fn decode_key(encoded: &str) -> Option<Zeroizing<[u8; KEY_LEN]>> {
@@ -280,6 +330,30 @@ mod tests {
         assert!(secrets.get(KEY_NAME).unwrap().is_some());
         store.remove("a1");
         assert!(store.load("a1").is_none());
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn an_identity_is_sealed_bound_to_its_account_and_removed_with_it() {
+        let secrets = MemoryStore::default();
+        let d = dir("identity");
+        let store = Store::open(d.clone(), &secrets).unwrap();
+        assert!(store.load_identity("a1").is_none());
+        store.save_identity("a1", b"PRIVATE KEY").unwrap();
+        assert_eq!(store.load_identity("a1").as_deref().map(Vec::as_slice), Some(&b"PRIVATE KEY"[..]));
+        let bytes = std::fs::read(store.identity_path("a1")).unwrap();
+        assert!(!bytes.windows(7).any(|w| w == b"PRIVATE"), "nothing readable on disk");
+        // Under another account's name, or as a cache file, it does not open.
+        std::fs::write(store.identity_path("a2"), &bytes).unwrap();
+        assert!(store.load_identity("a2").is_none());
+        std::fs::write(store.path("a1"), &bytes).unwrap();
+        assert!(store.load("a1").is_none());
+        store.save(&cache()).unwrap();
+        std::fs::write(store.identity_path("a1"), std::fs::read(store.path("a1")).unwrap()).unwrap();
+        assert!(store.load_identity("a1").is_none());
+        store.save_identity("a1", b"PRIVATE KEY").unwrap();
+        store.remove("a1");
+        assert!(store.load_identity("a1").is_none() && store.load("a1").is_none());
         let _ = std::fs::remove_dir_all(d);
     }
 
