@@ -413,6 +413,23 @@ mod base64_bytes {
     }
 }
 
+/// The prefixes a reply or forward puts before a subject, in the languages mail clients use.
+const SUBJECT_PREFIXES: [&str; 9] = ["re:", "fwd:", "fw:", "antw:", "aw:", "doorst:", "tr:", "wg:", "sv:"];
+
+/// The subject without its reply and forward prefixes ("Re:", "Fwd:", "Antw:" and the like,
+/// however many and in any case), trimmed and lower-cased. Messages with the same key belong to
+/// one conversation.
+pub fn conversation_key(subject: &str) -> String {
+    let mut s = subject.trim();
+    loop {
+        let lower = s.to_lowercase();
+        let Some(prefix) = SUBJECT_PREFIXES.iter().find(|p| lower.starts_with(**p)) else { break };
+        // The prefix is ASCII, so its length is the same in `s` and in `lower`.
+        s = s.get(prefix.len()..).unwrap_or("").trim_start();
+    }
+    s.trim().to_lowercase()
+}
+
 /// `s` cut to [`MAX_TEXT`] characters with control characters (other than tab) removed, so a
 /// header cannot smuggle line breaks or terminal escapes into the UI or a log.
 pub fn clean_text(s: &str) -> String {
@@ -422,6 +439,16 @@ pub fn clean_text(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_conversation_key_drops_every_reply_and_forward_prefix() {
+        assert_eq!(conversation_key("Re: RE: Fwd: Offerte drukwerk "), "offerte drukwerk");
+        assert_eq!(conversation_key("Antw: Planning"), conversation_key("planning"));
+        assert_eq!(conversation_key("FW:Doorst: Reünie"), "reünie");
+        assert_eq!(conversation_key("Rente"), "rente", "only a prefix with its colon counts");
+        assert_eq!(conversation_key("Re:"), "");
+        assert_eq!(conversation_key(""), "");
+    }
 
     #[test]
     fn clean_text_drops_controls_and_bounds_length() {
