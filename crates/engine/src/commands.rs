@@ -196,6 +196,7 @@ mod tests {
             auth: mailcraft_model::Auth::Password,
             incoming: Some(Server { host: "imap.b.nl".into(), port: 993, tls: Tls::Implicit }),
             outgoing: None,
+            dav: None,
         };
         let mut s = Session::with_accounts(vec![account]);
         assert_eq!(s.take_jobs(), vec![Job::Connect { account_id: "acc".into() }]);

@@ -6,6 +6,27 @@ Bestand › Accounts › Account toevoegen. Vul naam, e-mailadres en wachtwoord 
 "Servers invullen op basis van het adres" raadt `imap.<domein>` en `smtp.<domein>`. Je
 wachtwoord gaat in de sleutelhanger van je computer, niet in een bestand.
 
+### Agenda en adresboek bij een IMAP-account (CalDAV/CardDAV)
+
+De meeste aanbieders die IMAP spreken, bewaren je agenda en adresboek op een CalDAV- en
+CardDAV-server. Vul onder "Agenda en adresboek (CalDAV/CardDAV), optioneel" het https-adres
+van die server in; Mailcraft zoekt daar zelf de agenda's, takenlijsten en adresboeken op, met
+dezelfde gebruikersnaam en hetzelfde wachtwoord als voor de mail. Laat het veld Adresboek leeg
+als het op dezelfde server staat als de agenda. Laat beide leeg voor een account met alleen mail.
+
+| Aanbieder | Agenda | Adresboek |
+|---|---|---|
+| Fastmail | `https://caldav.fastmail.com/` | `https://carddav.fastmail.com/` |
+| iCloud | `https://caldav.icloud.com/` | `https://contacts.icloud.com/` |
+| Nextcloud | `https://cloud.voorbeeld.nl/remote.php/dav/` | (leeg) |
+| Posteo | `https://posteo.de:8443/` | (leeg) |
+| mailbox.org | `https://dav.mailbox.org/` | (leeg) |
+
+De knop "Servers invullen op basis van het adres" vult Fastmail, iCloud, Posteo en mailbox.org
+zelf in. iCloud en Fastmail met tweestapsverificatie willen een app-specifiek wachtwoord; dat
+geldt dan voor mail en agenda samen. Herhalende afspraken worden getoond zoals de server ze
+uitwerkt, maar kun je in Mailcraft nog niet bewerken.
+
 ## Gmail
 
 Google staat geen gewoon wachtwoord toe; je logt in via de browser (OAuth 2.0). Daarvoor moet
