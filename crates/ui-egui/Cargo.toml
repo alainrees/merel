@@ -22,6 +22,7 @@ log = { workspace = true }
 ureq = { workspace = true }
 directories = { workspace = true }
 rfd = { workspace = true }
+open = { workspace = true }
 
 [dev-dependencies]
 egui_kittest = { workspace = true }
