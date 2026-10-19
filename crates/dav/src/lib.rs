@@ -97,6 +97,18 @@ impl Mailbox for DavMailbox {
         Mailbox::send(&mut self.imap, message)
     }
 
+    fn create_folder(&mut self, parent: Option<&str>, name: &str) -> Result<()> {
+        Mailbox::create_folder(&mut self.imap, parent, name)
+    }
+
+    fn rename_folder(&mut self, folder: &str, name: &str) -> Result<()> {
+        Mailbox::rename_folder(&mut self.imap, folder, name)
+    }
+
+    fn delete_folder(&mut self, folder: &str) -> Result<()> {
+        Mailbox::delete_folder(&mut self.imap, folder)
+    }
+
     fn items(&mut self) -> Option<&mut dyn ItemStore> {
         Some(&mut self.items)
     }

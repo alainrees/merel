@@ -305,6 +305,18 @@ fn run(c: &mut dyn Mailbox, account: &Account, job: &Job) -> Result<Option<Event
             c.move_to(path, id, dest)?;
             None
         }
+        Job::CreateFolder { account_id, parent, name } => {
+            c.create_folder(parent.as_deref(), name)?;
+            Some(Event::Folders { account_id: account_id.clone(), folders: c.folders()? })
+        }
+        Job::RenameFolder { account_id, path, name } => {
+            c.rename_folder(path, name)?;
+            Some(Event::Folders { account_id: account_id.clone(), folders: c.folders()? })
+        }
+        Job::DeleteFolder { account_id, path } => {
+            c.delete_folder(path)?;
+            Some(Event::Folders { account_id: account_id.clone(), folders: c.folders()? })
+        }
         // Only reached for a store that sends itself; SMTP accounts are served in `serve`.
         Job::Send { draft_id, draft, .. } => {
             let result = match mailcraft_smtp::build(&account.address, draft) {

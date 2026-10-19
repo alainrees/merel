@@ -11,6 +11,7 @@ pub mod calendar;
 mod compose;
 pub mod contacts;
 mod dates;
+pub mod folders;
 mod html;
 pub mod reminders;
 pub mod remote;
@@ -64,18 +65,20 @@ impl Module {
 enum Tab {
     File,
     Home,
+    Folder,
     SendReceive,
     View,
     Help,
 }
 
 impl Tab {
-    const ALL: [Tab; 5] = [Tab::File, Tab::Home, Tab::SendReceive, Tab::View, Tab::Help];
+    const ALL: [Tab; 6] = [Tab::File, Tab::Home, Tab::Folder, Tab::SendReceive, Tab::View, Tab::Help];
 
     fn label(self) -> &'static str {
         match self {
             Tab::File => "Bestand",
             Tab::Home => "Start",
+            Tab::Folder => "Map",
             Tab::SendReceive => "Verzenden/ontvangen",
             Tab::View => "Beeld",
             Tab::Help => "Help",
@@ -106,6 +109,8 @@ pub struct MailApp {
     pub rules: Option<rules::State>,
     /// Whether the "Verplaatsen naar" window for the selected message is open.
     pub move_to: bool,
+    /// The window for a new, renamed or removed folder, while it is open.
+    pub folder_edit: Option<folders::FolderEdit>,
 }
 
 /// A message being dragged from the list, to drop on a folder.
@@ -129,6 +134,7 @@ impl MailApp {
             announced_reminders: std::collections::HashSet::new(),
             rules: None,
             move_to: false,
+            folder_edit: None,
         }
     }
 
@@ -174,6 +180,7 @@ impl MailApp {
         reminders::window(self, &ctx, &t);
         rules::window(self, &ctx, &t);
         move_window(self, &ctx, &t);
+        folders::window(self, &ctx, &t);
         drag_preview(self, &ctx, &t);
         if self.tab == Tab::Home && self.module == Module::Mail {
             shortcuts(self, &ctx);
@@ -334,6 +341,7 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         app.open_rules(false);
                     }
                 }
+                Tab::Folder if app.module == Module::Mail => folders::ribbon(app, ui, t),
                 Tab::SendReceive => {
                     let can = !app.engine.session.is_sample() && app.engine.session.selected_folder.is_some();
                     ribbon_button(app, ui, t, "⟳", "Vernieuwen", ("folder.refresh", Some("F5")), can);
@@ -456,6 +464,7 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let mut pick = None;
             let mut pick_drafts = None;
             let mut drop_on: Option<(String, String)> = None;
+            let mut menu_on: Option<(egui::Response, String, FolderKind)> = None;
             let mut open_accounts = false;
             for account in &app.engine.session.accounts {
                 ui.horizontal(|ui| {
@@ -496,6 +505,9 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     if r.clicked() {
                         pick = Some(f.id.clone());
                     }
+                    if r.secondary_clicked() || r.context_menu_opened() {
+                        menu_on = Some((r, f.id.clone(), f.kind));
+                    }
                 }
                 // Messages put aside on this computer, next to the server's folders.
                 let drafts = app.engine.session.drafts_of(&account.id).len();
@@ -533,6 +545,9 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
             if let Some((message, folder)) = drop_on {
                 app.run("message.move", json!({ "id": message, "folder_id": folder }));
+            }
+            if let Some((r, id, kind)) = menu_on {
+                folders::context_menu(app, &r, &id, kind);
             }
         });
 }
@@ -1420,6 +1435,52 @@ mod tests {
         h.get_by_label("Archief").click();
         h.run();
         h.get_by_label("Welkom bij Mailcraft");
+    }
+
+    #[test]
+    fn a_folder_is_made_renamed_and_removed_from_the_map_tab() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Map").click();
+        h.run();
+        h.get_by_label("Nieuwe map").click();
+        h.run();
+        h.get_by_label("Map aanmaken").click();
+        h.run();
+        let edit = h.state().folder_edit.as_ref().expect("the window stays open on an error");
+        assert!(edit.error.as_deref().is_some_and(|e| e.starts_with("Geef de map een naam")), "{:?}", edit.error);
+        h.state_mut().folder_edit.as_mut().expect("edit").name = "Projecten".into();
+        h.run();
+        h.get_by_label("Map aanmaken").click();
+        h.run();
+        assert!(h.state().folder_edit.is_none());
+        h.get_by_label("Projecten").click();
+        h.run();
+        assert_eq!(h.state().engine.session.selected_folder.as_deref(), Some("sample/INBOX/Projecten"));
+
+        h.get_by_label("Naam wijzigen").click();
+        h.run();
+        assert_eq!(h.state().folder_edit.as_ref().map(|e| e.name.as_str()), Some("Projecten"));
+        h.state_mut().folder_edit.as_mut().expect("edit").name = "Klanten".into();
+        h.run();
+        h.get_by_label("Opslaan").click();
+        h.run();
+        assert!(h.query_all_by_label("Projecten").next().is_none());
+        assert!(h.query_all_by_label("Klanten").next().is_some(), "the folder row carries the new name");
+        assert_eq!(h.state().engine.session.selected_folder.as_deref(), Some("sample/INBOX/Klanten"));
+
+        h.get_by_label("Map verwijderen").click();
+        h.run();
+        h.get_by_label("Ja, verwijderen").click();
+        h.run();
+        assert!(h.query_all_by_label("Klanten").next().is_none());
+        assert_eq!(h.state().engine.session.selected_folder.as_deref(), Some("inbox"), "back to the inbox");
+        // The inbox belongs to the account: the buttons are off and the menu says so.
+        h.get_by_label("Map verwijderen");
+        h.state_mut().delete_folder("inbox".into());
+        h.run();
+        assert!(h.state().folder_edit.is_none());
+        assert!(h.state().notice.as_deref().is_some_and(|n| n.contains("hoort bij het account")));
     }
 
     #[test]

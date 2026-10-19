@@ -76,7 +76,10 @@ impl Cache {
     /// Takes note of a server answer before the session applies it.
     pub fn note_event(&mut self, session: &Session, event: &Event) {
         let account = match event {
-            Event::Connected { account_id, .. } | Event::Synced { account_id, .. } | Event::ItemSaved { account_id, .. } => Some(account_id.clone()),
+            Event::Connected { account_id, .. }
+            | Event::Folders { account_id, .. }
+            | Event::Synced { account_id, .. }
+            | Event::ItemSaved { account_id, .. } => Some(account_id.clone()),
             Event::Headers { folder_id, .. } | Event::Found { folder_id, .. } => session.folder(folder_id).map(|f| f.account_id.clone()),
             Event::Body { message_id, raw, .. } => {
                 let account = session.message(message_id).and_then(|m| session.folder(&m.folder_id)).map(|f| f.account_id.clone());
