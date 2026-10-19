@@ -18,6 +18,7 @@ pub mod remote;
 pub mod rules;
 pub mod tasks;
 mod theme;
+pub mod view;
 
 use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
 use serde_json::{Value, json};
@@ -111,13 +112,19 @@ pub struct MailApp {
     pub move_to: bool,
     /// The window for a new, renamed or removed folder, while it is open.
     pub folder_edit: Option<folders::FolderEdit>,
+    /// What the "Beeld" tab chose; read from `view.json` at start.
+    pub view: view::ViewPrefs,
+    /// Whether the saved theme has been handed to egui yet (on the first frame).
+    theme_applied: bool,
 }
 
 /// A message being dragged from the list, to drop on a folder.
 struct DraggedMessage(String);
 
 impl MailApp {
-    pub fn new(engine: Engine) -> Self {
+    pub fn new(mut engine: Engine) -> Self {
+        let view = view::ViewPrefs::load(engine.config_path());
+        engine.session.sort = view.sort;
         MailApp {
             engine,
             module: Module::Mail,
@@ -135,6 +142,8 @@ impl MailApp {
             rules: None,
             move_to: false,
             folder_edit: None,
+            view,
+            theme_applied: false,
         }
     }
 
@@ -159,6 +168,10 @@ impl MailApp {
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
+        if !self.theme_applied {
+            ui.ctx().set_theme(self.view.theme.preference());
+            self.theme_applied = true;
+        }
         let t = Tokens::for_dark(ui.visuals().dark_mode);
         // Decoders for pictures embedded in mail; a no-op after the first frame.
         egui_extras::install_image_loaders(ui.ctx());
@@ -197,7 +210,15 @@ impl MailApp {
         rail(self, ui, &t);
         if self.module == Module::Mail {
             folder_pane(self, ui, &t);
-            message_list(self, ui, &t);
+            let frame = egui::Frame::NONE.fill(t.list).stroke(Stroke::new(1.0, t.border));
+            match self.view.reading_pane {
+                view::ReadingPane::Right => {
+                    egui::Panel::left("messages").default_size(360.0).resizable(true).frame(frame).show(ui, |ui| message_list(self, ui, &t));
+                }
+                view::ReadingPane::Bottom => {
+                    egui::Panel::top("messages").default_size(320.0).resizable(true).frame(frame).show(ui, |ui| message_list(self, ui, &t));
+                }
+            }
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading).inner_margin(Margin::same(20))).show(ui, |ui| {
                 reading_pane(self, ui, &t);
             });
@@ -347,6 +368,7 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     }
                 }
                 Tab::Folder if app.module == Module::Mail => folders::ribbon(app, ui, t),
+                Tab::View => view::ribbon(app, ui, t),
                 Tab::SendReceive => {
                     let can = !app.engine.session.is_sample() && app.engine.session.selected_folder.is_some();
                     ribbon_button(app, ui, t, "⟳", "Vernieuwen", ("folder.refresh", Some("F5")), can);
@@ -667,10 +689,10 @@ fn drafts_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens, account_id: &str) {
     }
 }
 
+/// The message list: title, search box and rows; the caller puts it in a panel.
 fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
-    egui::Panel::left("messages").default_size(360.0).resizable(true).frame(egui::Frame::NONE.fill(t.list).stroke(Stroke::new(1.0, t.border))).show(
-        ui,
-        |ui| {
+    {
+        {
             if let Some(account_id) = app.drafts_for.clone() {
                 drafts_list(app, ui, t, &account_id);
                 return;
@@ -755,9 +777,11 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ui.vertical_centered(|ui| ui.label(RichText::new(msg).color(t.text_dim)));
                 }
                 let show_folder = searching && app.engine.session.search_all;
+                let compact = app.view.compact;
+                let row_height = if compact { 48.0 } else { 68.0 };
                 for m in list {
                     let on = app.engine.session.selected_message.as_deref() == Some(m.id.as_str());
-                    let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 68.0), Sense::click_and_drag());
+                    let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click_and_drag());
                     r.dnd_set_drag_payload(DraggedMessage(m.id.clone()));
                     let r = r.on_hover_text(&m.subject);
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &m.subject));
@@ -805,17 +829,19 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         egui::FontId::proportional(13.0),
                         if m.flags.seen { t.text } else { t.accent_text },
                     );
-                    let preview = match (show_folder, app.engine.session.folder(&m.folder_id)) {
-                        (true, Some(f)) => format!("{} · {}", f.name, m.preview),
-                        _ => m.preview.clone(),
-                    };
-                    p.text(
-                        egui::pos2(x, rect.top() + 52.0),
-                        egui::Align2::LEFT_CENTER,
-                        clip(&preview, 56),
-                        egui::FontId::proportional(12.0),
-                        t.text_dim,
-                    );
+                    if !compact {
+                        let preview = match (show_folder, app.engine.session.folder(&m.folder_id)) {
+                            (true, Some(f)) => format!("{} · {}", f.name, m.preview),
+                            _ => m.preview.clone(),
+                        };
+                        p.text(
+                            egui::pos2(x, rect.top() + 52.0),
+                            egui::Align2::LEFT_CENTER,
+                            clip(&preview, 56),
+                            egui::FontId::proportional(12.0),
+                            t.text_dim,
+                        );
+                    }
                     if r.clicked() {
                         pick = Some(m.id.clone());
                     }
@@ -843,8 +869,8 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             if older {
                 app.run("folder.older", Value::Null);
             }
-        },
-    );
+        }
+    }
 }
 
 fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
@@ -1535,6 +1561,46 @@ mod tests {
         let s = &h.state().engine.session;
         assert!(s.messages.iter().all(|m| m.folder_id != "inbox"));
         assert!(h.query_all_by_label("Planning voor donderdag").next().is_none());
+    }
+
+    #[test]
+    fn the_view_tab_filters_the_list_moves_the_reading_pane_and_sets_the_theme() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Beeld").click();
+        h.run();
+        h.get_by_label("Ongelezen").click();
+        h.run();
+        assert!(h.query_all_by_label("Re: Offerte drukwerk").next().is_none(), "read mail is hidden");
+        h.get_by_label("Welkom bij Mailcraft");
+        h.get_by_label("Met bijlage").click();
+        h.run();
+        assert!(h.query_all_by_label("Welkom bij Mailcraft").next().is_none());
+        h.get_by_label("Planning voor donderdag").click();
+        h.run();
+        h.get_by_label("Alles").click();
+        h.run();
+        assert_eq!(h.state().engine.session.visible_messages().len(), 4);
+
+        h.get_by_label("Onder").click();
+        h.run();
+        assert_eq!(h.state().view.reading_pane, view::ReadingPane::Bottom);
+        h.get_by_label("Welkom bij Mailcraft").click();
+        h.run();
+        assert_eq!(h.state().engine.session.selected_message.as_deref(), Some("m0"), "the list still works under the reading pane");
+        h.get_by_label("Compact").click();
+        h.run();
+        assert!(h.state().view.compact);
+
+        h.get_by_label("Donker").click();
+        h.run();
+        h.run();
+        assert_eq!(h.state().view.theme, view::ThemeChoice::Dark);
+        assert_eq!(h.ctx.theme(), egui::Theme::Dark);
+        h.get_by_label("Licht").click();
+        h.run();
+        h.run();
+        assert_eq!(h.ctx.theme(), egui::Theme::Light);
     }
 
     #[test]
