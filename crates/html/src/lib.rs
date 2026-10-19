@@ -112,6 +112,30 @@ impl Document {
     }
 
     /// The content ids of the embedded pictures the document refers to.
+    /// Every link in the document as (text, href), in reading order, for the phishing check.
+    pub fn links(&self) -> Vec<(String, String)> {
+        fn walk(blocks: &[Block], out: &mut Vec<(String, String)>) {
+            for b in blocks {
+                match b {
+                    Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
+                        for i in inlines {
+                            if let Inline::Link { href, text, .. } = i {
+                                out.push((text.clone(), href.clone()));
+                            }
+                        }
+                    }
+                    Block::Quote(inner) => walk(inner, out),
+                    Block::List { items, .. } => items.iter().for_each(|i| walk(i, out)),
+                    Block::Table(rows) => rows.iter().flatten().for_each(|c| walk(&c.blocks, out)),
+                    Block::Code(_) | Block::Rule => {}
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.blocks, &mut out);
+        out
+    }
+
     pub fn inline_image_ids(&self) -> Vec<String> {
         fn walk(blocks: &[Block], out: &mut Vec<String>) {
             for b in blocks {
@@ -597,6 +621,21 @@ fn link_target(href: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn links_are_listed_in_reading_order_with_their_text() {
+        let d = parse(
+            r#"<p>Zie <a href="https://example.nl">de site</a>.</p><ul><li><a href="mailto:s@example.org">mail</a></li></ul><blockquote><a href="https://b.example/x">https://a.example</a></blockquote>"#,
+        );
+        assert_eq!(
+            d.links(),
+            [
+                ("de site".to_string(), "https://example.nl".to_string()),
+                ("mail".to_string(), "mailto:s@example.org".to_string()),
+                ("https://a.example".to_string(), "https://b.example/x".to_string()),
+            ]
+        );
+    }
 
     fn text(blocks: &[Block]) -> String {
         fn inl(inlines: &[Inline], out: &mut String) {

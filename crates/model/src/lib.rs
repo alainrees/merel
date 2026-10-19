@@ -11,6 +11,7 @@ mod contact;
 mod junk;
 mod quicksteps;
 mod rules;
+mod safety;
 mod task;
 
 pub use address::{Address, AddressError, parse_address_list};
@@ -22,6 +23,7 @@ pub use contact::{Contact, ContactError};
 pub use junk::{JunkLists, MAX_JUNK_ENTRY, entry_covers, junk_entry};
 pub use quicksteps::{MAX_QUICK_STEP_NAME, QuickStep, QuickStepError};
 pub use rules::{MAX_RULE_TEXT, Rule, RuleError, RuleField};
+pub use safety::{RISKY_EXTENSIONS, Warning, attachment_warnings, authentication_warning, host_of, link_warnings, lookalike, sender_warnings};
 pub use task::{Priority, Task, TaskError};
 
 use serde::{Deserialize, Serialize};
