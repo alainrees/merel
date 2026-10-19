@@ -2,7 +2,8 @@
 //! appointment window. Times are shown in the computer's time zone. A recurring appointment
 //! shows every occurrence; opening one opens the series, with a button to skip just that time.
 //! A search box above the view lists the matching appointments of the past year and the two
-//! years ahead instead of the view, until it is cleared.
+//! years ahead instead of the view, until it is cleared. A block can be dragged to another day
+//! (month view) or half hour (week and day views); a series cannot, it is changed in its window.
 
 use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
 use egui::{Align2, Color32, CornerRadius, FontId, Margin, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
@@ -328,6 +329,20 @@ impl MailApp {
         self.calendar.editor = Some(Editor::new_at(start));
     }
 
+    /// Moves a dragged appointment to `day`, at `time` when the drop named one; what went wrong
+    /// becomes a notice.
+    pub fn drop_appointment(&mut self, id: &str, day: NaiveDate, time: Option<NaiveTime>) {
+        let Some(a) = self.engine.session.appointment(id) else { return };
+        let Some(start) = dropped_start(a, day, time) else {
+            self.notice = Some("Die tijd bestaat niet in deze tijdzone.".into());
+            return;
+        };
+        if start == a.start {
+            return;
+        }
+        self.notice = self.engine.run("appointment.move", &json!({ "id": id, "start": start })).err().map(|e| describe(&e));
+    }
+
     /// Selects an appointment and opens it in the window; `start` is the occurrence that was
     /// clicked, which matters for a recurring one.
     pub fn open_appointment(&mut self, id: &str, start: i64) {
@@ -458,15 +473,44 @@ fn appointment_color(app: &MailApp, a: &Appointment, t: &Tokens) -> Color32 {
     app.engine.session.calendar(&a.calendar_id).map(|c| Color32::from_rgb(c.color[0], c.color[1], c.color[2])).unwrap_or(t.accent)
 }
 
+/// What is being dragged: one appointment, by id. A series is never dragged.
+pub(crate) struct DraggedAppointment(String);
+
+/// The drag payload for a block, when the appointment can be dragged.
+fn draggable(a: &Appointment) -> Option<DraggedAppointment> {
+    a.recurrence.is_none().then(|| DraggedAppointment(a.id.clone()))
+}
+
+/// Where a dropped appointment begins: on `day`, at `time` when the drop names one (a spot in
+/// the hour grid), else at its own time of day; an all-day appointment always at midnight.
+fn dropped_start(a: &Appointment, day: NaiveDate, time: Option<NaiveTime>) -> Option<i64> {
+    if a.all_day {
+        return midnight(day);
+    }
+    let time = time.unwrap_or_else(|| to_local(a.start).time());
+    to_timestamp(day.and_time(time))
+}
+
+/// The half hour under `y` in an hour grid whose midnight is at `top`.
+fn grid_time(y: f32, top: f32) -> NaiveTime {
+    let halves = ((y - top) / HOUR_HEIGHT * 2.0).floor().clamp(0.0, 47.0) as u32;
+    NaiveTime::from_hms_opt(halves / 2, (halves % 2) * 30, 0).unwrap_or(NaiveTime::MIN)
+}
+
 /// The chip text for an occurrence: the title, marked when it repeats.
 fn chip_title(a: &Appointment) -> String {
     if a.recurrence.is_some() { format!("{REPEAT_MARK} {}", a.title) } else { a.title.clone() }
 }
 
-/// A clickable block for one appointment. Returns true when clicked.
-fn chip(ui: &mut Ui, rect: Rect, label: &str, fill: Color32, selected: bool, t: &Tokens) -> bool {
-    let r = ui.interact(rect, ui.make_persistent_id(("chip", rect.min.x as i32, rect.min.y as i32, label)), Sense::click());
+/// A clickable block for one appointment, a drag source when `drag` is given. Returns true
+/// when clicked.
+fn chip(ui: &mut Ui, rect: Rect, label: &str, fill: Color32, selected: bool, drag: Option<DraggedAppointment>, t: &Tokens) -> bool {
+    let sense = if drag.is_some() { Sense::click_and_drag() } else { Sense::click() };
+    let r = ui.interact(rect, ui.make_persistent_id(("chip", rect.min.x as i32, rect.min.y as i32, label)), sense);
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    if let Some(payload) = drag {
+        r.dnd_set_drag_payload(payload);
+    }
     let p = ui.painter();
     let alpha = if r.hovered() { 255 } else { 220 };
     p.rect_filled(rect, CornerRadius::same(3), Color32::from_rgba_unmultiplied(fill.r(), fill.g(), fill.b(), alpha));
@@ -498,6 +542,7 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let h = (avail.y / 6.0).max(60.0);
     let mut open: Option<(String, i64)> = None;
     let mut pick_day: Option<NaiveDate> = None;
+    let mut drop: Option<(String, NaiveDate)> = None;
     let mut day = start;
     for _ in 0..6 {
         ui.horizontal(|ui| {
@@ -512,8 +557,22 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     )
                 });
                 let in_month = day.month() == focus.month();
+                let drop_here = r.dnd_hover_payload::<DraggedAppointment>().is_some();
+                if let Some(dragged) = r.dnd_release_payload::<DraggedAppointment>() {
+                    drop = Some((dragged.0.clone(), day));
+                }
                 let p = ui.painter();
-                p.rect_filled(rect, CornerRadius::ZERO, if in_month { t.reading } else { t.list });
+                p.rect_filled(
+                    rect,
+                    CornerRadius::ZERO,
+                    if drop_here {
+                        t.hover
+                    } else if in_month {
+                        t.reading
+                    } else {
+                        t.list
+                    },
+                );
                 p.rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
                 let number_pos = pos2(rect.right() - 14.0, rect.top() + 12.0);
                 if day == today {
@@ -538,7 +597,7 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         let y = rect.top() + 24.0 + i as f32 * 20.0;
                         let chip_rect = Rect::from_min_size(pos2(rect.left() + 3.0, y), vec2(rect.width() - 6.0, 18.0));
                         let label = if a.all_day { chip_title(a) } else { format!("{} {}", hm(a.start), chip_title(a)) };
-                        if chip(ui, chip_rect, &label, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), t) {
+                        if chip(ui, chip_rect, &label, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), draggable(a), t) {
                             open = Some((a.id.clone(), a.start));
                         }
                     }
@@ -557,7 +616,9 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
         });
     }
-    if let Some((id, start)) = open {
+    if let Some((id, day)) = drop {
+        app.drop_appointment(&id, day, None);
+    } else if let Some((id, start)) = open {
         app.open_appointment(&id, start);
     } else if let Some(d) = pick_day {
         app.calendar.focus = d;
@@ -573,6 +634,7 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
     let gutter = 48.0;
     let mut open: Option<(String, i64)> = None;
     let mut new_at: Option<(NaiveDate, u32)> = None;
+    let mut drop: Option<(String, NaiveDate, Option<NaiveTime>)> = None;
     let col_w = ((ui.available_width() - gutter) / days as f32).max(40.0);
     // Day headers.
     ui.horizontal(|ui| {
@@ -598,14 +660,20 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
         ui.painter().text(g.right_center() - vec2(4.0, 0.0), Align2::RIGHT_CENTER, "hele dag", FontId::proportional(10.5), t.text_dim);
         for i in 0..days {
             let d = add_days(first, i);
-            let (rect, _) = ui.allocate_exact_size(vec2(col_w, strip_h), Sense::hover());
+            let (rect, r) = ui.allocate_exact_size(vec2(col_w, strip_h), Sense::hover());
+            if r.dnd_hover_payload::<DraggedAppointment>().is_some() {
+                ui.painter().rect_filled(rect, CornerRadius::ZERO, t.hover);
+            }
+            if let Some(dragged) = r.dnd_release_payload::<DraggedAppointment>() {
+                drop = Some((dragged.0.clone(), d, None));
+            }
             ui.painter().rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
             if let (Some(from), Some(to)) = (midnight(d), midnight(add_days(d, 1))) {
                 let items: Vec<Appointment> = app.engine.session.appointments_between(from, to).into_iter().filter(|a| a.all_day).collect();
                 if let Some(a) = items.first() {
                     let label = if items.len() > 1 { format!("{} (+{})", chip_title(a), items.len() - 1) } else { chip_title(a) };
                     let chip_rect = rect.shrink2(vec2(2.0, 3.0));
-                    if chip(ui, chip_rect, &label, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), t) {
+                    if chip(ui, chip_rect, &label, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), draggable(a), t) {
                         open = Some((a.id.clone(), a.start));
                     }
                 }
@@ -635,6 +703,20 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                 let hour = ((pos.y - grid.top()) / HOUR_HEIGHT).floor().clamp(0.0, 23.0) as u32;
                 new_at = Some((d, hour));
             }
+            let pointer = ui.input(|i| i.pointer.latest_pos());
+            if r.dnd_hover_payload::<DraggedAppointment>().is_some()
+                && let Some(pos) = pointer
+            {
+                // The half hour the block would land in.
+                let tm = grid_time(pos.y, grid.top());
+                let y = grid.top() + (tm.hour() as f32 + tm.minute() as f32 / 60.0) * HOUR_HEIGHT;
+                ui.painter().rect_filled(Rect::from_min_size(pos2(x, y), vec2(col_w, HOUR_HEIGHT / 2.0)), CornerRadius::ZERO, t.hover);
+            }
+            if let Some(dragged) = r.dnd_release_payload::<DraggedAppointment>()
+                && let Some(pos) = pointer
+            {
+                drop = Some((dragged.0.clone(), d, Some(grid_time(pos.y, grid.top()))));
+            }
             let (Some(from), Some(to)) = (midnight(d), midnight(add_days(d, 1))) else { continue };
             let items: Vec<Appointment> = app.engine.session.appointments_between(from, to).into_iter().filter(|a| !a.all_day).collect();
             for a in &items {
@@ -643,7 +725,7 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                 let block =
                     Rect::from_min_max(pos2(x + 2.0, grid.top() + top + 1.0), pos2(x + col_w - 2.0, grid.top() + bottom.max(top + 18.0) - 1.0));
                 let label = format!("{} {}\n{}", hm(a.start), hm(a.end), chip_title(a));
-                if chip(ui, block, &label, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), t) {
+                if chip(ui, block, &label, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), draggable(a), t) {
                     open = Some((a.id.clone(), a.start));
                 }
             }
@@ -654,12 +736,26 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
             }
         }
     });
-    if let Some((id, start)) = open {
+    if let Some((id, day, time)) = drop {
+        app.drop_appointment(&id, day, time);
+    } else if let Some((id, start)) = open {
         app.open_appointment(&id, start);
     } else if let Some((d, hour)) = new_at {
         app.calendar.focus = d;
         app.new_appointment(d, hour);
     }
+}
+
+/// A small label that follows the pointer while an appointment is dragged.
+pub fn drag_preview(app: &MailApp, ctx: &egui::Context, t: &Tokens) {
+    let Some(dragged) = egui::DragAndDrop::payload::<DraggedAppointment>(ctx) else { return };
+    let Some(pos) = ctx.pointer_interact_pos() else { return };
+    let title = app.engine.session.appointment(&dragged.0).map(|a| a.title.clone()).unwrap_or_default();
+    egui::Area::new(egui::Id::new("appointment-drag-preview")).fixed_pos(pos + vec2(12.0, 12.0)).order(egui::Order::Tooltip).show(ctx, |ui| {
+        egui::Frame::popup(ui.style()).fill(t.list).show(ui, |ui| {
+            ui.label(RichText::new(format!("📅 {title}")).color(t.text));
+        });
+    });
 }
 
 /// The calendar module's panes; the ribbon and the window are drawn by the caller.
@@ -962,6 +1058,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
 fn describe(e: &CommandError) -> String {
     match e {
         CommandError::Param("title") => "Vul een titel in.".into(),
+        CommandError::Param("id") => "Een herhalende afspraak versleep je niet; open de reeks om de tijd te veranderen.".into(),
         CommandError::Param("end") => "Het einde ligt voor het begin.".into(),
         CommandError::Param("recurrence") => {
             "De herhaling kan zo niet: een afspraak moet korter zijn dan de tijd tussen twee keren, en herhalen kan alleen in een agenda op deze computer.".into()
@@ -978,6 +1075,37 @@ mod tests {
 
     fn d(y: i32, m: u32, day: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, day).unwrap()
+    }
+
+    #[test]
+    fn a_drop_lands_on_the_day_at_the_right_time() {
+        let base = to_timestamp(d(2026, 10, 21).and_hms_opt(14, 0, 0).unwrap()).unwrap();
+        let a = Appointment {
+            id: "a".into(),
+            calendar_id: "local".into(),
+            title: "Tandarts".into(),
+            start: base,
+            end: base + 3_600,
+            all_day: false,
+            location: String::new(),
+            notes: String::new(),
+            recurrence: None,
+            reminder: None,
+        };
+        let moved = to_local(dropped_start(&a, d(2026, 10, 23), None).unwrap());
+        assert_eq!((moved.date(), moved.time()), (d(2026, 10, 23), NaiveTime::from_hms_opt(14, 0, 0).unwrap()), "a month drop keeps the time");
+        let moved = to_local(dropped_start(&a, d(2026, 10, 23), Some(NaiveTime::from_hms_opt(9, 30, 0).unwrap())).unwrap());
+        assert_eq!(moved.time(), NaiveTime::from_hms_opt(9, 30, 0).unwrap(), "a grid drop takes the half hour");
+        let all_day = Appointment { all_day: true, ..a.clone() };
+        let moved = to_local(dropped_start(&all_day, d(2026, 10, 23), Some(NaiveTime::from_hms_opt(9, 30, 0).unwrap())).unwrap());
+        assert_eq!((moved.date(), moved.time()), (d(2026, 10, 23), NaiveTime::MIN), "an all-day appointment stays all day");
+        assert!(draggable(&a).is_some());
+        assert!(draggable(&Appointment { recurrence: Some(Recurrence::every(Frequency::Weekly)), ..a }).is_none(), "a series is not dragged");
+
+        assert_eq!(grid_time(100.0, 100.0), NaiveTime::MIN);
+        assert_eq!(grid_time(100.0 + HOUR_HEIGHT * 9.6, 100.0), NaiveTime::from_hms_opt(9, 30, 0).unwrap(), "snapped to the half hour");
+        assert_eq!(grid_time(100.0 + HOUR_HEIGHT * 30.0, 100.0), NaiveTime::from_hms_opt(23, 30, 0).unwrap(), "clamped to the day");
+        assert_eq!(grid_time(0.0, 100.0), NaiveTime::MIN);
     }
 
     #[test]
