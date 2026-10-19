@@ -55,6 +55,12 @@ encrypted offline cache, so the window fills at once on the next start and mail 
 before can be read without a connection, and changes you make without one (flags, moves,
 appointments, contacts, tasks) wait and reach the server when it is back, even after a restart.
 
+Folders are yours to arrange: the "Map" tab in the ribbon (or a right click on a folder) makes
+a new folder under the selected one, renames an ordinary folder or removes it with everything in
+it, after asking; the inbox and the other special folders stay as they are. The change goes to
+the server at once (IMAP `CREATE`/`RENAME`/`DELETE`, Exchange Web Services, Microsoft Graph) and
+the folder pane shows the list the server answers with, so it needs a connection.
+
 Rules sort incoming mail: "Regels" in the ribbon opens a window where a rule says which part of a
 message (sender, recipient, subject or the whole envelope) must contain which text, and what then
 happens (move to a folder, mark as read, flag). Rules run over the mail a refresh finds new in an

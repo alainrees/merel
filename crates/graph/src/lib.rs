@@ -512,6 +512,22 @@ impl Mailbox for GraphClient {
         self.call("POST", &format!("/me/messages/{}/move", encode(id)), Some(&json!({ "destinationId": dest }))).map(drop)
     }
 
+    fn create_folder(&mut self, parent: Option<&str>, name: &str) -> Result<()> {
+        let path = match parent {
+            Some(id) => format!("/me/mailFolders/{}/childFolders", encode(id)),
+            None => "/me/mailFolders".to_string(),
+        };
+        self.call("POST", &path, Some(&json!({ "displayName": name }))).map(drop)
+    }
+
+    fn rename_folder(&mut self, folder: &str, name: &str) -> Result<()> {
+        self.call("PATCH", &format!("/me/mailFolders/{}", encode(folder)), Some(&json!({ "displayName": name }))).map(drop)
+    }
+
+    fn delete_folder(&mut self, folder: &str) -> Result<()> {
+        self.call("DELETE", &format!("/me/mailFolders/{}", encode(folder)), None).map(drop)
+    }
+
     fn append(&mut self, folder: &str, message: &[u8]) -> Result<()> {
         // Graph files raw MIME as a draft; sending goes through `send`, which files its own copy.
         self.post_mime(&format!("/me/mailFolders/{}/messages", encode(folder)), message)
