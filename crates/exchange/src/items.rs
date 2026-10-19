@@ -119,6 +119,7 @@ fn task_of(node: Node<'_, '_>) -> Option<Task> {
         done,
         completed: text(node, "CompleteDate").and_then(parse_datetime),
         account_id: None,
+        repeat: None,
     }
     .validated()
     .ok()
