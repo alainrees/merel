@@ -15,6 +15,7 @@ mod dates;
 pub mod folders;
 pub mod help;
 mod html;
+pub mod quicksteps;
 pub mod reminders;
 pub mod remote;
 pub mod rules;
@@ -110,6 +111,8 @@ pub struct MailApp {
     pub announced_reminders: std::collections::HashSet<(String, i64)>,
     /// The rules window, while it is open.
     pub rules: Option<rules::State>,
+    /// The quick steps window, when it is open.
+    pub quick_steps: Option<quicksteps::State>,
     /// Whether the "Verplaatsen naar" window for the selected message is open.
     pub move_to: bool,
     /// The window for a new, renamed or removed folder, while it is open.
@@ -146,6 +149,7 @@ impl MailApp {
             drafts_for: None,
             announced_reminders: std::collections::HashSet::new(),
             rules: None,
+            quick_steps: None,
             move_to: false,
             folder_edit: None,
             categories: None,
@@ -205,6 +209,7 @@ impl MailApp {
         calendar::window(self, &ctx, &t);
         reminders::window(self, &ctx, &t);
         rules::window(self, &ctx, &t);
+        quicksteps::window(self, &ctx, &t);
         move_window(self, &ctx, &t);
         folders::window(self, &ctx, &t);
         categories::window(self, &ctx, &t);
@@ -264,8 +269,12 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
     let mut compose = None;
     let mut command = None;
     let mut step = 0;
+    let mut quick: Option<usize> = None;
+    const DIGITS: [Key; 9] = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9];
     ctx.input_mut(|i| {
-        if i.consume_key(Modifiers::COMMAND, Key::N) {
+        if let Some(n) = DIGITS.iter().position(|k| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, *k)) {
+            quick = Some(n);
+        } else if i.consume_key(Modifiers::COMMAND, Key::N) {
             compose = Some(ComposeKind::New);
         } else if i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::R) {
             compose = Some(ComposeKind::ReplyAll);
@@ -295,6 +304,10 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
         if kind == ComposeKind::New || has {
             app.open_compose(kind);
         }
+        return;
+    }
+    if let Some(n) = quick {
+        app.run_quick_step(n);
         return;
     }
     match command {
@@ -373,6 +386,8 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ribbon_button(app, ui, t, "○", "Ongelezen", ("message.mark_unread", Some(&key_hint("U"))), has);
                     ribbon_button(app, ui, t, "⚑", "Vlag", ("message.flag", None), has);
                     categories::menu(app, ui, t);
+                    ui.separator();
+                    quicksteps::ribbon(app, ui, t);
                     ui.separator();
                     if ribbon_action_hint(ui, t, "⚙", "Regels", true, Some("Mail automatisch verplaatsen of markeren")) {
                         app.open_rules(false);
@@ -1634,6 +1649,54 @@ mod tests {
         h.run();
         h.run();
         assert_eq!(h.ctx.theme(), egui::Theme::Light);
+    }
+
+    #[test]
+    fn a_quick_step_is_made_in_the_window_and_run_from_the_ribbon_and_the_keyboard() {
+        use egui::{Key, Modifiers};
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Beheren…").click();
+        h.run();
+        assert!(h.state().quick_steps.is_some());
+        h.get_by_label("Nog geen snelle stappen.");
+        h.get_by_label("Nieuwe snelle stap").click();
+        h.run();
+        h.get_by_label("Snelle stap opslaan").click();
+        h.run();
+        let form = h.state().quick_steps.as_ref().and_then(|s| s.form.as_ref()).expect("the form stays open on an error");
+        assert_eq!(form.error.as_deref(), Some("Geef de snelle stap een naam van hoogstens 40 tekens."));
+        {
+            let form = h.state_mut().quick_steps.as_mut().and_then(|s| s.form.as_mut()).expect("form");
+            form.name = "Klaar".into();
+            form.move_to = Some("archive".into());
+            form.mark_read = true;
+        }
+        h.run();
+        h.get_by_label("Snelle stap opslaan").click();
+        h.run();
+        assert_eq!(h.state().engine.session.quick_steps.len(), 1);
+        h.get_by_label("naar Archief, markeren als gelezen");
+        h.get_by_label("Sluiten").click();
+        h.run();
+        assert!(h.state().quick_steps.is_none());
+
+        h.get_by_label("Welkom bij Mailcraft").click();
+        h.run();
+        h.get_by_label("⚡ Klaar").click();
+        h.run();
+        let m0 = h.state().engine.session.message("m0").cloned().expect("m0");
+        assert!(m0.folder_id == "archive" && m0.flags.seen, "the step moved and marked the message");
+
+        h.get_by_label("Planning voor donderdag").click();
+        h.run();
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Num1);
+        h.run();
+        assert_eq!(
+            h.state().engine.session.message("m1").map(|m| m.folder_id.clone()),
+            Some("archive".to_string()),
+            "the first step answers to the shortcut"
+        );
     }
 
     #[test]
