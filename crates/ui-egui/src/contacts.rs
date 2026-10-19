@@ -256,8 +256,21 @@ fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         ui.label(RichText::new(&c.notes).color(t.text));
     }
     ui.add_space(14.0);
-    if ui.add(egui::Button::new("Bewerken").min_size(vec2(90.0, 26.0))).clicked() {
-        app.edit_selected_contact();
+    let mut export = false;
+    ui.horizontal(|ui| {
+        if ui.add(egui::Button::new("Bewerken").min_size(vec2(90.0, 26.0))).clicked() {
+            app.edit_selected_contact();
+        }
+        if ui
+            .add(egui::Button::new(crate::vcard::EXPORT).min_size(vec2(90.0, 26.0)))
+            .on_hover_text("Bewaart dit contact als .vcf-bestand in je map Downloads, om te delen of in een ander programma te openen.")
+            .clicked()
+        {
+            export = true;
+        }
+    });
+    if export {
+        app.export_selected_contact();
     }
     if mail {
         app.mail_selected_contact();
@@ -348,6 +361,13 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     if crate::ribbon_action(ui, t, "⟳", "Vernieuwen", !app.engine.session.item_accounts.is_empty()) {
         app.run("sync.refresh", serde_json::Value::Null);
+    }
+    ui.separator();
+    if crate::ribbon_action(ui, t, "📂", crate::vcard::IMPORT, true) {
+        // The computer's own dialog; it blocks until the person has chosen or cancelled.
+        if let Some(paths) = rfd::FileDialog::new().set_title("vCard-bestanden kiezen").add_filter("vCard", &["vcf", "vcard"]).pick_files() {
+            app.import_contacts(&paths);
+        }
     }
 }
 
