@@ -33,6 +33,11 @@ pub fn rules_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("rules.json")
 }
 
+/// The window's view choices ("Beeld" tab) that go with an accounts file.
+pub fn view_path(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("view.json")
+}
+
 pub fn load(path: &Path) -> Vec<Account> {
     load_json(path)
 }
