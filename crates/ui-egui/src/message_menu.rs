@@ -15,6 +15,8 @@ use crate::{ComposeKind, MailApp, Module, calendar, dates, tasks};
 pub enum Pick {
     Compose(ComposeKind),
     Command(&'static str),
+    /// A follow-up flag for the day named as `message.follow_up` takes it.
+    FollowUp(&'static str),
     Move,
     Task,
     Appointment,
@@ -33,16 +35,14 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
     let mut pick = None;
     r.context_menu(|ui| {
         let read = if m.flags.seen { ("Als ongelezen markeren", "message.mark_unread") } else { ("Als gelezen markeren", "message.mark_read") };
-        let flag = if m.flags.flagged { "Vlag weghalen" } else { "Vlag" };
         let sender = if known_sender { "Afzender openen in contacten" } else { "Afzender toevoegen aan contacten" };
         let junk = if in_junk { ("Geen ongewenst", "junk.trust") } else { ("Afzender blokkeren", "junk.block") };
         let ignore = if ignored { ("Gesprek niet meer negeren", "conversation.unignore") } else { ("Gesprek negeren", "conversation.ignore") };
-        let items: [(&str, Pick); 14] = [
+        let items: [(&str, Pick); 13] = [
             ("Beantwoorden", Pick::Compose(ComposeKind::Reply)),
             ("Allen beantwoorden", Pick::Compose(ComposeKind::ReplyAll)),
             ("Doorsturen", Pick::Compose(ComposeKind::Forward)),
             (read.0, Pick::Command(read.1)),
-            (flag, Pick::Command("message.flag")),
             ("Verplaatsen naar…", Pick::Move),
             ("Archiveren", Pick::Command("message.archive")),
             ("Ongewenst", Pick::Command("message.junk")),
@@ -54,8 +54,30 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
             (sender, Pick::Sender),
         ];
         for (i, (label, p)) in items.into_iter().enumerate() {
-            if matches!(i, 3 | 11) {
+            if matches!(i, 3 | 10) {
                 ui.separator();
+            }
+            if i == 4 {
+                // Outlook's "Opvolgen": the flag with a due day, under its own arrow.
+                ui.menu_button("Opvolgen", |ui| {
+                    for (when, label) in mailcraft_engine::followup::WHEN {
+                        if ui.button(label).clicked() {
+                            pick = Some(Pick::FollowUp(when));
+                        }
+                    }
+                    if ui.button("Geen datum").clicked() {
+                        pick = Some(Pick::FollowUp("none"));
+                    }
+                    if m.flags.flagged {
+                        ui.separator();
+                        if ui.button("Vlag weghalen").clicked() {
+                            pick = Some(Pick::Command("message.flag"));
+                        }
+                    }
+                    if pick.is_some() {
+                        egui::Popup::close_all(ui.ctx());
+                    }
+                });
             }
             if ui.button(label).clicked() {
                 pick = Some(p);
@@ -86,6 +108,7 @@ impl MailApp {
         match pick {
             Pick::Compose(kind) => self.open_compose(kind),
             Pick::Command(id) => self.run(id, Value::Null),
+            Pick::FollowUp(when) => self.run("message.follow_up", json!({ "when": when })),
             Pick::Move => self.move_to = true,
             Pick::Task => self.task_from_message(m),
             Pick::Appointment => self.appointment_from_message(m),

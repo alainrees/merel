@@ -16,6 +16,7 @@ pub mod config;
 pub mod contacts;
 pub mod drafts;
 pub mod folders;
+pub mod followup;
 pub mod ignore;
 pub mod junk;
 pub mod quicksteps;
@@ -418,6 +419,9 @@ pub struct Session {
     /// Conversations whose mail goes to Deleted Items on arrival; see [`ignore`].
     pub ignored: Vec<mailcraft_model::IgnoredConversation>,
     ignored_dirty: bool,
+    /// The due days of flagged messages, kept in `follow_ups.json`; see [`followup`].
+    pub follow_ups: Vec<mailcraft_model::FollowUp>,
+    follow_ups_dirty: bool,
     /// The categories (coloured labels) the person knows, kept in `categories.json`.
     pub categories: Vec<Category>,
     categories_dirty: bool,
@@ -556,8 +560,10 @@ impl Session {
             // reaches its file.
             fresh.junk = std::mem::take(&mut self.junk);
             fresh.categories = std::mem::take(&mut self.categories);
+            fresh.follow_ups = std::mem::take(&mut self.follow_ups);
             fresh.junk_dirty = self.junk_dirty;
             fresh.categories_dirty = self.categories_dirty;
+            fresh.follow_ups_dirty = self.follow_ups_dirty;
             fresh.rules_dirty = self.rules_dirty;
             fresh.quick_steps_dirty = self.quick_steps_dirty;
             fresh.ignored_dirty = self.ignored_dirty;
@@ -1044,6 +1050,9 @@ impl Engine {
         engine.session.set_junk(junk);
         let ignored = engine.config_path.as_deref().map(|p| config::load_json::<ignore::IgnoredFile>(&config::ignored_path(p))).unwrap_or_default();
         engine.session.set_ignored(ignored.ignored);
+        let follow_ups =
+            engine.config_path.as_deref().map(|p| config::load_json::<followup::FollowUpFile>(&config::follow_ups_path(p))).unwrap_or_default();
+        engine.session.set_follow_ups(follow_ups.follow_ups);
         let categories =
             engine.config_path.as_deref().map(|p| config::load_json::<categories::CategoriesFile>(&config::categories_path(p))).unwrap_or_default();
         engine.session.set_categories(categories.categories);
@@ -1063,6 +1072,7 @@ impl Engine {
             self.session.take_rules_dirty();
             self.session.take_junk_dirty();
             self.session.take_ignored_dirty();
+            self.session.take_follow_ups_dirty();
             self.session.take_categories_dirty();
             self.session.take_quick_steps_dirty();
             return Ok(());
@@ -1084,6 +1094,9 @@ impl Engine {
         }
         if self.session.take_ignored_dirty() {
             config::save_json(&config::ignored_path(&path), &self.session.ignored_data()).map_err(|e| CommandError::Store(e.to_string()))?;
+        }
+        if self.session.take_follow_ups_dirty() {
+            config::save_json(&config::follow_ups_path(&path), &self.session.follow_ups_data()).map_err(|e| CommandError::Store(e.to_string()))?;
         }
         if self.session.take_categories_dirty() {
             config::save_json(&config::categories_path(&path), &self.session.categories_data()).map_err(|e| CommandError::Store(e.to_string()))?;
