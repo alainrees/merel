@@ -1,8 +1,8 @@
 //! Built-in sample mail so the app has something to show before an account is added.
 
 use mailcraft_model::{
-    Account, Address, Appointment, Calendar, Contact, Flags, Folder, FolderKind, Frequency, MessageHeader, Priority, Protocol, Recurrence, Server,
-    Task, Tls,
+    Account, Address, Appointment, Calendar, Category, Contact, Flags, Folder, FolderKind, Frequency, MessageHeader, Priority, Protocol, Recurrence,
+    Server, Task, Tls,
 };
 
 use crate::Session;
@@ -86,11 +86,12 @@ fn build() -> Option<Session> {
                 flags: Flags { seen, ..Flags::default() },
                 has_attachments: att,
                 message_id: Some(format!("<sample-{i}@example.org>")),
+                categories: if i == 1 { vec!["Groene categorie".into()] } else { Vec::new() },
             })
         })
         .collect();
 
-    let mut session = Session { accounts: vec![account], folders, messages, ..Session::default() };
+    let mut session = Session { accounts: vec![account], folders, messages, categories: Category::defaults(), ..Session::default() };
     session.set_calendar_data(crate::calendar::CalendarFile {
         calendars: vec![Calendar::local()],
         appointments: appointments(),
