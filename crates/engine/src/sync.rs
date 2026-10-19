@@ -227,6 +227,7 @@ mod tests {
             location: String::new(),
             notes: String::new(),
             recurrence: None,
+            reminder: None,
         }
     }
 

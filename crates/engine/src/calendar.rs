@@ -24,6 +24,9 @@ use crate::{CommandError, Session};
 pub struct CalendarFile {
     pub calendars: Vec<Calendar>,
     pub appointments: Vec<Appointment>,
+    /// Reminders closed for good, of any calendar's appointments.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dismissed: Vec<crate::reminders::ReminderKey>,
 }
 
 impl Session {
@@ -31,6 +34,7 @@ impl Session {
     pub fn set_calendar_data(&mut self, data: CalendarFile) {
         self.calendars = data.calendars;
         self.appointments = data.appointments;
+        self.dismissed_reminders = data.dismissed;
         if self.calendars.is_empty() {
             self.calendars.push(Calendar::local());
         }
@@ -41,7 +45,7 @@ impl Session {
     pub fn calendar_data(&self) -> CalendarFile {
         let calendars: Vec<Calendar> = self.calendars.iter().filter(|c| c.account_id.is_none()).cloned().collect();
         let appointments = self.appointments.iter().filter(|a| calendars.iter().any(|c| c.id == a.calendar_id)).cloned().collect();
-        CalendarFile { calendars, appointments }
+        CalendarFile { calendars, appointments, dismissed: self.dismissed_reminders.clone() }
     }
 
     pub fn calendar(&self, id: &str) -> Option<&Calendar> {
@@ -93,11 +97,12 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// `appointment.save { id?, calendar_id?, title, start, end, all_day?, location?, notes?, recurrence? }`:
+/// `appointment.save { id?, calendar_id?, title, start, end, all_day?, location?, notes?, recurrence?, reminder? }`:
 /// creates the appointment, or replaces the one with `id`. Times are Unix seconds. `recurrence`
 /// is a [`Recurrence`] object (or null for a single appointment) and is only accepted for a
 /// calendar on this computer; the occurrences a series had skipped stay skipped unless the
-/// object names its own `skipped` list.
+/// object names its own `skipped` list. `reminder` is minutes before the start, null for none;
+/// left out, an existing appointment keeps its reminder.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
         Some(id) => Some(s.appointment(id).ok_or(CommandError::NotFound)?.clone()),
@@ -125,6 +130,11 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
             Some(r)
         }
     };
+    let reminder = match params.get("reminder") {
+        None => existing.as_ref().and_then(|a| a.reminder),
+        Some(Value::Null) => None,
+        Some(v) => Some(v.as_u64().and_then(|m| u32::try_from(m).ok()).ok_or(CommandError::Param("reminder"))?),
+    };
     let id = match (&existing, &account) {
         (Some(a), _) => a.id.clone(),
         (None, Some(account)) => s.pending_id(account),
@@ -140,6 +150,7 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         location: str_param(params, "location").unwrap_or("").to_string(),
         notes: str_param(params, "notes").unwrap_or("").to_string(),
         recurrence,
+        reminder,
     }
     .validated()
     .map_err(|e| match e {
@@ -205,9 +216,17 @@ mod tests {
         assert_eq!(s.appointments_between(0, 1001).len(), 1);
         assert!(s.appointments_between(4600, 9000).is_empty());
 
-        s.run("appointment.save", &json!({ "id": a.id, "title": "Lunch met Sanne", "start": 1000, "end": 4600 })).unwrap();
+        s.run("appointment.save", &json!({ "id": a.id, "title": "Lunch met Sanne", "start": 1000, "end": 4600, "reminder": 30 })).unwrap();
         assert_eq!(s.appointments.len(), 1);
         assert_eq!(s.appointment(&a.id).unwrap().title, "Lunch met Sanne");
+        s.run("appointment.save", &json!({ "id": a.id, "title": "Lunch met Sanne", "start": 1000, "end": 4600 })).unwrap();
+        assert_eq!(s.appointment(&a.id).unwrap().reminder, Some(30), "left out keeps the reminder");
+        s.run("appointment.save", &json!({ "id": a.id, "title": "Lunch met Sanne", "start": 1000, "end": 4600, "reminder": null })).unwrap();
+        assert_eq!(s.appointment(&a.id).unwrap().reminder, None);
+        assert_eq!(
+            s.run("appointment.save", &json!({ "title": "x", "start": 1, "end": 2, "reminder": "soon" })),
+            Err(CommandError::Param("reminder"))
+        );
 
         assert_eq!(s.run("appointment.save", &json!({ "title": "", "start": 1, "end": 2 })), Err(CommandError::Param("title")));
         assert_eq!(s.run("appointment.save", &json!({ "title": "x", "start": 2, "end": 2 })), Err(CommandError::Param("end")));

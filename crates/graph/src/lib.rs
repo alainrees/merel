@@ -160,6 +160,9 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         location: e.get("location").map(|l| str_of(l, "displayName")).unwrap_or("").to_string(),
         notes: body_text(e),
         recurrence: None,
+        reminder: (e.get("isReminderOn").and_then(Value::as_bool) == Some(true))
+            .then(|| e.get("reminderMinutesBeforeStart").and_then(Value::as_u64).and_then(|m| u32::try_from(m).ok()))
+            .flatten(),
     }
     .validated()
     .ok()
@@ -217,14 +220,19 @@ impl GraphClient {
     fn event_json(a: &Appointment, zone: &str) -> Value {
         let time =
             |ts| if a.all_day { json!({ "dateTime": local(ts), "timeZone": zone }) } else { json!({ "dateTime": utc(ts), "timeZone": "UTC" }) };
-        json!({
+        let mut event = json!({
             "subject": a.title,
             "body": text_body(&a.notes),
             "start": time(a.start),
             "end": time(a.end),
             "isAllDay": a.all_day,
             "location": { "displayName": a.location },
-        })
+            "isReminderOn": a.reminder.is_some(),
+        });
+        if let Some(m) = a.reminder {
+            event["reminderMinutesBeforeStart"] = json!(m);
+        }
+        event
     }
 
     /// The contact as Graph takes it: the first phone is the business one, the second the
@@ -524,7 +532,7 @@ impl Mailbox for GraphClient {
 impl ItemStore for GraphClient {
     fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>> {
         let path = format!(
-            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled",
+            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart",
             encode(&utc(from)),
             encode(&utc(to.max(from)))
         );
@@ -622,12 +630,18 @@ mod tests {
     fn events_become_appointments_and_back() {
         let e = json!({ "id": "E1", "subject": "Overleg", "isAllDay": false, "body": { "contentType": "text", "content": "n" },
             "start": { "dateTime": "2026-10-14T17:46:40.0000000", "timeZone": "UTC" }, "end": { "dateTime": "2026-10-14T18:46:40.0000000", "timeZone": "UTC" },
-            "location": { "displayName": "Studio" } });
+            "location": { "displayName": "Studio" }, "isReminderOn": true, "reminderMinutesBeforeStart": 45 });
         let a = appointment_of(&e).unwrap();
         assert_eq!(
-            (a.id.as_str(), a.title.as_str(), a.start, a.end, a.location.as_str(), a.notes.as_str()),
-            ("event:E1", "Overleg", 1_792_000_000, 1_792_003_600, "Studio", "n")
+            (a.id.as_str(), a.title.as_str(), a.start, a.end, a.location.as_str(), a.notes.as_str(), a.reminder),
+            ("event:E1", "Overleg", 1_792_000_000, 1_792_003_600, "Studio", "n", Some(45))
         );
+        let body = GraphClient::event_json(&a, "UTC");
+        assert_eq!((body["isReminderOn"].as_bool(), body["reminderMinutesBeforeStart"].as_u64()), (Some(true), Some(45)));
+        let silent = Appointment { reminder: None, ..a.clone() };
+        let body = GraphClient::event_json(&silent, "UTC");
+        assert_eq!(body["isReminderOn"], false);
+        assert!(body.get("reminderMinutesBeforeStart").is_none());
         assert!(appointment_of(&json!({ "id": "E2", "isCancelled": true, "start": { "dateTime": "2026-10-14T17:46:40" }, "end": { "dateTime": "2026-10-14T17:46:40" } })).is_none());
         let body = GraphClient::event_json(&a, "Europe/Amsterdam");
         assert_eq!(body["start"], json!({ "dateTime": "2026-10-14T17:46:40", "timeZone": "UTC" }));

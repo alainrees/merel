@@ -317,9 +317,46 @@ pub fn appointment_of(event: &Component, id: String) -> Option<Appointment> {
         location: event.text("LOCATION"),
         notes: event.text("DESCRIPTION"),
         recurrence: None,
+        reminder: reminder_of(event),
     }
     .validated()
     .ok()
+}
+
+/// The first alarm that fires before the start, in minutes: a `VALARM` whose `TRIGGER` is a
+/// (negative) duration from the start. Alarms at an absolute time or relative to the end are
+/// not Mailcraft's reminder and are left alone.
+fn reminder_of(event: &Component) -> Option<u32> {
+    event.children.iter().filter(|c| c.name.eq_ignore_ascii_case("VALARM")).find_map(|alarm| {
+        let trigger = alarm.prop("TRIGGER")?;
+        if trigger.param("RELATED").is_some_and(|r| r.eq_ignore_ascii_case("END"))
+            || trigger.param("VALUE").is_some_and(|v| v.eq_ignore_ascii_case("DATE-TIME"))
+        {
+            return None;
+        }
+        let seconds = duration_seconds(&trigger.raw)?;
+        u32::try_from((-seconds).max(0) / 60).ok()
+    })
+}
+
+/// Replaces the alarms that fire before the start with one for `minutes` before it (or with
+/// none); alarms at an absolute time or relative to the end stay.
+fn write_reminder(event: &mut Component, title: &str, minutes: Option<u32>) {
+    event.children.retain(|c| {
+        if !c.name.eq_ignore_ascii_case("VALARM") {
+            return true;
+        }
+        let Some(trigger) = c.prop("TRIGGER") else { return false };
+        trigger.param("RELATED").is_some_and(|r| r.eq_ignore_ascii_case("END"))
+            || trigger.param("VALUE").is_some_and(|v| v.eq_ignore_ascii_case("DATE-TIME"))
+    });
+    if let Some(m) = minutes {
+        let mut alarm = Component::new("VALARM");
+        alarm.props.push(Prop::new("ACTION", "DISPLAY"));
+        alarm.props.push(Prop::new("DESCRIPTION", title));
+        alarm.props.push(Prop { name: "TRIGGER".into(), params: Vec::new(), raw: if m == 0 { "PT0S".into() } else { format!("-PT{m}M") } });
+        event.children.push(alarm);
+    }
 }
 
 /// `PT1H30M`, `P1D` and the like, in seconds.
@@ -367,6 +404,7 @@ pub fn write_appointment(event: &mut Component, a: &Appointment) {
         event.set("DTSTART", Some(utc_prop("DTSTART", a.start)));
         event.set("DTEND", Some(utc_prop("DTEND", a.end)));
     }
+    write_reminder(event, &a.title, a.reminder);
     stamp(event);
 }
 
@@ -504,12 +542,20 @@ mod tests {
             ("Lunch met Sanne, Jan", "Kantine", "Regel eerst\n de offerte en de rest")
         );
         assert!(!a.all_day);
+        assert_eq!(a.reminder, Some(15), "the alarm 15 minutes before is the reminder");
 
         let mut root = roots[0].clone();
-        let changed = Appointment { title: "Lunch".into(), all_day: true, end: a.start + 86_400 * 2, ..a.clone() };
+        let changed = Appointment { title: "Lunch".into(), all_day: true, end: a.start + 86_400 * 2, reminder: Some(60), ..a.clone() };
         write_appointment(root.find_mut("VEVENT").unwrap(), &changed);
         let text = root.serialize();
-        assert!(text.contains("BEGIN:VALARM"), "the alarm stays: {text}");
+        assert!(
+            text.contains("BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Lunch\r\nTRIGGER:-PT60M\r\nEND:VALARM"),
+            "the alarm is rewritten: {text}"
+        );
+        assert_eq!(text.matches("BEGIN:VALARM").count(), 1);
+        let mut silent = root.clone();
+        write_appointment(silent.find_mut("VEVENT").unwrap(), &Appointment { reminder: None, ..changed.clone() });
+        assert!(!silent.serialize().contains("VALARM"), "no reminder, no alarm");
         assert!(text.contains("DTSTART;VALUE=DATE:2026"), "{text}");
         assert!(!text.contains("TZID=Europe/Amsterdam:2026"), "{text}");
         assert!(text.contains("SUMMARY:Lunch\r\n"));

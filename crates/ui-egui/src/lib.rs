@@ -12,6 +12,7 @@ mod compose;
 pub mod contacts;
 mod dates;
 mod html;
+pub mod reminders;
 pub mod remote;
 pub mod tasks;
 mod theme;
@@ -98,6 +99,8 @@ pub struct MailApp {
     pub remote: remote::RemoteImages,
     /// The account whose drafts the message list shows instead of a folder, if any.
     pub drafts_for: Option<String>,
+    /// Reminders the window has already asked attention for, by occurrence.
+    pub announced_reminders: std::collections::HashSet<(String, i64)>,
 }
 
 impl MailApp {
@@ -115,6 +118,7 @@ impl MailApp {
             shown_message: None,
             remote: remote::RemoteImages::default(),
             drafts_for: None,
+            announced_reminders: std::collections::HashSet::new(),
         }
     }
 
@@ -153,6 +157,7 @@ impl MailApp {
         let ctx = ui.ctx().clone();
         compose::show(self, &ctx, &t);
         calendar::window(self, &ctx, &t);
+        reminders::window(self, &ctx, &t);
         if self.tab == Tab::Home && self.module == Module::Mail {
             shortcuts(self, &ctx);
         }
@@ -1221,6 +1226,38 @@ mod tests {
         let yoga = s.appointments.iter().find(|a| a.title == "Yoga").expect("saved");
         assert_eq!(yoga.recurrence.as_ref().map(|r| r.count), Some(Some(3)));
         assert_eq!(s.appointments_between(yoga.start, yoga.start + 30 * 86_400).iter().filter(|a| a.title == "Yoga").count(), 3);
+    }
+
+    #[test]
+    fn a_due_reminder_pops_up_and_can_be_closed() {
+        let mut h = harness();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+        h.run();
+        assert!(h.query_by_label_contains("Herinnering").is_none(), "the sample calendar reminds of nothing");
+        let start = now + 600;
+        h.state_mut()
+            .engine
+            .run(
+                "appointment.save",
+                &serde_json::json!({ "title": "Tandarts", "location": "Praktijk", "start": start, "end": start + 1800, "reminder": 15 }),
+            )
+            .expect("saved");
+        h.run();
+        h.get_by_label_contains("Tandarts");
+        assert!(h.query_by_label_contains("Begint over 10 minuten").is_some() || h.query_by_label_contains("Begint over 9 minuten").is_some());
+        assert_eq!(h.state().announced_reminders.len(), 1);
+        h.get_by_label("Openen").click();
+        h.run();
+        assert_eq!(h.state().module, Module::Calendar);
+        assert_eq!(h.state().calendar.editor.as_ref().map(|e| e.title.as_str()), Some("Tandarts"));
+        h.get_by_label("Annuleren").click();
+        h.run();
+        h.get_by_label("Sluiten").click();
+        h.run();
+        assert!(h.query_by_label_contains("Begint over").is_none(), "closed");
+        let s = &h.state().engine.session;
+        assert_eq!(s.dismissed_reminders.len(), 1);
+        assert!(h.state().announced_reminders.is_empty());
     }
 
     #[test]
