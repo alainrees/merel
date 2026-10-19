@@ -33,6 +33,7 @@ pub mod remote;
 pub mod resend;
 pub mod rules;
 pub mod search_folders;
+mod signature;
 pub mod tasks;
 pub mod templates;
 pub mod theme;
@@ -1633,6 +1634,9 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             return;
         }
     }
+    if let Some(sig) = body.as_ref().and_then(|b| b.signature.as_ref()) {
+        signature::strip(ui, t, sig, m.from.email());
+    }
     // A list's mail offers the way off it, as Outlook does; not in the Junk folder, where the
     // header is not to be trusted.
     // A meeting invitation, as Outlook shows one over the message.
@@ -2737,6 +2741,23 @@ mod tests {
         let s = &h.state().engine.session;
         assert_eq!(s.outbox.len(), 1, "the receipt was handed to the outbox");
         assert!(h.state().notice.is_some(), "the sample account cannot send, and the person hears so");
+    }
+
+    #[test]
+    fn a_broken_signature_shows_a_warning_over_the_message() {
+        let mut h = harness();
+        {
+            let s = &mut h.state_mut().engine.session;
+            let body = mailcraft_engine::Body {
+                text: "Betaal deze factuur".into(),
+                signature: Some(mailcraft_smime::Signature::Broken),
+                ..Default::default()
+            };
+            s.bodies.insert("m3".into(), body);
+            s.selected_message = Some("m3".into());
+        }
+        h.run();
+        h.get_by_label(signature::BROKEN);
     }
 
     #[test]

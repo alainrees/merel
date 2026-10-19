@@ -220,8 +220,12 @@ the signature and later answer encrypted); the "Ondertekenen" box in the compose
 A message that should be signed and cannot be (an expired certificate, say) is not sent unsigned: the window says why.
 The private key never lies on disk in the clear: it is sealed with ChaCha20-Poly1305 under the key of the offline
 cache, bound to the account, in `cache/<account>.identity`, and goes when the certificate or the account is removed.
-Signing is aws-lc-rs; the CMS structures come from the RustCrypto `cms` crate. Checking signed mail that comes in and
-encrypting are the next steps.
+Signing is aws-lc-rs; the CMS structures come from the RustCrypto `cms` crate. Signed mail that comes in is checked
+when it opens (RSA with SHA-256/384/512, ECDSA P-256 and P-384): a strip over the message says "Digitaal ondertekend
+door …" when the signature holds, warns when the certificate belongs to another address than the sender's, and warns
+in red when the message changed after it was signed; a signature Mailcraft cannot check (SHA-1, an unknown algorithm)
+is named as such, never shown as valid. The `smime.p7s` part is not listed as an attachment. Whether the certificate's
+issuer is to be trusted is not checked yet. Encrypting is the next step.
 
 A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
 hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the
