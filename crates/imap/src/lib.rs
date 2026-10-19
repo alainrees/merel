@@ -157,14 +157,11 @@ impl ImapClient {
     }
 
     /// The newest `limit` messages of `folder`, newest last.
-    pub fn headers(&mut self, folder: &str, limit: u32) -> Result<Vec<RemoteHeader>> {
+    pub fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> Result<Vec<RemoteHeader>> {
         let mb = self.select(folder)?;
-        if mb.exists == 0 {
-            return Ok(Vec::new());
-        }
-        let first = mb.exists.saturating_sub(limit.max(1) - 1).max(1);
+        let Some((first, last)) = Self::fetch_range(mb.exists, offset, limit) else { return Ok(Vec::new()) };
         let query = format!("(UID FLAGS INTERNALDATE RFC822.SIZE BODYSTRUCTURE {HEADER_FIELDS})");
-        let fetches = self.session.fetch(format!("{first}:*"), query)?;
+        let fetches = self.session.fetch(format!("{first}:{last}"), query)?;
         let mut out = Vec::with_capacity(fetches.len());
         for f in fetches.iter() {
             let Some(uid) = f.uid else { continue };
@@ -184,6 +181,14 @@ impl ImapClient {
             });
         }
         Ok(out)
+    }
+
+    /// The sequence numbers to fetch for the page `offset` messages below the newest, `limit`
+    /// long: `None` when the folder has nothing there.
+    fn fetch_range(exists: u32, offset: u32, limit: u32) -> Option<(u32, u32)> {
+        let last = exists.checked_sub(offset).filter(|l| *l > 0)?;
+        let first = last.saturating_sub(limit.max(1) - 1).max(1);
+        Some((first, last))
     }
 
     /// The whole raw message, without setting \Seen.
@@ -242,8 +247,8 @@ impl Mailbox for ImapClient {
         Ok(ImapClient::folders(self)?)
     }
 
-    fn headers(&mut self, folder: &str, limit: u32) -> mailcraft_mailbox::Result<Vec<RemoteHeader>> {
-        Ok(ImapClient::headers(self, folder, limit)?)
+    fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> mailcraft_mailbox::Result<Vec<RemoteHeader>> {
+        Ok(ImapClient::headers(self, folder, offset, limit)?)
     }
 
     fn body(&mut self, folder: &str, id: &str) -> mailcraft_mailbox::Result<Vec<u8>> {
@@ -306,5 +311,16 @@ mod network_tests {
             Err(e) => panic!("expected a login refusal, got {e}"),
             Ok(_) => panic!("logged in with a bogus password"),
         }
+    }
+
+    #[test]
+    fn pages_count_down_from_the_newest_message() {
+        assert_eq!(ImapClient::fetch_range(0, 0, 200), None);
+        assert_eq!(ImapClient::fetch_range(5, 0, 200), Some((1, 5)));
+        assert_eq!(ImapClient::fetch_range(450, 0, 200), Some((251, 450)));
+        assert_eq!(ImapClient::fetch_range(450, 200, 200), Some((51, 250)));
+        assert_eq!(ImapClient::fetch_range(450, 400, 200), Some((1, 50)));
+        assert_eq!(ImapClient::fetch_range(450, 450, 200), None);
+        assert_eq!(ImapClient::fetch_range(3, 1, 0), Some((2, 2)), "a limit of 0 still fetches one");
     }
 }

@@ -75,7 +75,10 @@ pub enum Flag {
 pub trait Mailbox: Send {
     fn folders(&mut self) -> Result<Vec<RemoteFolder>>;
     /// The newest `limit` messages of `folder`, newest last.
-    fn headers(&mut self, folder: &str, limit: u32) -> Result<Vec<RemoteHeader>>;
+    /// The newest `limit` headers of `folder` after skipping the newest `offset`: `offset` 0 is
+    /// the top of the folder, `offset` 200 the page below it. Fewer than `limit` means the
+    /// folder's start has been reached.
+    fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> Result<Vec<RemoteHeader>>;
     /// The whole raw message, without marking it read.
     fn body(&mut self, folder: &str, id: &str) -> Result<Vec<u8>>;
     fn set_flag(&mut self, folder: &str, id: &str, flag: Flag, on: bool) -> Result<()>;

@@ -284,7 +284,9 @@ fn run(c: &mut dyn Mailbox, account: &Account, job: &Job) -> Result<Option<Event
             items_of(c)?.delete(id)?;
             None
         }
-        Job::Headers { folder_id, path, .. } => Some(Event::Headers { folder_id: folder_id.clone(), headers: c.headers(path, crate::HEADER_LIMIT)? }),
+        Job::Headers { folder_id, path, offset, .. } => {
+            Some(Event::Headers { folder_id: folder_id.clone(), headers: c.headers(path, *offset, crate::HEADER_LIMIT)?, offset: *offset })
+        }
         Job::Body { message_id, path, id, .. } => {
             let raw = c.body(path, id)?;
             let (body, header) = (Box::new(mailcraft_mime::parse_body(&raw)), mailcraft_mime::parse_header(&raw));
@@ -343,7 +345,7 @@ mod tests {
         worker.start_account(account.clone(), Credentials::new(&account, Secret::new("pw"), None));
         let flag = Job::Flag { account_id: "a1".into(), path: "INBOX".into(), id: "7".into(), flag: Flag::Seen, on: true };
         worker.submit(flag.clone());
-        worker.submit(Job::Headers { account_id: "a1".into(), folder_id: "a1/INBOX".into(), path: "INBOX".into() });
+        worker.submit(Job::Headers { account_id: "a1".into(), folder_id: "a1/INBOX".into(), path: "INBOX".into(), offset: 0 });
         let wait = Duration::from_secs(20);
         match rx.recv_timeout(wait).expect("an event") {
             Event::Deferred { account_id, job } => assert_eq!((account_id.as_str(), *job), ("a1", flag)),

@@ -377,7 +377,7 @@ impl Mailbox for EwsClient {
         Ok(out)
     }
 
-    fn headers(&mut self, folder: &str, limit: u32) -> Result<Vec<RemoteHeader>> {
+    fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> Result<Vec<RemoteHeader>> {
         let xml = self.call(&format!(
             concat!(
                 "<m:FindItem Traversal=\"Shallow\"><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape><t:AdditionalProperties>",
@@ -386,13 +386,14 @@ impl Mailbox for EwsClient {
                 "<t:FieldURI FieldURI=\"message:From\"/><t:FieldURI FieldURI=\"message:IsRead\"/>",
                 "<t:FieldURI FieldURI=\"message:InternetMessageId\"/>{flag}{verb}",
                 "</t:AdditionalProperties></m:ItemShape>",
-                "<m:IndexedPageItemView MaxEntriesReturned=\"{limit}\" Offset=\"0\" BasePoint=\"Beginning\"/>",
+                "<m:IndexedPageItemView MaxEntriesReturned=\"{limit}\" Offset=\"{offset}\" BasePoint=\"Beginning\"/>",
                 "<m:SortOrder><t:FieldOrder Order=\"Descending\"><t:FieldURI FieldURI=\"item:DateTimeReceived\"/></t:FieldOrder></m:SortOrder>",
                 "<m:ParentFolderIds><t:FolderId Id=\"{folder}\"/></m:ParentFolderIds></m:FindItem>"
             ),
             flag = extended_field(PR_FLAG_STATUS),
             verb = extended_field(PR_LAST_VERB_EXECUTED),
             limit = limit.clamp(1, 1000),
+            offset = offset,
             folder = esc(folder)
         ))?;
         let doc = parse(&xml)?;
