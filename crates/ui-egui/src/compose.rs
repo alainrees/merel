@@ -434,12 +434,16 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         .show(ctx, |ui| {
             ui.add_enabled_ui(!sending, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    let b = egui::Button::new(RichText::new("Verzenden").color(t.on_accent)).fill(t.accent).min_size(vec2(110.0, 30.0));
+                    // One even row: every button and menu the same height, the same gap between
+                    // them, also where the row wraps.
+                    ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+                    let h = crate::ACTION_HEIGHT;
+                    let b = egui::Button::new(RichText::new("Verzenden").color(t.on_accent)).fill(t.accent).min_size(vec2(110.0, h));
                     if ui.add(b).clicked() {
                         send = true;
                     }
                     if c.send_at.is_none() {
-                        ui.menu_button("Later verzenden ▾", |ui| {
+                        crate::action_menu(ui, "Later verzenden ▾", |ui| {
                             for (label, ts) in later_options(Local::now()) {
                                 if ui.button(label).clicked() {
                                     schedule = Some(ts);
@@ -447,13 +451,13 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                                 }
                             }
                         })
-                        .response
+                        .0
                         .on_hover_text(
                             "Zet het bericht opzij en verstuurt het op dat moment, als Mailcraft dan draait. Tot die tijd staat het onder Concepten.",
                         );
                     }
                     if ui
-                        .add(egui::Button::new("Opslaan als concept").min_size(vec2(140.0, 30.0)))
+                        .add(egui::Button::new("Opslaan als concept").min_size(vec2(140.0, h)))
                         .on_hover_text(
                             "Sluit het venster en bewaart het bericht onder Concepten bij het account. Het venster sluiten doet hetzelfde.",
                         )
@@ -462,14 +466,14 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                         put_aside = true;
                     }
                     if ui
-                        .add(egui::Button::new("Verwijderen").min_size(vec2(100.0, 30.0)))
+                        .add(egui::Button::new("Verwijderen").min_size(vec2(100.0, h)))
                         .on_hover_text("Gooit het bericht weg, ook als concept.")
                         .clicked()
                     {
                         discard = true;
                     }
                     if ui
-                        .add(egui::Button::new("📎 Bijlage toevoegen").min_size(vec2(150.0, 30.0)))
+                        .add(egui::Button::new("📎 Bijlage toevoegen").min_size(vec2(150.0, h)))
                         .on_hover_text("Kies een of meer bestanden. Je kunt ze ook naar dit venster slepen.")
                         .clicked()
                     {
@@ -713,6 +717,27 @@ mod tests {
         c.to = "sanne@example.org".into();
         assert_eq!(c.draft().unwrap().attachments.len(), 2, "attachments travel with the draft");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_action_row_is_one_even_line_of_buttons_and_menus() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        app.open_compose(Kind::New);
+        let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        harness.run();
+        harness.step();
+        let heights: Vec<f32> =
+            ["Verzenden", "Later verzenden ▾", "Opslaan als concept", "📎 Bijlage toevoegen", "Urgentie ▾", crate::templates::MENU]
+                .iter()
+                .map(|label| harness.get_by_label(label).rect().height())
+                .collect();
+        assert!(
+            heights.iter().all(|h| (h - crate::ACTION_HEIGHT).abs() < 1.0),
+            "every button and menu is {} high, not {heights:?}",
+            crate::ACTION_HEIGHT
+        );
     }
 
     #[test]

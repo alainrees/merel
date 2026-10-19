@@ -109,7 +109,7 @@ fn save_error(e: &CommandError) -> String {
 /// so far, and the window.
 pub fn menu(ui: &mut Ui, templates: &[&Template]) -> Option<Pick> {
     let mut pick = None;
-    ui.menu_button(MENU, |ui| {
+    crate::action_menu(ui, MENU, |ui| {
         for t in templates {
             if ui.button(&t.name).on_hover_text(t.first_line()).clicked() {
                 pick = Some(Pick::Insert(t.text.clone()));
@@ -129,7 +129,7 @@ pub fn menu(ui: &mut Ui, templates: &[&Template]) -> Option<Pick> {
             ui.close();
         }
     })
-    .response
+    .0
     .on_hover_text("Een vaste tekst in het bericht zetten, zoals Mijn sjablonen in Outlook.");
     pick
 }
