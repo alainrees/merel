@@ -1019,6 +1019,15 @@ impl Engine {
         self.config_path.as_deref()
     }
 
+    /// The source of an opened message, headers and all, as the server sent it: what
+    /// "Doorsturen als bijlage" attaches. `None` for sample mail and for a message the cache
+    /// does not hold.
+    pub fn raw_message(&self, message_id: &str) -> Option<&[u8]> {
+        let m = self.session.message(message_id)?;
+        let account = &self.session.folder(&m.folder_id)?.account_id;
+        self.cache.raw(account, message_id)
+    }
+
     /// Sample mail only, no worker: for tests and previews.
     pub fn sample() -> Self {
         let (_tx, rx) = channel();
