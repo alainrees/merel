@@ -46,6 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "message.mark_read", label: "Mark as Read", run: |s, _| set_seen(s, true) },
     CommandSpec { id: "message.mark_unread", label: "Mark as Unread", run: |s, _| set_seen(s, false) },
     CommandSpec { id: "message.flag", label: "Flag", run: toggle_flag },
+    CommandSpec { id: "message.move", label: "Move to folder", run: message_move },
     CommandSpec { id: "message.delete", label: "Delete", run: |s, _| move_selected(s, FolderKind::Deleted, "Deleted Items") },
     CommandSpec { id: "message.archive", label: "Archive", run: |s, _| move_selected(s, FolderKind::Archive, "Archive") },
     CommandSpec { id: "message.junk", label: "Junk", run: |s, _| move_selected(s, FolderKind::Junk, "Junk") },
@@ -156,12 +157,37 @@ fn toggle_flag(s: &mut Session, _: &Value) -> Result<(), CommandError> {
 fn move_selected(s: &mut Session, kind: FolderKind, what: &'static str) -> Result<(), CommandError> {
     let m = s.selected().ok_or(CommandError::NoSelection)?;
     let account = s.folder(&m.folder_id).map(|f| f.account_id.clone()).ok_or(CommandError::NotFound)?;
-    let target = s.folder_of_kind(&account, kind).cloned().ok_or(CommandError::NoFolder(what))?;
-    if let Some((account_id, path, id)) = remote(s) {
-        s.pending.push(Job::Move { account_id, path, id, dest: target.path.clone() });
+    let target = s.folder_of_kind(&account, kind).map(|f| f.id.clone()).ok_or(CommandError::NoFolder(what))?;
+    let id = m.id.clone();
+    move_message(s, &id, &target)
+}
+
+/// `message.move { folder_id, id? }`: moves the given message (else the selected one) to a
+/// folder of its own account. The folder it is in already is refused.
+fn message_move(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let target = str_param(params, "folder_id")?.to_string();
+    let id = params.get("id").and_then(Value::as_str).map(str::to_string).or_else(|| s.selected_message.clone()).ok_or(CommandError::NoSelection)?;
+    move_message(s, &id, &target)
+}
+
+/// Moves one message: the header changes folder in the session and the server gets the job.
+pub(crate) fn move_message(s: &mut Session, message_id: &str, target_id: &str) -> Result<(), CommandError> {
+    let m = s.message(message_id).cloned().ok_or(CommandError::NotFound)?;
+    let from = s.folder(&m.folder_id).cloned().ok_or(CommandError::NotFound)?;
+    let target = s.folder(target_id).cloned().ok_or(CommandError::Param("folder_id"))?;
+    if target.account_id != from.account_id || target.id == from.id {
+        return Err(CommandError::Param("folder_id"));
     }
-    selected_mut(s)?.folder_id = target.id;
-    s.selected_message = None;
+    if from.account_id != crate::SAMPLE_ACCOUNT {
+        s.pending.push(Job::Move { account_id: from.account_id, path: from.path, id: m.remote_id, dest: target.path.clone() });
+    }
+    if let Some(h) = s.messages.iter_mut().find(|h| h.id == message_id) {
+        h.folder_id = target.id;
+    }
+    if s.selected_message.as_deref() == Some(message_id) {
+        s.selected_message = None;
+    }
+    s.recount_unread();
     Ok(())
 }
 
@@ -282,6 +308,24 @@ mod tests {
         assert_eq!(s.take_jobs(), vec![Job::Send { account_id: "acc".into(), draft_id: id, draft: Box::new(draft), sent_path: None }]);
         s.apply(crate::Event::Sent { account_id: "acc".into(), draft_id: id, result: Err("nee".into()) });
         assert_eq!(s.outbox.get(&id), Some(&crate::SendState::Failed("nee".into())));
+    }
+
+    #[test]
+    fn a_message_moves_to_any_folder_of_its_own_account() {
+        let mut s = Session::sample();
+        let archive = s.folders.iter().find(|f| f.kind == FolderKind::Archive).map(|f| f.id.clone()).unwrap();
+        let inbox = s.folders.iter().find(|f| f.kind == FolderKind::Inbox).map(|f| f.id.clone()).unwrap();
+        let id = s.messages.iter().find(|m| m.folder_id == inbox).map(|m| m.id.clone()).unwrap();
+        assert_eq!(s.run("message.move", &json!({ "folder_id": archive })), Err(CommandError::NoSelection));
+        s.run("message.select", &json!({ "id": id })).unwrap();
+        assert_eq!(s.run("message.move", &json!({ "folder_id": inbox })), Err(CommandError::Param("folder_id")), "already there");
+        assert_eq!(s.run("message.move", &json!({ "folder_id": "nope" })), Err(CommandError::Param("folder_id")));
+        s.run("message.move", &json!({ "folder_id": archive })).unwrap();
+        assert_eq!(s.message(&id).unwrap().folder_id, archive);
+        assert!(s.selected_message.is_none());
+        assert!(s.take_jobs().is_empty(), "sample mail has no server");
+        s.run("message.move", &json!({ "id": id, "folder_id": inbox })).unwrap();
+        assert_eq!(s.message(&id).unwrap().folder_id, inbox);
     }
 
     #[test]
