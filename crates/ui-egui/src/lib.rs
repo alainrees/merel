@@ -1021,6 +1021,9 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let count = if searching { Some(app.engine.session.visible_messages().len()) } else { None };
             let mut server_search = false;
             let mut save_search = false;
+            let mut remember: Option<String> = None;
+            let mut recent_pick: Option<Option<String>> = None;
+            let recents = app.view.recent_searches.clone();
             egui::Frame::NONE.inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
                 let title = match count {
                     Some(n) => format!("Zoekresultaten ({n})"),
@@ -1031,8 +1034,31 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 ui.horizontal(|ui| {
                     let session = &mut app.engine.session;
                     let hint = if session.search_all { "Zoeken in alle mappen" } else { "Zoeken in deze map" };
-                    let width = (ui.available_width() - if searching { 240.0 } else { 150.0 }).max(80.0);
-                    ui.add(egui::TextEdit::singleline(&mut session.search).id(egui::Id::new(SEARCH_BOX)).hint_text(hint).desired_width(width));
+                    let menu_w = if recents.is_empty() { 0.0 } else { 30.0 };
+                    let width = (ui.available_width() - menu_w - if searching { 240.0 } else { 150.0 }).max(80.0);
+                    let box_r = ui.add(egui::TextEdit::singleline(&mut session.search).id(egui::Id::new(SEARCH_BOX)).hint_text(hint).desired_width(width));
+                    // Leaving the box (Enter, a click elsewhere) is when the words count as a search.
+                    if box_r.lost_focus() && !session.search.trim().is_empty() {
+                        remember = Some(session.search.clone());
+                    }
+                    if !recents.is_empty() {
+                        // Outlook's "Recente zoekopdrachten": the last words typed, to search again.
+                        ui.menu_button(view::RECENT_MENU, |ui| {
+                            for q in &recents {
+                                if ui.button(q).clicked() {
+                                    recent_pick = Some(Some(q.clone()));
+                                    ui.close();
+                                }
+                            }
+                            ui.separator();
+                            if ui.button(view::RECENT_CLEAR).clicked() {
+                                recent_pick = Some(None);
+                                ui.close();
+                            }
+                        })
+                        .response
+                        .on_hover_text(view::RECENT_HINT);
+                    }
                     if searching && ui.small_button("✕").on_hover_text("Zoekopdracht wissen").clicked() {
                         session.search.clear();
                     }
@@ -1073,6 +1099,25 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             });
             if save_search {
                 app.ask_search_folder();
+            }
+            if let Some(q) = remember {
+                app.view.remember_search(&q);
+                let ctx = ui.ctx().clone();
+                app.save_view(&ctx);
+            }
+            match recent_pick {
+                Some(Some(q)) => {
+                    app.engine.session.search = q.clone();
+                    app.view.remember_search(&q);
+                    let ctx = ui.ctx().clone();
+                    app.save_view(&ctx);
+                }
+                Some(None) => {
+                    app.view.recent_searches.clear();
+                    let ctx = ui.ctx().clone();
+                    app.save_view(&ctx);
+                }
+                None => {}
             }
             if server_search {
                 let _ = app.engine.run("search.server", &serde_json::Value::Null);
@@ -2634,6 +2679,27 @@ mod tests {
         h.get_by_label("Planning voor donderdag").click();
         h.run();
         assert_eq!(h.state().engine.session.selection(), ["m1"]);
+    }
+
+    #[test]
+    fn recente_zoekopdrachten_offer_the_last_words_typed_and_can_be_cleared() {
+        let mut h = harness();
+        h.run();
+        assert!(h.query_by_label(view::RECENT_MENU).is_none(), "no menu before anything was searched");
+        h.state_mut().view.recent_searches = vec!["offerte".into(), "factuur".into()];
+        h.run();
+        h.get_by_label(view::RECENT_MENU).click();
+        h.run();
+        h.get_by_label("factuur").click();
+        h.run();
+        assert_eq!(h.state().engine.session.search, "factuur");
+        assert_eq!(h.state().view.recent_searches, ["factuur", "offerte"], "the one picked moves to the top");
+        h.get_by_label(view::RECENT_MENU).click();
+        h.run();
+        h.get_by_label(view::RECENT_CLEAR).click();
+        h.run();
+        assert!(h.state().view.recent_searches.is_empty());
+        assert!(h.query_by_label(view::RECENT_MENU).is_none());
     }
 
     #[test]
