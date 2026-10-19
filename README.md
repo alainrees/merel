@@ -21,7 +21,9 @@ built-in sample mail, and reading mail from an IMAP account: add it under File â
 browse folders, open messages (plain text, or HTML drawn with its headings, lists, tables, links
 and embedded pictures, while pictures on the internet stay blocked until you click "Afbeeldingen
 laden" for that one message; a click on an attachment saves it to your Downloads folder, and a picture attachment
-also shows a thumbnail that opens a preview window, as in Outlook), mark read or unread, flag,
+also shows a thumbnail that opens a preview window, as in Outlook; a meeting invitation (a `text/calendar` part)
+gets a strip with the appointment, its time, place and organiser and "Aan agenda toevoegen", which opens the
+appointment window filled in for your own calendar; nothing is sent back to the organiser), mark read or unread, flag,
 delete, archive, move to junk or to any folder of the account ("Verplaatsen" in the ribbon, or drag
 the message onto a folder); changes go back to the server. A folder shows its newest 200
 messages and a button at the bottom of the list fetches the next 200, as often as needed. New mail

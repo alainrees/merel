@@ -16,6 +16,7 @@ mod dates;
 pub mod folders;
 pub mod help;
 mod html;
+pub mod invitation;
 pub mod junk;
 pub mod message_menu;
 pub mod print;
@@ -1450,6 +1451,14 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     // A list's mail offers the way off it, as Outlook does; not in the Junk folder, where the
     // header is not to be trusted.
+    // A meeting invitation, as Outlook shows one over the message.
+    if !in_junk && let Some(inv) = body.as_ref().and_then(|b| invitation::from_attachments(&b.attachments)) {
+        let known = inv.appointment.as_ref().is_some_and(|a| app.has_appointment_like(a));
+        if let Some(a) = invitation::strip(ui, t, &inv, known) {
+            app.add_invitation(&a);
+        }
+        ui.add_space(8.0);
+    }
     if !in_junk && let Some(targets) = body.as_ref().map(|b| b.unsubscribe.as_slice()).filter(|u| !u.is_empty()) {
         let mut ask = false;
         egui::Frame::new().fill(t.checked).corner_radius(4).inner_margin(8).show(ui, |ui| {
@@ -2132,6 +2141,39 @@ mod tests {
         assert!(h.query_by_label("⚑ Opvolgen: Wat er deze maand speelt").is_none(), "closed; the flag stays");
         assert!(h.state().engine.session.message("m3").unwrap().flags.flagged);
         assert!(h.state().engine.session.follow_ups.iter().any(|f| f.dismissed));
+    }
+
+    #[test]
+    fn an_invitation_in_the_mail_opens_the_appointment_window_filled_in() {
+        let mut h = harness();
+        let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:k1@x\r\nDTSTART:20261021T080000Z\r\nDTEND:20261021T093000Z\r\nSUMMARY:Kickoff\r\nLOCATION:Kantoor\r\nORGANIZER;CN=Sanne:mailto:sanne@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let body = mailcraft_engine::Body {
+            text: "Kom je ook?".into(),
+            attachments: vec![mailcraft_mime::Attachment {
+                name: "invite.ics".into(),
+                mime: "text/calendar".into(),
+                size: ics.len(),
+                bytes: std::sync::Arc::from(ics.as_bytes()),
+            }],
+            ..Default::default()
+        };
+        h.state_mut().engine.session.bodies.insert("m3".into(), body);
+        h.state_mut().engine.session.selected_message = Some("m3".into());
+        h.run();
+        h.get_by_label("📅 Uitnodiging: Kickoff");
+        h.get_by_label_contains("Kantoor · van Sanne");
+        h.get_by_label("Aan agenda toevoegen").click();
+        h.run();
+        {
+            let e = h.state().calendar.editor.as_ref().expect("the appointment window");
+            assert_eq!((e.title.as_str(), e.location.as_str(), &e.id, &e.calendar_id), ("Kickoff", "Kantoor", &None, &None));
+            assert_eq!(e.start_date, "21-10-2026");
+        }
+        h.get_by_label("Opslaan").click();
+        h.run();
+        assert!(h.state().engine.session.appointments.iter().any(|a| a.title == "Kickoff" && a.calendar_id == "local"));
+        h.get_by_label("Staat al in je agenda.");
+        assert!(h.query_by_label("Aan agenda toevoegen").is_none());
     }
 
     #[test]

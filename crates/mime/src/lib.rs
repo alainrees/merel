@@ -250,4 +250,14 @@ mod tests {
         }
         assert_eq!(preview("a\n\n  b\tc", 3), "a b");
     }
+
+    #[test]
+    fn a_calendar_part_is_listed_as_an_attachment() {
+        let msg = b"Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nKom je ook?\r\n--b\r\nContent-Type: text/calendar; method=REQUEST; charset=utf-8\r\nContent-Disposition: attachment; filename=\"invite.ics\"\r\n\r\nBEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Kickoff\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n--b--\r\n";
+        let b = parse_body(msg);
+        assert_eq!(b.text.trim(), "Kom je ook?");
+        assert_eq!(b.attachments.len(), 1);
+        assert_eq!((b.attachments[0].name.as_str(), b.attachments[0].mime.as_str()), ("invite.ics", "text/calendar"));
+        assert!(std::str::from_utf8(&b.attachments[0].bytes).unwrap().contains("SUMMARY:Kickoff"));
+    }
 }
