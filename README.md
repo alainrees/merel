@@ -54,6 +54,13 @@ encrypted offline cache, so the window fills at once on the next start and mail 
 before can be read without a connection, and changes you make without one (flags, moves,
 appointments, contacts, tasks) wait and reach the server when it is back, even after a restart.
 
+Rules sort incoming mail: "Regels" in the ribbon opens a window where a rule says which part of a
+message (sender, recipient, subject or the whole envelope) must contain which text, and what then
+happens (move to a folder, mark as read, flag). Rules run over the mail a refresh finds new in an
+account's inbox, also while offline (the change waits in the queue like any other), and "Regels nu
+uitvoeren op deze map" runs them over the open folder at once; "Regel voor deze afzender" starts one
+from the selected message. Rules are kept in `rules.json`.
+
 Keyboard shortcuts in the mail module follow Outlook (Cmd instead of Ctrl on a Mac): arrow keys
 walk the message list, Delete removes the selected message, Ctrl+N starts a new message, Ctrl+R
 replies, Ctrl+Shift+R replies to all, Ctrl+F forwards, Ctrl+Q and Ctrl+U mark read or unread,
