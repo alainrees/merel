@@ -2538,6 +2538,7 @@ dependencies = [
  "mailcraft-model",
  "mailcraft-secrets",
  "serde_json",
+ "ureq",
  "zeroize",
 ]
 
