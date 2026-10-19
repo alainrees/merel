@@ -9,6 +9,7 @@ use serde_json::Value;
 use mailcraft_model::{FolderKind, JunkLists, junk_entry};
 
 use crate::{CommandError, Job, SAMPLE_ACCOUNT, Session, commands::move_message};
+use mailcraft_model::JunkLevel;
 
 impl Session {
     pub fn set_junk(&mut self, lists: JunkLists) {
@@ -35,11 +36,29 @@ impl Session {
         !self.sender_safe(email) && self.junk.is_blocked(email)
     }
 
-    /// A message new in an inbox from a blocked sender goes to the account's Junk folder; true
-    /// when it did (the rules then do not see it).
+    /// Whether a message with this sender is filed as junk on arrival: a blocked sender, and
+    /// beyond that what the level says. Safe senders, contacts and your own addresses never are.
+    pub fn files_as_junk(&self, from: &mailcraft_model::Address) -> bool {
+        let email = from.email();
+        let own: Vec<&str> = self.accounts.iter().map(|a| a.address.email()).collect();
+        if self.sender_safe(email) || own.iter().any(|o| o.eq_ignore_ascii_case(email)) {
+            return false;
+        }
+        if self.junk.is_blocked(email) {
+            return true;
+        }
+        match self.junk.level {
+            JunkLevel::Standard => false,
+            JunkLevel::High => !mailcraft_model::sender_warnings(from, &self.contacts, &own).is_empty(),
+            JunkLevel::SafeOnly => true,
+        }
+    }
+
+    /// A message new in an inbox that [`Self::files_as_junk`] goes to the account's Junk folder;
+    /// true when it did (the rules then do not see it).
     pub(crate) fn apply_junk(&mut self, message_id: &str) -> bool {
         let Some(m) = self.message(message_id) else { return false };
-        if !self.sender_blocked(m.from.email()) {
+        if !self.files_as_junk(&m.from) {
             return false;
         }
         let Some(folder) = self.folder(&m.folder_id) else { return false };
@@ -120,6 +139,16 @@ pub fn trust(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     {
         report(s, &id, false);
         file_as(s, &id, FolderKind::Inbox, "Inbox")?;
+    }
+    Ok(())
+}
+
+/// `junk.level { level }`: how far the filing goes ("standard", "high" or "safe_only").
+pub fn level(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let level = params.get("level").and_then(Value::as_str).and_then(JunkLevel::from_id).ok_or(CommandError::Param("level"))?;
+    if s.junk.level != level {
+        s.junk.level = level;
+        s.junk_dirty = true;
     }
     Ok(())
 }
@@ -239,5 +268,56 @@ mod tests {
             "{jobs:?}"
         );
         assert!(jobs.iter().any(|j| matches!(j, Job::Move { .. })));
+    }
+
+    #[test]
+    fn the_level_says_how_far_the_filing_goes() {
+        let mut s = Session::with_accounts(vec![crate::tests::account("a")]);
+        s.apply(Event::Connected {
+            account_id: "a".into(),
+            folders: vec![
+                RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true },
+                RemoteFolder { path: "Junk".into(), name: "Junk".into(), kind: FolderKind::Junk, selectable: true },
+            ],
+            syncs_items: false,
+        });
+        s.contacts.push(mailcraft_model::Contact {
+            id: "c1".into(),
+            name: "Sanne de Vries".into(),
+            emails: vec!["sanne@example.org".into()],
+            ..Default::default()
+        });
+        let list = |headers: Vec<RemoteHeader>| Event::Headers { folder_id: "a/INBOX".into(), headers, offset: 0, limit: HEADER_LIMIT };
+        s.apply(list(vec![header(1, "old@example.org")]));
+        let folder = |s: &Session, n: u32| s.message(&format!("a/INBOX#{n}")).map(|m| m.folder_id.clone()).unwrap_or_default();
+
+        // Standard: only the blocked list.
+        s.apply(list(vec![header(1, "old@example.org"), header(2, "\"Sanne de Vries\" <sanne@examp1e.org>"), header(3, "shop@store.example")]));
+        assert_eq!((folder(&s, 2), folder(&s, 3)), ("a/INBOX".to_string(), "a/INBOX".to_string()));
+
+        assert_eq!(s.run("junk.level", &json!({ "level": "loud" })), Err(CommandError::Param("level")));
+        s.run("junk.level", &json!({ "level": "high" })).unwrap();
+        assert!(s.take_junk_dirty());
+        s.run("junk.level", &json!({ "level": "high" })).unwrap();
+        assert!(!s.take_junk_dirty(), "the same level again changes nothing");
+        // High: a sender with signs of phishing in the header, not an unknown shop.
+        s.apply(list(vec![header(1, "old@example.org"), header(4, "\"Sanne de Vries\" <sanne@examp1e.org>"), header(5, "shop@store.example")]));
+        assert_eq!((folder(&s, 4), folder(&s, 5)), ("a/Junk".to_string(), "a/INBOX".to_string()));
+
+        // Safe lists only: everything not from a contact, a safe sender or yourself.
+        s.run("junk.level", &json!({ "level": "safe_only" })).unwrap();
+        s.run("junk.trust", &json!({ "entry": "store.example" })).unwrap();
+        s.apply(list(vec![
+            header(1, "old@example.org"),
+            header(6, "sanne@example.org"),
+            header(7, "shop@store.example"),
+            header(8, "A@voorbeeld.nl"),
+            header(9, "stranger@elsewhere.example"),
+        ]));
+        assert_eq!(folder(&s, 6), "a/INBOX", "a contact");
+        assert_eq!(folder(&s, 7), "a/INBOX", "a safe sender");
+        assert_eq!(folder(&s, 8), "a/INBOX", "your own address");
+        assert_eq!(folder(&s, 9), "a/Junk", "a stranger");
+        assert!(!s.take_jobs().iter().any(|j| matches!(j, Job::Junk { .. })), "filing by the level is not the person's word");
     }
 }

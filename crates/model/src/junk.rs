@@ -1,12 +1,44 @@
 //! Blocked and safe senders, as Outlook's junk e-mail options have them. An entry is an
 //! address ("news@example.org") or a domain ("example.org", which covers every address there
 //! and at its subdomains). Nothing here looks at the message text: the lists are the person's
-//! own choices, and the mail server's filter does the rest.
+//! own choices, and the mail server's filter does the rest. The [`JunkLevel`] says how far the
+//! filing goes beyond the blocked list, like Outlook's protection level.
 
 use serde::{Deserialize, Serialize};
 
 /// The longest entry (an address can be 254 characters).
 pub const MAX_JUNK_ENTRY: usize = 254;
+
+/// How much new mail is filed as junk on arrival, besides the blocked senders.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JunkLevel {
+    /// Only the blocked senders; the server's filter does the rest.
+    #[default]
+    Standard,
+    /// Also a sender who shows signs of phishing in the header: a contact's name with another
+    /// address, or a look-alike of a known domain.
+    High,
+    /// Everything that is not from a contact, a safe sender or one of your own addresses.
+    SafeOnly,
+}
+
+impl JunkLevel {
+    pub const ALL: [JunkLevel; 3] = [JunkLevel::Standard, JunkLevel::High, JunkLevel::SafeOnly];
+
+    /// The name a command takes (`junk.level { level }`).
+    pub fn id(self) -> &'static str {
+        match self {
+            JunkLevel::Standard => "standard",
+            JunkLevel::High => "high",
+            JunkLevel::SafeOnly => "safe_only",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<JunkLevel> {
+        JunkLevel::ALL.into_iter().find(|l| l.id() == id)
+    }
+}
 
 /// What `junk.json` holds.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -17,6 +49,8 @@ pub struct JunkLists {
     /// Addresses and domains that are never filed as junk, whatever `blocked` says.
     #[serde(default)]
     pub safe: Vec<String>,
+    #[serde(default)]
+    pub level: JunkLevel,
 }
 
 impl JunkLists {
@@ -76,7 +110,7 @@ mod tests {
         assert!(!entry_covers("example.org", "x@notexample.org"));
         assert!(!entry_covers("example.org", "nonsense"));
 
-        let lists = JunkLists { blocked: vec!["spam.example".into()], safe: vec!["boss@spam.example".into()] };
+        let lists = JunkLists { blocked: vec!["spam.example".into()], safe: vec!["boss@spam.example".into()], level: JunkLevel::Standard };
         assert!(lists.is_blocked("a@spam.example") && lists.is_blocked("boss@spam.example"), "the lists do not know about each other");
         assert!(lists.is_safe("BOSS@spam.example") && !lists.is_safe("a@spam.example"));
     }

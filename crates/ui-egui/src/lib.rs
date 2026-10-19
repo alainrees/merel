@@ -1782,6 +1782,9 @@ mod tests {
         h.run();
         assert_eq!(h.state().engine.session.junk.blocked, ["spam.example"]);
         assert_eq!(h.state().junk.as_ref().map(|o| o.entry.as_str()), Some(""), "the field is cleared");
+        h.get_by_label("Hoog").click();
+        h.run();
+        assert_eq!(h.state().engine.session.junk.level, mailcraft_model::JunkLevel::High);
         h.get_by_label("Sluiten").click();
         h.run();
         assert!(h.state().junk.is_none());
