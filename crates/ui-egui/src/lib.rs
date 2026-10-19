@@ -413,6 +413,8 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
             compose = Some(ComposeKind::Forward);
         } else if i.consume_key(Modifiers::COMMAND, Key::P) {
             command = Some("message.print");
+        } else if i.consume_key(Modifiers::CTRL, Key::Delete) {
+            command = Some("conversation.ignore");
         } else if i.consume_key(Modifiers::NONE, Key::Delete) || (MAC && i.consume_key(Modifiers::NONE, Key::Backspace)) {
             command = Some("message.delete");
         } else if (!MAC && i.consume_key(Modifiers::NONE, Key::Backspace)) || (MAC && i.consume_key(Modifiers::CTRL, Key::E)) {
@@ -969,7 +971,8 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &m.subject));
                     let known_sender = app.engine.session.contact_with_email(m.from.email()).is_some();
                     let in_junk = app.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk);
-                    if let Some(p) = message_menu::menu(&r, m, known_sender, in_junk) {
+                    let ignored = app.engine.session.message_ignored(&m.id);
+                    if let Some(p) = message_menu::menu(&r, m, known_sender, in_junk, ignored) {
                         menu_pick = Some((m.clone(), p));
                     }
                     // The fold control is its own widget, drawn over the row's left edge.
@@ -1118,6 +1121,24 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         ui.add_space(8.0);
         if not_junk {
             app.run("junk.trust", json!({ "id": m.id }));
+            return;
+        }
+    }
+    if app.engine.session.message_ignored(&m.id) {
+        // An ignored conversation, as Outlook shows it: the way back is at hand.
+        let mut stop = false;
+        egui::Frame::new().fill(t.checked).corner_radius(4).inner_margin(8).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(IGNORED_NOTICE).color(t.text));
+                stop = ui
+                    .small_button("Niet meer negeren")
+                    .on_hover_text("Zet de berichten van dit gesprek terug in Postvak IN; nieuwe berichten erin komen daar weer aan.")
+                    .clicked();
+            });
+        });
+        ui.add_space(8.0);
+        if stop {
+            app.run("conversation.unignore", json!({ "id": m.id }));
             return;
         }
     }
@@ -1280,6 +1301,8 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 
 /// The first line of the strip above a message that shows signs of phishing.
 pub(crate) const PHISHING_TITLE: &str = "⚠ Pas op: dit bericht heeft kenmerken van phishing.";
+/// The strip above a message of an ignored conversation.
+pub(crate) const IGNORED_NOTICE: &str = "🚫 Dit gesprek wordt genegeerd: nieuwe berichten erin gaan meteen naar Verwijderde items.";
 /// The strip above a message in the Junk folder.
 pub(crate) const JUNK_NOTICE: &str = "⚠ Dit bericht staat in Ongewenste e-mail. Links, bijlagen en afbeeldingen van internet zijn uitgeschakeld tot je het als Geen ongewenst aanmerkt.";
 
@@ -1764,6 +1787,28 @@ mod tests {
         assert!(h.query_by_label(JUNK_NOTICE).is_none());
         assert!(!h.get_by_label_contains("bon.pdf").accesskit_node().is_disabled());
         assert!(h.query_by_label("Afbeeldingen laden").is_some());
+    }
+
+    #[test]
+    fn a_conversation_is_ignored_from_the_menu_and_taken_back_from_the_strip() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Wat er deze maand speelt").click_secondary();
+        h.run();
+        h.get_by_label("Gesprek negeren").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert_eq!(s.message("m3").map(|m| m.folder_id.as_str()), Some("deleted"));
+        assert_eq!(s.ignored.iter().map(|i| i.key.as_str()).collect::<Vec<_>>(), ["wat er deze maand speelt"]);
+
+        h.state_mut().engine.session.selected_message = Some("m3".into());
+        h.run();
+        h.get_by_label(IGNORED_NOTICE);
+        h.get_by_label("Niet meer negeren").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert_eq!(s.message("m3").map(|m| m.folder_id.as_str()), Some("inbox"));
+        assert!(s.ignored.is_empty());
     }
 
     #[test]
