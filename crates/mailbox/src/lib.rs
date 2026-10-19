@@ -10,6 +10,7 @@
 use mailcraft_mime::ParsedHeader;
 use mailcraft_model::{Appointment, Contact, FolderKind, Task};
 use mailcraft_secrets::Secret;
+use serde::{Deserialize, Serialize};
 
 /// How to log in.
 #[derive(Clone, Debug)]
@@ -63,7 +64,7 @@ pub struct RemoteHeader {
 }
 
 /// A flag a person can set on a message.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Flag {
     Seen,
     Flagged,
@@ -93,7 +94,7 @@ pub trait Mailbox: Send {
 
 /// An appointment, contact or task on its way to or from a store. Its `id` is the store's
 /// own (empty for one that does not exist there yet); the engine maps it to a session id.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Item {
     Appointment(Appointment),
     Contact(Contact),
