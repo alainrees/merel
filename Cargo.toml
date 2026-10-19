@@ -24,6 +24,7 @@ mailcraft-graph = { path = "crates/graph" }
 mailcraft-html = { path = "crates/html" }
 mailcraft-store = { path = "crates/store" }
 mailcraft-dav = { path = "crates/dav" }
+mailcraft-smime = { path = "crates/smime" }
 
 # foundation
 thiserror = "2"
@@ -47,6 +48,11 @@ ureq = { version = "3", default-features = false, features = ["rustls-no-provide
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
 # The offline cache is sealed with ChaCha20-Poly1305 from the same crypto library rustls uses.
 aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys"] }
+# S/MIME: PKCS#12 import, and the CMS structures of signed mail; the signing itself is aws-lc-rs.
+p12-keystore = "0.4"
+cms = { version = "=0.3.0-pre.1", features = ["std"] }
+der = { version = "0.8", features = ["alloc", "std"] }
+x509-cert = "0.3"
 open = "5"
 sha2 = "0.11"
 base64 = "0.23"
