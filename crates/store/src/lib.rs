@@ -57,6 +57,9 @@ pub struct AccountCache {
     pub messages: Vec<MessageHeader>,
     /// Oldest first; the newest opened message is last.
     pub bodies: Vec<CachedBody>,
+    /// Changes that found no connection, oldest first, as the engine serialises its jobs.
+    #[serde(default)]
+    pub pending: Vec<serde_json::Value>,
     /// Whether the account's store keeps appointments, contacts and tasks.
     pub syncs_items: bool,
     pub calendars: Vec<Calendar>,

@@ -9,6 +9,7 @@ rust-version.workspace = true
 mailcraft-model = { workspace = true }
 mailcraft-mime = { workspace = true }
 mailcraft-secrets = { workspace = true }
+serde = { workspace = true }
 thiserror = { workspace = true }
 
 [lints]
