@@ -218,7 +218,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 app.tab = Tab::Home;
             }
             ui.add_space(12.0);
-            ui.label(RichText::new("   Accounts").size(13.0).color(t.on_accent.gamma_multiply(0.8)));
+            ui.label(RichText::new("   Accounts").size(13.0).color(t.on_accent));
             ui.add_space(12.0);
             // Printing lives here, as in Outlook's File menu; Ctrl+P on the Start tab does the same.
             if item(ui, "Afdrukken") {

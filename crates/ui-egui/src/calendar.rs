@@ -595,7 +595,7 @@ fn side_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         } else if day.month() == focus.month() {
                             t.text
                         } else {
-                            t.text_dim.gamma_multiply(0.6)
+                            t.text_disabled
                         };
                         p.text(rect.center(), Align2::CENTER_CENTER, day.day().to_string(), FontId::proportional(12.0), color);
                         if r.clicked() {
