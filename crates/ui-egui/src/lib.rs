@@ -13,6 +13,7 @@ pub mod cleanup;
 mod compose;
 pub mod contacts;
 mod dates;
+pub mod eml;
 pub mod folders;
 pub mod groups;
 pub mod help;
@@ -482,6 +483,8 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
             compose = Some(ComposeKind::ReplyAll);
         } else if i.consume_key(Modifiers::COMMAND, Key::R) {
             compose = Some(ComposeKind::Reply);
+        } else if i.consume_key(Modifiers::COMMAND | Modifiers::ALT, Key::F) {
+            command = Some("forward_attached");
         } else if i.consume_key(Modifiers::COMMAND, Key::F) {
             compose = Some(ComposeKind::Forward);
         } else if i.consume_key(Modifiers::COMMAND, Key::P) {
@@ -540,6 +543,7 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
             }
         }
         Some("message.print") if app.can_print() => app.print_selected(),
+        Some("forward_attached") if has => app.forward_as_attachment(),
         Some(id) if has => app.run(id, Value::Null),
         _ => {}
     }
@@ -1867,6 +1871,27 @@ mod tests {
         h.run();
         assert!(h.state().engine.session.drafts.is_empty());
         h.get_by_label("Geen concepten.");
+    }
+
+    #[test]
+    fn doorsturen_als_bijlage_attaches_the_message_itself_as_an_eml_file() {
+        use egui::{Key, Modifiers};
+        let mut h = harness();
+        h.run();
+        let id = h.state().engine.session.visible_messages().first().map(|m| m.id.clone()).expect("sample mail");
+        h.state_mut().select_message(&id);
+        h.run();
+        let m = h.state().engine.session.selected().cloned().expect("a message is selected");
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::F);
+        h.run();
+        let c = h.state().compose.as_ref().expect("a new message opens");
+        assert!(c.subject.starts_with("Fw:"), "{}", c.subject);
+        assert!(!c.body.contains("schreef"), "nothing is quoted, the message travels whole: {}", c.body);
+        assert_eq!(c.attachments.len(), 1);
+        let a = &c.attachments[0];
+        assert_eq!((a.name.as_str(), a.mime.as_str()), (crate::eml::file_name(&m.subject).as_str(), "message/rfc822"));
+        let source = String::from_utf8_lossy(&a.bytes);
+        assert!(source.contains(&format!("Subject: {}", m.subject)) && source.contains(m.from.email()), "{source}");
     }
 
     #[test]
