@@ -14,6 +14,7 @@ mod dates;
 mod html;
 pub mod reminders;
 pub mod remote;
+pub mod rules;
 pub mod tasks;
 mod theme;
 
@@ -101,6 +102,8 @@ pub struct MailApp {
     pub drafts_for: Option<String>,
     /// Reminders the window has already asked attention for, by occurrence.
     pub announced_reminders: std::collections::HashSet<(String, i64)>,
+    /// The rules window, while it is open.
+    pub rules: Option<rules::State>,
 }
 
 impl MailApp {
@@ -119,6 +122,7 @@ impl MailApp {
             remote: remote::RemoteImages::default(),
             drafts_for: None,
             announced_reminders: std::collections::HashSet::new(),
+            rules: None,
         }
     }
 
@@ -148,6 +152,10 @@ impl MailApp {
                 Some(if arrivals == 1 { "1 nieuw bericht ontvangen.".to_string() } else { format!("{arrivals} nieuwe berichten ontvangen.") });
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
         }
+        let hits = self.engine.session.take_rule_hits();
+        if hits > 0 {
+            self.notice = Some(rules::rule_notice(hits));
+        }
         // Wake up now and then so the engine's refresh timer runs while nothing happens; faster
         // while something is on its way.
         let wake = if self.engine.session.has_pending() { std::time::Duration::from_millis(250) } else { std::time::Duration::from_secs(5) };
@@ -158,6 +166,7 @@ impl MailApp {
         compose::show(self, &ctx, &t);
         calendar::window(self, &ctx, &t);
         reminders::window(self, &ctx, &t);
+        rules::window(self, &ctx, &t);
         if self.tab == Tab::Home && self.module == Module::Mail {
             shortcuts(self, &ctx);
         }
@@ -306,6 +315,10 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ribbon_button(app, ui, t, "◉", "Gelezen", ("message.mark_read", Some(&key_hint("Q"))), has);
                     ribbon_button(app, ui, t, "○", "Ongelezen", ("message.mark_unread", Some(&key_hint("U"))), has);
                     ribbon_button(app, ui, t, "⚑", "Vlag", ("message.flag", None), has);
+                    ui.separator();
+                    if ribbon_action_hint(ui, t, "⚙", "Regels", true, Some("Mail automatisch verplaatsen of markeren")) {
+                        app.open_rules(false);
+                    }
                 }
                 Tab::SendReceive => {
                     let can = !app.engine.session.is_sample() && app.engine.session.selected_folder.is_some();
@@ -868,6 +881,7 @@ fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         || n.ends_with("ontvangen.")
                         || n.starts_with("Bijlage opgeslagen")
                         || n.starts_with("Concept bewaard")
+                        || n.starts_with("Regels toegepast")
                     {
                         t.accent_text
                     } else {
@@ -1258,6 +1272,50 @@ mod tests {
         let s = &h.state().engine.session;
         assert_eq!(s.dismissed_reminders.len(), 1);
         assert!(h.state().announced_reminders.is_empty());
+    }
+
+    #[test]
+    fn a_rule_is_made_in_the_window_and_run_over_the_open_folder() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Regels").click();
+        h.run();
+        assert!(h.state().rules.is_some());
+        h.get_by_label("Nog geen regels.");
+        h.get_by_label("Nieuwe regel").click();
+        h.run();
+        h.get_by_label("Regel opslaan").click();
+        h.run();
+        let form = h.state().rules.as_ref().and_then(|s| s.form.as_ref()).expect("the form stays open on an error");
+        assert_eq!(form.error.as_deref(), Some("Vul in waar de regel op moet letten."));
+        {
+            let form = h.state_mut().rules.as_mut().and_then(|s| s.form.as_mut()).expect("form");
+            form.name = "Studio".into();
+            form.contains = "STUDIO@".into();
+            form.move_to = Some("archive".into());
+            form.mark_read = true;
+        }
+        h.run();
+        h.get_by_label("Regel opslaan").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert_eq!(s.rules.len(), 1);
+        assert_eq!((s.rules[0].name.as_str(), s.rules[0].contains.as_str(), s.rules[0].account_id.as_str()), ("Studio", "STUDIO@", "sample"));
+        assert!(h.state().rules.as_ref().is_some_and(|r| r.form.is_none()));
+        h.get_by_label_contains("Van bevat “STUDIO@” → naar Archief, markeren als gelezen");
+        assert_eq!(s.message("m0").unwrap().folder_id, "inbox", "saving a rule moves nothing by itself");
+        h.get_by_label("Regels nu uitvoeren op deze map").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert_eq!(s.message("m0").unwrap().folder_id, "archive");
+        assert!(s.message("m0").unwrap().flags.seen);
+        assert_eq!(h.state().notice.as_deref(), Some("Regels toegepast op 1 bericht."));
+        h.get_by_label("Regel verwijderen").click();
+        h.run();
+        assert!(h.state().engine.session.rules.is_empty());
+        h.get_by_label("Sluiten").click();
+        h.run();
+        assert!(h.state().rules.is_none());
     }
 
     #[test]
