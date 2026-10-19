@@ -46,6 +46,57 @@ const SEARCH_AHEAD_DAYS: i64 = 731;
 /// Pixels per hour in the week and day views.
 const HOUR_HEIGHT: f32 = 44.0;
 const DATE_FORMAT: &str = "%d-%m-%Y";
+
+/// The ribbon button and window that jump to a typed day, Outlook's "Ga naar datum" (Ctrl+G).
+pub const GOTO: &str = "Ga naar datum";
+pub const GOTO_HINT: &str = "Gebruik dag-maand-jaar, bijvoorbeeld 21-10-2026.";
+const GOTO_BOX: &str = "calendar_goto_box";
+
+/// A day typed as dag-maand-jaar, with or without leading zeros.
+pub fn parse_date(text: &str) -> Option<NaiveDate> {
+    NaiveDate::parse_from_str(text.trim(), DATE_FORMAT).ok()
+}
+
+impl MailApp {
+    /// Opens "Ga naar datum" with the shown day filled in.
+    pub fn open_goto(&mut self) {
+        self.calendar.goto = Some(self.calendar.focus.format(DATE_FORMAT).to_string());
+    }
+}
+
+/// The "Ga naar datum" window, while it is open: a day as dag-maand-jaar, "Ga" (or Enter) shows
+/// it in the current view, "Annuleren" closes.
+pub fn goto_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    let Some(mut text) = app.calendar.goto.take() else { return };
+    let mut go = false;
+    let mut close = false;
+    egui::Window::new(GOTO).collapsible(false).resizable(false).default_width(260.0).show(ctx, |ui| {
+        ui.label(RichText::new("Welke dag wil je zien? (dag-maand-jaar)").color(t.text));
+        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0).id(egui::Id::new(GOTO_BOX)));
+        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            go = true;
+        }
+        if parse_date(&text).is_none() {
+            ui.label(RichText::new(GOTO_HINT).size(12.0).color(t.flag));
+        }
+        ui.horizontal(|ui| {
+            if ui.button("Ga").clicked() {
+                go = true;
+            }
+            if ui.button("Annuleren").clicked() {
+                close = true;
+            }
+        });
+    });
+    if go && let Some(day) = parse_date(&text) {
+        app.calendar.focus = day;
+        app.calendar.query.clear();
+        close = true;
+    }
+    if !close {
+        app.calendar.goto = Some(text);
+    }
+}
 const TIME_FORMAT: &str = "%H:%M";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +118,8 @@ pub struct State {
     pub editor: Option<Editor>,
     /// The appointment whose bottom edge is being dragged, with the end it would get.
     pub resizing: Option<Resizing>,
+    /// The day typed in the "Ga naar datum" window, while it is open.
+    pub goto: Option<String>,
 }
 
 /// An appointment being stretched or shortened by its bottom edge.
@@ -78,7 +131,7 @@ pub struct Resizing {
 
 impl Default for State {
     fn default() -> Self {
-        State { view: View::Month, focus: today(), query: String::new(), editor: None, resizing: None }
+        State { view: View::Month, focus: today(), query: String::new(), editor: None, resizing: None, goto: None }
     }
 }
 
