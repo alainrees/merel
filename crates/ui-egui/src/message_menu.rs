@@ -18,6 +18,8 @@ pub enum Pick {
     Compose(ComposeKind),
     /// A new message with this one attached as an `.eml` file.
     ForwardAttached,
+    /// The message as a new one, with the same recipients, subject, text and attachments.
+    Resend,
     Command(&'static str),
     /// A follow-up flag for the day named as `message.follow_up` takes it.
     FollowUp(&'static str),
@@ -70,11 +72,12 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
         let sender = if known_sender { "Afzender openen in contacten" } else { "Afzender toevoegen aan contacten" };
         let junk = if in_junk { ("Geen ongewenst", "junk.trust") } else { ("Afzender blokkeren", "junk.block") };
         let ignore = if ignored { ("Gesprek niet meer negeren", "conversation.unignore") } else { ("Gesprek negeren", "conversation.ignore") };
-        let items: [(&str, Pick); 18] = [
+        let items: [(&str, Pick); 19] = [
             ("Beantwoorden", Pick::Compose(ComposeKind::Reply)),
             ("Allen beantwoorden", Pick::Compose(ComposeKind::ReplyAll)),
             ("Doorsturen", Pick::Compose(ComposeKind::Forward)),
             (crate::eml::FORWARD, Pick::ForwardAttached),
+            (crate::resend::RESEND, Pick::Resend),
             (MEETING, Pick::Meeting),
             (read.0, Pick::Command(read.1)),
             ("Verplaatsen naar…", Pick::Move),
@@ -91,10 +94,10 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
             ("Regel maken voor deze afzender…", Pick::Rule),
         ];
         for (i, (label, p)) in items.into_iter().enumerate() {
-            if matches!(i, 5 | 13 | 16) {
+            if matches!(i, 6 | 14 | 17) {
                 ui.separator();
             }
-            if i == 6 {
+            if i == 7 {
                 // Outlook's "Opvolgen": the flag with a due day, under its own arrow.
                 ui.menu_button("Opvolgen", |ui| {
                     for (when, label) in mailcraft_engine::followup::WHEN {
@@ -162,6 +165,7 @@ impl MailApp {
         match pick {
             Pick::Compose(kind) => self.open_compose(kind),
             Pick::ForwardAttached => self.forward_as_attachment(),
+            Pick::Resend => self.resend_message(m),
             Pick::Command(id) => self.run(id, Value::Null),
             Pick::FollowUp(when) => self.run("message.follow_up", json!({ "when": when })),
             Pick::Snooze(when) => self.run("message.snooze", json!({ "when": when })),

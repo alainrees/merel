@@ -28,6 +28,7 @@ pub mod quicksteps;
 pub mod receipt;
 pub mod reminders;
 pub mod remote;
+pub mod resend;
 pub mod rules;
 pub mod search_folders;
 pub mod tasks;
