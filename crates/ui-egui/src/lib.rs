@@ -29,6 +29,7 @@ pub mod remote;
 pub mod rules;
 pub mod search_folders;
 pub mod tasks;
+pub mod templates;
 mod theme;
 pub mod unsubscribe;
 pub mod view;
@@ -125,6 +126,8 @@ pub struct MailApp {
     pub junk: Option<junk::Options>,
     /// The quick steps window, when it is open.
     pub quick_steps: Option<quicksteps::State>,
+    /// The "Sjablonen" window, when it is open.
+    pub templates: Option<templates::State>,
     /// Whether the "Verplaatsen naar" window for the selected message is open.
     pub move_to: bool,
     /// The window for a new, renamed or removed folder, while it is open.
@@ -244,6 +247,7 @@ impl MailApp {
             rules: None,
             junk: None,
             quick_steps: None,
+            templates: None,
             move_to: false,
             folder_edit: None,
             categories: None,
@@ -316,6 +320,7 @@ impl MailApp {
         rules::window(self, &ctx, &t);
         junk::window(self, &ctx, &t);
         quicksteps::window(self, &ctx, &t);
+        templates::window(self, &ctx, &t);
         move_window(self, &ctx, &t);
         folders::window(self, &ctx, &t);
         unsubscribe::window(self, &ctx, &t);
