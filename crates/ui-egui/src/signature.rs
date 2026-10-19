@@ -1,12 +1,28 @@
 //! The strip over a signed message, as Outlook shows its red ribbon or seal: who signed, or
-//! that the signature does not hold.
+//! that the signature does not hold. An encrypted message that opened says so too.
 
 use egui::{CornerRadius, Margin, RichText, Ui};
+use mailcraft_mime::Encryption;
 use mailcraft_smime::Signature;
 
 use crate::Tokens;
 
 pub const BROKEN: &str = "⚠ De digitale handtekening klopt niet. Het bericht is na het ondertekenen veranderd, of de handtekening is vervalst.";
+
+pub const ENCRYPTED: &str = "🔒 Versleuteld bericht. Alleen de ontvangers kunnen het lezen; het onderwerp was onderweg niet versleuteld.";
+
+/// The strip over an encrypted message that opened. One that did not open shows why in place
+/// of its text, so it needs no strip.
+pub fn encryption_strip(ui: &mut Ui, t: &Tokens, encryption: &Encryption) {
+    if *encryption != Encryption::Opened {
+        return;
+    }
+    egui::Frame::NONE.fill(t.checked).corner_radius(CornerRadius::same(4)).inner_margin(Margin::symmetric(10, 6)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(RichText::new(ENCRYPTED).size(12.0).color(t.text));
+    });
+    ui.add_space(8.0);
+}
 
 /// What the strip says, and whether it is a warning.
 pub fn text(signature: &Signature, from: &str) -> (String, bool) {

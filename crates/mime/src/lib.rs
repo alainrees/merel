@@ -72,6 +72,17 @@ pub struct Body {
     pub receipt_to: Option<Address>,
     /// The S/MIME signature on the message, when it is signed.
     pub signature: Option<mailcraft_smime::Signature>,
+    /// Set for a message that came encrypted (S/MIME): whether it opened.
+    pub encrypted: Option<Encryption>,
+}
+
+/// What became of an encrypted message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Encryption {
+    /// Decrypted with the account's certificate; the body is what was inside.
+    Opened,
+    /// Not opened, and why, in Dutch.
+    Locked(String),
 }
 
 fn addresses(a: Option<&mail_parser::Address<'_>>) -> Vec<Address> {
@@ -175,7 +186,7 @@ pub fn parse_body(bytes: &[u8]) -> Body {
             bytes: p.contents().into(),
         })
         .collect();
-    Body { text, from_html, rich, images, attachments, authentication, unsubscribe, receipt_to, signature }
+    Body { text, from_html, rich, images, attachments, authentication, unsubscribe, receipt_to, signature, encrypted: None }
 }
 
 fn mime_of(p: &mail_parser::MessagePart<'_>) -> String {

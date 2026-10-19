@@ -1000,8 +1000,9 @@ pub struct Engine {
     secrets: Arc<dyn SecretStore>,
     config_path: Option<std::path::PathBuf>,
     cache: cache::Cache,
-    /// Each account's S/MIME certificate, shared with the worker threads that sign.
-    identities: certificates::Identities,
+    /// The S/MIME certificates, the accounts' own and the correspondents', shared with the
+    /// worker threads that sign, encrypt and decrypt.
+    keys: certificates::Keys,
     last_refresh: Instant,
     last_item_refresh: Instant,
 }
@@ -1031,7 +1032,7 @@ impl Engine {
             secrets: Arc::new(mailcraft_secrets::MemoryStore::default()),
             config_path: None,
             cache: cache::Cache::none(),
-            identities: certificates::Identities::default(),
+            keys: certificates::Keys::default(),
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
         }
@@ -1042,8 +1043,8 @@ impl Engine {
     pub fn load(secrets: Arc<dyn SecretStore>, config_path: Option<std::path::PathBuf>) -> Self {
         let accounts = config_path.as_deref().map(config::load).unwrap_or_default();
         let (tx, rx) = channel();
-        let identities = certificates::Identities::default();
-        let worker = worker::Worker::new(tx, std::sync::Arc::clone(&identities));
+        let keys = certificates::Keys::default();
+        let worker = worker::Worker::new(tx, keys.clone());
         let calendar = config_path.as_deref().map(|p| config::load_json::<calendar::CalendarFile>(&config::calendar_path(p))).unwrap_or_default();
         let mut engine = Engine {
             session: Session::default(),
@@ -1052,7 +1053,7 @@ impl Engine {
             secrets,
             config_path,
             cache: cache::Cache::none(),
-            identities,
+            keys,
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
         };
@@ -1064,6 +1065,7 @@ impl Engine {
             engine.cache = cache::Cache::open(engine.config_path.as_deref(), &*engine.secrets);
             engine.cache.restore(&mut engine.session);
             engine.load_identities();
+            engine.load_people();
             engine.spawn_accounts();
         }
         if !calendar.appointments.is_empty() || !calendar.calendars.is_empty() {
@@ -1355,6 +1357,9 @@ impl Engine {
                 continue;
             }
             self.cache.note_event(&self.session, &e);
+            if let Event::Body { message_id, body, header, .. } = &e {
+                self.learn_certificate(message_id, header.from.as_ref(), body);
+            }
             // Changes made offline reach the server before anything else does.
             let replay = match &e {
                 Event::Connected { account_id, .. } => self.cache.take_pending(account_id),
@@ -1382,7 +1387,7 @@ impl Engine {
 
     fn dispatch(&mut self) {
         let jobs = self.session.take_jobs();
-        let jobs = self.cache.serve(&mut self.session, jobs);
+        let jobs = self.cache.serve(&mut self.session, &self.keys.identities, jobs);
         let Some(worker) = &self.worker else { return };
         for j in jobs {
             if j.account_id() != SAMPLE_ACCOUNT {

@@ -72,7 +72,7 @@ Changes made without a connection (flags, moves, deletions, items saved or delet
 | Crate | Job | Security notes |
 |---|---|---|
 | `sync` | Background refresh of folders and items, conflict handling | Per-account rate limits and back-off |
-| `smime` | S/MIME: PKCS#12 import, signing (verification and encryption to follow); OpenPGP later | aws-lc-rs for the cryptography, RustCrypto `cms`/`x509-cert`/`p12-keystore` for the structures |
+| `smime` | S/MIME: PKCS#12 import, signing, verification, encryption and decryption (`envelope`); OpenPGP later | aws-lc-rs for the cryptography, RustCrypto `cms`/`x509-cert`/`p12-keystore` for the structures |
 
 ## OWASP top 10 mapping
 

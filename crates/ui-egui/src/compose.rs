@@ -53,6 +53,9 @@ pub struct Compose {
     /// Whether the message is signed with the account's S/MIME certificate; `None` follows the
     /// account: signed when it has one.
     pub sign: Option<bool>,
+    /// Outlook's "Versleutelen": the message goes out encrypted (S/MIME) for its recipients
+    /// and the sender, and only when every recipient's certificate is known.
+    pub encrypt: bool,
     /// What Send found worth a second look, with the moment chosen if "Later verzenden" was
     /// pressed; the window shows it and waits for "Toch verzenden" or a change to the message.
     pub check: Option<Check>,
@@ -73,6 +76,8 @@ pub const SEND_ANYWAY: &str = "Toch verzenden";
 pub const LOOK_AGAIN: &str = "Nog even nakijken";
 /// The tick box that signs the message with the account's S/MIME certificate.
 pub const SIGN: &str = "Ondertekenen";
+/// The tick box that encrypts the message for its recipients.
+pub const ENCRYPT: &str = "Versleutelen";
 
 /// Words that say an attachment is meant to be on, in Dutch and English.
 const ATTACHMENT_WORDS: &[&str] = &[
@@ -163,6 +168,7 @@ impl Compose {
             importance: Importance::Normal,
             read_receipt: false,
             sign: None,
+            encrypt: false,
             check: None,
             initial: String::new(),
             draft_id: None,
@@ -224,6 +230,7 @@ impl Compose {
         c.importance = d.importance;
         c.read_receipt = d.read_receipt;
         c.sign = d.sign;
+        c.encrypt = d.encrypt;
         c
     }
 
@@ -254,6 +261,7 @@ impl Compose {
             importance: self.importance,
             read_receipt: self.read_receipt,
             sign: self.sign,
+            encrypt: self.encrypt,
         }
     }
 
@@ -412,6 +420,11 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let account =
         if c.account_id.is_empty() { app.engine.session.current_account().map(|a| a.id.clone()).unwrap_or_default() } else { c.account_id.clone() };
     let certificate = app.engine.certificate(&account);
+    // The recipients encrypted mail cannot reach yet, for want of their certificate.
+    let missing = match c.draft() {
+        Ok(d) if c.encrypt => app.engine.missing_certificates(&[d.to, d.cc].concat()),
+        _ => Vec::new(),
+    };
     // Files dropped onto the window become attachments; files hovering over it get a hint.
     if !sending {
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
@@ -508,6 +521,11 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                             c.sign = Some(on);
                         }
                     }
+                    if certificate.is_some() || c.encrypt {
+                        ui.checkbox(&mut c.encrypt, ENCRYPT).on_hover_text(
+                            "Versleutelt het bericht en de bijlagen (S/MIME), zodat alleen de ontvangers en jij het kunnen lezen. Het onderwerp gaat niet versleuteld. Dat lukt alleen naar mensen van wie je al een ondertekend bericht hebt gehad.",
+                        );
+                    }
                     template = crate::templates::menu(ui, &app.engine.session.templates_sorted());
                     if sending {
                         ui.label(RichText::new("Verzenden…").color(t.text_dim));
@@ -535,6 +553,13 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     if look_again {
                         c.check = None;
                     }
+                }
+                if !missing.is_empty() {
+                    egui::Frame::new().fill(t.flag.gamma_multiply(0.15)).corner_radius(4).inner_margin(8).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(RichText::new(format!("🔒 {}", mailcraft_engine::certificates::missing_text(&missing))).color(t.text));
+                    });
+                    ui.add_space(6.0);
                 }
                 if let Some(ts) = c.send_at {
                     ui.horizontal_wrapped(|ui| {
@@ -616,6 +641,13 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             c.error = None;
             c.add_files(paths);
         }
+    }
+    // Encrypted mail does not go out in the clear, and not to someone who could not open it.
+    if (send || schedule.is_some() || anyway) && !missing.is_empty() {
+        c.error = Some(format!("{} Zet Versleutelen uit om toch te verzenden.", mailcraft_engine::certificates::missing_text(&missing)));
+        send = false;
+        schedule = None;
+        anyway = false;
     }
     if anyway && let Some(check) = c.check.take() {
         match check.later {

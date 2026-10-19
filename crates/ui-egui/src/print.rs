@@ -444,6 +444,7 @@ mod tests {
             unsubscribe: Vec::new(),
             receipt_to: None,
             signature: None,
+            encrypted: None,
         };
         let html = page(&header(), Some(&body));
         assert!(html.contains("<title>Offerte &lt;script&gt;alert(1)&lt;/script&gt;</title>"), "{html}");

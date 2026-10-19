@@ -313,6 +313,10 @@ pub struct Draft {
     /// uitgaande berichten" does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sign: Option<bool>,
+    /// Encrypt the message (S/MIME) for its recipients and the sender, Outlook's "Versleutelen";
+    /// it goes out only when every recipient's certificate is known.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub encrypt: bool,
 }
 
 impl Draft {
@@ -386,6 +390,9 @@ pub struct StoredDraft {
     /// See [`Draft::sign`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sign: Option<bool>,
+    /// See [`Draft::encrypt`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub encrypt: bool,
 }
 
 impl StoredDraft {
@@ -406,6 +413,7 @@ impl StoredDraft {
             importance: self.importance,
             read_receipt: self.read_receipt,
             sign: self.sign,
+            encrypt: self.encrypt,
         })
     }
 

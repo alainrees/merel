@@ -143,6 +143,7 @@ mod tests {
             importance: Importance::High,
             read_receipt: true,
             sign: None,
+            encrypt: false,
         };
         let m = build(&from, &draft).unwrap();
         let text = String::from_utf8(m.formatted()).unwrap();

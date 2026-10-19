@@ -222,6 +222,21 @@ mod tests {
         harness.run();
         assert_eq!(harness.state().compose.as_ref().and_then(|c| c.sign), Some(false));
         assert_eq!(harness.state().compose.as_ref().map(|c| c.as_stored().sign), Some(Some(false)), "kept with the draft");
+
+        // Encrypting waits for the recipient's certificate, and says whose is missing.
+        harness.get_by_label(crate::compose::ENCRYPT).click();
+        if let Some(c) = harness.state_mut().compose.as_mut() {
+            c.to = "jij@example.org".into();
+            c.subject = "Contract".into();
+        }
+        harness.run();
+        let missing = "Van jij@example.org is nog geen certificaat bekend";
+        assert_eq!(harness.query_all_by_label_contains(missing).count(), 1);
+        harness.get_by_label("Verzenden").click();
+        harness.run();
+        let c = harness.state().compose.as_ref().unwrap();
+        assert!(c.draft_id.is_none() && c.error.as_deref().is_some_and(|e| e.contains(missing)), "not sent in the clear");
+        assert!(c.as_stored().encrypt, "kept with the draft");
         harness.state_mut().compose = None;
         harness.run();
 

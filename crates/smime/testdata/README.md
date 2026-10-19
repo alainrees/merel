@@ -10,3 +10,5 @@ exist only for the tests, and the password of every `.p12` file is `geheim`.
 All are valid from 19 October 2026 for a hundred years.
 - `signed-openssl.eml`, `signed-ec.eml`: mail signed by `openssl smime -sign`, by "Jij Tester" (RSA) and by
   "Ec Tester" <ec@example.org> (ECDSA P-256); `signed-tampered.eml` is the first with its text changed afterwards.
+- `encrypted-openssl.eml`, `encrypted-oaep.eml`: mail for "Jij Tester" encrypted by OpenSSL with AES-256-CBC, the key
+  wrapped with RSAES-PKCS1-v1_5 and with RSAES-OAEP.
