@@ -216,6 +216,7 @@ impl MailApp {
         categories::window(self, &ctx, &t);
         help::window(self, &ctx, &t);
         drag_preview(self, &ctx, &t);
+        calendar::drag_preview(self, &ctx, &t);
         if self.tab == Tab::Home && self.module == Module::Mail {
             shortcuts(self, &ctx);
         } else if self.tab == Tab::Home {
