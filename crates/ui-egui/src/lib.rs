@@ -1638,8 +1638,13 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if let Some(e) = body.as_ref().and_then(|b| b.encrypted.as_ref()) {
         signature::encryption_strip(ui, t, e);
     }
-    if let Some(sig) = body.as_ref().and_then(|b| b.signature.as_ref()) {
-        signature::strip(ui, t, sig, m.from.email());
+    if let Some(sig) = body.as_ref().and_then(|b| b.signature.as_ref())
+        && signature::strip(ui, t, sig, m.from.email(), !in_junk)
+    {
+        match app.engine.trust_certificate(&message_id) {
+            Ok(()) => app.notice = Some("Het certificaat wordt vertrouwd; je kunt deze afzender nu ook versleuteld mailen.".into()),
+            Err(e) => app.notice = Some(e),
+        }
     }
     // A list's mail offers the way off it, as Outlook does; not in the Junk folder, where the
     // header is not to be trusted.
@@ -2762,6 +2767,26 @@ mod tests {
         }
         h.run();
         h.get_by_label(signature::BROKEN);
+    }
+
+    #[test]
+    fn a_certificate_from_an_unknown_issuer_can_be_trusted_from_the_strip() {
+        let mut h = harness();
+        {
+            let s = &mut h.state_mut().engine.session;
+            let from = s.message("m3").unwrap().from.email().to_lowercase();
+            let signer =
+                mailcraft_smime::CertInfo { name: "Iemand".into(), emails: vec![from], issuer: "Eigen CA".into(), not_before: 0, not_after: 0 };
+            let signature = mailcraft_smime::Signature::Valid { signer, certificate: vec![1, 2, 3], issuers: Vec::new(), trusted: false };
+            s.bodies.insert("m3".into(), mailcraft_engine::Body { text: "Hoi".into(), signature: Some(signature), ..Default::default() });
+            s.selected_message = Some("m3".into());
+        }
+        h.run();
+        assert_eq!(h.query_all_by_label_contains("is niet bekend als betrouwbaar").count(), 1);
+        h.get_by_label(signature::TRUST).click();
+        h.run();
+        assert!(h.query_by_label(signature::TRUST).is_none());
+        assert_eq!(h.query_all_by_label_contains("✔ Digitaal ondertekend door Iemand").count(), 1);
     }
 
     #[test]
