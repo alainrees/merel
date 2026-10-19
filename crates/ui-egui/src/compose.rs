@@ -1,7 +1,10 @@
 //! The compose window: new mail, reply, reply all and forward, with attachments picked from
 //! the computer's file dialog or dropped onto the window. "Later verzenden" puts the message
 //! aside with a moment to go out, like Outlook's "Bezorging uitstellen"; until then it is a
-//! draft on this computer, and the engine sends it when the app runs at that moment.
+//! draft on this computer, and the engine sends it when the app runs at that moment. Before a
+//! message goes, the window looks for what Outlook warns about too: a text that speaks of an
+//! attachment while none is on, and an empty subject; it then asks once, and sends on "Toch
+//! verzenden".
 
 use std::path::{Path, PathBuf};
 
@@ -44,6 +47,50 @@ pub struct Compose {
     pub send_at: Option<i64>,
     /// Outlook's "Hoge urgentie" or "Lage urgentie"; normal unless chosen.
     pub importance: Importance,
+    /// What Send found worth a second look, with the moment chosen if "Later verzenden" was
+    /// pressed; the window shows it and waits for "Toch verzenden" or a change to the message.
+    pub check: Option<Check>,
+}
+
+/// Outlook's reminders before a message goes: "Je schrijft over een bijlage…" and "Het bericht
+/// heeft geen onderwerp."
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Check {
+    pub warnings: Vec<&'static str>,
+    /// The "Later verzenden" moment the check held back, or None for a plain send.
+    pub later: Option<i64>,
+}
+
+pub const NO_ATTACHMENT: &str = "Je schrijft over een bijlage, maar er zit er geen bij.";
+pub const NO_SUBJECT: &str = "Het bericht heeft geen onderwerp.";
+pub const SEND_ANYWAY: &str = "Toch verzenden";
+pub const LOOK_AGAIN: &str = "Nog even nakijken";
+
+/// Words that say an attachment is meant to be on, in Dutch and English.
+const ATTACHMENT_WORDS: &[&str] = &[
+    "bijlage",
+    "bijlagen",
+    "bijgevoegd",
+    "bijgevoegde",
+    "bijgesloten",
+    "meegestuurd",
+    "meegestuurde",
+    "meegezonden",
+    "aangehecht",
+    "attached",
+    "attachment",
+    "attachments",
+    "enclosed",
+];
+
+/// Whether the person's own text speaks of an attachment. Quoted lines, the signature and a
+/// forwarded message underneath are left out: a reply to "zie bijlage" is not a promise of one.
+pub fn mentions_attachment(text: &str) -> bool {
+    text.lines()
+        .take_while(|l| *l != "-- " && !l.starts_with("----------"))
+        .filter(|l| !l.starts_with('>'))
+        .flat_map(|l| l.split(|c: char| !c.is_alphanumeric()))
+        .any(|w| ATTACHMENT_WORDS.contains(&w.to_lowercase().as_str()))
 }
 
 /// The moments "Later verzenden" offers, from `now`: in an hour, this (or tomorrow) evening at
@@ -106,6 +153,7 @@ impl Compose {
             stored: None,
             send_at: None,
             importance: Importance::Normal,
+            check: None,
             initial: String::new(),
             draft_id: None,
             error: None,
@@ -207,6 +255,18 @@ impl Compose {
 
     pub fn draft(&self) -> Result<Draft, String> {
         self.as_stored().to_draft()
+    }
+
+    /// What is worth a second look before the message goes, in the order the strip shows it.
+    pub fn warnings(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if self.attachments.is_empty() && (mentions_attachment(&self.body) || mentions_attachment(&self.subject)) {
+            out.push(NO_ATTACHMENT);
+        }
+        if self.subject.trim().is_empty() {
+            out.push(NO_SUBJECT);
+        }
+        out
     }
 
     /// Reads a file from disk and adds it, or says why it cannot go along. The size is checked
@@ -348,6 +408,16 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut put_aside = false;
     let mut pick = false;
     let mut remove = None;
+    let mut anyway = false;
+    // The message may have changed since the check: the strip follows it and goes when nothing
+    // is left to say.
+    if c.check.is_some() {
+        let current = c.warnings();
+        match c.check.as_mut() {
+            Some(check) if !current.is_empty() => check.warnings = current,
+            _ => c.check = None,
+        }
+    }
     egui::Window::new(if c.stored.is_some() { "Concept" } else { "Nieuw bericht" })
         .open(&mut open)
         .default_size(vec2(680.0, 520.0))
@@ -405,6 +475,27 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                         ui.label(RichText::new("Laat los om toe te voegen").color(t.accent_text));
                     }
                 });
+                if let Some(check) = &c.check {
+                    let mut look_again = false;
+                    egui::Frame::new().fill(t.flag.gamma_multiply(0.15)).corner_radius(4).inner_margin(8).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        for w in &check.warnings {
+                            ui.label(RichText::new(format!("⚠ {w}")).color(t.text));
+                        }
+                        ui.horizontal(|ui| {
+                            if ui.button(SEND_ANYWAY).clicked() {
+                                anyway = true;
+                            }
+                            if ui.button(LOOK_AGAIN).clicked() {
+                                look_again = true;
+                            }
+                        });
+                    });
+                    ui.add_space(6.0);
+                    if look_again {
+                        c.check = None;
+                    }
+                }
                 if let Some(ts) = c.send_at {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(RichText::new(format!("⏰ Wordt verzonden op {}.", when_text(ts))).color(t.accent_text));
@@ -472,6 +563,21 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         if let Some(paths) = rfd::FileDialog::new().set_title("Bijlagen kiezen").pick_files() {
             c.error = None;
             c.add_files(paths);
+        }
+    }
+    if anyway && let Some(check) = c.check.take() {
+        match check.later {
+            Some(ts) => schedule = Some(ts),
+            None => send = true,
+        }
+    } else if send || schedule.is_some() {
+        // Outlook's reminders: a message that speaks of an attachment without one, or without a
+        // subject, waits for "Toch verzenden". The recipient check comes first, as it always did.
+        let warnings = c.warnings();
+        if !warnings.is_empty() && c.draft().is_ok() {
+            c.check = Some(Check { warnings, later: schedule });
+            send = false;
+            schedule = None;
         }
     }
     if let Some(ts) = schedule {
@@ -668,6 +774,94 @@ mod tests {
         assert_eq!(h.state().compose.as_ref().and_then(|c| c.send_at), None);
         h.state_mut().put_aside();
         assert_eq!(h.state().engine.session.draft(&id).and_then(|d| d.send_at), None);
+    }
+
+    #[test]
+    fn a_text_about_an_attachment_is_found_outside_quotes_and_signature() {
+        assert!(mentions_attachment("Zie de bijlage voor de offerte."));
+        assert!(mentions_attachment("Hierbij BIJGEVOEGD het verslag"));
+        assert!(mentions_attachment("Please find the report attached."));
+        assert!(!mentions_attachment("Tot morgen!\n\n> Zie bijlage"));
+        assert!(!mentions_attachment("Tot morgen!\n\n-- \nAlain, bijlagen op aanvraag"));
+        assert!(!mentions_attachment("Kijk even.\n\n---------- Doorgestuurd bericht ----------\nVan: x\n\nzie bijlage"));
+        assert!(!mentions_attachment("De bijlagenkamer is open"), "whole words only");
+    }
+
+    #[test]
+    fn send_asks_first_about_a_missing_attachment_or_subject_and_sends_on_toch_verzenden() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        app.open_compose(Kind::New);
+        if let Some(c) = app.compose.as_mut() {
+            c.to = "sanne@example.org".into();
+            c.body = "Hoi Sanne, in de bijlage de planning.".into();
+        }
+        let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        h.run();
+        h.get_by_label("Verzenden").click();
+        h.run();
+        let c = h.state().compose.as_ref().expect("the window stays");
+        assert_eq!(c.draft_id, None, "not sent yet");
+        assert_eq!(c.check.as_ref().map(|k| k.warnings.clone()), Some(vec![NO_ATTACHMENT, NO_SUBJECT]));
+        h.get_by_label(&format!("⚠ {NO_ATTACHMENT}"));
+        h.get_by_label(&format!("⚠ {NO_SUBJECT}"));
+
+        // A subject typed in takes that warning away; an attachment would take the other.
+        if let Some(c) = h.state_mut().compose.as_mut() {
+            c.subject = "Planning".into();
+        }
+        h.run();
+        assert_eq!(h.state().compose.as_ref().and_then(|c| c.check.as_ref()).map(|k| k.warnings.clone()), Some(vec![NO_ATTACHMENT]));
+        h.get_by_label(LOOK_AGAIN).click();
+        h.run();
+        assert_eq!(h.state().compose.as_ref().and_then(|c| c.check.clone()), None);
+        if let Some(c) = h.state_mut().compose.as_mut() {
+            c.attachments.push(DraftAttachment::new("planning.pdf", vec![0; 10]));
+        }
+        h.run();
+        h.get_by_label("Verzenden").click();
+        h.run();
+        // The sample account cannot send, so the attempt shows as its error; the point is that no
+        // question came in between.
+        let c = h.state().compose.as_ref().expect("the window stays");
+        assert!(c.check.is_none() && c.error.as_deref().is_some_and(|e| e.contains("echt account")), "sent without a question: {:?}", c.error);
+    }
+
+    #[test]
+    fn toch_verzenden_sends_and_later_verzenden_is_checked_too() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        app.open_compose(Kind::New);
+        if let Some(c) = app.compose.as_mut() {
+            c.to = "sanne@example.org".into();
+            c.body = "Zonder onderwerp".into();
+        }
+        let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        h.run();
+        h.get_by_label("Later verzenden ▾").click();
+        h.run();
+        h.get_by_label("Over een uur").click();
+        h.run();
+        let c = h.state().compose.as_ref().expect("held back");
+        assert!(c.check.as_ref().is_some_and(|k| k.later.is_some() && k.warnings == [NO_SUBJECT]));
+        assert!(h.state().engine.session.drafts.is_empty());
+        h.get_by_label(SEND_ANYWAY).click();
+        h.run();
+        assert!(h.state().compose.is_none(), "put aside with the moment");
+        assert!(h.state().engine.session.drafts.first().and_then(|d| d.send_at).is_some());
+
+        // Without a recipient the old message about the recipient comes first and no check shows.
+        h.state_mut().open_compose(Kind::New);
+        if let Some(c) = h.state_mut().compose.as_mut() {
+            c.body = "zie bijlage".into();
+        }
+        h.run();
+        h.get_by_label("Verzenden").click();
+        h.run();
+        let c = h.state().compose.as_ref().expect("the window stays");
+        assert!(c.check.is_none() && c.error.as_deref().is_some_and(|e| e.contains("ontvanger")), "{:?}", c.error);
     }
 
     #[test]
