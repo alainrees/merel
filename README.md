@@ -19,7 +19,8 @@ and Linux.
 The Outlook-style window (ribbon, module rail, folder pane, message list, reading pane) over
 built-in sample mail, and reading mail from an IMAP account: add it under File › Accounts,
 browse folders, open messages (plain text, or HTML drawn with its headings, lists, tables, links
-and embedded pictures, while pictures on the internet stay blocked), mark read or unread, flag,
+and embedded pictures, while pictures on the internet stay blocked until you click "Afbeeldingen
+laden" for that one message), mark read or unread, flag,
 delete, archive and move to junk; changes go back to the server. A search box above the
 message list narrows it by subject, sender, recipient or preview text, in the current folder or
 across every folder of every account (it searches what Mailcraft has fetched so far). Sending over SMTP: new mail,

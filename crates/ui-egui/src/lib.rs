@@ -11,6 +11,7 @@ mod compose;
 pub mod contacts;
 mod dates;
 mod html;
+pub mod remote;
 pub mod tasks;
 mod theme;
 
@@ -92,6 +93,8 @@ pub struct MailApp {
     notice: Option<String>,
     /// The message whose body is on screen; when it changes, its pictures leave the cache.
     shown_message: Option<String>,
+    /// Pictures on the internet, fetched for the open message only when asked.
+    pub remote: remote::RemoteImages,
 }
 
 impl MailApp {
@@ -107,6 +110,7 @@ impl MailApp {
             tasks: tasks::State::default(),
             notice: None,
             shown_message: None,
+            remote: remote::RemoteImages::default(),
         }
     }
 
@@ -513,21 +517,37 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if app.shown_message.as_deref() != Some(message_id.as_str()) {
         // The pictures of the previous message are not needed any more.
         ui.ctx().forget_all_images();
+        app.remote.reset();
         app.shown_message = Some(message_id.clone());
     }
     let rich = body.as_ref().and_then(|b| b.rich.as_ref());
     let blocked = rich.map(|d| d.remote_images).unwrap_or(0);
-    // Privacy: nothing in a message runs or loads; pictures on the internet stay blocked.
+    let allowed = app.remote.allowed(&message_id);
+    // Privacy: nothing in a message runs or loads; pictures on the internet stay blocked until
+    // the person asks for them, for this one message.
     let notice = match (rich, body.as_ref().is_some_and(|b| b.from_html)) {
+        (Some(_), _) if blocked > 0 && allowed => Some("🛡 De afbeeldingen van internet in dit bericht worden geladen omdat je daarom vroeg."),
         (Some(_), _) if blocked > 0 => Some("🛡 Afbeeldingen van internet zijn geblokkeerd om je privacy te beschermen."),
         (Some(_), _) => None,
         (None, true) => Some("🛡 Dit bericht is als tekst weergegeven. Externe afbeeldingen zijn geblokkeerd om je privacy te beschermen."),
         (None, false) => None,
     };
     if let Some(notice) = notice {
+        let mut load = false;
         egui::Frame::NONE.fill(t.checked).corner_radius(CornerRadius::same(4)).inner_margin(Margin::symmetric(10, 6)).show(ui, |ui| {
-            ui.label(RichText::new(notice).size(12.0).color(t.text));
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(notice).size(12.0).color(t.text));
+                if blocked > 0 && !allowed {
+                    load = ui
+                        .small_button("Afbeeldingen laden")
+                        .on_hover_text("Haalt de afbeeldingen van dit ene bericht op van internet. De afzender kan daaraan zien dat je het bericht hebt geopend.")
+                        .clicked();
+                }
+            });
         });
+        if load && let Some(doc) = rich {
+            app.remote.allow(ui.ctx(), &message_id, doc);
+        }
         ui.add_space(8.0);
     }
     if let Some(b) = body.as_ref().filter(|b| !b.attachments.is_empty()) {
@@ -549,7 +569,9 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if let Some(b) = body.as_ref()
         && let Some(doc) = b.rich.as_ref()
     {
-        let clicked = egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| html::show(ui, t, doc, &b.images, &message_id)).inner;
+        let remote = app.remote.snapshot(&message_id);
+        let clicked =
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| html::show(ui, t, doc, &b.images, &message_id, remote.as_ref())).inner;
         if let Some(html::Clicked::Mailto(address)) = clicked {
             let mut c = Compose::new(ComposeKind::New, None);
             c.to = address;
