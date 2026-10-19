@@ -48,6 +48,11 @@ pub fn follow_ups_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("follow_ups.json")
 }
 
+/// The snoozed-mail file that goes with an accounts file.
+pub fn snoozes_path(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("snoozed.json")
+}
+
 /// The quick steps file that goes with an accounts file.
 pub fn quick_steps_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("quick_steps.json")

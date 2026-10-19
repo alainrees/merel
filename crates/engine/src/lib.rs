@@ -26,6 +26,7 @@ pub mod reminders;
 pub mod rules;
 mod sample;
 pub mod signin;
+pub mod snooze;
 pub mod sync;
 pub mod tasks;
 pub mod templates;
@@ -428,6 +429,9 @@ pub struct Session {
     follow_ups_dirty: bool,
     /// Follow-up reminders put off until a moment, by the follow-up's key; in memory only.
     pub snoozed_follow_ups: HashMap<String, i64>,
+    /// Messages put off with "Sluimeren", kept in `snoozed.json`; see [`snooze`].
+    pub snoozes: Vec<mailcraft_model::Snooze>,
+    snoozes_dirty: bool,
     /// The categories (coloured labels) the person knows, kept in `categories.json`.
     pub categories: Vec<Category>,
     categories_dirty: bool,
@@ -575,6 +579,8 @@ impl Session {
             fresh.junk = std::mem::take(&mut self.junk);
             fresh.categories = std::mem::take(&mut self.categories);
             fresh.follow_ups = std::mem::take(&mut self.follow_ups);
+            fresh.snoozes = std::mem::take(&mut self.snoozes);
+            fresh.snoozes_dirty = self.snoozes_dirty;
             fresh.junk_dirty = self.junk_dirty;
             fresh.categories_dirty = self.categories_dirty;
             fresh.follow_ups_dirty = self.follow_ups_dirty;
@@ -620,6 +626,7 @@ impl Session {
     /// what the offline cache holds, not the whole server.
     pub fn visible_messages(&self) -> Vec<&MessageHeader> {
         let needle = self.search.trim().to_lowercase();
+        let now = snooze::now();
         let hits = self.current_hits().map(|h| &h.ids);
         let mut list: Vec<&MessageHeader> = self
             .messages
@@ -633,6 +640,9 @@ impl Session {
                 }
             })
             .filter(|m| self.filter.keeps(m))
+            // Snoozed mail is out of sight until its moment, and the only thing the "Gesluimerd"
+            // filter shows.
+            .filter(|m| (self.filter == view::Filter::Snoozed) == self.snoozed_until(m, now).is_some())
             .filter(|m| self.category_filter.as_deref().is_none_or(|c| m.categories.iter().any(|x| x.eq_ignore_ascii_case(c))))
             .collect();
         list.sort_by(|a, b| self.sort.order(a, b));
@@ -1071,6 +1081,8 @@ impl Engine {
         let follow_ups =
             engine.config_path.as_deref().map(|p| config::load_json::<followup::FollowUpFile>(&config::follow_ups_path(p))).unwrap_or_default();
         engine.session.set_follow_ups(follow_ups.follow_ups);
+        let snoozes = engine.config_path.as_deref().map(|p| config::load_json::<snooze::SnoozeFile>(&config::snoozes_path(p))).unwrap_or_default();
+        engine.session.set_snoozes(snoozes.snoozes);
         let categories =
             engine.config_path.as_deref().map(|p| config::load_json::<categories::CategoriesFile>(&config::categories_path(p))).unwrap_or_default();
         engine.session.set_categories(categories.categories);
@@ -1096,6 +1108,7 @@ impl Engine {
             self.session.take_junk_dirty();
             self.session.take_ignored_dirty();
             self.session.take_follow_ups_dirty();
+            self.session.take_snoozes_dirty();
             self.session.take_categories_dirty();
             self.session.take_quick_steps_dirty();
             self.session.take_groups_dirty();
@@ -1122,6 +1135,9 @@ impl Engine {
         }
         if self.session.take_follow_ups_dirty() {
             config::save_json(&config::follow_ups_path(&path), &self.session.follow_ups_data()).map_err(|e| CommandError::Store(e.to_string()))?;
+        }
+        if self.session.take_snoozes_dirty() {
+            config::save_json(&config::snoozes_path(&path), &self.session.snoozes_data()).map_err(|e| CommandError::Store(e.to_string()))?;
         }
         if self.session.take_categories_dirty() {
             config::save_json(&config::categories_path(&path), &self.session.categories_data()).map_err(|e| CommandError::Store(e.to_string()))?;

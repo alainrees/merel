@@ -63,6 +63,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "message.follow_up", label: "Follow up", run: crate::followup::follow_up },
     CommandSpec { id: "followup.dismiss", label: "Close follow-up reminder", run: crate::followup::dismiss },
     CommandSpec { id: "followup.snooze", label: "Snooze follow-up reminder", run: crate::followup::snooze },
+    CommandSpec { id: "message.snooze", label: "Snooze message", run: crate::snooze::snooze },
+    CommandSpec { id: "message.unsnooze", label: "Bring snoozed message back", run: crate::snooze::unsnooze },
+    CommandSpec { id: "message.wake_snoozed", label: "Bring back snoozed messages that are due", run: crate::snooze::wake },
     CommandSpec { id: "message.move", label: "Move to folder", run: message_move },
     CommandSpec { id: "message.delete", label: "Delete", run: message_delete },
     CommandSpec { id: "message.archive", label: "Archive", run: |s, _| move_selected(s, FolderKind::Archive, "Archive") },
@@ -232,7 +235,7 @@ fn set_flag(s: &mut Session, message_id: &str, flag: Flag, on: bool) {
     }
 }
 
-fn set_seen_one(s: &mut Session, message_id: &str, seen: bool) -> Result<(), CommandError> {
+pub(crate) fn set_seen_one(s: &mut Session, message_id: &str, seen: bool) -> Result<(), CommandError> {
     let m = header_mut(s, message_id)?;
     if m.flags.seen == seen {
         return Ok(());

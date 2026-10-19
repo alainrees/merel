@@ -289,6 +289,7 @@ impl MailApp {
         // Decoders for pictures embedded in mail; a no-op after the first frame.
         egui_extras::install_image_loaders(ui.ctx());
         self.engine.poll();
+        self.wake_snoozed();
         let arrivals = self.engine.session.take_arrivals();
         if arrivals > 0 {
             self.notice =
@@ -1086,6 +1087,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let grouped =
                     app.view.groups && matches!(app.engine.session.sort, mailcraft_engine::view::Sort::Newest | mailcraft_engine::view::Sort::Oldest);
                 let today = chrono::Local::now().date_naive();
+                let now_ts = chrono::Local::now().timestamp();
                 let mut last_group: Option<&str> = None;
                 for row in rows {
                     let m = row.m;
@@ -1111,7 +1113,8 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     let known_sender = app.engine.session.contact_with_email(m.from.email()).is_some();
                     let in_junk = app.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk);
                     let ignored = app.engine.session.message_ignored(&m.id);
-                    if let Some(p) = message_menu::menu(&r, m, known_sender, in_junk, ignored) {
+                    let snoozed = app.engine.session.snoozed_until(m, now_ts).is_some();
+                    if let Some(p) = message_menu::menu(&r, m, known_sender, in_junk, ignored, snoozed) {
                         menu_pick = Some((m.clone(), p));
                     }
                     // The fold control is its own widget, drawn over the row's left edge.
@@ -1252,6 +1255,19 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 impl MailApp {
     /// Shows a message in the mail module: its folder opens and it is selected, from wherever
     /// the person was (the flagged mail in the tasks module, for one).
+    /// Brings back the snoozed messages whose moment has come, unread, and says so once.
+    fn wake_snoozed(&mut self) {
+        let due = self.engine.session.snoozes_due(chrono::Local::now().timestamp());
+        if due.is_empty() {
+            return;
+        }
+        self.run("message.wake_snoozed", Value::Null);
+        self.notice = Some(match due.as_slice() {
+            [m] => format!("Gesluimerd bericht is terug: {}", m.subject),
+            list => format!("{} gesluimerde berichten zijn terug.", list.len()),
+        });
+    }
+
     pub fn open_message(&mut self, id: &str) {
         let Some(folder) = self.engine.session.message(id).map(|m| m.folder_id.clone()) else { return };
         self.module = Module::Mail;
@@ -1345,6 +1361,22 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.label(RichText::new(&m.subject).size(20.0).strong().color(t.text));
     ui.add_space(10.0);
     importance::strip(ui, t, m.importance);
+    if let Some(until) = app.engine.session.snoozed_until(&m, chrono::Local::now().timestamp()) {
+        // Outlook's "Sluimeren": the moment the message comes back, and the way back now.
+        let mut back = false;
+        egui::Frame::new().fill(t.checked).corner_radius(4).inner_margin(8).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(format!("⏰ Gesluimerd tot {}; dan komt het bericht ongelezen terug.", compose::when_text(until))).color(t.text),
+                );
+                back = ui.small_button(message_menu::UNSNOOZE).on_hover_text("Zet het bericht nu terug in de lijst.").clicked();
+            });
+        });
+        ui.add_space(8.0);
+        if back {
+            app.run("message.unsnooze", Value::Null);
+        }
+    }
     if m.flags.flagged {
         // The follow-up strip, as Outlook puts it over a flagged message: the due day, red once
         // it has passed, and the way to mark it done.
