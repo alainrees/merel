@@ -24,6 +24,7 @@ pub mod meeting;
 pub mod message_menu;
 pub mod print;
 pub mod quicksteps;
+pub mod receipt;
 pub mod reminders;
 pub mod remote;
 pub mod rules;
@@ -135,6 +136,8 @@ pub struct MailApp {
     pub folder_edit: Option<folders::FolderEdit>,
     /// The "Afmelden" question, while it is open.
     pub unsubscribe: Option<unsubscribe::Confirm>,
+    /// The messages a read receipt went out for since the app started; the strip then says so.
+    pub receipts_sent: std::collections::HashSet<String>,
     pub cleanup: Option<cleanup::Confirm>,
     /// The picture attachment open in its preview window.
     pub preview: Option<attachments::Preview>,
@@ -237,6 +240,7 @@ impl MailApp {
             tasks: tasks::State::default(),
             notice: None,
             unsubscribe: None,
+            receipts_sent: Default::default(),
             cleanup: None,
             preview: None,
             message_window: false,
@@ -1539,6 +1543,14 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             app.ask_unsubscribe(&message_id, m.from.display(), &targets);
         }
     }
+    // The sender's request for a read receipt, as Outlook asks it. Never answered by itself, and
+    // not in the Junk folder, where the address is not to be trusted.
+    if !in_junk
+        && let Some(to) = body.as_ref().and_then(|b| b.receipt_to.clone())
+        && receipt::strip(ui, t, &to, app.receipts_sent.contains(&message_id))
+    {
+        app.send_read_receipt(&message_id);
+    }
     let rich = body.as_ref().and_then(|b| b.rich.as_ref());
     let blocked = rich.map(|d| d.remote_images).unwrap_or(0);
     let allowed = app.remote.allowed(&message_id);
@@ -2341,6 +2353,29 @@ mod tests {
         h.run();
         assert!(h.state().unsubscribe.is_none());
         assert_eq!(h.state().engine.session.outbox.len(), 1, "the request was handed to the outbox");
+        assert!(h.state().notice.is_some(), "the sample account cannot send, and the person hears so");
+    }
+
+    #[test]
+    fn a_request_for_a_read_receipt_shows_a_strip_and_sends_only_on_a_click() {
+        let mut h = harness();
+        {
+            let s = &mut h.state_mut().engine.session;
+            let body = mailcraft_engine::Body {
+                text: "Gelezen?".into(),
+                receipt_to: Some(mailcraft_model::Address::new(Some("Sanne"), "sanne@example.org").unwrap()),
+                ..Default::default()
+            };
+            s.bodies.insert("m3".into(), body);
+            s.selected_message = Some("m3".into());
+        }
+        h.run();
+        h.get_by_label(receipt::STRIP);
+        assert!(h.state().engine.session.outbox.is_empty(), "nothing goes out by itself");
+        h.get_by_label(receipt::SEND).click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert_eq!(s.outbox.len(), 1, "the receipt was handed to the outbox");
         assert!(h.state().notice.is_some(), "the sample account cannot send, and the person hears so");
     }
 
