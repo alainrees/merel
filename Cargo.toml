@@ -74,7 +74,7 @@ egui = "0.36"
 eframe = { version = "0.36", default-features = false }
 egui_kittest = "0.36"
 # Image decoding for pictures embedded in mail (no SVG: no text rendering engine, no scripts).
-egui_extras = { version = "0.36", default-features = false, features = ["image", "gif", "webp"] }
+egui_extras = { version = "0.36", default-features = false, features = ["image", "gif", "webp", "svg"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 # The computer's own file dialog, to pick attachments (native on macOS and Windows, the desktop portal on Linux).
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "pollster"] }
