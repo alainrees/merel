@@ -65,6 +65,8 @@ pub struct ViewPrefs {
     pub sort: Sort,
     /// The folders pinned under "Favorieten" at the top of the folder pane, by id, in order.
     pub favorites: Vec<String>,
+    /// The saved searches listed under "Zoekmappen" in the folder pane.
+    pub search_folders: Vec<crate::search_folders::SearchFolder>,
 }
 
 impl Default for ViewPrefs {
@@ -77,6 +79,7 @@ impl Default for ViewPrefs {
             groups: true,
             sort: Sort::default(),
             favorites: Vec::new(),
+            search_folders: Vec::new(),
         }
     }
 }

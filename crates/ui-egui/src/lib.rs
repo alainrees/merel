@@ -23,6 +23,7 @@ pub mod quicksteps;
 pub mod reminders;
 pub mod remote;
 pub mod rules;
+pub mod search_folders;
 pub mod tasks;
 mod theme;
 pub mod unsubscribe;
@@ -132,6 +133,8 @@ pub struct MailApp {
     /// The selected message is open in its own window (Enter, a double-click, or always when the
     /// reading pane is off).
     pub message_window: bool,
+    /// The form for saving the open search as a search folder, while open.
+    pub search_folder_form: Option<search_folders::Form>,
     /// The "Alle categorieën" window, while it is open.
     pub categories: Option<categories::Manager>,
     /// The open help window ("Help" tab), if any.
@@ -229,6 +232,7 @@ impl MailApp {
             cleanup: None,
             preview: None,
             message_window: false,
+            search_folder_form: None,
             shown_message: None,
             remote: remote::RemoteImages::default(),
             drafts_for: None,
@@ -313,6 +317,7 @@ impl MailApp {
         cleanup::window(self, &ctx, &t);
         attachments::preview_window(self, &ctx, &t);
         message_window(self, &ctx, &t);
+        search_folders::window(self, &ctx, &t);
         categories::window(self, &ctx, &t);
         help::window(self, &ctx, &t);
         drag_preview(self, &ctx, &t);
@@ -810,6 +815,8 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 }
             }
             ui.add_space(12.0);
+            // Outlook's "Zoekmappen": the saved searches, under the accounts.
+            search_folders::section(app, ui, t);
             if ui.add(egui::Button::new(RichText::new("＋ Account toevoegen").color(t.accent_text)).frame(false)).clicked() {
                 open_accounts = true;
             }
@@ -969,6 +976,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let searching = app.engine.session.is_searching();
             let count = if searching { Some(app.engine.session.visible_messages().len()) } else { None };
             let mut server_search = false;
+            let mut save_search = false;
             egui::Frame::NONE.inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
                 let title = match count {
                     Some(n) => format!("Zoekresultaten ({n})"),
@@ -979,10 +987,13 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 ui.horizontal(|ui| {
                     let session = &mut app.engine.session;
                     let hint = if session.search_all { "Zoeken in alle mappen" } else { "Zoeken in deze map" };
-                    let width = (ui.available_width() - 150.0).max(80.0);
+                    let width = (ui.available_width() - if searching { 240.0 } else { 150.0 }).max(80.0);
                     ui.add(egui::TextEdit::singleline(&mut session.search).id(egui::Id::new(SEARCH_BOX)).hint_text(hint).desired_width(width));
                     if searching && ui.small_button("✕").on_hover_text("Zoekopdracht wissen").clicked() {
                         session.search.clear();
+                    }
+                    if searching && ui.small_button("Zoekmap").on_hover_text("Deze zoekopdracht bewaren als zoekmap in het mappenvenster").clicked() {
+                        save_search = true;
                     }
                     ui.checkbox(&mut session.search_all, "Alle mappen")
                         .on_hover_text("Zoek in alle mappen van alle accounts, in de berichten die Mailcraft al heeft opgehaald.");
@@ -1016,6 +1027,9 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     }
                 }
             });
+            if save_search {
+                app.ask_search_folder();
+            }
             if server_search {
                 let _ = app.engine.run("search.server", &serde_json::Value::Null);
             }
@@ -2234,6 +2248,46 @@ mod tests {
         h.get_by_label("Planning voor donderdag").click();
         h.run();
         assert_eq!(h.state().engine.session.selection(), ["m1"]);
+    }
+
+    #[test]
+    fn a_search_is_saved_as_a_search_folder_and_run_again_from_the_folder_pane() {
+        let mut h = harness();
+        h.run();
+        assert!(h.query_by_label(search_folders::HEADING).is_none());
+        {
+            let s = &mut h.state_mut().engine.session;
+            s.search = "offerte".into();
+            s.search_all = true;
+        }
+        h.run();
+        h.get_by_label("Zoekmap").click();
+        h.run();
+        assert_eq!(h.state().search_folder_form.as_ref().map(|f| f.name.as_str()), Some("offerte"), "the words are the first name");
+        h.state_mut().search_folder_form.as_mut().expect("form").name = "Offertes".into();
+        h.run();
+        h.get_by_label("Opslaan").click();
+        h.run();
+        assert!(h.state().search_folder_form.is_none());
+        let saved = h.state().view.search_folders.clone();
+        assert_eq!(saved.len(), 1);
+        assert_eq!((saved[0].name.as_str(), saved[0].query.as_str(), saved[0].all_folders), ("Offertes", "offerte", true));
+        h.get_by_label(search_folders::HEADING);
+
+        h.state_mut().engine.session.search.clear();
+        h.state_mut().engine.session.search_all = false;
+        h.run();
+        h.get_by_label("Offertes").click();
+        h.run();
+        let s = &h.state().engine.session;
+        assert!(s.search == "offerte" && s.search_all, "the saved search runs again");
+        assert!(s.visible_messages().iter().all(|m| m.subject.to_lowercase().contains("offerte")));
+
+        h.get_by_label("Offertes").click_secondary();
+        h.run();
+        h.get_by_label("Zoekmap verwijderen").click();
+        h.run();
+        assert!(h.state().view.search_folders.is_empty() && h.query_by_label(search_folders::HEADING).is_none());
     }
 
     #[test]
