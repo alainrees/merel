@@ -376,6 +376,7 @@ mod tests {
             notes: String::new(),
             recurrence: None,
             reminder: None,
+            private: false,
         };
         let mon = d(2026, 10, 19);
         let tue = d(2026, 10, 20);

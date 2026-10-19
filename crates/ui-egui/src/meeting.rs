@@ -147,6 +147,7 @@ mod tests {
             notes: "Schetsen meenemen.".into(),
             recurrence: None,
             reminder: Some(15),
+            private: false,
         }
     }
 

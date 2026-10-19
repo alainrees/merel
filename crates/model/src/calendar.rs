@@ -59,6 +59,11 @@ pub struct Appointment {
     /// every occurrence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reminder: Option<u32>,
+    /// Outlook's "Privé": the details stay hidden from anyone the calendar is shared with. Goes
+    /// to the server as iCalendar `CLASS:PRIVATE`, Exchange and Microsoft 365 sensitivity
+    /// `Private` and Google visibility `private`.
+    #[serde(default)]
+    pub private: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -373,6 +378,7 @@ mod tests {
             notes: "x\u{7}y".into(),
             recurrence: None,
             reminder: None,
+            private: false,
         }
     }
 

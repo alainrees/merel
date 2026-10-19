@@ -63,6 +63,7 @@ fn appointment_of(node: Node<'_, '_>) -> Option<Appointment> {
         notes: body_text(node),
         recurrence: None,
         reminder: (text(node, "ReminderIsSet") == Some("true")).then(|| text(node, "ReminderMinutesBeforeStart")?.trim().parse().ok()).flatten(),
+        private: matches!(text(node, "Sensitivity"), Some("Private" | "Confidential")),
     }
     .validated()
     .ok()
@@ -191,6 +192,7 @@ fn appointment_fields(a: &Appointment) -> Fields {
     let time = |ts| if a.all_day { local(ts) } else { utc(ts) };
     let mut f = Fields::new("CalendarItem");
     f.put("item:Subject", format!("<t:Subject>{}</t:Subject>", esc(&a.title)));
+    f.put("item:Sensitivity", format!("<t:Sensitivity>{}</t:Sensitivity>", if a.private { "Private" } else { "Normal" }));
     f.put("item:Body", format!("<t:Body BodyType=\"Text\">{}</t:Body>", esc(&a.notes)));
     f.put("item:ReminderIsSet", format!("<t:ReminderIsSet>{}</t:ReminderIsSet>", a.reminder.is_some()));
     if let Some(m) = a.reminder {
@@ -363,6 +365,7 @@ impl ItemStore for EwsClient {
         let ids = self.list_ids("calendar", &view)?;
         let props = field_uris(&[
             "item:Subject",
+            "item:Sensitivity",
             "item:Body",
             "item:ReminderIsSet",
             "item:ReminderMinutesBeforeStart",
@@ -609,12 +612,13 @@ mod tests {
             notes: String::new(),
             recurrence: None,
             reminder: Some(15),
+            private: false,
         };
         let xml = appointment_fields(&a).create();
         assert_eq!(
             xml,
             concat!(
-                "<t:CalendarItem><t:Subject>A &amp; B</t:Subject><t:Body BodyType=\"Text\"></t:Body>",
+                "<t:CalendarItem><t:Subject>A &amp; B</t:Subject><t:Sensitivity>Normal</t:Sensitivity><t:Body BodyType=\"Text\"></t:Body>",
                 "<t:ReminderIsSet>true</t:ReminderIsSet><t:ReminderMinutesBeforeStart>15</t:ReminderMinutesBeforeStart><t:Start>2026-10-14T17:46:40Z</t:Start>",
                 "<t:End>2026-10-14T18:46:40Z</t:End><t:IsAllDayEvent>false</t:IsAllDayEvent><t:Location>&lt;Studio&gt;</t:Location></t:CalendarItem>"
             )

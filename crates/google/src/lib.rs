@@ -200,6 +200,7 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         notes: str_of(e, "description").to_string(),
         recurrence: None,
         reminder: reminder_of(e),
+        private: matches!(str_of(e, "visibility"), "private" | "confidential"),
     }
     .validated()
     .ok()
@@ -235,7 +236,8 @@ fn event_json(a: &Appointment, zone: &str) -> Value {
         Some(m) => json!({ "useDefault": false, "overrides": [{ "method": "popup", "minutes": m }] }),
         None => json!({ "useDefault": true }),
     };
-    let mut event = json!({ "summary": a.title, "description": a.notes, "location": a.location, "start": time(a.start), "end": time(a.end), "reminders": reminders });
+    let visibility = if a.private { "private" } else { "default" };
+    let mut event = json!({ "summary": a.title, "description": a.notes, "location": a.location, "start": time(a.start), "end": time(a.end), "reminders": reminders, "visibility": visibility });
     if let Some(r) = &a.recurrence {
         event["recurrence"] = json!([format!("RRULE:{}", r.rrule(a.all_day))]);
     }
@@ -537,6 +539,13 @@ mod tests {
         let a = appointment_of(&timed).unwrap();
         assert_eq!((a.id.as_str(), a.title.as_str(), a.start, a.end, a.all_day), ("event:e1", "Overleg", 1_792_000_000, 1_792_003_600, false));
         assert_eq!(a.reminder, Some(20), "the pop-up counts, not the e-mail");
+        assert!(!a.private);
+        assert_eq!(event_json(&a, "Europe/Amsterdam")["visibility"], "default");
+        let mut hidden = timed.clone();
+        hidden["visibility"] = json!("private");
+        let h = appointment_of(&hidden).unwrap();
+        assert!(h.private, "Privé comes back from the visibility");
+        assert_eq!(event_json(&h, "Europe/Amsterdam")["visibility"], "private");
         assert_eq!(
             event_json(&a, "Europe/Amsterdam")["reminders"],
             json!({ "useDefault": false, "overrides": [{ "method": "popup", "minutes": 20 }] })
