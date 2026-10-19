@@ -178,6 +178,26 @@ pub enum SendState {
     Failed(String),
 }
 
+/// Whether every word of `needle` (lower-case) occurs in the message's subject, sender,
+/// recipients or preview.
+fn matches(m: &MessageHeader, needle: &str) -> bool {
+    let haystack = {
+        let mut h = String::with_capacity(256);
+        for part in [m.subject.as_str(), m.from.display(), m.from.email(), m.preview.as_str()] {
+            h.push_str(part);
+            h.push('\n');
+        }
+        for a in &m.to {
+            h.push_str(a.display());
+            h.push('\n');
+            h.push_str(a.email());
+            h.push('\n');
+        }
+        h.to_lowercase()
+    };
+    needle.split_whitespace().all(|w| haystack.contains(w))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AccountStatus {
     Offline,
@@ -197,6 +217,10 @@ pub struct Session {
     pub loading: HashSet<String>,
     pub selected_folder: Option<String>,
     pub selected_message: Option<String>,
+    /// What the person typed in the search box; empty shows the selected folder as it is.
+    pub search: String,
+    /// Whether a search covers every folder of every account, or the selected folder only.
+    pub search_all: bool,
     /// Drafts handed to `send`, by draft id.
     pub outbox: HashMap<u64, SendState>,
     /// A browser sign-in in progress (`Some(None)`), or how the last one ended.
@@ -340,12 +364,27 @@ impl Session {
         self.messages.iter().find(|m| m.id == id)
     }
 
-    /// Messages in the selected folder, newest first.
+    /// Messages in the selected folder, newest first; while a search is on, the messages that
+    /// match it, in the selected folder or (`search_all`) everywhere the session has mail.
+    /// A search looks at what has been fetched: the newest headers of each opened folder and
+    /// what the offline cache holds, not the whole server.
     pub fn visible_messages(&self) -> Vec<&MessageHeader> {
-        let Some(folder) = &self.selected_folder else { return Vec::new() };
-        let mut list: Vec<&MessageHeader> = self.messages.iter().filter(|m| &m.folder_id == folder).collect();
+        let needle = self.search.trim().to_lowercase();
+        let mut list: Vec<&MessageHeader> = self
+            .messages
+            .iter()
+            .filter(|m| {
+                let in_folder = self.selected_folder.as_deref() == Some(m.folder_id.as_str());
+                if needle.is_empty() { in_folder } else { (in_folder || self.search_all) && matches(m, &needle) }
+            })
+            .collect();
         list.sort_by_key(|m| std::cmp::Reverse(m.date));
         list
+    }
+
+    /// Whether the message list shows search results rather than a folder.
+    pub fn is_searching(&self) -> bool {
+        !self.search.trim().is_empty()
     }
 
     pub fn selected(&self) -> Option<&MessageHeader> {
@@ -802,6 +841,34 @@ mod tests {
             outgoing: None,
             dav: None,
         }
+    }
+
+    #[test]
+    fn a_search_filters_what_has_been_fetched() {
+        let mut s = Session::sample();
+        let all = s.visible_messages().len();
+        assert!(all > 1);
+        s.search = "  DONDERDAG ".into();
+        let found = s.visible_messages();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].subject, "Planning voor donderdag");
+        assert!(s.is_searching());
+        s.search = "donderdag planning".into();
+        assert_eq!(s.visible_messages().len(), 1, "every word must match, in any order");
+        s.search = "donderdag zzzz".into();
+        assert!(s.visible_messages().is_empty());
+        // Sender names count too.
+        let from = s.messages[0].from.display().to_string();
+        s.search = from.clone();
+        assert!(s.visible_messages().iter().all(|m| m.from.display() == from) && !s.visible_messages().is_empty());
+        // Across folders, every matching message of every account is listed.
+        s.search = "e".into();
+        let in_folder = s.visible_messages().len();
+        s.search_all = true;
+        let everywhere = s.visible_messages().len();
+        assert!(everywhere >= in_folder && everywhere == s.messages.iter().filter(|m| matches(m, "e")).count());
+        s.search.clear();
+        assert_eq!(s.visible_messages().len(), all, "an empty search shows the folder again");
     }
 
     #[test]

@@ -375,8 +375,26 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 .and_then(|id| app.engine.session.folder(id))
                 .map(|f| f.name.clone())
                 .unwrap_or_default();
+            let searching = app.engine.session.is_searching();
+            let count = if searching { Some(app.engine.session.visible_messages().len()) } else { None };
             egui::Frame::NONE.inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
-                ui.label(RichText::new(folder_name).size(18.0).strong().color(t.text));
+                let title = match count {
+                    Some(n) => format!("Zoekresultaten ({n})"),
+                    None => folder_name,
+                };
+                ui.label(RichText::new(title).size(18.0).strong().color(t.text));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let session = &mut app.engine.session;
+                    let hint = if session.search_all { "Zoeken in alle mappen" } else { "Zoeken in deze map" };
+                    let width = (ui.available_width() - 150.0).max(80.0);
+                    ui.add(egui::TextEdit::singleline(&mut session.search).hint_text(hint).desired_width(width));
+                    if searching && ui.small_button("✕").on_hover_text("Zoekopdracht wissen").clicked() {
+                        session.search.clear();
+                    }
+                    ui.checkbox(&mut session.search_all, "Alle mappen")
+                        .on_hover_text("Zoek in alle mappen van alle accounts, in de berichten die Mailcraft al heeft opgehaald.");
+                });
             });
             let mut pick = None;
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
@@ -384,9 +402,16 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let loading = app.engine.session.selected_folder.as_deref().is_some_and(|f| app.engine.session.loading.contains(f));
                 if list.is_empty() {
                     ui.add_space(24.0);
-                    let msg = if loading { "Berichten ophalen…" } else { "Deze map is leeg." };
+                    let msg = if searching {
+                        "Geen berichten gevonden. Mailcraft zoekt in de berichten die het al heeft opgehaald."
+                    } else if loading {
+                        "Berichten ophalen…"
+                    } else {
+                        "Deze map is leeg."
+                    };
                     ui.vertical_centered(|ui| ui.label(RichText::new(msg).color(t.text_dim)));
                 }
+                let show_folder = searching && app.engine.session.search_all;
                 for m in list {
                     let on = app.engine.session.selected_message.as_deref() == Some(m.id.as_str());
                     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 68.0), Sense::click());
@@ -436,10 +461,14 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         egui::FontId::proportional(13.0),
                         if m.flags.seen { t.text } else { t.accent_text },
                     );
+                    let preview = match (show_folder, app.engine.session.folder(&m.folder_id)) {
+                        (true, Some(f)) => format!("{} · {}", f.name, m.preview),
+                        _ => m.preview.clone(),
+                    };
                     p.text(
                         egui::pos2(x, rect.top() + 52.0),
                         egui::Align2::LEFT_CENTER,
-                        clip(&m.preview, 56),
+                        clip(&preview, 56),
                         egui::FontId::proportional(12.0),
                         t.text_dim,
                     );
@@ -607,6 +636,25 @@ mod tests {
         egui_kittest::Harness::builder()
             .with_size(vec2(1280.0, 800.0))
             .build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(Engine::sample()))
+    }
+
+    #[test]
+    fn the_search_box_narrows_the_list_and_can_be_cleared() {
+        let mut h = harness();
+        h.run();
+        let all = h.state().engine.session.visible_messages().len();
+        h.state_mut().engine.session.search = "donderdag".into();
+        h.run();
+        assert!(h.query_by_label("Zoekresultaten (1)").is_some());
+        assert!(h.query_by_label("Planning voor donderdag").is_some());
+        assert_eq!(h.state().engine.session.visible_messages().len(), 1);
+        h.get_by_label("✕").click();
+        h.run();
+        assert!(!h.state().engine.session.is_searching());
+        assert_eq!(h.state().engine.session.visible_messages().len(), all);
+        h.state_mut().engine.session.search = "niets-hiervan".into();
+        h.run();
+        assert!(h.query_by_label_contains("Geen berichten gevonden").is_some());
     }
 
     #[test]
