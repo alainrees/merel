@@ -15,12 +15,17 @@ const DATE_FORMAT: &str = "%d-%m-%Y";
 /// What the tasks module remembers between frames.
 pub struct State {
     pub filter: TaskFilter,
+    /// What the search box holds; empty shows every task the filter allows.
+    pub query: String,
     pub editor: Option<Editor>,
 }
 
+/// The search box's widget id, so Ctrl+E can put the cursor there.
+pub(crate) const SEARCH_BOX: &str = "tasks_search_box";
+
 impl Default for State {
     fn default() -> Self {
-        State { filter: TaskFilter::Open, editor: None }
+        State { filter: TaskFilter::Open, query: String::new(), editor: None }
     }
 }
 
@@ -129,6 +134,16 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .frame(egui::Frame::NONE.fill(t.panel).inner_margin(Margin::symmetric(10, 10)).stroke(Stroke::new(1.0, t.border)))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
+                let width = (ui.available_width() - 28.0).max(60.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut app.tasks.query).id(egui::Id::new(SEARCH_BOX)).hint_text("Zoeken in taken").desired_width(width),
+                );
+                if !app.tasks.query.is_empty() && ui.small_button("✕").on_hover_text("Zoekopdracht wissen").clicked() {
+                    app.tasks.query.clear();
+                }
+            });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
                 for (label, f) in [("Open", TaskFilter::Open), ("Voltooid", TaskFilter::Done), ("Alles", TaskFilter::All)] {
                     if ui.selectable_label(app.tasks.filter == f, label).clicked() {
                         app.tasks.filter = f;
@@ -137,12 +152,16 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             });
             ui.add_space(8.0);
             let selected = app.engine.session.selected_task.clone();
-            let list: Vec<Task> = app.engine.session.tasks_filtered(app.tasks.filter).into_iter().cloned().collect();
+            let list: Vec<Task> = app.engine.session.tasks_matching(app.tasks.filter, &app.tasks.query).into_iter().cloned().collect();
             if list.is_empty() {
-                ui.label(
-                    RichText::new(if app.tasks.filter == TaskFilter::Done { "Nog niets voltooid." } else { "Geen taken. Lekker rustig." })
-                        .color(t.text_dim),
-                );
+                let text = if !app.tasks.query.trim().is_empty() {
+                    "Geen taak gevonden."
+                } else if app.tasks.filter == TaskFilter::Done {
+                    "Nog niets voltooid."
+                } else {
+                    "Geen taken. Lekker rustig."
+                };
+                ui.label(RichText::new(text).color(t.text_dim));
             }
             let midnight = today().and_time(NaiveTime::MIN);
             let today_ts = to_timestamp(midnight).unwrap_or(0);

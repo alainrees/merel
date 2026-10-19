@@ -69,6 +69,15 @@ impl Session {
         list
     }
 
+    /// The occurrences in `[from, to)` of the appointments whose title, location or notes hold
+    /// every word of `query`, earliest first; see [`Self::appointments_between`].
+    pub fn appointments_matching(&self, query: &str, from: i64, to: i64) -> Vec<Appointment> {
+        let mut list: Vec<Appointment> =
+            self.appointments.iter().filter(|a| a.matches(query)).flat_map(|a| a.occurrences(from, to, &Local)).collect();
+        list.sort_by(|a, b| (a.start, a.end, &a.id).cmp(&(b.start, b.end, &b.id)));
+        list
+    }
+
     /// Whether a command changed the calendar since the last call.
     pub fn take_calendar_dirty(&mut self) -> bool {
         std::mem::take(&mut self.calendar_dirty)
@@ -204,6 +213,20 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_search_lists_the_matching_occurrences_in_the_period() {
+        let mut s = Session::default();
+        s.set_calendar_data(CalendarFile::default());
+        s.run("appointment.save", &json!({ "title": "Tandarts", "start": 3_600, "end": 7_200, "location": "Centrum" })).unwrap();
+        s.run("appointment.save", &json!({ "title": "Weekstart", "start": 10_000, "end": 11_800, "recurrence": { "frequency": "weekly" } })).unwrap();
+        let week = 7 * 86_400;
+        let titles = |list: Vec<Appointment>| list.into_iter().map(|a| (a.title, a.start)).collect::<Vec<_>>();
+        assert_eq!(titles(s.appointments_matching("centrum", 0, 3 * week)), [("Tandarts".to_string(), 3_600)], "the location counts");
+        assert_eq!(titles(s.appointments_matching("WEEK", 0, 3 * week)).len(), 3, "one hit per occurrence in the period");
+        assert_eq!(titles(s.appointments_matching("week start", 0, week)), [("Weekstart".to_string(), 10_000)], "every word must occur");
+        assert!(s.appointments_matching("lunch", 0, 3 * week).is_empty());
+    }
 
     #[test]
     fn appointments_are_saved_selected_and_deleted() {

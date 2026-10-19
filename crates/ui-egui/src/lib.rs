@@ -218,6 +218,8 @@ impl MailApp {
         drag_preview(self, &ctx, &t);
         if self.tab == Tab::Home && self.module == Module::Mail {
             shortcuts(self, &ctx);
+        } else if self.tab == Tab::Home {
+            module_shortcuts(self, &ctx);
         }
         if self.tab == Tab::File {
             backstage::show(self, ui, &t);
@@ -250,6 +252,27 @@ impl MailApp {
 
 /// The search box's widget id, so a shortcut can put the cursor there.
 const SEARCH_BOX: &str = "message_search_box";
+
+/// The two search keys in the calendar, contacts and tasks modules: Ctrl+E (Cmd+E on a Mac)
+/// puts the cursor in the module's search box, and Esc, once no text field has the keyboard,
+/// clears it.
+fn module_shortcuts(app: &mut MailApp, ctx: &egui::Context) {
+    use egui::{Key, Modifiers};
+    if app.compose.is_some() {
+        return;
+    }
+    let (box_id, query) = match app.module {
+        Module::Mail => return,
+        Module::Calendar => (calendar::SEARCH_BOX, &mut app.calendar.query),
+        Module::People => (contacts::SEARCH_BOX, &mut app.contacts.query),
+        Module::Tasks => (tasks::SEARCH_BOX, &mut app.tasks.query),
+    };
+    if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::E)) {
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new(box_id)));
+    } else if !ctx.egui_wants_keyboard_input() && !query.trim().is_empty() && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+        query.clear();
+    }
+}
 
 /// Keyboard shortcuts for the mail module, the way Outlook has them. They work while no text
 /// field has the keyboard and no message is being written, so typing never triggers one;
@@ -1381,6 +1404,52 @@ mod tests {
         h.get_by_label("Verwijderen").click();
         h.run();
         assert!(h.state().engine.session.appointments.iter().all(|a| a.title != "Tandarts"));
+    }
+
+    #[test]
+    fn the_calendar_and_tasks_search_boxes_narrow_what_is_shown() {
+        use egui::{Key, Modifiers};
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.run();
+        h.key_press_modifiers(Modifiers::COMMAND, Key::E);
+        h.run();
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new(calendar::SEARCH_BOX)), "Ctrl+E goes to the calendar's search box");
+        h.ctx.memory_mut(|m| m.surrender_focus(egui::Id::new(calendar::SEARCH_BOX)));
+        h.state_mut().calendar.query = "sanne".into();
+        h.run();
+        assert!(h.query_by_label("Lunch met Sanne").is_some(), "the results list names the match");
+        assert!(h.query_by_label_contains("Overleg ontwerp").is_none(), "the month view is gone while searching");
+        assert!(h.query_by_label("1 afspraak gevonden.").is_some());
+        h.get_by_label("Lunch met Sanne").click();
+        h.run();
+        assert_eq!(h.state().calendar.editor.as_ref().map(|e| e.title.as_str()), Some("Lunch met Sanne"), "a click opens the appointment");
+        h.state_mut().calendar.editor = None;
+        h.state_mut().calendar.query = "weekstart".into();
+        h.run();
+        assert!(h.query_all_by_label_contains("Weekstart").count() > 50, "a weekly series gives one row per occurrence in three years");
+        h.key_press(Key::Escape);
+        h.run();
+        assert!(h.state().calendar.query.is_empty(), "Esc clears the search");
+        assert!(h.query_by_label_contains("Overleg ontwerp").is_some(), "and the month view is back");
+
+        h.state_mut().module = Module::Tasks;
+        h.run();
+        h.key_press_modifiers(Modifiers::COMMAND, Key::E);
+        h.run();
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new(tasks::SEARCH_BOX)));
+        h.ctx.memory_mut(|m| m.surrender_focus(egui::Id::new(tasks::SEARCH_BOX)));
+        h.state_mut().tasks.query = "portfolio".into();
+        h.run();
+        assert!(h.query_by_label("Portfolio bijwerken").is_some());
+        assert!(h.query_by_label("Offerte drukwerk beantwoorden").is_none(), "the other open task is filtered out");
+        h.state_mut().tasks.query = "niets-hiervan".into();
+        h.run();
+        assert!(h.query_by_label("Geen taak gevonden.").is_some());
+        h.key_press(Key::Escape);
+        h.run();
+        assert!(h.state().tasks.query.is_empty());
+        assert!(h.query_by_label("Offerte drukwerk beantwoorden").is_some());
     }
 
     #[test]
