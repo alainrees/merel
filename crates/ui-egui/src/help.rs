@@ -30,9 +30,9 @@ pub fn shortcut_list() -> Vec<(String, &'static str)> {
         (key_hint("P"), "Afdrukken via de browser"),
         (key_hint("Q"), "Markeren als gelezen"),
         (key_hint("U"), "Markeren als ongelezen"),
-        (key_hint("E"), "Naar het zoekveld"),
+        (key_hint("E"), "Naar het zoekveld (ook in agenda, contacten en taken)"),
         (key_hint("Shift+1") + " … 9", "Snelle stap 1 tot 9 van het account"),
-        ("Esc".to_string(), "Zoekopdracht wissen"),
+        ("Esc".to_string(), "Zoekopdracht wissen (ook in agenda, contacten en taken)"),
         ("F5".to_string(), "Map vernieuwen"),
     ]
 }

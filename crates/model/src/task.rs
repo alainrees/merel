@@ -69,6 +69,12 @@ impl Task {
     pub fn overdue(&self, today: i64) -> bool {
         !self.done && self.due.is_some_and(|d| d < today)
     }
+
+    /// Whether every word of `query` (case-insensitive) occurs in the title or the notes.
+    pub fn matches(&self, query: &str) -> bool {
+        let text = format!("{}\n{}", self.title, self.notes).to_lowercase();
+        query.split_whitespace().all(|w| text.contains(&w.to_lowercase()))
+    }
 }
 
 #[cfg(test)]
