@@ -4,6 +4,12 @@ Mail and calendar for the desktop, with the Outlook workflow you already know an
 ArtCraft family (WordCraft, GridCraft, DeskCraft). Pure Rust, one binary, runs on macOS, Windows
 and Linux.
 
+The windows are moving to the "Helder" style, a fresher look after the new Outlook: white rounded
+cards on a light grey ground, quiet buttons that are a line icon and a label (Lucide icons, ISC
+licence, embedded), one blue main button per bar, fields with only an underline and switches
+instead of tick boxes. The appointment window is the first: a command bar on top, the form with an
+icon per row, and the day it falls on beside it, so a clash shows before you save.
+
 ## Principles
 
 - **Security and privacy by design.** No browser engine in the app, so mail cannot run scripts.
