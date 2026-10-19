@@ -256,11 +256,15 @@ pub(crate) fn flag_message(s: &mut Session, message_id: &str, on: bool) -> Resul
     Ok(())
 }
 
-/// Flags the whole selection, or takes the flag off all of it when the selected message has
-/// one, as Outlook does.
-fn toggle_flag(s: &mut Session, _: &Value) -> Result<(), CommandError> {
-    let ids = selection(s)?;
-    let on = !s.selected().is_some_and(|m| m.flags.flagged);
+/// `message.flag { id? }`: flags the given message, else the whole selection; takes the flag
+/// off instead when the message (the selected one, for a selection) has it, as Outlook does.
+fn toggle_flag(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let ids = match params.get("id").and_then(Value::as_str) {
+        Some(id) => vec![id.to_string()],
+        None => selection(s)?,
+    };
+    let first = ids.first().ok_or(CommandError::NoSelection)?;
+    let on = !s.message(first).ok_or(CommandError::NotFound)?.flags.flagged;
     for id in ids {
         flag_message(s, &id, on)?;
     }
@@ -415,6 +419,11 @@ mod tests {
         assert!([&ids[2], &ids[3]].iter().all(|id| s.message(id).unwrap().flags.flagged));
         s.run("message.flag", &Value::Null).unwrap();
         assert!([&ids[2], &ids[3]].iter().all(|id| !s.message(id).unwrap().flags.flagged), "the second press takes every flag off");
+        s.run("message.flag", &json!({ "id": ids[0] })).unwrap();
+        assert!(s.message(&ids[0]).unwrap().flags.flagged && !s.message(&ids[2]).unwrap().flags.flagged, "an id flags that one message alone");
+        s.run("message.flag", &json!({ "id": ids[0] })).unwrap();
+        assert!(!s.message(&ids[0]).unwrap().flags.flagged);
+        assert_eq!(s.run("message.flag", &json!({ "id": "missing" })), Err(CommandError::NotFound));
         s.run("message.delete", &Value::Null).unwrap();
         for id in [&ids[2], &ids[3]] {
             let folder = s.message(id).unwrap().folder_id.clone();
