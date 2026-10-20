@@ -203,21 +203,21 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .frame(crate::helder::card_frame(t).inner_margin(Margin::same(12)).outer_margin(Margin { left: 0, right: 6, top: 0, bottom: 12 }))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                let width = (ui.available_width() - 28.0).max(60.0);
+                let width = (ui.available_width() - 40.0).max(60.0);
                 crate::helder::search_field(ui, t, &mut app.tasks.query, egui::Id::new(SEARCH_BOX), "Zoeken in taken", width);
-                if !app.tasks.query.is_empty() && ui.small_button("✕").on_hover_text("Zoekopdracht wissen").clicked() {
+                if !app.tasks.query.is_empty()
+                    && crate::helder::quiet(ui, t, |ui| crate::helder::icon_button(ui, t, crate::helder::Icon::X, crate::SEARCH_CLEAR)).clicked()
+                {
                     app.tasks.query.clear();
                 }
             });
             ui.add_space(6.0);
-            crate::helder::quiet(ui, t, |ui| {
-                ui.horizontal(|ui| {
-                    for (label, f) in [("Open", TaskFilter::Open), ("Voltooid", TaskFilter::Done), ("Alles", TaskFilter::All)] {
-                        if ui.selectable_label(app.tasks.filter == f, label).clicked() {
-                            app.tasks.filter = f;
-                        }
+            ui.horizontal(|ui| {
+                for (label, f) in [("Open", TaskFilter::Open), ("Voltooid", TaskFilter::Done), ("Alles", TaskFilter::All)] {
+                    if crate::helder::chip(ui, t, label, app.tasks.filter == f).clicked() {
+                        app.tasks.filter = f;
                     }
-                });
+                }
             });
             ui.add_space(8.0);
             let selected = app.engine.session.selected_task.clone();

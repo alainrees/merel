@@ -1,12 +1,13 @@
 //! The Backstage (the File tab): accounts, and the form that adds one.
 
-use egui::{Margin, RichText, Stroke, Ui, vec2};
+use egui::{Margin, RichText, Ui, vec2};
 use zeroize::Zeroize;
 
 use mailcraft_engine::{AccountStatus, signin};
 use mailcraft_model::{Account, Address, Dav, Protocol, Server, Tls};
 use mailcraft_secrets::Secret;
 
+use crate::helder::{self, Icon};
 use crate::{MailApp, Tab, Tokens};
 
 /// What the person has typed so far. The password is wiped when the form is dropped.
@@ -207,24 +208,24 @@ impl AccountForm {
     }
 }
 
+/// The text of the side menu's way back to the mail.
+pub const BACK: &str = "Terug";
+
 pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    ui.painter().rect_filled(ui.available_rect_before_wrap(), 0.0, t.window);
     egui::Panel::left("backstage_nav")
-        .exact_size(200.0)
+        .exact_size(220.0)
         .resizable(false)
-        .frame(egui::Frame::NONE.fill(t.accent).inner_margin(Margin::symmetric(0, 12)))
+        .show_separator_line(false)
+        .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin { left: 12, right: 8, top: 8, bottom: 12 }))
         .show(ui, |ui| {
-            let item = |ui: &mut Ui, label: &str| {
-                ui.add_sized([ui.available_width(), 34.0], egui::Button::new(RichText::new(label).size(15.0).color(t.on_accent)).frame(false))
-                    .clicked()
-            };
-            if item(ui, "←  Terug") {
+            if helder::nav_item(ui, t, Icon::ChevronLeft, BACK, false).clicked() {
                 app.tab = Tab::Home;
             }
-            ui.add_space(12.0);
-            ui.label(RichText::new("   Accounts").size(13.0).color(t.on_accent));
-            ui.add_space(12.0);
+            ui.add_space(8.0);
+            helder::nav_item(ui, t, Icon::User, "Accounts", true);
             // Printing lives here, as in Outlook's File menu; Ctrl+P on the Start tab does the same.
-            if item(ui, "Afdrukken") {
+            if helder::nav_item(ui, t, Icon::Printer, "Afdrukken", false).clicked() {
                 if app.module == crate::Module::Calendar {
                     app.print_calendar();
                 } else if app.can_print() {
@@ -235,18 +236,26 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 app.tab = Tab::Home;
             }
             // Outlook's "Opslaan als": the open message as an .eml file in Downloads; Ctrl+S too.
-            if item(ui, crate::eml::SAVE_AS) {
+            if helder::nav_item(ui, t, Icon::Save, crate::eml::SAVE_AS, false).clicked() {
                 app.save_as_file();
                 app.tab = Tab::Home;
             }
-            if item(ui, "Ongewenste e-mail") {
+            if helder::nav_item(ui, t, Icon::ShieldAlert, "Ongewenste e-mail", false).clicked() {
                 app.junk = Some(crate::junk::Options::default());
                 app.tab = Tab::Home;
             }
         });
-    egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.reading).inner_margin(Margin::same(28))).show(ui, |ui| {
+    let frame = helder::card_frame(t).inner_margin(Margin::same(28)).outer_margin(Margin { left: 0, right: 12, top: 0, bottom: 12 });
+    egui::CentralPanel::default().frame(frame).show(ui, |ui| {
+        helder::secondary(ui, t, |ui| page(app, ui, t));
+    });
+}
+
+/// The Accounts page: each account on a card, then the form that adds or edits one.
+fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.label(RichText::new("Accounts").size(26.0).color(t.text));
+            ui.label(RichText::new("Accounts").size(helder::TITLE_TEXT).strong().color(t.text));
             ui.add_space(12.0);
             // A sign-in started from this list reports here; the OAuth form consumes its own.
             let oauth_form = matches!(app.form.kind, Protocol::Gmail | Protocol::Microsoft365);
@@ -292,7 +301,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 if email == "jij@example.org" {
                     continue;
                 }
-                egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.border)).inner_margin(Margin::same(12)).show(ui, |ui| {
+                helder::card_frame(t).inner_margin(Margin::same(16)).show(ui, |ui| {
                     ui.set_width(ui.available_width().min(560.0));
                     ui.label(RichText::new(name).strong().color(t.text));
                     ui.label(RichText::new(email).color(t.text_dim));
@@ -368,7 +377,10 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                             .color(t.text),
                         );
                         ui.horizontal(|ui| {
-                            if ui.add(egui::Button::new(RichText::new("Ja, verwijderen").color(t.on_accent)).fill(t.flag)).clicked() {
+                            if ui
+                                .add(egui::Button::new(RichText::new("Ja, verwijderen").color(t.on_accent)).fill(t.flag).stroke(egui::Stroke::NONE))
+                                .clicked()
+                            {
                                 remove = Some(id.clone());
                             }
                             if ui.button("Annuleren").clicked() {
@@ -420,7 +432,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             } else {
                 ("Account toevoegen".to_string(), "IMAP en SMTP. Je wachtwoord gaat in de sleutelhanger van je computer, niet in een bestand.")
             };
-            let heading = ui.label(RichText::new(heading).size(20.0).color(t.text));
+            let heading = ui.label(RichText::new(heading).size(18.0).strong().color(t.text));
             if std::mem::take(&mut app.form.scroll_to_form) {
                 heading.scroll_to_me(Some(egui::Align::TOP));
             }
@@ -428,37 +440,76 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.add_space(8.0);
             form(app, ui, t);
         });
+    }
+}
+
+/// The width of the labels before the form's fields.
+const LABEL_WIDTH: f32 = 150.0;
+
+/// A form row: its label, then an underlined field.
+fn field(ui: &mut Ui, t: &Tokens, label: &str, value: &mut String, password: bool) {
+    ui.horizontal(|ui| {
+        caption(ui, t, label);
+        let r = ui.add(
+            egui::TextEdit::singleline(value)
+                .password(password)
+                .frame(egui::Frame::NONE)
+                .font(egui::FontId::proportional(helder::FIELD_TEXT))
+                .text_color(t.text)
+                .desired_width(320.0)
+                .margin(Margin::symmetric(4, 5)),
+        );
+        helder::underline(ui, t, &r);
     });
 }
 
-fn field(ui: &mut Ui, t: &Tokens, label: &str, value: &mut String, password: bool) {
-    ui.horizontal(|ui| {
-        ui.add_sized([150.0, 24.0], egui::Label::new(RichText::new(label).color(t.text)));
-        ui.add(egui::TextEdit::singleline(value).password(password).desired_width(300.0));
+fn caption(ui: &mut Ui, t: &Tokens, label: &str) {
+    ui.allocate_ui_with_layout(vec2(LABEL_WIDTH, 30.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.set_min_size(vec2(LABEL_WIDTH, 30.0));
+        ui.label(RichText::new(label).size(14.0).color(t.text_dim));
     });
+}
+
+/// A sub-heading of the form, such as "Ontvangen (IMAP)".
+fn section(ui: &mut Ui, t: &Tokens, text: &str) {
+    ui.add_space(4.0);
+    ui.label(RichText::new(text).size(14.0).strong().color(t.text));
+}
+
+/// A choice between a few options, as chips.
+fn chips<V: PartialEq + Copy>(ui: &mut Ui, t: &Tokens, value: &mut V, options: &[(V, &str)]) {
+    for (v, name) in options {
+        if helder::chip(ui, t, name, *value == *v).clicked() {
+            *value = *v;
+        }
+    }
 }
 
 fn tls_picker(ui: &mut Ui, t: &Tokens, id: &str, tls: &mut Tls) {
     ui.horizontal(|ui| {
-        ui.add_sized([150.0, 24.0], egui::Label::new(RichText::new("Versleuteling").color(t.text)));
-        ui.push_id(id, |ui| {
-            ui.radio_value(tls, Tls::Implicit, "TLS");
-            ui.radio_value(tls, Tls::StartTls, "STARTTLS");
-        });
+        caption(ui, t, "Versleuteling");
+        ui.push_id(id, |ui| chips(ui, t, tls, &[(Tls::Implicit, "TLS"), (Tls::StartTls, "STARTTLS")]));
     });
 }
 
 fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.horizontal(|ui| {
-        ui.add_sized([150.0, 24.0], egui::Label::new(RichText::new("Soort account").color(t.text)));
+        caption(ui, t, "Soort account");
         if app.form.editing.is_some() {
             // The kind of an account is fixed; its servers and sign-in are what change.
             ui.label(RichText::new(if app.form.kind == Protocol::Exchange { "Exchange" } else { "IMAP/SMTP" }).color(t.text));
         } else {
-            ui.radio_value(&mut app.form.kind, Protocol::ImapSmtp, "IMAP/SMTP");
-            ui.radio_value(&mut app.form.kind, Protocol::Gmail, "Gmail");
-            ui.radio_value(&mut app.form.kind, Protocol::Microsoft365, "Microsoft 365");
-            ui.radio_value(&mut app.form.kind, Protocol::Exchange, "Exchange");
+            chips(
+                ui,
+                t,
+                &mut app.form.kind,
+                &[
+                    (Protocol::ImapSmtp, "IMAP/SMTP"),
+                    (Protocol::Gmail, "Gmail"),
+                    (Protocol::Microsoft365, "Microsoft 365"),
+                    (Protocol::Exchange, "Exchange"),
+                ],
+            );
         }
     });
     ui.add_space(6.0);
@@ -483,8 +534,8 @@ fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     field(ui, t, "E-mailadres", &mut f.email, false);
     if !exchange {
         ui.horizontal(|ui| {
-            ui.add_space(154.0);
-            if ui.small_button("Servers invullen op basis van het adres").clicked() {
+            ui.add_space(LABEL_WIDTH + ui.spacing().item_spacing.x);
+            if helder::quiet(ui, t, |ui| helder::tool_button(ui, t, Icon::Sparkles, "Servers invullen op basis van het adres")).clicked() {
                 f.suggest();
             }
         });
@@ -493,27 +544,27 @@ fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     field(ui, t, "Wachtwoord", &mut f.password, true);
     if f.editing.is_some() {
         ui.horizontal(|ui| {
-            ui.add_space(154.0);
+            ui.add_space(LABEL_WIDTH + ui.spacing().item_spacing.x);
             ui.label(RichText::new("Laat leeg om het huidige wachtwoord te houden.").size(12.0).color(t.text_dim));
         });
     }
     ui.add_space(8.0);
     if exchange {
-        ui.label(RichText::new("Exchange-server").strong().color(t.text));
+        section(ui, t, "Exchange-server");
         field(ui, t, "Server", &mut f.imap_host, false);
         ui.label(RichText::new("Bijvoorbeeld mail.bedrijf.nl; Mailcraft gebruikt https://<server>/EWS/Exchange.asmx. Gebruikersnaam als DOMEIN\\naam of als e-mailadres.").size(12.0).color(t.text_dim));
     } else {
-        ui.label(RichText::new("Ontvangen (IMAP)").strong().color(t.text));
+        section(ui, t, "Ontvangen (IMAP)");
         field(ui, t, "Server", &mut f.imap_host, false);
         field(ui, t, "Poort", &mut f.imap_port, false);
         tls_picker(ui, t, "imap_tls", &mut f.imap_tls);
         ui.add_space(8.0);
-        ui.label(RichText::new("Verzenden (SMTP)").strong().color(t.text));
+        section(ui, t, "Verzenden (SMTP)");
         field(ui, t, "Server", &mut f.smtp_host, false);
         field(ui, t, "Poort", &mut f.smtp_port, false);
         tls_picker(ui, t, "smtp_tls", &mut f.smtp_tls);
         ui.add_space(8.0);
-        ui.label(RichText::new("Agenda en adresboek (CalDAV/CardDAV), optioneel").strong().color(t.text));
+        section(ui, t, "Agenda en adresboek (CalDAV/CardDAV), optioneel");
         field(ui, t, "Agenda", &mut f.dav_calendar, false);
         field(ui, t, "Adresboek", &mut f.dav_contacts, false);
         ui.label(
@@ -531,9 +582,9 @@ fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let mut save = false;
     let mut cancel = false;
     ui.horizontal(|ui| {
-        save = ui.add_sized([220.0, 30.0], egui::Button::new(RichText::new(label).color(t.on_accent)).fill(t.accent)).clicked();
+        save = helder::primary_button(ui, t, Icon::Send, label).clicked();
         if editing {
-            cancel = ui.add_sized([110.0, 30.0], egui::Button::new("Annuleren")).clicked();
+            cancel = ui.button("Annuleren").clicked();
         }
     });
     ui.add_space(4.0);
@@ -610,8 +661,7 @@ fn oauth_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         ui.label(RichText::new(e).color(t.flag));
     }
     let label = if busy { "Wacht op de browser…".to_string() } else { format!("Inloggen bij {provider}") };
-    let click =
-        ui.add_enabled(!busy, egui::Button::new(RichText::new(label).color(t.on_accent)).fill(t.accent).min_size(vec2(220.0, 30.0))).clicked();
+    let click = ui.add_enabled_ui(!busy, |ui| helder::primary_button(ui, t, Icon::Globe, &label)).inner.clicked();
     if busy {
         ui.label(
             RichText::new("Log in in het browservenster dat is geopend. Daarna verschijnt het account hier vanzelf.").size(12.0).color(t.text_dim),
@@ -765,7 +815,7 @@ mod tests {
         engine.set_signature(&engine.session.accounts[0].id.clone(), "Groet").unwrap();
         let mut app = MailApp::new(engine);
         app.tab = Tab::File;
-        let mut harness = Harness::builder().with_size(vec2(1100.0, 1200.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        let mut harness = Harness::builder().with_size(vec2(1100.0, 1600.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         harness.run();
         harness.get_by_label("Account bewerken").click();
         harness.run();
