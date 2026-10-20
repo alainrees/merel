@@ -3526,6 +3526,45 @@ mod tests {
     }
 
     #[test]
+    fn an_appointment_gets_and_loses_categories_in_its_window() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.state_mut().calendar.query = "Lunch met Sanne".into();
+        h.run();
+        let id = h.state().engine.session.appointments.iter().find(|a| a.title == "Lunch met Sanne").unwrap().id.clone();
+        let start = h.state().engine.session.appointment(&id).unwrap().start;
+        h.state_mut().open_appointment(&id, start);
+        h.run();
+        h.get_by_label(calendar::CATEGORIZE).click();
+        h.run();
+        h.get_by_label("● Rode categorie").click();
+        h.run();
+        assert!(h.query_by_label("● Groene categorie").is_none(), "a pick closes the menu");
+        h.get_by_label(calendar::CATEGORIZE).click();
+        h.run();
+        h.get_by_label("● Groene categorie").click();
+        h.run();
+        assert_eq!(h.state().calendar.editor.as_ref().unwrap().categories, vec!["Rode categorie", "Groene categorie"]);
+        h.get_by_label(&calendar::remove_category_label("Rode categorie")).click();
+        h.run();
+        assert_eq!(h.state().calendar.editor.as_ref().unwrap().categories, vec!["Groene categorie"], "the chip in the form takes it off");
+        h.get_by_label("Opslaan").click();
+        h.run();
+        assert_eq!(h.state().engine.session.appointment(&id).unwrap().categories, vec!["Groene categorie"]);
+        let a = h.state().engine.session.appointment(&id).unwrap().clone();
+        let green = crate::categories::color_of(mailcraft_model::CategoryColor::Green);
+        assert_eq!(calendar::block_color(h.state(), &a, &Tokens::light()), green, "a categorised block takes its category's colour");
+        let start = h.state().engine.session.appointment(&id).unwrap().start;
+        h.state_mut().open_appointment(&id, start);
+        h.run();
+        h.get_by_label(calendar::CATEGORIZE).click();
+        h.run();
+        h.get_by_label(calendar::CLEAR_CATEGORIES).click();
+        h.run();
+        assert!(h.state().calendar.editor.as_ref().unwrap().categories.is_empty(), "Alle categorieën wissen empties the list");
+    }
+
+    #[test]
     fn a_calendar_is_added_given_a_colour_renamed_and_deleted_from_the_side_pane() {
         let mut h = harness();
         h.state_mut().module = Module::Calendar;

@@ -15,7 +15,7 @@ use mailcraft_mailbox::{Item, ItemStore, MailboxError, Result};
 use mailcraft_model::{Address, Appointment, Contact, Frequency, Priority, Recurrence, ShowAs, Task, clean_text};
 use roxmltree::Node;
 
-use crate::{EwsClient, child, esc, find, parse, parse_datetime, response_messages, text};
+use crate::{EwsClient, categories_of, child, esc, find, parse, parse_datetime, response_messages, text};
 
 /// Items returned per listing; a mailbox with more just shows the first ones.
 const PAGE: u32 = 1000;
@@ -70,6 +70,7 @@ fn appointment_of(node: Node<'_, '_>) -> Option<Appointment> {
             Some("OOF") => ShowAs::Oof,
             _ => ShowAs::Busy,
         },
+        categories: categories_of(node),
     }
     .validated()
     .ok()
@@ -200,6 +201,8 @@ fn appointment_fields(a: &Appointment) -> Fields {
     f.put("item:Subject", format!("<t:Subject>{}</t:Subject>", esc(&a.title)));
     f.put("item:Sensitivity", format!("<t:Sensitivity>{}</t:Sensitivity>", if a.private { "Private" } else { "Normal" }));
     f.put("item:Body", format!("<t:Body BodyType=\"Text\">{}</t:Body>", esc(&a.notes)));
+    let strings: String = a.categories.iter().map(|c| format!("<t:String>{}</t:String>", esc(c))).collect();
+    f.list.push(("item:Categories", None, (!strings.is_empty()).then(|| format!("<t:Categories>{strings}</t:Categories>"))));
     f.put("item:ReminderIsSet", format!("<t:ReminderIsSet>{}</t:ReminderIsSet>", a.reminder.is_some()));
     if let Some(m) = a.reminder {
         f.put("item:ReminderMinutesBeforeStart", format!("<t:ReminderMinutesBeforeStart>{m}</t:ReminderMinutesBeforeStart>"));
@@ -380,6 +383,7 @@ impl ItemStore for EwsClient {
             "item:Subject",
             "item:Sensitivity",
             "item:Body",
+            "item:Categories",
             "item:ReminderIsSet",
             "item:ReminderMinutesBeforeStart",
             "calendar:Start",
@@ -561,6 +565,7 @@ mod tests {
     fn calendar_items_become_appointments() {
         let xml = reply(concat!(
             "<t:CalendarItem><t:ItemId Id=\"AAk1\" ChangeKey=\"x\"/><t:Subject>Overleg</t:Subject><t:Body BodyType=\"Text\">Agenda:\n- punt 1</t:Body>",
+            "<t:Categories><t:String>Werk</t:String></t:Categories>",
             "<t:ReminderIsSet>true</t:ReminderIsSet><t:ReminderMinutesBeforeStart>30</t:ReminderMinutesBeforeStart>",
             "<t:Start>2026-10-14T17:46:40Z</t:Start><t:End>2026-10-14T18:46:40Z</t:End><t:IsAllDayEvent>false</t:IsAllDayEvent>",
             "<t:LegacyFreeBusyStatus>Tentative</t:LegacyFreeBusyStatus><t:Location>Studio</t:Location></t:CalendarItem>",
@@ -569,6 +574,7 @@ mod tests {
         assert_eq!((a.id.as_str(), a.title.as_str(), a.location.as_str(), a.notes.as_str()), ("AAk1", "Overleg", "Studio", "Agenda:\n- punt 1"));
         assert_eq!((a.start, a.end, a.all_day, a.reminder), (1_792_000_000, 1_792_003_600, false, Some(30)));
         assert_eq!(a.show_as, ShowAs::Tentative);
+        assert_eq!(a.categories, vec!["Werk"]);
         let off = reply(concat!(
             "<t:CalendarItem><t:ItemId Id=\"A4\"/><t:ReminderIsSet>false</t:ReminderIsSet><t:ReminderMinutesBeforeStart>15</t:ReminderMinutesBeforeStart>",
             "<t:Start>2026-10-14T17:46:40Z</t:Start><t:End>2026-10-14T18:46:40Z</t:End></t:CalendarItem>"
@@ -631,6 +637,7 @@ mod tests {
             reminder: Some(15),
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
+            categories: Vec::new(),
         };
         let xml = appointment_fields(&a).create();
         assert_eq!(
@@ -642,6 +649,12 @@ mod tests {
                 "<t:Location>&lt;Studio&gt;</t:Location></t:CalendarItem>"
             )
         );
+        let tagged = appointment_fields(&Appointment { categories: vec!["Werk".into(), "A&B".into()], ..a.clone() });
+        assert!(
+            tagged.create().contains("</t:Body><t:Categories><t:String>Werk</t:String><t:String>A&amp;B</t:String></t:Categories><t:ReminderIsSet>"),
+            "categories sit between the body and the reminder, as the schema orders them"
+        );
+        assert!(appointment_fields(&a).changes().1.contains("item:Categories"), "no categories clears them on the server");
         let free = appointment_fields(&Appointment { show_as: ShowAs::Free, ..a.clone() }).create();
         assert!(free.contains("<t:LegacyFreeBusyStatus>Free</t:LegacyFreeBusyStatus>"), "{free}");
         let whole = Appointment { all_day: true, ..a.clone() };

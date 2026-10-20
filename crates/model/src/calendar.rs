@@ -88,6 +88,11 @@ pub struct Appointment {
     /// Outlook's "Weergeven als": how the time counts for whoever looks at your availability.
     #[serde(default)]
     pub show_as: ShowAs,
+    /// Outlook's categories, by name: the coloured labels the person knows from mail (their
+    /// colours are in the session's category list). Travels as iCalendar `CATEGORIES`,
+    /// Exchange and Microsoft 365 categories, and a private extended property on Google.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<String>,
 }
 
 /// How an appointment shows in your availability, Outlook's "Weergeven als". Travels as the
@@ -312,6 +317,7 @@ impl Appointment {
             return Err(AppointmentError::EndsBeforeStart);
         }
         self.reminder = self.reminder.map(|m| m.min(MAX_REMINDER));
+        self.categories = crate::clean_categories(std::mem::take(&mut self.categories));
         if let Some(r) = self.recurrence.take() {
             let r = r.normalized();
             if self.end - self.start > r.shortest_gap() {
@@ -418,6 +424,7 @@ mod tests {
             reminder: None,
             private: false,
             show_as: ShowAs::Busy,
+            categories: Vec::new(),
         }
     }
 
