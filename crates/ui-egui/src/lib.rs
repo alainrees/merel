@@ -1652,13 +1652,16 @@ fn message_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         return;
     };
     let mut open = true;
-    egui::Window::new(format!("✉ {subject}"))
-        .id(egui::Id::new("message-window"))
-        .open(&mut open)
-        .default_size(vec2(760.0, 560.0))
-        .resizable(true)
-        .frame(egui::Frame::window(&ctx.global_style()).fill(t.reading).inner_margin(Margin::same(16)))
-        .show(ctx, |ui| reading_pane(app, ui, t));
+    helder::os_window(ctx, t, "message-window", &format!("✉ {subject}"), vec2(820.0, 640.0), &mut open, |ui| {
+        // Esc closes it, also when it is a window of its own and the main window does not see the key.
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            app.message_window = false;
+        }
+        egui::Frame::new().fill(t.reading).corner_radius(helder::CARD_RADIUS).inner_margin(Margin::same(16)).show(ui, |ui| {
+            ui.set_min_size(ui.available_size());
+            reading_pane(app, ui, t)
+        });
+    });
     if !open {
         app.message_window = false;
     }

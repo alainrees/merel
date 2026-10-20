@@ -785,6 +785,38 @@ pub fn note(ui: &mut Ui, t: &Tokens, text: &str) {
     });
 }
 
+/// A window of its own, as Outlook opens a message, an appointment or a new mail: the system's
+/// title bar with its close, minimise and zoom buttons, on macOS, Windows and Linux alike.
+/// Closing it from the title bar clears `open`. Where the platform cannot open a second
+/// window (and in the tests) it is drawn as a window inside the main one.
+pub fn os_window<R>(
+    ctx: &egui::Context,
+    t: &Tokens,
+    id: &str,
+    title: &str,
+    size: egui::Vec2,
+    open: &mut bool,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    let builder = egui::ViewportBuilder::default().with_title(title).with_inner_size(size).with_min_inner_size(vec2(480.0, 360.0));
+    let mut add = Some(add);
+    let mut out = None;
+    ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), builder, |ui, class| {
+        let Some(add) = add.take() else { return };
+        if class == egui::ViewportClass::EmbeddedWindow {
+            out = Some(add(ui));
+            return;
+        }
+        if ui.input(|i| i.viewport().close_requested()) {
+            *open = false;
+        }
+        egui::CentralPanel::default().frame(Frame::NONE.fill(t.window).inner_margin(12)).show(ui, |ui| {
+            out = Some(add(ui));
+        });
+    });
+    out
+}
+
 /// Lays out `add` at the right end of a row of buttons. Unlike [`right`] it never draws over
 /// what came before: it takes the width it needed last frame, and when the row has no room
 /// left it follows straight on, so the window grows rather than the buttons overlapping.

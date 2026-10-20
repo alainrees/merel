@@ -1581,7 +1581,8 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         (Some(_), Some(_)) => "Herhaalde afspraak",
         (Some(_), None) => "Afspraak",
     };
-    egui::Window::new(title).collapsible(false).resizable(false).frame(helder::window_frame(ctx, t)).default_width(940.0).show(ctx, |ui| {
+    let mut open = true;
+    helder::os_window(ctx, t, "appointment-window", title, vec2(980.0, 760.0), &mut open, |ui| {
         helder::quiet(ui, t, |ui| {
             ui.horizontal(|ui| {
                 let sends = !editor.attendees.trim().is_empty();
@@ -1671,6 +1672,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             }
         });
     });
+    close |= !open;
     if skip && let (Some(id), Some(start)) = (editor.id.clone(), editor.occurrence) {
         match app.engine.run("appointment.skip", &json!({ "id": id, "start": start })) {
             Ok(()) => close = true,
