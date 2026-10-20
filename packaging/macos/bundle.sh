@@ -35,4 +35,7 @@ stage="$work/dmg"
 mkdir -p "$stage"
 cp -R "$app" "$stage/"
 ln -s /Applications "$stage/Applications"
-hdiutil create -volname "Mailcraft" -srcfolder "$stage" -ov -format UDZO "$out/Mailcraft-$version-macos.dmg"
+# hdiutil's own size guess runs short for a fresh bundle ("No space left on device"), so give
+# it the content size plus room for the file system.
+size_mb=$(($(du -sm "$stage" | cut -f1) * 12 / 10 + 20))
+hdiutil create -volname "Mailcraft" -srcfolder "$stage" -size "${size_mb}m" -fs HFS+ -ov -format UDZO "$out/Mailcraft-$version-macos.dmg"
