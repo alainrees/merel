@@ -37,10 +37,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked -p mailcraft
       - name: Installer
-        shell: bash
+        # PowerShell, not Git Bash: Bash would turn the /D switch into a path.
+        shell: pwsh
         run: |
           choco install innosetup --no-progress -y
-          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/DAppVersion=$(packaging/version.sh)" packaging/windows/mailcraft.iss
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"$' | Select-Object -First 1).Matches.Groups[1].Value
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" packaging\windows\mailcraft.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
           name: windows
