@@ -8,6 +8,20 @@ use crate::{MailApp, Tokens, key_hint, ribbon_action_hint};
 /// The project page, for the "Op GitHub" button.
 pub const REPOSITORY: &str = "https://github.com/alainrees/mailcraft";
 
+/// The version of this build, as "Over Mailcraft" and the Help tab show it: the release number
+/// plus the commit and its date, so two builds of the same release can be told apart.
+pub fn version_line() -> String {
+    version_text(env!("CARGO_PKG_VERSION"), env!("MAILCRAFT_COMMIT"), env!("MAILCRAFT_COMMIT_DATE"))
+}
+
+fn version_text(version: &str, commit: &str, date: &str) -> String {
+    match (commit.is_empty(), date.is_empty()) {
+        (true, _) => format!("Versie {version}"),
+        (false, true) => format!("Versie {version} (build {commit})"),
+        (false, false) => format!("Versie {version} (build {commit} van {date})"),
+    }
+}
+
 /// Which help window is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HelpWindow {
@@ -82,6 +96,8 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     if ribbon_action_hint(ui, t, "ℹ", "Over Mailcraft", true, Some("Versie en uitgangspunten")) {
         app.help = Some(HelpWindow::About);
     }
+    ui.separator();
+    ui.label(RichText::new(version_line()).size(12.0).color(t.text_dim));
 }
 
 /// The open help window, if any.
@@ -107,7 +123,12 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         HelpWindow::About => {
             egui::Window::new("Over Mailcraft").collapsible(false).resizable(false).default_width(400.0).show(ctx, |ui| {
                 ui.label(RichText::new("Mailcraft").size(22.0).strong().color(t.text));
-                ui.label(RichText::new(format!("Versie {}", env!("CARGO_PKG_VERSION"))).color(t.text_dim));
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(version_line()).color(t.text_dim));
+                    if ui.small_button("Kopiëren").on_hover_text("De versie naar het klembord, handig bij een foutmelding").clicked() {
+                        ui.ctx().copy_text(format!("Mailcraft {}", version_line().trim_start_matches("Versie ")));
+                    }
+                });
                 ui.add_space(8.0);
                 ui.label(RichText::new("Mail, agenda, contacten en taken voor de desktop, met de werkwijze van Outlook en de stijl van de ArtCraft-familie. Geschreven in Rust met egui; één programma voor macOS, Windows en Linux.").color(t.text));
                 ui.add_space(8.0);
@@ -136,5 +157,13 @@ mod tests {
         assert_eq!(list.len(), 28);
         assert!(list.iter().any(|(k, _)| k.ends_with("+Shift+V")));
         assert!(list.iter().all(|(k, what)| !k.is_empty() && !what.is_empty()));
+    }
+
+    #[test]
+    fn the_version_names_the_build_when_it_is_known() {
+        assert_eq!(version_text("0.1.0", "", ""), "Versie 0.1.0");
+        assert_eq!(version_text("0.1.0", "abc1234", ""), "Versie 0.1.0 (build abc1234)");
+        assert_eq!(version_text("0.1.0", "abc1234", "2026-10-20"), "Versie 0.1.0 (build abc1234 van 2026-10-20)");
+        assert!(version_line().starts_with(&format!("Versie {}", env!("CARGO_PKG_VERSION"))));
     }
 }

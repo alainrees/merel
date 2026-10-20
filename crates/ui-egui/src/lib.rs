@@ -3849,9 +3849,12 @@ mod tests {
         h.get_by_label("Sluiten").click();
         h.run();
         assert!(h.state().help.is_none());
+        // The Help tab itself shows the version too, next to the button.
+        h.get_by_label(help::version_line().as_str());
         h.get_by_label("Over Mailcraft").click();
         h.run();
-        h.get_by_label(format!("Versie {}", env!("CARGO_PKG_VERSION")).as_str());
+        assert_eq!(h.query_all_by_label(help::version_line().as_str()).count(), 2);
+        h.get_by_label("Kopiëren");
         h.get_by_label("Sluiten").click();
         h.run();
         assert!(h.state().help.is_none());
