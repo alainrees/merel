@@ -775,7 +775,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     let status = 22.0;
                     egui::ScrollArea::vertical().auto_shrink(false).max_height(ui.available_height() - status).show(ui, |ui| {
                         let height = ui.available_height();
-                        rich_edit::edit(ui, t, &mut c.editor, &mut c.body, "Bericht", height);
+                        rich_edit::edit(ui, t, &mut c.editor, &mut c.body, "Bericht", "", height);
                     });
                     ui.horizontal(|ui| {
                         ui.set_height(status);

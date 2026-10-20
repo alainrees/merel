@@ -9,10 +9,13 @@
 //! Session ids of account items are `<account id>/<store id>`, like folder ids, so a session
 //! id always says where an item lives.
 
+use std::collections::HashMap;
+
 use chrono::{Days, Local, NaiveTime, TimeZone};
 use serde_json::Value;
 
 use mailcraft_mailbox::Item;
+use mailcraft_model::rich::Rich;
 use mailcraft_model::{Account, Appointment, Calendar, Contact, Task};
 
 use crate::{CommandError, Job, Session};
@@ -90,7 +93,7 @@ impl Session {
             return Err(CommandError::Store("dit item wordt nog opgeslagen op de server, probeer het zo opnieuw".into()));
         }
         item.set_id(remote.unwrap_or_default());
-        self.pending.push(Job::SaveItem { account_id: account_id.to_string(), local_id, item });
+        self.pending.push(Job::SaveItem { account_id: account_id.to_string(), local_id, item: Box::new(item) });
         Ok(())
     }
 
@@ -125,10 +128,23 @@ impl Session {
         }
         self.item_accounts.insert(account_id.to_string());
         let calendar_id = self.ensure_calendar(account_id);
+        // Servers keep notes as text; the formatting stays on this computer for as long as the
+        // text it lies over comes back unchanged.
+        let formatted: HashMap<String, (String, Rich)> = self
+            .appointments
+            .iter()
+            .filter(|a| a.calendar_id == calendar_id)
+            .filter_map(|a| a.notes_rich.clone().map(|r| (a.id.clone(), (a.notes.clone(), r))))
+            .collect();
         self.appointments.retain(|a| a.calendar_id != calendar_id);
         self.appointments.extend(appointments.into_iter().map(|mut a| {
             a.id = Self::local_item_id(account_id, &a.id);
             a.calendar_id = calendar_id.clone();
+            if let Some((notes, rich)) = formatted.get(&a.id)
+                && *notes == a.notes
+            {
+                a.notes_rich = Some(rich.clone());
+            }
             if a.all_day {
                 a.start = snap_to_midnight(a.start);
                 a.end = snap_to_midnight(a.end).max(a.start + 86_400);
@@ -226,6 +242,7 @@ mod tests {
             all_day,
             location: String::new(),
             notes: String::new(),
+            notes_rich: None,
             recurrence: None,
             reminder: None,
             private: false,
@@ -289,6 +306,25 @@ mod tests {
     }
 
     #[test]
+    fn formatted_notes_survive_a_sync_while_their_text_is_unchanged() {
+        let mut s = Session::with_accounts(vec![account("acc", "Werk")]);
+        connected(&mut s);
+        let mut a = appointment("A1", 1_792_000_000, 1_792_003_600, false);
+        a.notes = "Agenda".into();
+        s.apply(Event::Synced { account_id: "acc".into(), appointments: vec![a.clone()], contacts: Vec::new(), tasks: Vec::new() });
+        let mut rich = Rich::plain("Agenda");
+        rich.apply(0..6, |st| st.bold = true);
+        if let Some(local) = s.appointments.iter_mut().find(|x| x.id == "acc/A1") {
+            local.notes_rich = Some(rich.clone());
+        }
+        s.apply(Event::Synced { account_id: "acc".into(), appointments: vec![a.clone()], contacts: Vec::new(), tasks: Vec::new() });
+        assert_eq!(s.appointment("acc/A1").and_then(|x| x.notes_rich.clone()), Some(rich), "same text, same formatting");
+        a.notes = "Agenda, gewijzigd op de server".into();
+        s.apply(Event::Synced { account_id: "acc".into(), appointments: vec![a], contacts: Vec::new(), tasks: Vec::new() });
+        assert_eq!(s.appointment("acc/A1").and_then(|x| x.notes_rich.clone()), None, "changed elsewhere: the text wins");
+    }
+
+    #[test]
     fn changes_to_account_items_go_to_the_store() {
         let mut s = Session::with_accounts(vec![account("acc", "Werk")]);
         connected(&mut s);
@@ -301,7 +337,7 @@ mod tests {
         assert!(pending.starts_with("acc/pending-"));
         let jobs = s.take_jobs();
         assert!(
-            matches!(&jobs[..], [Job::SaveItem { account_id, local_id, item: Item::Appointment(a) }] if account_id == "acc" && *local_id == pending && a.id.is_empty())
+            matches!(&jobs[..], [Job::SaveItem { account_id, local_id, item }] if account_id == "acc" && *local_id == pending && matches!(&**item, Item::Appointment(a) if a.id.is_empty()))
         );
         // Editing before the store has named it is refused rather than duplicated.
         assert!(matches!(
@@ -313,7 +349,9 @@ mod tests {
         assert!(s.appointment("acc/A9").is_some() && s.appointment(&pending).is_none());
         assert_eq!(s.selected_appointment.as_deref(), Some("acc/A9"));
         s.run("appointment.save", &json!({ "id": "acc/A9", "title": "Lunch", "start": 1000, "end": 4600, "location": "Kantine" })).unwrap();
-        assert!(matches!(&s.take_jobs()[..], [Job::SaveItem { item: Item::Appointment(a), .. }] if a.id == "A9" && a.location == "Kantine"));
+        assert!(
+            matches!(&s.take_jobs()[..], [Job::SaveItem { item, .. }] if matches!(&**item, Item::Appointment(a) if a.id == "A9" && a.location == "Kantine"))
+        );
         s.run("appointment.delete", &Value::Null).unwrap();
         assert!(matches!(&s.take_jobs()[..], [Job::DeleteItem { account_id, id }] if account_id == "acc" && id == "A9"));
         assert!(s.appointments.is_empty() && !s.take_calendar_dirty());
@@ -322,7 +360,9 @@ mod tests {
         let c = s.selected_contact().unwrap().clone();
         assert_eq!(c.account_id.as_deref(), Some("acc"));
         assert!(!s.take_contacts_dirty());
-        assert!(matches!(&s.take_jobs()[..], [Job::SaveItem { item: Item::Contact(c), .. }] if c.id.is_empty() && c.name == "Noor"));
+        assert!(
+            matches!(&s.take_jobs()[..], [Job::SaveItem { item, .. }] if matches!(&**item, Item::Contact(c) if c.id.is_empty() && c.name == "Noor"))
+        );
         assert_eq!(s.run("contact.save", &json!({ "name": "X", "account_id": "nope" })), Err(CommandError::Param("account_id")));
         s.apply(Event::ItemSaved { account_id: "acc".into(), local_id: c.id, remote_id: "C5".into() });
         s.run("contact.delete", &json!({ "id": "acc/C5" })).unwrap();
@@ -333,7 +373,7 @@ mod tests {
         s.apply(Event::ItemSaved { account_id: "acc".into(), local_id: t.id, remote_id: "T5".into() });
         s.take_jobs();
         s.run("task.complete", &Value::Null).unwrap();
-        assert!(matches!(&s.take_jobs()[..], [Job::SaveItem { item: Item::Task(t), .. }] if t.id == "T5" && t.done));
+        assert!(matches!(&s.take_jobs()[..], [Job::SaveItem { item, .. }] if matches!(&**item, Item::Task(t) if t.id == "T5" && t.done)));
         assert!(!s.take_tasks_dirty());
 
         // Local items still go to the files, not to a store.
