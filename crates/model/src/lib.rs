@@ -18,8 +18,8 @@ mod templates;
 
 pub use address::{Address, AddressError, parse_address_list};
 pub use calendar::{
-    Appointment, AppointmentError, Calendar, Frequency, MAX_INTERVAL, MAX_NOTES, MAX_OCCURRENCES, MAX_REMINDER, Recurrence, ShowAs,
-    describe_recurrence,
+    Appointment, AppointmentError, CALENDAR_COLORS, Calendar, Frequency, MAX_CALENDAR_NAME, MAX_INTERVAL, MAX_NOTES, MAX_OCCURRENCES, MAX_REMINDER,
+    Recurrence, ShowAs, describe_recurrence,
 };
 pub use categories::{Category, CategoryColor, MAX_CATEGORY_NAME, category_keyword};
 pub use contact::{Contact, ContactError};

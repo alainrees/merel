@@ -97,6 +97,7 @@ fn build() -> Option<Session> {
         calendars: vec![Calendar::local()],
         appointments: appointments(),
         dismissed: Vec::new(),
+        colors: Default::default(),
     });
     session.set_contacts(contacts());
     session.set_tasks(tasks());

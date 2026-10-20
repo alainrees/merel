@@ -20,6 +20,27 @@ pub const MAX_INTERVAL: u32 = 999;
 /// The earliest a reminder may come, in minutes before the start: four weeks.
 pub const MAX_REMINDER: u32 = 4 * 7 * 24 * 60;
 
+/// The longest calendar name accepted, in characters.
+pub const MAX_CALENDAR_NAME: usize = 100;
+
+/// The colours a calendar can be given, with their Dutch names, as Outlook offers a row of
+/// them. Each stands out at least 3:1 against the window in light and in dark mode, so the dot
+/// in the calendar list stays visible, on a card too.
+pub const CALENDAR_COLORS: [(&str, [u8; 3]); 12] = [
+    ("Blauw", [0x2A, 0x78, 0xD2]),
+    ("Turkoois", [0x00, 0x83, 0x8F]),
+    ("Groen", [0x2E, 0x8B, 0x57]),
+    ("Olijf", [0x6F, 0x7F, 0x1A]),
+    ("Goud", [0xA8, 0x84, 0x00]),
+    ("Oranje", [0xC8, 0x66, 0x0F]),
+    ("Rood", [0xD4, 0x46, 0x46]),
+    ("Roze", [0xC8, 0x46, 0x8F]),
+    ("Paars", [0x8A, 0x62, 0xC8]),
+    ("Lavendel", [0x9A, 0x6F, 0xD0]),
+    ("Bruin", [0xA0, 0x6A, 0x46]),
+    ("Grijs", [0x6E, 0x76, 0x80]),
+];
+
 /// A calendar: local, or one of an account once calendars sync.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Calendar {
@@ -34,7 +55,7 @@ pub struct Calendar {
 impl Calendar {
     /// The calendar every installation starts with.
     pub fn local() -> Self {
-        Calendar { id: "local".into(), name: "Mijn agenda".into(), account_id: None, color: [0x1F, 0x6F, 0xC9] }
+        Calendar { id: "local".into(), name: "Mijn agenda".into(), account_id: None, color: CALENDAR_COLORS[0].1 }
     }
 }
 
