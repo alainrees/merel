@@ -82,7 +82,7 @@ impl Worker {
 
 fn describe(e: &MailboxError) -> String {
     match e {
-        MailboxError::Connect { host, .. } => format!("Kan geen verbinding maken met {host}."),
+        MailboxError::Connect { host, reason } => format!("Kan geen verbinding maken met {host}: {}.", clip(reason)),
         MailboxError::Login => "De server accepteert de gebruikersnaam of het wachtwoord niet.".into(),
         MailboxError::AuthScheme(scheme) => format!(
             "De server eist een aanmeldmethode die Mailcraft nog niet ondersteunt ({scheme}). Vraag de beheerder om Basic-verificatie voor EWS, of gebruik een Microsoft 365-account."
@@ -120,6 +120,14 @@ fn no_connection(account_id: &str, job: &Job, what: String) -> Event {
     if job.is_change() { Event::Deferred { account_id: account_id.to_string(), job: Box::new(job.clone()) } } else { failure(account_id, job, what) }
 }
 
+/// After a connection: says why the calendar and address book stayed away, when they did.
+fn report_items_error(c: &dyn Mailbox, account_id: &str, events: &Sender<Event>) {
+    if let Some(e) = c.items_error() {
+        let what = format!("Agenda en adresboek: {}", describe(e));
+        let _ = events.send(Event::ItemsFailed { account_id: account_id.to_string(), what });
+    }
+}
+
 fn longer(wait: Option<Duration>) -> Option<Duration> {
     Some(wait.map_or(FIRST_RETRY, |w| (w * 2).min(MAX_RETRY)))
 }
@@ -150,6 +158,7 @@ fn serve(account: Account, mut credentials: Credentials, keys: Keys, jobs: Recei
                                 if let Some(ev) = ev {
                                     let _ = events.send(ev);
                                 }
+                                report_items_error(c.as_ref(), &account.id, &events);
                                 client = Some(c);
                                 retry = None;
                             }
@@ -204,6 +213,9 @@ fn serve(account: Account, mut credentials: Credentials, keys: Keys, jobs: Recei
                 Ok(Some(ev)) => {
                     retry = None;
                     let _ = events.send(ev);
+                    if matches!(job, Job::Connect { .. }) {
+                        report_items_error(c.as_ref(), &account.id, &events);
+                    }
                     break;
                 }
                 Ok(None) => {
