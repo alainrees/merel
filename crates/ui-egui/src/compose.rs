@@ -553,7 +553,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let now = ctx.input(|i| i.time);
     let saved_text = c.saved_at.map(saved_text);
     let title = if c.from_draft { "Concept" } else { "Nieuw bericht" };
-    helder::os_window(ctx, t, "compose-window", title, vec2(900.0, 700.0), &mut open, |ui| {
+    helder::item_window(ctx, t, "compose-window", title, vec2(900.0, 700.0), &mut open, |ui| {
         // Files dropped onto the window become attachments; files hovering over it get a hint.
         // The window's own input, as it may be a window of its own.
         if !sending {

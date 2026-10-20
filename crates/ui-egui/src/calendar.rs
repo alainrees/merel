@@ -1759,7 +1759,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         (Some(_), None) => "Afspraak",
     };
     let mut open = true;
-    helder::os_window(ctx, t, "appointment-window", title, vec2(980.0, 760.0), &mut open, |ui| {
+    helder::item_window(ctx, t, "appointment-window", title, vec2(980.0, 760.0), &mut open, |ui| {
         helder::quiet(ui, t, |ui| {
             ui.horizontal(|ui| {
                 let sends = !editor.attendees.trim().is_empty();

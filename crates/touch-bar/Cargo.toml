@@ -1,0 +1,25 @@
+[package]
+name = "mailcraft-touch-bar"
+description = "Keeps AppKit's Touch Bar bookkeeping from aborting Mailcraft on macOS."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", features = ["exception"] }
+log = { workspace = true }
+
+# The only crate that may use `unsafe`: replacing an AppKit method needs it. Every other crate
+# keeps the workspace's `unsafe_code = "forbid"`.
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
