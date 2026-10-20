@@ -16,3 +16,17 @@ log = { workspace = true }
 
 [lints]
 workspace = true
+
+# The .deb package for Debian and Ubuntu, made by cargo-deb in the release workflow.
+[package.metadata.deb]
+name = "mailcraft"
+maintainer = "Alain Rees"
+copyright = "2026, the Mailcraft authors"
+section = "mail"
+extended-description = "Mail, calendar, contacts and tasks for the desktop, with the way of working of Outlook."
+depends = "$auto"
+assets = [
+    ["target/release/mailcraft", "usr/bin/", "755"],
+    ["../../packaging/linux/mailcraft.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/icon-256.png", "usr/share/icons/hicolor/256x256/apps/mailcraft.png", "644"],
+]

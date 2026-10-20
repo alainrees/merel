@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Mailcraft
+Comment=Mail, agenda, contacten en taken
+Exec=mailcraft
+Icon=mailcraft
+Terminal=false
+Categories=Office;Network;Email;Calendar;
+StartupWMClass=mailcraft

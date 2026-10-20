@@ -319,3 +319,18 @@ cargo clippy --all-targets -- -D warnings
 Requires Rust 1.95 or newer.
 
 See [`docs/architecture.md`](docs/architecture.md).
+
+## Install
+
+Each release on the [releases page](https://github.com/alainrees/mailcraft/releases) carries an
+installer per platform, built by `.github/workflows/release.yml` when a tag `vX.Y.Z` is pushed
+(the tag must match the version in `Cargo.toml`); `SHA256SUMS.txt` lists their checksums.
+
+| Platform | File | How |
+| --- | --- | --- |
+| macOS 11+ (Apple Silicon and Intel) | `Mailcraft-X.Y.Z-macos.dmg` | Drag Mailcraft to Applications. The app has a free ad-hoc signature, not an Apple one, so the first start needs "Open Anyway" under System Settings > Privacy & Security. |
+| Windows 10+ (x64) | `Mailcraft-X.Y.Z-windows-setup.exe` | A short wizard in Dutch or English; installs for the current user without administrator rights. SmartScreen asks once, under "More info". |
+| Linux (x86_64) | `Mailcraft-X.Y.Z-linux-x86_64.AppImage` or `mailcraft_X.Y.Z-1_amd64.deb` | Make the AppImage executable and run it, or install the .deb on Debian or Ubuntu. |
+
+The packaging files live in `packaging/`: the app icon, `macos/bundle.sh` with `Info.plist`,
+`windows/mailcraft.iss` for Inno Setup and `linux/` with the desktop entry and the AppImage script.
