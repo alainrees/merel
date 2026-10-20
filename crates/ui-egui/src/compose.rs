@@ -391,11 +391,11 @@ impl MailApp {
         match serde_json::to_value(c.as_stored()) {
             Ok(params) => {
                 self.run("draft.save", params);
-                if self.notice.is_none() {
-                    self.notice = Some("Concept bewaard. Je vindt het onder Concepten bij het account.".into());
+                if !self.notice.as_ref().is_some_and(|n| matches!(n.tone, crate::notice::Tone::Warning | crate::notice::Tone::Error)) {
+                    self.notice = Some(crate::Notice::success("Concept bewaard. Je vindt het onder Concepten bij het account."));
                 }
             }
-            Err(_) => self.notice = Some("Het concept kon niet worden bewaard.".into()),
+            Err(_) => self.notice = Some(crate::Notice::error("Het concept kon niet worden bewaard.")),
         }
     }
 
@@ -419,7 +419,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 let stored = c.stored.clone();
                 app.compose = None;
                 app.forget_draft(stored.as_deref());
-                app.notice = Some("Bericht verzonden.".into());
+                app.notice = Some(crate::Notice::success("Bericht verzonden."));
                 return;
             }
             Some(SendState::Failed(e)) => {
@@ -720,10 +720,10 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 app.notice = None;
                 app.put_aside();
                 if app.engine.session.last_draft.as_deref().and_then(|id| app.engine.session.draft(id)).is_some_and(|d| d.send_at == Some(ts)) {
-                    app.notice = Some(format!(
+                    app.notice = Some(crate::Notice::success(format!(
                         "Het bericht wordt verzonden op {} als Mailcraft dan draait. Tot die tijd staat het onder Concepten; open het daar om dat te veranderen.",
                         when_text(ts)
-                    ));
+                    )));
                 }
                 return;
             }

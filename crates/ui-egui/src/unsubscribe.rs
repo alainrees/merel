@@ -97,19 +97,19 @@ impl MailApp {
                 let account =
                     self.engine.session.message(&c.message_id).and_then(|m| self.engine.session.folder(&m.folder_id)).map(|f| f.account_id.clone());
                 let Some(account) = account else {
-                    self.notice = Some("Het bericht is niet meer te vinden.".to_string());
+                    self.notice = Some(crate::Notice::warning("Het bericht is niet meer te vinden."));
                     return;
                 };
                 let draft = Draft { to: vec![to.clone()], subject: subject.clone(), body: "unsubscribe".to_string(), ..Draft::default() };
                 let id = self.engine.send(&account, draft);
                 self.notice = Some(match self.engine.session.outbox.get(&id) {
-                    Some(SendState::Failed(e)) => e.clone(),
-                    _ => format!("Afmeldverzoek verstuurd aan {}.", to.email()),
+                    Some(SendState::Failed(e)) => crate::Notice::error(e.clone()),
+                    _ => crate::Notice::success(format!("Afmeldverzoek verstuurd aan {}.", to.email())),
                 });
             }
             Way::Web(url) => {
                 ctx.open_url(egui::OpenUrl::new_tab(url));
-                self.notice = Some("De afmeldpagina is geopend in de browser.".to_string());
+                self.notice = Some(crate::Notice::info("De afmeldpagina is geopend in de browser."));
             }
         }
     }

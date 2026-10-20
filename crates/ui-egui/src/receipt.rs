@@ -55,17 +55,17 @@ impl MailApp {
     /// Sends the receipt the sender asked for, from the account the message came in on.
     pub fn send_read_receipt(&mut self, message_id: &str) {
         let Some(m) = self.engine.session.message(message_id).cloned() else {
-            self.notice = Some("Het bericht is niet meer te vinden.".to_string());
+            self.notice = Some(crate::Notice::warning("Het bericht is niet meer te vinden."));
             return;
         };
         let Some(to) = self.engine.session.bodies.get(message_id).and_then(|b| b.receipt_to.clone()) else { return };
         let Some(account) = self.engine.session.folder(&m.folder_id).map(|f| f.account_id.clone()) else { return };
         let id = self.engine.send(&account, draft(&m, &to, chrono::Local::now().timestamp()));
         match self.engine.session.outbox.get(&id) {
-            Some(SendState::Failed(e)) => self.notice = Some(e.clone()),
+            Some(SendState::Failed(e)) => self.notice = Some(crate::Notice::error(e.clone())),
             _ => {
                 self.receipts_sent.insert(message_id.to_string());
-                self.notice = Some(format!("Leesbevestiging verstuurd aan {}.", to.email()));
+                self.notice = Some(crate::Notice::success(format!("Leesbevestiging verstuurd aan {}.", to.email())));
             }
         }
     }
