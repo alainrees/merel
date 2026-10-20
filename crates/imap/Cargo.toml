@@ -3,6 +3,7 @@ name = "mailcraft-imap"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 mailcraft-model = { workspace = true }
@@ -10,6 +11,8 @@ mailcraft-mime = { workspace = true }
 mailcraft-mailbox = { workspace = true }
 imap = { workspace = true }
 imap-proto = { workspace = true }
+rustls = { workspace = true }
+rustls-platform-verifier = { workspace = true }
 mailcraft-secrets = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }

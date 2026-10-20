@@ -37,7 +37,7 @@ delete, archive, move to junk or to any folder of the account ("Verplaatsen" in 
 the message onto a folder); changes go back to the server. A folder shows its newest 200
 messages and a button at the bottom of the list fetches the next 200, as often as needed. New mail
 comes in on its own: the inbox of every connected account and the open folder are refreshed every
-two minutes (calendar, contacts and tasks every five), the status bar counts new unread messages,
+two minutes (calendar, contacts and tasks every five), a notice counts new unread messages,
 the window asks for attention, and its title shows the unread mail in the inboxes of every account
 together ("Mailcraft (3)"), so the count is visible in the dock, taskbar or window switcher. Junk: the
 server's own filter stays the first line, and its Junk folder shows as "Ongewenste e-mail". On top of that,
@@ -75,8 +75,8 @@ rest are plain words that may occur anywhere. "Zoek op de server" asks the mail 
 reply, reply all and forward (a forwarded message takes its attachments along, as in Outlook, except from the Junk folder; "Doorsturen als bijlage" in the message menu, or Ctrl+Alt+F, sends the message itself along as an .eml file with its headers, like Outlook's "Forward as Attachment", not from the Junk folder either; "Opnieuw verzenden" opens a message, a sent one say, as a new message with the same recipients, subject, text and attachments, like Outlook's "Resend This Message"), with attachments (picked with the file dialog or dropped onto the window, 25 MB together), a copy filed in Sent and the account's signature under the text. Closing a message you were writing puts it aside as a draft ("Concepten (deze computer)" under the account, kept in the encrypted offline cache, never on the server) to open, finish and send later. "Later verzenden" in the same window puts the message aside with a moment (in an hour, this evening, tomorrow morning, Monday morning), like Outlook's "Bezorging uitstellen": it shows under Concepten with that moment, Mailcraft sends it then if it is running, and opening it lets you drop the moment or send at once; one that cannot go becomes an ordinary draft again with a notice. Before a message goes, Mailcraft asks once, as Outlook does, when the text speaks of an attachment ("bijlage", "bijgevoegd", "attached", …) while none is on, or when the subject is empty; "Toch verzenden" sends it as it is. A password account's name,
 servers, user name and password can be changed afterwards from the account list. Gmail and Microsoft 365 sign in through
 the system browser (OAuth 2.0 with PKCE; XOAUTH2 on IMAP and SMTP for Gmail, Microsoft Graph
-for Microsoft 365); see [docs/accounts.md](docs/accounts.md) for the one-time app
-registration. Exchange Server (2013+)
+for Microsoft 365). Microsoft 365 uses Mailcraft's own Entra registration, so only name and address are asked,
+with room for a client ID of your own; Gmail needs a client of your own, see [docs/accounts.md](docs/accounts.md). Exchange Server (2013+)
 works through Exchange Web Services over HTTPS, reading and sending alike. The calendar module
 shows a month, week or day view with a local calendar: appointments are created, edited and
 deleted in a window and kept in `calendar.json`. An appointment in a calendar on this computer can
@@ -98,7 +98,11 @@ reminds again. Reminders travel with Exchange, Microsoft
 365, Google and CalDAV appointments as the server's own reminder or alarm. An appointment can be marked
 "Privé", as in Outlook: it shows a lock in the calendar, and the mark travels to Exchange and Microsoft 365 as
 sensitivity Private, to Google as visibility private and to CalDAV as `CLASS:PRIVATE`, so anyone the calendar is
-shared with there sees only that the time is taken. "Weergeven als" in the same window sets how the time counts for
+shared with there sees only that the time is taken. Categories, the same coloured labels as on mail, go on an appointment
+in its window ("Categorie toevoegen", a chip with ✕ takes one off, "Alle categorieën wissen" empties the list); a
+categorised appointment is painted in its first category's colour, as Outlook does. They travel to CalDAV as
+`CATEGORIES`, to Exchange and Microsoft 365 as the item's categories, and to Google (which has none) as a private
+extended property. "Weergeven als" in the same window sets how the time counts for
 your availability, Outlook's Vrij, Voorlopig, Bezet or Afwezig: a free appointment is drawn as a pale block with the
 calendar's colour as its border, a tentative one half-transparent, a busy one solid and an out-of-office one purple.
 The status travels as Exchange's LegacyFreeBusyStatus, Microsoft 365's showAs, Google's transparency (free or busy,
@@ -122,9 +126,16 @@ each week in the month view and in the time gutter of the week and day views, as
 (off by default, kept in `view.json`); "Ga naar datum" in the ribbon (Ctrl+G) asks for a day as dag-maand-jaar and
 shows it in the current view, as Outlook's Ga naar datum; "Werkuren" on the Beeld tab (on by default) shades the hours
 outside 8:00-17:00 and the weekend in the day and week views, as Outlook shades the time outside the working day; each
-calendar under "Mijn agenda's" in the side pane has a tick box, and an unticked calendar keeps its appointments out of
-the views, the search list and the printed page until it is ticked again (reminders still come), as in Outlook (kept
-in `view.json`). In the week and day views
+calendar under "Mijn agenda's" in the side pane has a round dot in its colour, filled with a tick while it shows, and
+clicking the row hides it: an unticked calendar keeps its appointments out of the views, the search list and the
+printed page until it is ticked again (reminders still come), as in Outlook (kept in `view.json`). The "⋯" after a
+calendar (or a right click) gives it one of twelve colours, each at least 3:1 against the window in both themes, and
+renames or deletes a calendar on this computer; "Agenda toevoegen" makes a new local calendar with a name and colour.
+A colour picked for an account's calendar stays on this computer (`calendar.json`). With more than one calendar ticked, the day and
+week views show a tab per calendar in its colour, as Outlook does: merged, the calendars share one grid and
+appointments at the same time stand side by side (each in its own colour); the arrow on a tab puts the calendars
+side by side, each with its own days under its tab (a click in a calendar's hours makes the appointment there), and
+back; the cross on a tab unticks that calendar. The choice is kept in `view.json`. In the week and day views
 the bottom edge of an appointment can be dragged too, to make it longer or shorter by the half hour. The calendar's
 side pane lists the open tasks; drag one onto a day or an hour and the appointment window opens for it, with the
 task's title and notes filled in, so planning a task is one drag and "Opslaan". The appointment window also has
@@ -140,7 +151,7 @@ puts every member's address in the field. Groups live in `contact_groups.json` o
 brings its own calendar, contacts and tasks along (Google Calendar, People and Tasks for Gmail), and so
 does an IMAP account with a CalDAV/CardDAV server next to it (Fastmail, iCloud, Nextcloud and the like): they
 appear next to the local ones, changes go straight to the server, and a new item asks whether
-it belongs on this computer or in the account. Everything an account showed is kept in an
+it belongs on this computer or in the account. When that calendar server cannot be reached, the mail still connects and the account's card says what went wrong with the calendar. A mail server that does not answer, or a port with the wrong choice between TLS and STARTTLS, gives a plain error within a minute instead of "Verbinden…" without end. Everything an account showed is kept in an
 encrypted offline cache, so the window fills at once on the next start and mail you opened
 before can be read without a connection, and changes you make without one (flags, moves,
 appointments, contacts, tasks) wait and reach the server when it is back, even after a restart.
@@ -198,7 +209,14 @@ temporary folder and opens it, and the browser's print dialog does the rest. In 
 appointment's time, title and place. "Opslaan als…" under "Bestand" (or Ctrl+S) saves the open message as an
 .eml file in the Downloads folder, like Outlook's "Save As": the message as it arrived, headers and all, when the
 cache still holds it, else a plain copy of its envelope and text; the file is named after the subject and a taken
-name gets " (2)". The status bar says where it went.
+name gets " (2)". A notice says where it went.
+
+What an action has to say appears the way the new Outlook shows it: a message bar at the top of the window, just
+under the ribbon, where the person was looking. Its icon and edge tell the kind apart, and a screen reader hears it
+too: green with a check for done, blue for information, amber with a triangle for a warning, red only for what
+failed. Good news and information go away after six seconds and a warning after twelve (never while the pointer
+rests on it); an error stays until it is closed. A saved file is named by itself and its folder, not by its full
+path, and "Toon in Finder" (Verkenner on Windows, the folder on Linux) shows it.
 
 A flag can carry a date, Outlook's "Opvolgen": the right-click menu's "Opvolgen" offers Vandaag, Morgen,
 Deze week (this week's Friday), Volgende week or Geen datum. The flag goes to the server as any flag does; the
@@ -264,7 +282,7 @@ recipient and S/MIME does not.
 
 A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
 hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the
-list until then and comes back unread, with a line in the status bar; the "Gesluimerd" filter on the Beeld tab shows
+list until then and comes back unread, with a notice; the "Gesluimerd" filter on the Beeld tab shows
 what is put off, a strip over such a message names the moment, and "Niet meer sluimeren" brings it back now. The list
 stays on this computer (`snoozed.json`, filed under the Message-ID so a move keeps it); the server only sees the
 unread flag when the message returns.
@@ -334,3 +352,9 @@ installer per platform, built by `.github/workflows/release.yml` when a tag `vX.
 
 The packaging files live in `packaging/`: the app icon, `macos/bundle.sh` with `Info.plist`,
 `windows/mailcraft.iss` for Inno Setup and `linux/` with the desktop entry and the AppImage script.
+
+## License
+
+Mailcraft is licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT), at your option. Unless you state otherwise, any contribution you submit
+for inclusion in Mailcraft is dual licensed as above, without any additional terms or conditions.

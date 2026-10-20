@@ -97,6 +97,7 @@ fn build() -> Option<Session> {
         calendars: vec![Calendar::local()],
         appointments: appointments(),
         dismissed: Vec::new(),
+        colors: Default::default(),
     });
     session.set_contacts(contacts());
     session.set_tasks(tasks());
@@ -192,6 +193,7 @@ fn appointments() -> Vec<Appointment> {
                 reminder: None,
                 private: false,
                 show_as: mailcraft_model::ShowAs::Busy,
+                categories: if i == 0 { vec!["Blauwe categorie".into()] } else { Vec::new() },
             })
         })
         .collect();
@@ -212,6 +214,7 @@ fn appointments() -> Vec<Appointment> {
             reminder: None,
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
+            categories: Vec::new(),
         });
     }
     list

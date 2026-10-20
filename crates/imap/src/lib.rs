@@ -3,7 +3,17 @@
 //! TLS is mandatory. Implicit TLS (port 993) or STARTTLS, both through rustls with the
 //! platform's certificate verifier; there is no way to turn verification off. Mailbox names
 //! are quoted before they go on the wire, so a hostile folder name cannot inject a command.
+//!
+//! The connection is opened here rather than by the imap crate, so that every step has a
+//! limit: a server that does not answer, or answers on the wrong port, is an error after
+//! [`CONNECT_TIMEOUT`] or [`READ_TIMEOUT`] instead of a wait without end.
 
+use std::io::{self, Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::Arc;
+use std::time::Duration;
+
+use imap::extensions::idle::SetReadTimeout;
 use imap_proto::{BodyStructure, NameAttribute};
 pub use mailcraft_mailbox::{Credential, Flag, Mailbox, MailboxError, RemoteFolder, RemoteHeader};
 use mailcraft_model::{FolderKind, Server, Tls};
@@ -21,10 +31,16 @@ impl imap::Authenticator for XOAuth2<'_> {
     }
 }
 
+/// How long a server gets to accept the connection.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long a server may stay silent while Mailcraft waits for its answer.
+pub const READ_TIMEOUT: Duration = Duration::from_secs(60);
+
 #[derive(Debug, thiserror::Error)]
 pub enum ImapError {
-    #[error("could not connect to {host}: {source}")]
-    Connect { host: String, source: Box<imap::Error> },
+    /// The connection could not be opened or secured; `reason` is for the person, in Dutch.
+    #[error("could not connect to {host}: {reason}")]
+    Connect { host: String, reason: String },
     #[error("the server refused the user name or password")]
     Login,
     #[error("IMAP error: {0}")]
@@ -39,12 +55,47 @@ impl From<imap::Error> for ImapError {
     }
 }
 
+fn is_timeout(e: &io::Error) -> bool {
+    matches!(e.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock)
+}
+
+/// What went wrong while opening a connection, in words for the person.
+fn reason_of(e: &io::Error) -> String {
+    if is_timeout(e) {
+        return "de server reageert niet; klopt de keuze tussen TLS en STARTTLS bij deze poort?".into();
+    }
+    if let Some(tls) = e.get_ref().and_then(|inner| inner.downcast_ref::<rustls::Error>()) {
+        return match tls {
+            rustls::Error::InvalidCertificate(c) => format!("het certificaat van de server wordt niet vertrouwd ({c:?})"),
+            other => format!("de beveiligde verbinding mislukte ({other}); klopt de keuze tussen TLS en STARTTLS bij deze poort?"),
+        };
+    }
+    match e.kind() {
+        io::ErrorKind::ConnectionRefused => "de server weigert de verbinding; klopt de poort?".into(),
+        io::ErrorKind::InvalidData | io::ErrorKind::UnexpectedEof | io::ErrorKind::ConnectionReset | io::ErrorKind::ConnectionAborted => {
+            "de server verbrak de beveiligde verbinding; klopt de keuze tussen TLS en STARTTLS bij deze poort?".into()
+        }
+        _ => e.to_string(),
+    }
+}
+
+/// The reason inside an imap error raised while connecting.
+fn connect_reason(e: &imap::Error) -> String {
+    match e {
+        imap::Error::Io(io) => reason_of(io),
+        other => other.to_string(),
+    }
+}
+
 impl From<ImapError> for MailboxError {
     fn from(e: ImapError) -> Self {
         match e {
-            ImapError::Connect { host, source } => MailboxError::Connect { host, reason: source.to_string() },
+            ImapError::Connect { host, reason } => MailboxError::Connect { host, reason },
             ImapError::Login => MailboxError::Login,
-            ImapError::Protocol(e) => MailboxError::Protocol(e.to_string()),
+            ImapError::Protocol(e) => match *e {
+                imap::Error::Io(io) if is_timeout(&io) => MailboxError::Protocol("de server reageert niet meer".into()),
+                e => MailboxError::Protocol(e.to_string()),
+            },
             ImapError::BadName(n) => MailboxError::BadName(n),
         }
     }
@@ -58,6 +109,128 @@ fn uid_of(id: &str) -> Result<u32> {
 }
 
 type Conn = imap::Connection;
+
+/// A TLS connection over TCP, in a shape the imap crate can drive.
+struct TlsStream(rustls::StreamOwned<rustls::ClientConnection, TcpStream>);
+
+impl Read for TlsStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+
+impl Write for TlsStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.write(buf)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+impl SetReadTimeout for TlsStream {
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> imap::Result<()> {
+        self.0.sock.set_read_timeout(timeout).map_err(imap::Error::Io)
+    }
+}
+
+/// A TCP connection to `host:port`, tried address by address, each within
+/// [`CONNECT_TIMEOUT`]; reads and writes on it give up after `wait`.
+fn open_tcp(host: &str, port: u16, wait: Duration) -> std::result::Result<TcpStream, String> {
+    let addrs: Vec<_> = (host, port).to_socket_addrs().map_err(|_| "de servernaam is niet gevonden; klopt hij?".to_string())?.collect();
+    if addrs.is_empty() {
+        return Err("de servernaam is niet gevonden; klopt hij?".into());
+    }
+    let mut last = None;
+    for addr in addrs {
+        match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
+            Ok(tcp) => {
+                let limits = tcp.set_read_timeout(Some(wait)).and_then(|()| tcp.set_write_timeout(Some(wait)));
+                return limits.map(|()| tcp).map_err(|e| reason_of(&e));
+            }
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(match last {
+        Some(e) if is_timeout(&e) => {
+            format!("de server reageert niet (na {} seconden opgegeven); klopt de servernaam en de poort?", CONNECT_TIMEOUT.as_secs())
+        }
+        Some(e) => reason_of(&e),
+        None => "de servernaam is niet gevonden; klopt hij?".into(),
+    })
+}
+
+/// Wraps `tcp` in TLS for `host`, checked by the platform's certificate verifier. The
+/// handshake itself happens on the first read.
+fn tls(host: &str, tcp: TcpStream) -> std::result::Result<TlsStream, String> {
+    use rustls_platform_verifier::BuilderVerifierExt;
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .and_then(|b| b.with_platform_verifier())
+        .map_err(|e| format!("de beveiliging kon niet worden ingesteld ({e})"))?
+        .with_no_client_auth();
+    let name = rustls::pki_types::ServerName::try_from(host.to_string()).map_err(|_| "de servernaam is niet geldig".to_string())?;
+    let conn = rustls::ClientConnection::new(Arc::new(config), name).map_err(|e| format!("de beveiligde verbinding mislukte ({e})"))?;
+    Ok(TlsStream(rustls::StreamOwned::new(conn, tcp)))
+}
+
+/// One line from the server, read a byte at a time so nothing after it (the TLS handshake)
+/// is taken from the socket.
+fn read_line(tcp: &mut TcpStream) -> std::result::Result<String, String> {
+    let mut line = Vec::new();
+    let mut byte = [0u8; 1];
+    while line.len() < 8192 {
+        match tcp.read(&mut byte) {
+            Ok(0) => return Err("de server verbrak de verbinding; klopt de keuze tussen TLS en STARTTLS bij deze poort?".into()),
+            Ok(_) if byte[0] == b'\n' => return Ok(String::from_utf8_lossy(&line).trim_end().to_string()),
+            Ok(_) => line.push(byte[0]),
+            Err(e) => return Err(reason_of(&e)),
+        }
+    }
+    Err("de server stuurt iets anders dan IMAP; klopt de poort?".into())
+}
+
+/// Reads the plain greeting and asks for `STARTTLS`; the connection is ready for TLS after.
+fn starttls(tcp: &mut TcpStream) -> std::result::Result<(), String> {
+    let greeting = read_line(tcp)?;
+    // PREAUTH before TLS would mean a session nobody secured; it is refused like anything else.
+    if !greeting.starts_with("* OK") {
+        return Err("de server stuurt iets anders dan IMAP; klopt de poort?".into());
+    }
+    tcp.write_all(b"m0 STARTTLS\r\n").map_err(|e| reason_of(&e))?;
+    loop {
+        let line = read_line(tcp)?;
+        if let Some(status) = line.strip_prefix("m0 ") {
+            return if status.get(..2).is_some_and(|s| s.eq_ignore_ascii_case("OK")) {
+                Ok(())
+            } else {
+                Err("de server weigert STARTTLS; kies TLS of een andere poort".into())
+            };
+        }
+    }
+}
+
+/// An IMAP client on a secured connection, greeting read: TLS from the first byte, or a plain
+/// greeting and `STARTTLS` first. `wait` is how long the server may stay silent.
+fn open(server: &Server, wait: Duration) -> Result<imap::Client<Conn>> {
+    let host = server.host.as_str();
+    let failed = |reason: String| ImapError::Connect { host: host.to_string(), reason };
+    let tcp = open_tcp(host, server.port, wait).map_err(failed)?;
+    let stream = match server.tls {
+        Tls::Implicit => tls(host, tcp).map_err(failed)?,
+        Tls::StartTls => {
+            let mut tcp = tcp;
+            starttls(&mut tcp).map_err(failed)?;
+            tls(host, tcp).map_err(failed)?
+        }
+    };
+    let mut client = imap::Client::new(Box::new(stream) as Conn);
+    if server.tls == Tls::Implicit {
+        client.read_greeting().map_err(|e| failed(connect_reason(&e)))?;
+    }
+    Ok(client)
+}
 
 pub struct ImapClient {
     session: imap::Session<Conn>,
@@ -114,14 +287,7 @@ fn has_attachment(b: &BodyStructure<'_>) -> bool {
 impl ImapClient {
     /// Connects, negotiates TLS and logs in.
     pub fn connect(server: &Server, username: &str, credential: &Credential) -> Result<Self> {
-        let mode = match server.tls {
-            Tls::Implicit => imap::ConnectionMode::Tls,
-            Tls::StartTls => imap::ConnectionMode::StartTls,
-        };
-        let client = imap::ClientBuilder::new(server.host.as_str(), server.port)
-            .mode(mode)
-            .connect()
-            .map_err(|source| ImapError::Connect { host: server.host.clone(), source: Box::new(source) })?;
+        let client = open(server, READ_TIMEOUT)?;
         let refused = |(e, _): (imap::Error, imap::Client<Conn>)| match e {
             imap::Error::No(_) | imap::Error::Bad(_) => ImapError::Login,
             e => ImapError::Protocol(Box::new(e)),
@@ -505,6 +671,86 @@ impl Mailbox for ImapClient {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::Instant;
+
+    /// A server on a free local port that runs `serve` on the first connection.
+    fn server(serve: impl FnOnce(std::net::TcpStream) + Send + 'static) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                serve(stream);
+            }
+        });
+        port
+    }
+
+    fn reason(tls: Tls, port: u16) -> String {
+        let started = Instant::now();
+        let at = Server { host: "localhost".into(), port, tls };
+        let Err(e) = open(&at, Duration::from_millis(500)) else { panic!("connected to a server that should fail") };
+        assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
+        match e {
+            ImapError::Connect { host, reason } => {
+                assert_eq!(host, "localhost");
+                reason
+            }
+            other => panic!("expected a connection error, got {other}"),
+        }
+    }
+
+    #[test]
+    fn a_silent_server_is_an_error_not_a_wait() {
+        // STARTTLS on a TLS port: both sides wait for the other to speak first.
+        let port = server(|s| {
+            std::thread::sleep(Duration::from_secs(3));
+            drop(s);
+        });
+        assert!(reason(Tls::StartTls, port).contains("reageert niet"));
+        // TLS to a server that takes the hello and never answers.
+        let port = server(|mut s| {
+            let _ = s.read(&mut [0u8; 512]);
+            std::thread::sleep(Duration::from_secs(3));
+        });
+        assert!(reason(Tls::Implicit, port).contains("reageert niet"));
+    }
+
+    #[test]
+    fn plain_imap_on_a_tls_connection_says_so() {
+        let port = server(|mut s| {
+            let _ = s.write_all(b"* OK IMAP4rev1 ready\r\n");
+            let _ = s.read(&mut [0u8; 512]);
+        });
+        let why = reason(Tls::Implicit, port);
+        assert!(why.contains("TLS en STARTTLS"), "{why}");
+    }
+
+    #[test]
+    fn a_closed_port_and_an_unknown_name_are_told_apart() {
+        let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        assert!(reason(Tls::Implicit, port).contains("weigert"));
+        let at = Server { host: "bestaat-niet.invalid".into(), port: 993, tls: Tls::Implicit };
+        match open(&at, Duration::from_millis(500)) {
+            Err(ImapError::Connect { reason, .. }) => assert!(reason.contains("niet gevonden"), "{reason}"),
+            other => panic!("expected a connection error, got {:?}", other.err()),
+        }
+    }
+
+    #[test]
+    fn a_server_refusing_starttls_says_so() {
+        let port = server(|mut s| {
+            let _ = s.write_all(b"* OK ready\r\n");
+            let mut buf = [0u8; 512];
+            let n = s.read(&mut buf).unwrap_or(0);
+            let tag = String::from_utf8_lossy(&buf[..n]).split(' ').next().unwrap_or("a1").to_string();
+            let _ = s.write_all(format!("{tag} BAD STARTTLS not supported\r\n").as_bytes());
+            std::thread::sleep(Duration::from_millis(500));
+        });
+        assert!(reason(Tls::StartTls, port).contains("STARTTLS"));
+    }
+
     use super::*;
 
     #[test]

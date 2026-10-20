@@ -66,15 +66,15 @@ impl MailApp {
         let name = format!("{}.vcf", if c.name.trim().is_empty() { "contact" } else { c.name.trim() });
         self.notice = Some(match downloads_dir() {
             Some(dir) => match save_to(&dir, &name, text.as_bytes()) {
-                Ok(path) => format!("Contact opgeslagen als {}", path.display()),
-                Err(e) => format!("Contact niet opgeslagen: {e}"),
+                Ok(path) => crate::attachments::saved("Contact", &path),
+                Err(e) => crate::Notice::error(format!("Contact niet opgeslagen: {e}")),
             },
-            None => "Contact niet opgeslagen: geen map Downloads gevonden.".into(),
+            None => crate::Notice::error("Contact niet opgeslagen: geen map Downloads gevonden."),
         });
     }
 
     /// Reads vCard files into the local address book; a card whose first address is known
-    /// already is skipped. The outcome shows in the status bar.
+    /// already is skipped. A notice says how it went.
     pub fn import_contacts(&mut self, paths: &[impl AsRef<Path>]) -> Outcome {
         let mut out = Outcome::default();
         for path in paths {
@@ -102,7 +102,12 @@ impl MailApp {
                 }
             }
         }
-        self.notice = Some(out.notice());
+        let tone = match out {
+            Outcome { added: 0, failed: 0, .. } => crate::notice::Tone::Info,
+            Outcome { failed: 0, .. } => crate::notice::Tone::Success,
+            _ => crate::notice::Tone::Warning,
+        };
+        self.notice = Some(crate::Notice::new(tone, out.notice()));
         out
     }
 }

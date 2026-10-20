@@ -118,7 +118,7 @@ impl Cache {
                 }
                 Some(account_id.clone())
             }
-            Event::Failed { .. } | Event::Sent { .. } | Event::SignedIn { .. } => None,
+            Event::Failed { .. } | Event::ItemsFailed { .. } | Event::Sent { .. } | Event::SignedIn { .. } => None,
         };
         if let Some(account) = account.filter(|a| a != SAMPLE_ACCOUNT) {
             self.dirty.insert(account);

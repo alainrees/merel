@@ -31,7 +31,7 @@ pub struct AccountForm {
     pub client_secret: String,
     pub error: Option<String>,
     /// How a sign-in started from the account list ended.
-    pub notice: Option<String>,
+    pub notice: Option<crate::Notice>,
     /// The account whose Remove button was clicked once; the second click removes it.
     pub confirm_remove: Option<String>,
     /// The account whose signature is being edited, with the text so far.
@@ -231,7 +231,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 } else if app.can_print() {
                     app.print_selected();
                 } else {
-                    app.notice = Some("Open eerst een bericht om af te drukken.".into());
+                    app.notice = Some(crate::Notice::warning("Open eerst een bericht om af te drukken."));
                 }
                 app.tab = Tab::Home;
             }
@@ -261,8 +261,8 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let oauth_form = matches!(app.form.kind, Protocol::Gmail | Protocol::Microsoft365);
             if !oauth_form {
                 match app.engine.session.sign_in.take() {
-                    Some(Some(Ok(()))) => app.form.notice = Some("Opnieuw aangemeld; het account verbindt opnieuw.".into()),
-                    Some(Some(Err(e))) => app.form.notice = Some(e),
+                    Some(Some(Ok(()))) => app.form.notice = Some(crate::Notice::success("Opnieuw aangemeld; het account verbindt opnieuw.")),
+                    Some(Some(Err(e))) => app.form.notice = Some(crate::Notice::error(e)),
                     Some(None) => app.engine.session.sign_in = Some(None),
                     None => {}
                 }
@@ -288,7 +288,7 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 ui.label(RichText::new("Er is nog geen account. Je ziet voorbeeldmail.").color(t.text_dim));
             }
             if let Some(n) = &app.form.notice {
-                ui.label(RichText::new(n).color(t.text_dim));
+                crate::notice::inline(ui, t, n);
                 ui.add_space(8.0);
             }
             let mut again = None;
@@ -312,6 +312,10 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         AccountStatus::Error(e) => (e, t.flag),
                     };
                     ui.label(RichText::new(txt).size(12.0).color(col));
+                    // The mail works, the calendar server next to it did not answer.
+                    if let Some(e) = app.engine.session.item_errors.get(&id) {
+                        ui.label(RichText::new(e).size(12.0).color(t.flag));
+                    }
                     ui.add_space(4.0);
                     if oauth {
                         let label = if busy { "Wacht op de browser…" } else { "Opnieuw aanmelden" };
@@ -409,8 +413,8 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
             if let Some((id, text)) = save_signature {
                 app.form.notice = match app.engine.set_signature(&id, &text) {
-                    Ok(()) => Some("De handtekening is opgeslagen.".into()),
-                    Err(e) => Some(e),
+                    Ok(()) => Some(crate::Notice::success("De handtekening is opgeslagen.")),
+                    Err(e) => Some(crate::Notice::error(e)),
                 };
             }
             if let Some(id) = remove {
@@ -419,8 +423,8 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 }
                 app.form.confirm_remove = None;
                 app.form.notice = Some(match app.engine.remove_account(&id) {
-                    Ok(()) => "Het account is verwijderd.".into(),
-                    Err(e) => e,
+                    Ok(()) => crate::Notice::success("Het account is verwijderd."),
+                    Err(e) => crate::Notice::error(e),
                 });
             }
             ui.add_space(16.0);
@@ -600,7 +604,7 @@ fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 match app.engine.update_account(account, password) {
                     Ok(()) => {
                         app.form = AccountForm::default();
-                        app.form.notice = Some("Het account is opgeslagen en verbindt opnieuw.".into());
+                        app.form.notice = Some(crate::Notice::success("Het account is opgeslagen en verbindt opnieuw."));
                     }
                     Err(e) => app.form.error = Some(e),
                 }
@@ -633,12 +637,17 @@ fn oauth_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         None => {}
     }
     let busy = app.engine.session.sign_in.is_some();
+    // With Mailcraft's own registration the client ID is only for those who bring their own.
+    let builtin = app.form.kind.builtin_client_id().is_some();
     let (provider, secret_needed, help) = match app.form.kind {
         Protocol::Gmail => (
             "Google",
             true,
             "Maak in de Google Cloud Console een OAuth-client van het type Desktop app en vul de client-ID en het client-secret in. Zie docs/accounts.md.",
         ),
+        _ if builtin => {
+            ("Microsoft", false, "Vul je naam en e-mailadres in en log in bij Microsoft in je browser. Mailcraft ziet je wachtwoord niet.")
+        }
         _ => (
             "Microsoft",
             false,
@@ -651,7 +660,13 @@ fn oauth_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.add_enabled_ui(!busy, |ui| {
         field(ui, t, "Naam", &mut f.name, false);
         field(ui, t, "E-mailadres", &mut f.email, false);
-        field(ui, t, "Client-ID", &mut f.client_id, false);
+        if builtin {
+            egui::CollapsingHeader::new("Eigen client-ID (optioneel)").default_open(!f.client_id.is_empty()).show(ui, |ui| {
+                field(ui, t, "Client-ID", &mut f.client_id, false);
+            });
+        } else {
+            field(ui, t, "Client-ID", &mut f.client_id, false);
+        }
         if secret_needed {
             field(ui, t, "Client-secret", &mut f.client_secret, true);
         }
@@ -771,6 +786,26 @@ mod tests {
         assert!(harness.query_by_label("Handtekening bewerken").is_some());
         harness.state_mut().open_compose(crate::compose::Kind::New);
         assert_eq!(harness.state().compose.as_ref().map(|c| c.body.as_str()), Some("\n\n-- \nGroet,\nAlain"));
+    }
+
+    #[test]
+    fn the_account_card_says_why_the_calendar_is_missing() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut engine = mailcraft_engine::Engine::sample();
+        let mut f = AccountForm::default();
+        f.email = "alain@voorbeeld.nl".into();
+        f.password = "x".into();
+        f.suggest();
+        let account = f.account().unwrap();
+        let id = account.id.clone();
+        engine.add_account(account, Secret::new("x")).unwrap();
+        engine.session.item_errors.insert(id, "Agenda en adresboek: Kan geen verbinding maken met dav.voorbeeld.nl: de server reageert niet.".into());
+        let mut app = MailApp::new(engine);
+        app.tab = Tab::File;
+        let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        harness.run();
+        assert!(harness.query_by_label_contains("Agenda en adresboek: Kan geen verbinding").is_some());
     }
 
     #[test]

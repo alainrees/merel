@@ -111,7 +111,7 @@ impl Session {
         if self.calendar(&id).is_none() {
             let index = self.accounts.iter().position(|a| a.id == account_id).unwrap_or(0);
             let name = self.accounts.iter().find(|a| a.id == account_id).map(|a| a.name.clone()).unwrap_or_else(|| account_id.to_string());
-            let color = PALETTE[index % PALETTE.len()];
+            let color = self.calendar_colors.get(&id).copied().unwrap_or(PALETTE[index % PALETTE.len()]);
             self.calendars.push(Calendar { id: id.clone(), name, account_id: Some(account_id.to_string()), color });
         }
         id
@@ -230,6 +230,7 @@ mod tests {
             reminder: None,
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
+            categories: Vec::new(),
         }
     }
 
@@ -273,6 +274,18 @@ mod tests {
         s.run("sync.refresh", &Value::Null).unwrap();
         s.apply(Event::Synced { account_id: "acc".into(), appointments: Vec::new(), contacts: Vec::new(), tasks: Vec::new() });
         assert!(s.appointments.is_empty() && s.contacts.is_empty() && s.selected_contact.is_none());
+
+        // A colour picked for the account's calendar is saved locally and survives the
+        // calendar being made again, after a restart or when the account signs in anew.
+        s.run("calendar.color", &json!({ "id": "acc/calendar", "color": [1, 2, 3] })).unwrap();
+        let saved = s.calendar_data();
+        assert_eq!(saved.colors.get("acc/calendar"), Some(&[1, 2, 3]));
+        s.calendars.retain(|c| c.account_id.is_none());
+        s.set_calendar_data(saved);
+        s.apply(Event::Synced { account_id: "acc".into(), appointments: Vec::new(), contacts: Vec::new(), tasks: Vec::new() });
+        assert_eq!(s.calendar("acc/calendar").unwrap().color, [1, 2, 3]);
+        s.remove_account("acc");
+        assert!(s.calendar_colors.is_empty(), "the colour goes with the account");
     }
 
     #[test]

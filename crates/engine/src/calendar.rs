@@ -10,12 +10,14 @@
 //! account's calendar a new appointment can start a series too: the rule goes to the server once,
 //! which then owns the series and hands over single occurrences, edited one by one.
 
+use std::collections::BTreeMap;
+
 use chrono::Local;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use mailcraft_mailbox::Item;
-use mailcraft_model::{Appointment, AppointmentError, Calendar, Recurrence};
+use mailcraft_model::{Appointment, AppointmentError, CALENDAR_COLORS, Calendar, MAX_CALENDAR_NAME, Recurrence, clean_text};
 
 use crate::{CommandError, Session};
 
@@ -27,6 +29,10 @@ pub struct CalendarFile {
     /// Reminders closed for good, of any calendar's appointments.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dismissed: Vec<crate::reminders::ReminderKey>,
+    /// Colours the person picked for account calendars, by calendar id; a local calendar keeps
+    /// its colour in its own entry.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub colors: BTreeMap<String, [u8; 3]>,
 }
 
 impl Session {
@@ -35,6 +41,7 @@ impl Session {
         self.calendars = data.calendars;
         self.appointments = data.appointments;
         self.dismissed_reminders = data.dismissed;
+        self.calendar_colors = data.colors;
         if self.calendars.is_empty() {
             self.calendars.push(Calendar::local());
         }
@@ -45,7 +52,7 @@ impl Session {
     pub fn calendar_data(&self) -> CalendarFile {
         let calendars: Vec<Calendar> = self.calendars.iter().filter(|c| c.account_id.is_none()).cloned().collect();
         let appointments = self.appointments.iter().filter(|a| calendars.iter().any(|c| c.id == a.calendar_id)).cloned().collect();
-        CalendarFile { calendars, appointments, dismissed: self.dismissed_reminders.clone() }
+        CalendarFile { calendars, appointments, dismissed: self.dismissed_reminders.clone(), colors: self.calendar_colors.clone() }
     }
 
     pub fn calendar(&self, id: &str) -> Option<&Calendar> {
@@ -114,7 +121,8 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 /// object names its own `skipped` list. `reminder` is minutes before the start, null for none;
 /// left out, an existing appointment keeps its reminder. `private` marks the appointment as
 /// Outlook's "Privé"; false when left out. `show_as` is `free`, `tentative`, `busy` or `oof`;
-/// left out, an existing appointment keeps its status and a new one is busy.
+/// left out, an existing appointment keeps its status and a new one is busy. `categories` is
+/// a list of category names; left out, an existing appointment keeps its categories.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
         Some(id) => Some(s.appointment(id).ok_or(CommandError::NotFound)?.clone()),
@@ -151,6 +159,10 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         None => existing.as_ref().map(|a| a.show_as).unwrap_or_default(),
         Some(v) => serde_json::from_value::<mailcraft_model::ShowAs>(v.clone()).map_err(|_| CommandError::Param("show_as"))?,
     };
+    let categories = match params.get("categories") {
+        None => existing.as_ref().map(|a| a.categories.clone()).unwrap_or_default(),
+        Some(v) => serde_json::from_value::<Vec<String>>(v.clone()).map_err(|_| CommandError::Param("categories"))?,
+    };
     let id = match (&existing, &account) {
         (Some(a), _) => a.id.clone(),
         (None, Some(account)) => s.pending_id(account),
@@ -169,6 +181,7 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         reminder,
         private: params.get("private").and_then(Value::as_bool).unwrap_or(false),
         show_as,
+        categories,
     }
     .validated()
     .map_err(|e| match e {
@@ -263,6 +276,127 @@ pub fn delete(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// Gives the appointment `id` (else the selected one) other categories, on this computer or
+/// through its account's store.
+fn set_categories(s: &mut Session, params: &Value, change: impl FnOnce(&mut Vec<String>)) -> Result<(), CommandError> {
+    let id = str_param(params, "id").map(str::to_string).or_else(|| s.selected_appointment.clone()).ok_or(CommandError::NoSelection)?;
+    let mut a = s.appointment(&id).ok_or(CommandError::NotFound)?.clone();
+    change(&mut a.categories);
+    a.categories = mailcraft_model::clean_categories(a.categories);
+    match s.appointment_account(&a.calendar_id) {
+        Some(account) => s.save_remote(&account, false, Item::Appointment(a.clone()))?,
+        None => s.calendar_dirty = true,
+    }
+    if let Some(slot) = s.appointments.iter_mut().find(|x| x.id == id) {
+        *slot = a;
+    }
+    Ok(())
+}
+
+/// `appointment.categorize { name, id? }`: puts the category on the appointment, or takes it
+/// off when it is there, as `message.categorize` does for mail. The name must be a known
+/// category, or one the appointment carries already.
+pub fn categorize(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let name = clean_text(str_param(params, "name").unwrap_or("")).trim().to_string();
+    let known = s.categories.iter().find(|c| c.name.eq_ignore_ascii_case(&name)).map(|c| c.name.clone());
+    let id = str_param(params, "id").map(str::to_string).or_else(|| s.selected_appointment.clone()).ok_or(CommandError::NoSelection)?;
+    let carried = s.appointment(&id).ok_or(CommandError::NotFound)?.categories.iter().find(|c| c.eq_ignore_ascii_case(&name)).cloned();
+    if carried.is_none() && known.is_none() {
+        return Err(CommandError::Param("name"));
+    }
+    set_categories(s, &json!({ "id": id }), |list| match carried {
+        Some(c) => list.retain(|x| *x != c),
+        None => list.extend(known),
+    })
+}
+
+/// `appointment.clear_categories { id? }`: takes every category off the appointment.
+pub fn clear_categories(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    set_categories(s, params, Vec::clear)
+}
+
+fn name_param(params: &Value) -> Result<String, CommandError> {
+    let name: String = clean_text(str_param(params, "name").unwrap_or("")).trim().chars().take(MAX_CALENDAR_NAME).collect();
+    if name.is_empty() { Err(CommandError::Param("name")) } else { Ok(name) }
+}
+
+fn color_param(params: &Value) -> Result<[u8; 3], CommandError> {
+    let parts: Vec<u8> = params
+        .get("color")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_u64).filter_map(|n| u8::try_from(n).ok()).collect())
+        .unwrap_or_default();
+    <[u8; 3]>::try_from(parts.as_slice()).map_err(|_| CommandError::Param("color"))
+}
+
+/// The calendar `id` names, if it lives on this computer.
+fn local_calendar(s: &Session, params: &Value) -> Result<String, CommandError> {
+    let id = str_param(params, "id").ok_or(CommandError::Param("id"))?;
+    let c = s.calendar(id).ok_or(CommandError::NotFound)?;
+    if c.account_id.is_some() {
+        return Err(CommandError::Param("id"));
+    }
+    Ok(c.id.clone())
+}
+
+/// `calendar.add { name, color? }`: a new calendar on this computer, Outlook's "Agenda
+/// toevoegen". `color` is `[r, g, b]`; left out, the first colour no calendar has yet.
+/// [`Session::last_calendar`] holds the new id.
+pub fn calendar_add(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let name = name_param(params)?;
+    let color = match params.get("color") {
+        Some(_) => color_param(params)?,
+        None => CALENDAR_COLORS.iter().map(|(_, c)| *c).find(|c| !s.calendars.iter().any(|k| k.color == *c)).unwrap_or(CALENDAR_COLORS[0].1),
+    };
+    let id = (1..).map(|n| format!("local-{n}")).find(|id| s.calendar(id).is_none()).unwrap_or_default();
+    s.calendars.push(Calendar { id: id.clone(), name, account_id: None, color });
+    s.last_calendar = Some(id);
+    s.calendar_dirty = true;
+    Ok(())
+}
+
+/// `calendar.color { id, color }`: gives a calendar, local or an account's, another colour;
+/// `color` is `[r, g, b]`. An account's calendar keeps it on this computer only.
+pub fn calendar_color(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let id = str_param(params, "id").ok_or(CommandError::Param("id"))?.to_string();
+    let color = color_param(params)?;
+    let c = s.calendars.iter_mut().find(|c| c.id == id).ok_or(CommandError::NotFound)?;
+    c.color = color;
+    if c.account_id.is_some() {
+        s.calendar_colors.insert(id, color);
+    }
+    s.calendar_dirty = true;
+    Ok(())
+}
+
+/// `calendar.rename { id, name }`: a calendar on this computer gets another name; an account's
+/// is named after the account.
+pub fn calendar_rename(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let id = local_calendar(s, params)?;
+    let name = name_param(params)?;
+    if let Some(c) = s.calendars.iter_mut().find(|c| c.id == id) {
+        c.name = name;
+    }
+    s.calendar_dirty = true;
+    Ok(())
+}
+
+/// `calendar.delete { id }`: removes a calendar on this computer with all its appointments.
+/// One local calendar always stays.
+pub fn calendar_delete(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let id = local_calendar(s, params)?;
+    if s.calendars.iter().filter(|c| c.account_id.is_none()).count() < 2 {
+        return Err(CommandError::Param("id"));
+    }
+    s.calendars.retain(|c| c.id != id);
+    s.appointments.retain(|a| a.calendar_id != id);
+    if s.selected_appointment().is_none() {
+        s.selected_appointment = None;
+    }
+    s.calendar_dirty = true;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -321,6 +455,70 @@ mod tests {
         let series = s.selected_appointment().unwrap().id.clone();
         assert!(matches!(s.run("appointment.resize", &json!({ "id": series, "end": 20_000 })), Err(CommandError::Param("id"))));
         assert!(matches!(s.run("appointment.resize", &json!({ "id": "nope", "end": 1 })), Err(CommandError::NotFound)));
+    }
+
+    #[test]
+    fn categories_go_on_and_off_an_appointment() {
+        let mut s = Session { categories: mailcraft_model::Category::defaults(), ..Session::default() };
+        s.set_calendar_data(CalendarFile::default());
+        s.run("appointment.save", &json!({ "title": "Lunch", "start": 1000, "end": 4600, "categories": ["Rode categorie", " ", "rode categorie"] }))
+            .unwrap();
+        let id = s.selected_appointment().unwrap().id.clone();
+        assert_eq!(s.appointment(&id).unwrap().categories, vec!["Rode categorie"], "cleaned, without doubles");
+        s.run("appointment.save", &json!({ "id": id, "title": "Lunch", "start": 1000, "end": 4600 })).unwrap();
+        assert_eq!(s.appointment(&id).unwrap().categories, vec!["Rode categorie"], "left out keeps them");
+        s.take_calendar_dirty();
+        s.run("appointment.categorize", &json!({ "name": "groene categorie" })).unwrap();
+        assert_eq!(s.appointment(&id).unwrap().categories, vec!["Rode categorie", "Groene categorie"], "a known name, as the list spells it");
+        assert!(s.take_calendar_dirty());
+        s.run("appointment.categorize", &json!({ "id": id, "name": "Rode categorie" })).unwrap();
+        assert_eq!(s.appointment(&id).unwrap().categories, vec!["Groene categorie"], "a second time takes it off");
+        assert_eq!(s.run("appointment.categorize", &json!({ "name": "Onbekend" })), Err(CommandError::Param("name")));
+        s.run("appointment.clear_categories", &json!({ "id": id })).unwrap();
+        assert!(s.appointment(&id).unwrap().categories.is_empty());
+        assert_eq!(
+            s.run("appointment.save", &json!({ "title": "x", "start": 1, "end": 2, "categories": "Rood" })),
+            Err(CommandError::Param("categories"))
+        );
+    }
+
+    #[test]
+    fn calendars_are_added_coloured_renamed_and_deleted() {
+        let mut s = Session::default();
+        s.set_calendar_data(CalendarFile::default());
+        s.run("calendar.add", &json!({ "name": "  Sport\u{7}  " })).unwrap();
+        let id = s.last_calendar.clone().unwrap();
+        let sport = s.calendar(&id).unwrap().clone();
+        assert_eq!((sport.name.as_str(), sport.account_id.as_deref()), ("Sport", None));
+        assert_ne!(sport.color, Calendar::local().color, "a new calendar takes a colour no calendar has yet");
+        assert!(s.take_calendar_dirty());
+        s.run("calendar.add", &json!({ "name": "Gezin", "color": [10, 20, 30] })).unwrap();
+        let gezin = s.last_calendar.clone().unwrap();
+        assert_ne!(gezin, id);
+        assert_eq!(s.calendar(&gezin).unwrap().color, [10, 20, 30]);
+        assert_eq!(s.run("calendar.add", &json!({ "name": " " })), Err(CommandError::Param("name")));
+        assert_eq!(s.run("calendar.add", &json!({ "name": "x", "color": [1, 2] })), Err(CommandError::Param("color")));
+        assert_eq!(s.run("calendar.add", &json!({ "name": "x", "color": [1, 2, 300] })), Err(CommandError::Param("color")));
+
+        s.run("calendar.color", &json!({ "id": "local", "color": [200, 0, 0] })).unwrap();
+        assert_eq!(s.calendar("local").unwrap().color, [200, 0, 0]);
+        assert!(s.calendar_colors.is_empty(), "a local calendar keeps its colour in its own entry");
+        s.run("calendar.rename", &json!({ "id": id, "name": "Hardlopen" })).unwrap();
+        assert_eq!(s.calendar(&id).unwrap().name, "Hardlopen");
+        assert_eq!(s.calendar_data().calendars.len(), 3, "the new calendars go to the file");
+
+        s.run("appointment.save", &json!({ "calendar_id": id, "title": "Training", "start": 1000, "end": 4600 })).unwrap();
+        s.run("appointment.save", &json!({ "title": "Lunch", "start": 1000, "end": 4600 })).unwrap();
+        s.run("calendar.delete", &json!({ "id": id })).unwrap();
+        assert!(s.calendar(&id).is_none());
+        assert_eq!(s.appointments.len(), 1, "the calendar's appointments go with it, the others stay");
+        s.run("calendar.delete", &json!({ "id": gezin })).unwrap();
+        assert_eq!(s.run("calendar.delete", &json!({ "id": "local" })), Err(CommandError::Param("id")), "one local calendar always stays");
+
+        s.calendars.push(Calendar { id: "acc/calendar".into(), name: "Werk".into(), account_id: Some("acc".into()), color: [0; 3] });
+        assert_eq!(s.run("calendar.rename", &json!({ "id": "acc/calendar", "name": "x" })), Err(CommandError::Param("id")));
+        assert_eq!(s.run("calendar.delete", &json!({ "id": "acc/calendar" })), Err(CommandError::Param("id")));
+        assert_eq!(s.run("calendar.color", &json!({ "id": "nope", "color": [1, 1, 1] })), Err(CommandError::NotFound));
     }
 
     #[test]

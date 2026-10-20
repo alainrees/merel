@@ -273,6 +273,12 @@ pub enum Event {
         account_id: String,
         what: String,
     },
+    /// The account's mail connected, but the calendar server next to it did not; `what` is a
+    /// sentence for the person.
+    ItemsFailed {
+        account_id: String,
+        what: String,
+    },
     /// A change could not reach the server because there is no connection; it waits in the
     /// offline queue until the account connects again.
     Deferred {
@@ -388,6 +394,10 @@ pub struct Session {
     pub calendars: Vec<Calendar>,
     pub appointments: Vec<Appointment>,
     pub selected_appointment: Option<String>,
+    /// Colours picked for account calendars, by calendar id; saved with the local calendar.
+    pub calendar_colors: std::collections::BTreeMap<String, [u8; 3]>,
+    /// The id `calendar.add` gave, for the window that added it.
+    pub last_calendar: Option<String>,
     /// Reminders closed for good, by occurrence; saved with the local calendar.
     pub dismissed_reminders: Vec<reminders::ReminderKey>,
     /// Reminders put off, by occurrence, until the given moment.
@@ -398,6 +408,8 @@ pub struct Session {
     pub selected_task: Option<String>,
     /// Accounts whose store keeps appointments, contacts and tasks, and so syncs them.
     pub item_accounts: HashSet<String>,
+    /// Why an account's calendar and address book could not be reached while its mail could.
+    pub item_errors: HashMap<String, String>,
     /// Rules for incoming mail, every account's together, in the order they run.
     pub rules: Vec<Rule>,
     rules_dirty: bool,
@@ -523,12 +535,16 @@ impl Session {
         self.status.remove(account_id);
         self.queued.remove(account_id);
         self.item_accounts.remove(account_id);
+        self.item_errors.remove(account_id);
         self.pending.retain(|j| j.account_id() != account_id);
         if self.selected_folder.as_deref().is_some_and(|f| f.starts_with(&prefix)) {
             self.selected_folder = self.folders.iter().find(|f| f.kind == FolderKind::Inbox).map(|f| f.id.clone());
             self.selected_message = None;
         }
         self.calendars.retain(|c| c.account_id.as_deref() != Some(account_id));
+        if self.calendar_colors.remove(&Self::account_calendar_id(account_id)).is_some() {
+            self.calendar_dirty = true;
+        }
         if self.rules.iter().any(|r| r.account_id == account_id) {
             self.rules.retain(|r| r.account_id != account_id);
             self.rules_dirty = true;
@@ -591,6 +607,7 @@ impl Session {
             | Event::Synced { account_id, .. }
             | Event::ItemSaved { account_id, .. }
             | Event::Failed { account_id, .. }
+            | Event::ItemsFailed { account_id, .. }
             | Event::Deferred { account_id, .. }
             | Event::Sent { account_id, .. } => self.accounts.iter().any(|a| &a.id == account_id),
             Event::Headers { folder_id, .. } | Event::Found { folder_id, .. } => self.folder(folder_id).is_some(),
@@ -758,6 +775,7 @@ impl Session {
             Event::Connected { account_id, folders, syncs_items } => {
                 self.status.insert(account_id.clone(), AccountStatus::Online);
                 self.queued.remove(&account_id);
+                self.item_errors.remove(&account_id);
                 if syncs_items {
                     self.item_accounts.insert(account_id.clone());
                     self.request_sync(&account_id);
@@ -866,6 +884,9 @@ impl Session {
             Event::Failed { account_id, what } => {
                 self.loading.clear();
                 self.status.insert(account_id, AccountStatus::Error(what));
+            }
+            Event::ItemsFailed { account_id, what } => {
+                self.item_errors.insert(account_id, what);
             }
             Event::Deferred { account_id, .. } => {
                 *self.queued.entry(account_id.clone()).or_default() += 1;
@@ -1640,6 +1661,7 @@ mod tests {
                 reminder: None,
                 private: false,
                 show_as: mailcraft_model::ShowAs::Busy,
+                categories: Vec::new(),
             }],
             contacts: Vec::new(),
             tasks: Vec::new(),
@@ -1700,5 +1722,21 @@ mod tests {
         engine.update_account(account("a"), Some(Secret::new("new"))).unwrap();
         assert_eq!(engine.secrets.get("a").unwrap().map(|p| p.expose().to_string()), Some("new".into()));
         assert!(engine.update_account(account("nope"), None).is_err());
+    }
+    #[test]
+    fn a_calendar_server_that_fails_leaves_the_mail_online() {
+        let mut s = Session::default();
+        s.add_account(account("a"));
+        let connected = || Event::Connected { account_id: "a".into(), folders: Vec::new(), syncs_items: false };
+        s.apply(connected());
+        s.apply(Event::ItemsFailed { account_id: "a".into(), what: "Agenda en adresboek: weg.".into() });
+        assert_eq!(s.status.get("a"), Some(&AccountStatus::Online));
+        assert_eq!(s.item_errors.get("a").map(String::as_str), Some("Agenda en adresboek: weg."));
+        // The next connection tries the calendar again; until it says otherwise, all is well.
+        s.apply(connected());
+        assert!(s.item_errors.is_empty());
+        s.apply(Event::ItemsFailed { account_id: "a".into(), what: "x".into() });
+        s.remove_account("a");
+        assert!(s.item_errors.is_empty());
     }
 }

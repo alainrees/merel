@@ -4,6 +4,7 @@ description = "OAuth 2.0 with PKCE through the system browser, for Gmail and Mic
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 mailcraft-secrets = { workspace = true }

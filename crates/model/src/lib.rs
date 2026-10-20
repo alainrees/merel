@@ -18,10 +18,10 @@ mod templates;
 
 pub use address::{Address, AddressError, parse_address_list};
 pub use calendar::{
-    Appointment, AppointmentError, Calendar, Frequency, MAX_INTERVAL, MAX_NOTES, MAX_OCCURRENCES, MAX_REMINDER, Recurrence, ShowAs,
-    describe_recurrence,
+    Appointment, AppointmentError, CALENDAR_COLORS, Calendar, Frequency, MAX_CALENDAR_NAME, MAX_INTERVAL, MAX_NOTES, MAX_OCCURRENCES, MAX_REMINDER,
+    Recurrence, ShowAs, describe_recurrence,
 };
-pub use categories::{Category, CategoryColor, MAX_CATEGORY_NAME, category_keyword};
+pub use categories::{Category, CategoryColor, MAX_CATEGORY_NAME, MAX_ITEM_CATEGORIES, category_keyword, clean_categories};
 pub use contact::{Contact, ContactError};
 pub use groups::{ContactGroup, ContactGroupError, MAX_GROUP_MEMBERS, MAX_GROUP_NAME, mailbox};
 pub use junk::{JunkLevel, JunkLists, MAX_JUNK_ENTRY, entry_covers, junk_entry};
@@ -75,7 +75,25 @@ pub enum Auth {
     },
 }
 
+/// Mailcraft's own registration with Microsoft Entra: a multi-tenant public client (no secret,
+/// loopback redirects only), so people sign in without registering anything themselves. Empty
+/// until the registration exists.
+pub const MICROSOFT_CLIENT_ID: &str = "";
+
 impl Protocol {
+    /// The client ID this build signs in with when the person names none of their own. A build
+    /// can bring its own registration through `MAILCRAFT_MICROSOFT_CLIENT_ID`.
+    pub fn builtin_client_id(self) -> Option<&'static str> {
+        match self {
+            Protocol::Microsoft365 => [option_env!("MAILCRAFT_MICROSOFT_CLIENT_ID"), Some(MICROSOFT_CLIENT_ID)]
+                .into_iter()
+                .flatten()
+                .map(str::trim)
+                .find(|id| !id.is_empty()),
+            _ => None,
+        }
+    }
+
     /// The ready-made settings for a hosted service; `None` for plain IMAP/SMTP.
     pub fn preset(self) -> Option<Preset> {
         match self {

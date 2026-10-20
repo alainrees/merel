@@ -203,9 +203,19 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         private: matches!(str_of(e, "visibility"), "private" | "confidential"),
         // Google knows only free or busy; a tentative or out-of-office appointment reads as busy.
         show_as: if str_of(e, "transparency") == "transparent" { ShowAs::Free } else { ShowAs::Busy },
+        categories: categories_of(e),
     }
     .validated()
     .ok()
+}
+
+/// Google has no categories; Mailcraft keeps their names in a private extended property, one
+/// per line, which only this account's own apps see.
+const CATEGORIES: &str = "mailcraftCategories";
+
+fn categories_of(e: &Value) -> Vec<String> {
+    let text = e.get("extendedProperties").and_then(|p| p.get("private")).map(|p| str_of(p, CATEGORIES)).unwrap_or("");
+    text.lines().map(str::to_string).collect()
 }
 
 /// The event's own pop-up reminder, in minutes before the start. An event that uses the
@@ -249,6 +259,7 @@ fn event_json(a: &Appointment, zone: &str) -> Value {
         "reminders": reminders,
         "visibility": visibility,
         "transparency": transparency,
+        "extendedProperties": { "private": { CATEGORIES: a.categories.join("\n") } },
     });
     if let Some(r) = &a.recurrence {
         event["recurrence"] = json!([format!("RRULE:{}", r.rrule(a.all_day))]);
@@ -365,7 +376,12 @@ impl GoogleItems {
     /// when Google cannot say.
     pub fn connect(token: &Secret) -> Option<Self> {
         let agent = ureq::Agent::new_with_config(
-            ureq::config::Config::builder().timeout_global(Some(Duration::from_secs(60))).http_status_as_error(false).user_agent("Mailcraft").build(),
+            ureq::config::Config::builder()
+                .tls_config(tls())
+                .timeout_global(Some(Duration::from_secs(60)))
+                .http_status_as_error(false)
+                .user_agent("Mailcraft")
+                .build(),
         );
         let store = GoogleItems { agent, token: token.clone() };
         match store.scopes() {
@@ -520,6 +536,16 @@ impl ItemStore for GoogleItems {
     }
 }
 
+/// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
+/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// agent without this panics on its first request.
+fn tls() -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+        .build()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -564,6 +590,13 @@ mod tests {
         let f = appointment_of(&free).unwrap();
         assert_eq!(f.show_as, ShowAs::Free);
         assert_eq!(event_json(&f, "Europe/Amsterdam")["transparency"], "transparent");
+        assert!(f.categories.is_empty());
+        let mut tagged = timed.clone();
+        tagged["extendedProperties"] = json!({ "private": { "mailcraftCategories": "Werk\nKlant" }, "shared": { "x": "y" } });
+        let t = appointment_of(&tagged).unwrap();
+        assert_eq!(t.categories, vec!["Werk", "Klant"]);
+        assert_eq!(event_json(&t, "Europe/Amsterdam")["extendedProperties"]["private"]["mailcraftCategories"], "Werk\nKlant");
+        assert_eq!(event_json(&f, "Europe/Amsterdam")["extendedProperties"]["private"]["mailcraftCategories"], "", "none clears them");
         assert_eq!(
             event_json(&Appointment { show_as: ShowAs::Tentative, ..f }, "Europe/Amsterdam")["transparency"],
             "opaque",

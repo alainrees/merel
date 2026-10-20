@@ -110,6 +110,9 @@ pub struct ViewPrefs {
     /// The hours outside the working day (before 8:00, from 17:00, and the weekend) shaded in
     /// the calendar's day and week views, as Outlook shades them. On unless switched off.
     pub work_hours: bool,
+    /// Outlook's "Naast elkaar weergeven": with more than one calendar ticked, the day and week
+    /// views give each calendar its own days next to the others instead of one merged grid.
+    pub calendars_side_by_side: bool,
     /// The folders pinned under "Favorieten" at the top of the folder pane, by id, in order.
     pub favorites: Vec<String>,
     /// The saved searches listed under "Zoekmappen" in the folder pane.
@@ -141,6 +144,7 @@ impl Default for ViewPrefs {
             sort: Sort::default(),
             week_numbers: false,
             work_hours: true,
+            calendars_side_by_side: false,
             favorites: Vec::new(),
             search_folders: Vec::new(),
             recent_searches: Vec::new(),

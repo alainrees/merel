@@ -230,7 +230,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         Some(Action::Edit(id)) => form_state = app.engine.session.template(&id).map(Form::from_template),
         Some(Action::Delete(id)) => {
             if let Err(e) = app.engine.run("template.delete", &json!({ "id": id })) {
-                app.notice = Some(e.to_string());
+                app.notice = Some(crate::Notice::error(e.to_string()));
             }
         }
         None => {}

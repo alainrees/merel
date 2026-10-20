@@ -70,6 +70,23 @@ impl Category {
     }
 }
 
+/// The most categories one item keeps.
+pub const MAX_ITEM_CATEGORIES: usize = 25;
+
+/// A list of category names as an item keeps it: cleaned, trimmed, at most
+/// [`MAX_CATEGORY_NAME`] characters each, no empty names and no doubles (ignoring case), at most
+/// [`MAX_ITEM_CATEGORIES`] of them.
+pub fn clean_categories(names: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for name in names {
+        let name: String = crate::clean_text(name.trim()).chars().take(MAX_CATEGORY_NAME).collect();
+        if !name.is_empty() && !out.iter().any(|n| n.eq_ignore_ascii_case(&name)) && out.len() < MAX_ITEM_CATEGORIES {
+            out.push(name);
+        }
+    }
+    out
+}
+
 /// The IMAP keyword for a category name: an atom, so letters, digits, `-` and `.` stay and
 /// everything else (spaces included) becomes `_`. Read back, `_` becomes a space again.
 pub fn category_keyword(name: &str) -> String {
@@ -83,6 +100,11 @@ mod tests {
     #[test]
     fn keywords_are_atoms() {
         assert_eq!(category_keyword(" Rode categorie "), "Rode_categorie");
+        assert_eq!(
+            clean_categories(vec![" Werk ".into(), "".into(), "werk".into(), "Privé\u{7}".into()]),
+            vec!["Werk".to_string(), "Privé".to_string()],
+            "trimmed, cleaned, no empties and no doubles"
+        );
         assert_eq!(category_keyword("Privé (thuis)"), "Priv___thuis_");
         assert_eq!(Category::defaults().len(), 6);
     }

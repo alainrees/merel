@@ -210,6 +210,11 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
             Some("oof") => ShowAs::Oof,
             _ => ShowAs::Busy,
         },
+        categories: e
+            .get("categories")
+            .and_then(Value::as_array)
+            .map(|l| l.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .unwrap_or_default(),
     }
     .validated()
     .ok()
@@ -284,6 +289,7 @@ impl GraphClient {
                 ShowAs::Busy => "busy",
                 ShowAs::Oof => "oof",
             },
+            "categories": a.categories,
         });
         if let Some(m) = a.reminder {
             event["reminderMinutesBeforeStart"] = json!(m);
@@ -337,7 +343,12 @@ impl GraphClient {
             Credential::Password(_) => return Err(MailboxError::Protocol("Microsoft Graph needs a browser sign-in, not a password".into())),
         };
         let agent = ureq::Agent::new_with_config(
-            ureq::config::Config::builder().timeout_global(Some(Duration::from_secs(60))).http_status_as_error(false).user_agent("Mailcraft").build(),
+            ureq::config::Config::builder()
+                .tls_config(tls())
+                .timeout_global(Some(Duration::from_secs(60)))
+                .http_status_as_error(false)
+                .user_agent("Mailcraft")
+                .build(),
         );
         let time_zone = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into());
         let mut client = GraphClient { agent, base: format!("https://{host}/v1.0"), host, token, known: Vec::new(), time_zone, task_list: None };
@@ -349,7 +360,7 @@ impl GraphClient {
     #[cfg(test)]
     fn offline() -> Self {
         GraphClient {
-            agent: ureq::Agent::new_with_defaults(),
+            agent: ureq::Agent::new_with_config(ureq::config::Config::builder().tls_config(tls()).build()),
             base: "https://graph.microsoft.com/v1.0".into(),
             host: "graph.microsoft.com".into(),
             token: Secret::new(String::new()),
@@ -627,7 +638,7 @@ impl Mailbox for GraphClient {
 impl ItemStore for GraphClient {
     fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>> {
         let path = format!(
-            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity,showAs",
+            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity,showAs,categories",
             encode(&utc(from)),
             encode(&utc(to.max(from)))
         );
@@ -668,6 +679,16 @@ impl ItemStore for GraphClient {
         let path = self.path_of(id)?;
         self.call("DELETE", &path, None).map(drop)
     }
+}
+
+/// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
+/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// agent without this panics on its first request.
+fn tls() -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+        .build()
 }
 
 #[cfg(test)]
@@ -747,6 +768,11 @@ mod tests {
         let m = appointment_of(&maybe).unwrap();
         assert_eq!(m.show_as, ShowAs::Tentative);
         assert_eq!(GraphClient::event_json(&m, "UTC")["showAs"], "tentative");
+        assert_eq!(body["categories"], json!([]), "no categories clears them on the server");
+        maybe["categories"] = json!(["Werk", "", "Klant"]);
+        let tagged = appointment_of(&maybe).unwrap();
+        assert_eq!(tagged.categories, vec!["Werk", "Klant"]);
+        assert_eq!(GraphClient::event_json(&tagged, "UTC")["categories"], json!(["Werk", "Klant"]));
         maybe["showAs"] = json!("workingElsewhere");
         assert_eq!(appointment_of(&maybe).unwrap().show_as, ShowAs::Free, "working elsewhere leaves the time free");
         let silent = Appointment { reminder: None, ..a.clone() };
