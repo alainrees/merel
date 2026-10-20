@@ -599,6 +599,9 @@ const LIST_CHIPS: [mailcraft_engine::view::Filter; 4] = [
     mailcraft_engine::view::Filter::Attachments,
 ];
 
+/// The label of the small button that empties a search box.
+pub(crate) const SEARCH_CLEAR: &str = "Zoekopdracht wissen";
+
 /// The filter menu's name over the message list.
 pub(crate) const LIST_FILTER: &str = "Filteren";
 
@@ -634,29 +637,39 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 helder::quiet(ui, t, |ui| {
                     if !recents.is_empty() {
                         // Outlook's "Recente zoekopdrachten": the last words typed, to search again.
-                        ui.menu_button(view::RECENT_MENU, |ui| {
-                            for q in &recents {
-                                if ui.button(q).clicked() {
-                                    recent_pick = Some(Some(q.clone()));
+                        let button = egui::Button::image(helder::Icon::Clock.image(helder::ICON, t.text))
+                            .frame_when_inactive(false)
+                            .corner_radius(helder::CONTROL_RADIUS)
+                            .min_size(vec2(helder::BUTTON_HEIGHT, helder::BUTTON_HEIGHT));
+                        let r = egui::containers::menu::MenuButton::from_button(button)
+                            .ui(ui, |ui| {
+                                for q in &recents {
+                                    if ui.button(q).clicked() {
+                                        recent_pick = Some(Some(q.clone()));
+                                        ui.close();
+                                    }
+                                }
+                                ui.separator();
+                                if ui.button(view::RECENT_CLEAR).clicked() {
+                                    recent_pick = Some(None);
                                     ui.close();
                                 }
-                            }
-                            ui.separator();
-                            if ui.button(view::RECENT_CLEAR).clicked() {
-                                recent_pick = Some(None);
-                                ui.close();
-                            }
-                        })
-                        .response
-                        .on_hover_text(view::RECENT_HINT);
+                            })
+                            .0;
+                        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, view::RECENT_MENU));
+                        r.on_hover_text(view::RECENT_MENU);
                     }
-                    if searching && ui.small_button("✕").on_hover_text("Zoekopdracht wissen").clicked() {
+                    if searching && helder::icon_button(ui, t, helder::Icon::X, SEARCH_CLEAR).clicked() {
                         session.search.clear();
                     }
-                    if searching && ui.small_button("Zoekmap").on_hover_text("Deze zoekopdracht bewaren als zoekmap in het mappenvenster").clicked() {
+                    if searching
+                        && helder::tool_button(ui, t, helder::Icon::FolderPlus, "Zoekmap")
+                            .on_hover_text("Deze zoekopdracht bewaren als zoekmap in het mappenvenster")
+                            .clicked()
+                    {
                         save_search = true;
                     }
-                    ui.checkbox(&mut session.search_all, "Alle mappen")
+                    helder::toggle(ui, t, &mut session.search_all, "Alle mappen")
                         .on_hover_text("Zoek in alle mappen van alle accounts, in de berichten die Mailcraft al heeft opgehaald.");
                 });
             });
@@ -686,7 +699,9 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 }
 
 fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
-    if app.module == Module::Mail {
+    // The File tab is a page of its own, as Outlook's: no search bar and no command bar.
+    let file = app.tab == Tab::File;
+    if app.module == Module::Mail && !file {
         search_bar(app, ui, t);
     }
     egui::Panel::top("tabs").show_separator_line(false).frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin::symmetric(8, 4))).show(
@@ -708,6 +723,9 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             });
         },
     );
+    if file {
+        return;
+    }
     // The Helder ribbon: one line of icon buttons on a card over the window's grey ground.
     egui::Panel::top("ribbon")
         .show_separator_line(false)
@@ -866,9 +884,20 @@ fn ribbon_toggle(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, on: bool) ->
     ribbon_draw(ui, t, glyph, label, true, None, Some(on))
 }
 
+/// [`ribbon_toggle`] with `hint` shown on hover.
+fn ribbon_toggle_hint(ui: &mut Ui, t: &Tokens, label: &str, on: bool, hint: &str) -> bool {
+    ribbon_paint(ui, t, "", label, true, None, Some(on)).on_hover_text(hint).clicked()
+}
+
 /// Draws a ribbon button; `on` is set for a button that can stay lit. "Nieuwe e-mail" and the
 /// other "new" buttons are the blue main button of their ribbon.
 fn ribbon_draw(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool, shortcut: Option<&str>, on: Option<bool>) -> bool {
+    let r = ribbon_paint(ui, t, glyph, label, enabled, shortcut, on);
+    enabled && r.clicked()
+}
+
+/// Draws a ribbon button and gives its response.
+fn ribbon_paint(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool, shortcut: Option<&str>, on: Option<bool>) -> egui::Response {
     let primary = enabled && helder::ribbon_primary(label);
     let lit = on == Some(true);
     let icon = helder::ribbon_icon(label, glyph);
@@ -923,7 +952,7 @@ fn ribbon_draw(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool,
     if !icon_only {
         ui.painter().text(egui::pos2(left + lead + gap, rect.center().y), egui::Align2::LEFT_CENTER, label, ribbon_label_font(), color);
     }
-    enabled && r.clicked()
+    r
 }
 
 /// A ribbon button that runs a command; `action` is the command id with the shortcut shown
@@ -2356,7 +2385,7 @@ mod tests {
         assert!(h.query_by_label("Zoekresultaten (1)").is_some());
         assert!(h.query_by_label("Planning voor donderdag").is_some());
         assert_eq!(h.state().engine.session.visible_messages().len(), 1);
-        h.get_by_label("✕").click();
+        h.get_by_label(SEARCH_CLEAR).click();
         h.run();
         assert!(!h.state().engine.session.is_searching());
         assert_eq!(h.state().engine.session.visible_messages().len(), all);
@@ -3877,16 +3906,16 @@ mod tests {
         h.run();
         h.get_by_label("Beeld").click();
         h.run();
-        h.get_by_value("Alle").click();
+        h.get_by_label(view::ALL_CATEGORIES).click();
         h.run();
         h.get_by_label("Groene categorie").click();
         h.run();
         assert_eq!(h.state().engine.session.category_filter.as_deref(), Some("Groene categorie"));
         assert!(h.query_all_by_label("Welkom bij Mailcraft").next().is_none(), "only mail with the category is listed");
         h.get_by_label("Planning voor donderdag");
-        h.get_by_value("Groene categorie").click();
+        h.get_by_label("Groene categorie").click();
         h.run();
-        h.get_by_label("Alle").click();
+        h.get_by_label(view::ALL_CATEGORIES).click();
         h.run();
         assert!(h.state().engine.session.category_filter.is_none());
         h.get_by_label("Ongelezen").click();
@@ -4056,7 +4085,7 @@ mod tests {
         h.get_by_label("Bestand").click();
         h.run();
         assert!(h.query_by_label("Toevoegen en verbinden").is_some());
-        h.get_by_label("←  Terug").click();
+        h.get_by_label(backstage::BACK).click();
         h.run();
         assert!(h.query_by_label("Toevoegen en verbinden").is_none());
     }
