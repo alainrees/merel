@@ -189,7 +189,7 @@ impl Client {
             error_description: Option<String>,
         }
         let agent = ureq::Agent::new_with_config(
-            ureq::config::Config::builder().timeout_global(Some(Duration::from_secs(30))).http_status_as_error(false).build(),
+            ureq::config::Config::builder().tls_config(tls()).timeout_global(Some(Duration::from_secs(30))).http_status_as_error(false).build(),
         );
         let mut response = agent
             .post(&self.token_url)
@@ -272,6 +272,16 @@ fn handle(mut stream: TcpStream, state: &str) -> Option<Result<String, OAuthErro
 /// The SASL XOAUTH2 initial response for IMAP and SMTP.
 pub fn xoauth2(user: &str, access_token: &Secret) -> String {
     format!("user={user}\x01auth=Bearer {}\x01\x01", access_token.expose())
+}
+
+/// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
+/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// agent without this panics on its first request.
+fn tls() -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+        .build()
 }
 
 #[cfg(test)]

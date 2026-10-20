@@ -200,7 +200,12 @@ impl EwsClient {
             Credential::OAuth2(t) => Secret::new(format!("Bearer {}", t.expose())),
         };
         let agent = ureq::Agent::new_with_config(
-            ureq::config::Config::builder().timeout_global(Some(Duration::from_secs(60))).http_status_as_error(false).user_agent("Mailcraft").build(),
+            ureq::config::Config::builder()
+                .tls_config(tls())
+                .timeout_global(Some(Duration::from_secs(60)))
+                .http_status_as_error(false)
+                .user_agent("Mailcraft")
+                .build(),
         );
         let time_zone = iana_time_zone::get_timezone().ok().as_deref().and_then(windows_zone);
         let mut client = EwsClient { agent, url, host, authorization, known: Vec::new(), time_zone };
@@ -212,7 +217,7 @@ impl EwsClient {
     #[cfg(test)]
     pub(crate) fn offline(time_zone: Option<&'static str>) -> Self {
         EwsClient {
-            agent: ureq::Agent::new_with_defaults(),
+            agent: ureq::Agent::new_with_config(ureq::config::Config::builder().tls_config(tls()).build()),
             url: String::new(),
             host: "test".into(),
             authorization: Secret::new(String::new()),
@@ -590,6 +595,16 @@ impl Mailbox for EwsClient {
     }
 
     fn logout(self: Box<Self>) {}
+}
+
+/// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
+/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// agent without this panics on its first request.
+fn tls() -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+        .build()
 }
 
 #[cfg(test)]
