@@ -312,6 +312,10 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         AccountStatus::Error(e) => (e, t.flag),
                     };
                     ui.label(RichText::new(txt).size(12.0).color(col));
+                    // The mail works, the calendar server next to it did not answer.
+                    if let Some(e) = app.engine.session.item_errors.get(&id) {
+                        ui.label(RichText::new(e).size(12.0).color(t.flag));
+                    }
                     ui.add_space(4.0);
                     if oauth {
                         let label = if busy { "Wacht op de browser…" } else { "Opnieuw aanmelden" };
@@ -782,6 +786,26 @@ mod tests {
         assert!(harness.query_by_label("Handtekening bewerken").is_some());
         harness.state_mut().open_compose(crate::compose::Kind::New);
         assert_eq!(harness.state().compose.as_ref().map(|c| c.body.as_str()), Some("\n\n-- \nGroet,\nAlain"));
+    }
+
+    #[test]
+    fn the_account_card_says_why_the_calendar_is_missing() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut engine = mailcraft_engine::Engine::sample();
+        let mut f = AccountForm::default();
+        f.email = "alain@voorbeeld.nl".into();
+        f.password = "x".into();
+        f.suggest();
+        let account = f.account().unwrap();
+        let id = account.id.clone();
+        engine.add_account(account, Secret::new("x")).unwrap();
+        engine.session.item_errors.insert(id, "Agenda en adresboek: Kan geen verbinding maken met dav.voorbeeld.nl: de server reageert niet.".into());
+        let mut app = MailApp::new(engine);
+        app.tab = Tab::File;
+        let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        harness.run();
+        assert!(harness.query_by_label_contains("Agenda en adresboek: Kan geen verbinding").is_some());
     }
 
     #[test]

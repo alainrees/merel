@@ -38,19 +38,23 @@ const CARDDAV: &str = "urn:ietf:params:xml:ns:carddav";
 const MAX_REPLY: u64 = 16 * 1024 * 1024;
 /// Redirects followed for one request.
 const MAX_REDIRECTS: usize = 5;
+/// How long the DAV server gets to accept a connection.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// Cards fetched per `addressbook-multiget`.
 const CARD_BATCH: usize = 50;
 
 /// An IMAP account's store: IMAP for mail, DAV for the rest.
 pub struct DavMailbox {
     imap: ImapClient,
-    items: DavClient,
+    /// The DAV side, or why it could not be reached; the mail works either way.
+    items: std::result::Result<DavClient, MailboxError>,
 }
 
 impl DavMailbox {
     /// Logs in over IMAP and finds the calendars and address books on the DAV server, with the
-    /// same user name and password. A DAV server that cannot be reached or holds no calendar
-    /// is an error, since the person asked for it.
+    /// same user name and password. Only the IMAP login decides whether this succeeds: a DAV
+    /// server that cannot be reached or holds no calendar leaves the mail working, and
+    /// [`Mailbox::items_error`] tells why the calendar is missing.
     pub fn connect(server: &Server, username: &str, credential: &Credential, dav: &Dav) -> Result<Self> {
         let password = match credential {
             Credential::Password(p) => p.clone(),
@@ -59,7 +63,10 @@ impl DavMailbox {
             }
         };
         let imap = ImapClient::connect(server, username, credential).map_err(MailboxError::from)?;
-        let items = DavClient::connect(dav, username, password)?;
+        let items = DavClient::connect(dav, username, password);
+        if let Err(e) = &items {
+            log::warn!("CalDAV/CardDAV at {}: {e}", host_of(&dav.calendar));
+        }
         Ok(DavMailbox { imap, items })
     }
 }
@@ -122,7 +129,14 @@ impl Mailbox for DavMailbox {
     }
 
     fn items(&mut self) -> Option<&mut dyn ItemStore> {
-        Some(&mut self.items)
+        match &mut self.items {
+            Ok(items) => Some(items),
+            Err(_) => None,
+        }
+    }
+
+    fn items_error(&self) -> Option<&MailboxError> {
+        self.items.as_ref().err()
     }
 
     fn logout(self: Box<Self>) {
@@ -173,6 +187,17 @@ fn origin(url: &str) -> String {
     let after_scheme = url.find("://").map(|i| i + 3).unwrap_or(0);
     let end = url.get(after_scheme..).and_then(|rest| rest.find('/')).map(|i| after_scheme + i).unwrap_or(url.len());
     url.get(..end).unwrap_or(url).to_string()
+}
+
+/// Why a request did not get through, in words for the person.
+fn reason_of(e: &ureq::Error) -> String {
+    match e {
+        ureq::Error::Timeout(_) => "de server reageert niet".into(),
+        ureq::Error::HostNotFound => "de servernaam is niet gevonden; klopt het adres?".into(),
+        ureq::Error::ConnectionFailed => "de server weigert de verbinding".into(),
+        ureq::Error::Tls(_) | ureq::Error::Rustls(_) => format!("de beveiligde verbinding mislukte ({e})"),
+        other => other.to_string(),
+    }
 }
 
 /// The host of `url`, for error messages.
@@ -262,6 +287,7 @@ impl DavClient {
         let agent = ureq::Agent::new_with_config(
             ureq::config::Config::builder()
                 .timeout_global(Some(Duration::from_secs(60)))
+                .timeout_connect(Some(CONNECT_TIMEOUT))
                 .http_status_as_error(false)
                 .max_redirects(0)
                 .user_agent("Mailcraft")
@@ -327,7 +353,7 @@ impl DavClient {
             }
             .map_err(|e| MailboxError::Protocol(e.to_string()))?;
             let host = host_of(&url);
-            let mut response = self.agent.run(request).map_err(|e| MailboxError::Connect { host: host.clone(), reason: e.to_string() })?;
+            let mut response = self.agent.run(request).map_err(|e| MailboxError::Connect { host: host.clone(), reason: reason_of(&e) })?;
             let status = response.status().as_u16();
             let headers: Vec<(String, String)> =
                 response.headers().iter().map(|(k, v)| (k.as_str().to_ascii_lowercase(), v.to_str().unwrap_or("").to_string())).collect();
@@ -353,21 +379,26 @@ impl DavClient {
         }
     }
 
-    /// Where `/.well-known/<kind>` on the server points, else `base` itself.
-    fn well_known(&self, base: &str, kind: &str) -> String {
+    /// Where `/.well-known/<kind>` on the server points, else `base` itself. A server that
+    /// cannot be reached at all is an error at once, rather than once per URL tried.
+    fn well_known(&self, base: &str, kind: &str) -> Result<String> {
         let url = format!("{}/.well-known/{kind}", origin(base));
         // Redirects are followed inside `request`; what comes back tells where we ended up
         // only through the principal lookup, so a plain probe decides whether the path exists.
         match self.request("PROPFIND", &url, &[("Depth", "0")], Some(("application/xml; charset=utf-8", PRINCIPAL_QUERY.as_bytes()))) {
-            Ok((207, _, _)) => url,
-            _ => base.to_string(),
+            Ok((207, _, _)) => Ok(url),
+            Err(e @ MailboxError::Connect { .. }) => Err(e),
+            _ => Ok(base.to_string()),
         }
     }
 
     /// The current user's principal URL, found from `base` (through its well-known path).
     fn principal(&self, base: &str, kind: &str) -> Result<String> {
-        let start = self.well_known(base, kind);
-        let xml = self.multistatus("PROPFIND", &start, "0", PRINCIPAL_QUERY).or_else(|_| self.multistatus("PROPFIND", base, "0", PRINCIPAL_QUERY))?;
+        let start = self.well_known(base, kind)?;
+        let xml = self.multistatus("PROPFIND", &start, "0", PRINCIPAL_QUERY).or_else(|e| match e {
+            MailboxError::Connect { .. } => Err(e),
+            _ => self.multistatus("PROPFIND", base, "0", PRINCIPAL_QUERY),
+        })?;
         let doc = Document::parse(&xml).map_err(|e| MailboxError::Protocol(e.to_string()))?;
         let href = responses(&doc)
             .into_iter()
