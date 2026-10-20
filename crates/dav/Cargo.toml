@@ -4,6 +4,7 @@ description = "IMAP accounts with a CalDAV/CardDAV server next to them: appointm
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 mailcraft-model = { workspace = true }

@@ -4,6 +4,7 @@ description = "Mail model: accounts, folders, messages and addresses. No I/O, no
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 serde = { workspace = true }

@@ -4,6 +4,7 @@ description = "Exchange Web Services (EWS) over HTTPS for Exchange Server 2013 a
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 mailcraft-model = { workspace = true }

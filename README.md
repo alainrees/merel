@@ -334,3 +334,9 @@ installer per platform, built by `.github/workflows/release.yml` when a tag `vX.
 
 The packaging files live in `packaging/`: the app icon, `macos/bundle.sh` with `Info.plist`,
 `windows/mailcraft.iss` for Inno Setup and `linux/` with the desktop entry and the AppImage script.
+
+## License
+
+Mailcraft is licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT), at your option. Unless you state otherwise, any contribution you submit
+for inclusion in Mailcraft is dual licensed as above, without any additional terms or conditions.
