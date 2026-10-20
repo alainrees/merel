@@ -122,9 +122,12 @@ each week in the month view and in the time gutter of the week and day views, as
 (off by default, kept in `view.json`); "Ga naar datum" in the ribbon (Ctrl+G) asks for a day as dag-maand-jaar and
 shows it in the current view, as Outlook's Ga naar datum; "Werkuren" on the Beeld tab (on by default) shades the hours
 outside 8:00-17:00 and the weekend in the day and week views, as Outlook shades the time outside the working day; each
-calendar under "Mijn agenda's" in the side pane has a tick box, and an unticked calendar keeps its appointments out of
-the views, the search list and the printed page until it is ticked again (reminders still come), as in Outlook (kept
-in `view.json`). In the week and day views
+calendar under "Mijn agenda's" in the side pane has a round dot in its colour, filled with a tick while it shows, and
+clicking the row hides it: an unticked calendar keeps its appointments out of the views, the search list and the
+printed page until it is ticked again (reminders still come), as in Outlook (kept in `view.json`). The "⋯" after a
+calendar (or a right click) gives it one of twelve colours, each at least 3:1 against the window in both themes, and
+renames or deletes a calendar on this computer; "Agenda toevoegen" makes a new local calendar with a name and colour.
+A colour picked for an account's calendar stays on this computer (`calendar.json`). In the week and day views
 the bottom edge of an appointment can be dragged too, to make it longer or shorter by the half hour. The calendar's
 side pane lists the open tasks; drag one onto a day or an hour and the appointment window opens for it, with the
 task's title and notes filled in, so planning a task is one drag and "Opslaan". The appointment window also has

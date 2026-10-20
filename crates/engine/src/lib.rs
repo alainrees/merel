@@ -394,6 +394,10 @@ pub struct Session {
     pub calendars: Vec<Calendar>,
     pub appointments: Vec<Appointment>,
     pub selected_appointment: Option<String>,
+    /// Colours picked for account calendars, by calendar id; saved with the local calendar.
+    pub calendar_colors: std::collections::BTreeMap<String, [u8; 3]>,
+    /// The id `calendar.add` gave, for the window that added it.
+    pub last_calendar: Option<String>,
     /// Reminders closed for good, by occurrence; saved with the local calendar.
     pub dismissed_reminders: Vec<reminders::ReminderKey>,
     /// Reminders put off, by occurrence, until the given moment.
@@ -538,6 +542,9 @@ impl Session {
             self.selected_message = None;
         }
         self.calendars.retain(|c| c.account_id.as_deref() != Some(account_id));
+        if self.calendar_colors.remove(&Self::account_calendar_id(account_id)).is_some() {
+            self.calendar_dirty = true;
+        }
         if self.rules.iter().any(|r| r.account_id == account_id) {
             self.rules.retain(|r| r.account_id != account_id);
             self.rules_dirty = true;
