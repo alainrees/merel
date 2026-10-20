@@ -92,6 +92,7 @@ pub fn ics(a: &Appointment, method: &str, attendees: &[Attendee]) -> String {
             event.props.push(ical::attendee_prop(p));
         }
     }
+    ical::add_timezones(&mut root);
     root.serialize()
 }
 
@@ -181,6 +182,7 @@ pub fn published(a: &Appointment) -> String {
     if let Some(event) = root.find_mut("VEVENT") {
         ical::write_appointment(event, &Appointment { meeting: None, ..a.clone() });
     }
+    ical::add_timezones(&mut root);
     root.serialize()
 }
 

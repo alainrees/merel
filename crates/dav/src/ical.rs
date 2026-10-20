@@ -5,7 +5,7 @@
 
 use std::str::FromStr;
 
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz;
 use mailcraft_model::{Appointment, Attendee, Contact, Meeting, Priority, Response, ShowAs, Task, clean_text};
 
@@ -213,7 +213,240 @@ pub fn parse(text: &str) -> Vec<Component> {
             current.props.push(prop);
         }
     }
+    for root in &mut roots {
+        resolve_zones(root);
+    }
     roots
+}
+
+/// Windows time zone names, as Outlook and Exchange write them in `TZID`, with an IANA zone that
+/// keeps the same clock.
+const WINDOWS_ZONES: &[(&str, &str)] = &[
+    ("W. Europe Standard Time", "Europe/Amsterdam"),
+    ("Romance Standard Time", "Europe/Paris"),
+    ("Central Europe Standard Time", "Europe/Budapest"),
+    ("Central European Standard Time", "Europe/Warsaw"),
+    ("GMT Standard Time", "Europe/London"),
+    ("Greenwich Standard Time", "Atlantic/Reykjavik"),
+    ("GTB Standard Time", "Europe/Athens"),
+    ("FLE Standard Time", "Europe/Helsinki"),
+    ("E. Europe Standard Time", "Europe/Chisinau"),
+    ("Turkey Standard Time", "Europe/Istanbul"),
+    ("Russian Standard Time", "Europe/Moscow"),
+    ("South Africa Standard Time", "Africa/Johannesburg"),
+    ("Egypt Standard Time", "Africa/Cairo"),
+    ("Israel Standard Time", "Asia/Jerusalem"),
+    ("Arabian Standard Time", "Asia/Dubai"),
+    ("India Standard Time", "Asia/Kolkata"),
+    ("China Standard Time", "Asia/Shanghai"),
+    ("Singapore Standard Time", "Asia/Singapore"),
+    ("Tokyo Standard Time", "Asia/Tokyo"),
+    ("AUS Eastern Standard Time", "Australia/Sydney"),
+    ("New Zealand Standard Time", "Pacific/Auckland"),
+    ("Eastern Standard Time", "America/New_York"),
+    ("Central Standard Time", "America/Chicago"),
+    ("Mountain Standard Time", "America/Denver"),
+    ("Pacific Standard Time", "America/Los_Angeles"),
+    ("Atlantic Standard Time", "America/Halifax"),
+    ("E. South America Standard Time", "America/Sao_Paulo"),
+    ("UTC", "UTC"),
+    ("Coordinated Universal Time", "UTC"),
+];
+
+/// The IANA zone a `TZID` stands for: its own name, or the zone of a Windows name.
+fn known_zone(tzid: &str) -> Option<Tz> {
+    let name = tzid.trim().trim_matches('"').trim_matches('/');
+    Tz::from_str(name).ok().or_else(|| WINDOWS_ZONES.iter().find(|(w, _)| w.eq_ignore_ascii_case(name)).and_then(|(_, iana)| Tz::from_str(iana).ok()))
+}
+
+/// `+0200`, `-0500` or `+053000` in seconds east of UTC.
+fn utc_offset(s: &str) -> Option<i32> {
+    let s = s.trim();
+    let (sign, digits) = match s.as_bytes().first()? {
+        b'+' => (1, &s[1..]),
+        b'-' => (-1, &s[1..]),
+        _ => return None,
+    };
+    let n = |r: std::ops::Range<usize>| digits.get(r).and_then(|d| d.parse::<i32>().ok());
+    let seconds = n(0..2)? * 3_600 + n(2..4)? * 60 + if digits.len() >= 6 { n(4..6)? } else { 0 };
+    Some(sign * seconds)
+}
+
+/// When an observance of a VTIMEZONE (`STANDARD` or `DAYLIGHT`) begins in `year`, as local
+/// time: its `DTSTART` moved to that year by a yearly `RRULE` with `BYMONTH` and `BYDAY`
+/// (`-1SU`, `2SU`, …), or its `DTSTART` itself without a rule.
+fn onset(observance: &Component, year: i32) -> Option<NaiveDateTime> {
+    let start = NaiveDateTime::parse_from_str(observance.prop("DTSTART")?.raw.trim(), "%Y%m%dT%H%M%S").ok()?;
+    let Some(rule) = observance.prop("RRULE") else { return Some(start) };
+    let part =
+        |key: &str| rule.raw.split(';').find_map(|p| p.split_once('=').filter(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.to_string()));
+    let month: u32 = part("BYMONTH")?.parse().ok()?;
+    let byday = part("BYDAY")?;
+    let (nth, day) = byday.split_at(byday.len().checked_sub(2)?);
+    let nth: i32 = if nth.is_empty() { 1 } else { nth.trim_start_matches('+').parse().ok()? };
+    let weekday = match day.to_ascii_uppercase().as_str() {
+        "MO" => chrono::Weekday::Mon,
+        "TU" => chrono::Weekday::Tue,
+        "WE" => chrono::Weekday::Wed,
+        "TH" => chrono::Weekday::Thu,
+        "FR" => chrono::Weekday::Fri,
+        "SA" => chrono::Weekday::Sat,
+        _ => chrono::Weekday::Sun,
+    };
+    let date = if nth > 0 {
+        NaiveDate::from_weekday_of_month_opt(year, month, weekday, u8::try_from(nth).ok()?)?
+    } else {
+        // Counting from the end: the last such weekday of the month, and so on back.
+        let next = if month == 12 { NaiveDate::from_ymd_opt(year + 1, 1, 1)? } else { NaiveDate::from_ymd_opt(year, month + 1, 1)? };
+        let mut d = next.pred_opt()?;
+        while d.weekday() != weekday {
+            d = d.pred_opt()?;
+        }
+        d.checked_sub_days(chrono::Days::new(7 * u64::try_from(-nth - 1).ok()?))?
+    };
+    Some(date.and_time(start.time()))
+}
+
+/// The offset from UTC a VTIMEZONE gives at local time `at`: that of the observance that began
+/// last before it.
+fn vtimezone_offset(zone: &Component, at: NaiveDateTime) -> Option<i32> {
+    let mut best: Option<(NaiveDateTime, i32)> = None;
+    let mut any = None;
+    for o in zone.children.iter().filter(|c| c.name == "STANDARD" || c.name == "DAYLIGHT") {
+        let Some(offset) = o.prop("TZOFFSETTO").and_then(|p| utc_offset(&p.raw)) else { continue };
+        any = any.or(Some(offset));
+        for year in [at.year() - 1, at.year()] {
+            if let Some(begin) = onset(o, year)
+                && begin <= at
+                && best.is_none_or(|(b, _)| begin > b)
+            {
+                best = Some((begin, offset));
+            }
+        }
+    }
+    best.map(|(_, o)| o).or(any)
+}
+
+/// Makes every time with a `TZID` readable: a Windows name becomes its IANA zone, and a zone
+/// only the calendar's own VTIMEZONE describes (Outlook's "Customized Time Zone") is worked out
+/// from that description and written as UTC.
+fn resolve_zones(root: &mut Component) {
+    let zones: Vec<Component> = root.children.iter().filter(|c| c.name == "VTIMEZONE").cloned().collect();
+    fn walk(c: &mut Component, zones: &[Component]) {
+        if c.name == "VTIMEZONE" {
+            return;
+        }
+        for p in &mut c.props {
+            let Some(tzid) = p.param("TZID").map(|z| z.trim().trim_matches('"').to_string()) else { continue };
+            if Tz::from_str(tzid.trim_matches('/')).is_ok() {
+                continue;
+            }
+            if let Some((_, iana)) = WINDOWS_ZONES.iter().find(|(w, _)| w.eq_ignore_ascii_case(&tzid)) {
+                for (name, value) in &mut p.params {
+                    if name.eq_ignore_ascii_case("TZID") {
+                        *value = (*iana).to_string();
+                    }
+                }
+                continue;
+            }
+            let Some(zone) = zones.iter().find(|z| z.text("TZID").trim().trim_matches('"') == tzid) else { continue };
+            let times: Option<Vec<String>> = p
+                .raw
+                .split(',')
+                .map(|v| {
+                    let local = NaiveDateTime::parse_from_str(v.trim(), "%Y%m%dT%H%M%S").ok()?;
+                    let utc = local - chrono::TimeDelta::seconds(i64::from(vtimezone_offset(zone, local)?));
+                    Some(utc.format("%Y%m%dT%H%M%SZ").to_string())
+                })
+                .collect();
+            if let Some(times) = times {
+                p.raw = times.join(",");
+                p.params.retain(|(n, _)| !n.eq_ignore_ascii_case("TZID"));
+            }
+        }
+        for child in &mut c.children {
+            walk(child, zones);
+        }
+    }
+    walk(root, &zones);
+}
+
+/// Adds a VTIMEZONE for every IANA zone a `TZID` in `root` names, as RFC 5545 asks, so another
+/// program (Outlook) reads the times with the same clock: the zone's standard and summer time
+/// for this year, with yearly rules when it changes clocks.
+pub fn add_timezones(root: &mut Component) {
+    fn names(c: &Component, out: &mut Vec<String>) {
+        for p in &c.props {
+            if let Some(z) = p.param("TZID")
+                && !out.iter().any(|o| o == z)
+            {
+                out.push(z.to_string());
+            }
+        }
+        for child in &c.children {
+            names(child, out);
+        }
+    }
+    let mut zones = Vec::new();
+    names(root, &mut zones);
+    for name in zones {
+        if root.children.iter().any(|c| c.name == "VTIMEZONE" && c.text("TZID") == name) {
+            continue;
+        }
+        if let Some(tz) = known_zone(&name) {
+            let mut vt = vtimezone(&tz);
+            vt.set_text("TZID", &name);
+            root.children.insert(0, vt);
+        }
+    }
+}
+
+/// A VTIMEZONE for `tz`, from its clock changes this year.
+fn vtimezone(tz: &Tz) -> Component {
+    let year = Utc::now().year();
+    let offset_at = |ts: i64| tz.offset_from_utc_datetime(&DateTime::from_timestamp(ts, 0).unwrap_or_default().naive_utc()).fix().local_minus_utc();
+    let fmt = |o: i32| format!("{}{:02}{:02}", if o < 0 { '-' } else { '+' }, o.abs() / 3_600, o.abs() % 3_600 / 60);
+    let begin = NaiveDate::from_ymd_opt(year, 1, 1).map(|d| d.and_time(NaiveTime::MIN).and_utc().timestamp()).unwrap_or(0);
+    let end = NaiveDate::from_ymd_opt(year + 1, 1, 1).map(|d| d.and_time(NaiveTime::MIN).and_utc().timestamp()).unwrap_or(0);
+    // The moments the offset changes this year, found hour by hour, then to the minute.
+    let mut changes = Vec::new();
+    let mut t = begin;
+    while t < end {
+        if offset_at(t) != offset_at(t + 3_600) {
+            let mut m = t;
+            while offset_at(m) == offset_at(t) && m < t + 3_600 {
+                m += 60;
+            }
+            changes.push((m, offset_at(t), offset_at(m)));
+        }
+        t += 3_600;
+    }
+    let mut zone = Component::new("VTIMEZONE");
+    zone.props.push(Prop::new("TZID", tz.name()));
+    if changes.is_empty() {
+        let o = offset_at(begin);
+        let mut s = Component::new("STANDARD");
+        s.props.push(Prop { name: "DTSTART".into(), params: Vec::new(), raw: "19700101T000000".into() });
+        s.props.push(Prop { name: "TZOFFSETFROM".into(), params: Vec::new(), raw: fmt(o) });
+        s.props.push(Prop { name: "TZOFFSETTO".into(), params: Vec::new(), raw: fmt(o) });
+        zone.children.push(s);
+        return zone;
+    }
+    const DAYS: [&str; 7] = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
+    for (at, from, to) in changes {
+        let local = DateTime::from_timestamp(at + i64::from(from), 0).unwrap_or_default().naive_utc();
+        let date = local.date();
+        let nth = (date.day() - 1) / 7 + 1;
+        let last = date.checked_add_days(chrono::Days::new(7)).is_none_or(|d| d.month() != date.month());
+        let byday = format!("{}{}", if last { "-1".to_string() } else { nth.to_string() }, DAYS[date.weekday().num_days_from_monday() as usize]);
+        let mut o = Component::new(if to > from { "DAYLIGHT" } else { "STANDARD" });
+        o.props.push(Prop { name: "DTSTART".into(), params: Vec::new(), raw: local.format("%Y%m%dT%H%M%S").to_string() });
+        o.props.push(Prop { name: "TZOFFSETFROM".into(), params: Vec::new(), raw: fmt(from) });
+        o.props.push(Prop { name: "TZOFFSETTO".into(), params: Vec::new(), raw: fmt(to) });
+        o.props.push(Prop { name: "RRULE".into(), params: Vec::new(), raw: format!("FREQ=YEARLY;BYMONTH={};BYDAY={byday}", date.month()) });
+        zone.children.push(o);
+    }
+    zone
 }
 
 /// `NAME;PARAM=value;PARAM="quoted:value":value`.
@@ -268,7 +501,7 @@ pub fn moment(p: &Prop) -> Option<(i64, bool)> {
         return Some((dt.and_utc().timestamp(), false));
     }
     let dt = NaiveDateTime::parse_from_str(v, "%Y%m%dT%H%M%S").ok()?;
-    let zone = p.param("TZID").and_then(|z| Tz::from_str(z.trim_matches('/')).ok()).or_else(local_zone);
+    let zone = p.param("TZID").and_then(known_zone).or_else(local_zone);
     let ts = match zone {
         Some(tz) => tz.from_local_datetime(&dt).earliest().map(|d| d.timestamp()),
         None => Local.from_local_datetime(&dt).earliest().map(|d| d.timestamp()),
@@ -696,6 +929,46 @@ mod tests {
     use super::*;
 
     const EVENT: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\nBEGIN:VTIMEZONE\r\nTZID:Europe/Amsterdam\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:abc@x\r\nDTSTAMP:20261001T120000Z\r\nDTSTART;TZID=Europe/Amsterdam:20261019T100000\r\nDTEND;TZID=Europe/Amsterdam:20261019T113000\r\nSUMMARY:Lunch met Sanne\\, Jan\r\nLOCATION:Kantine\r\nDESCRIPTION:Regel eerst\\n de offerte\r\n  en de rest\r\nBEGIN:VALARM\r\nTRIGGER:-PT15M\r\nACTION:DISPLAY\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    #[test]
+    fn outlooks_own_time_zones_are_read_with_their_clock() {
+        // Outlook answers a UTC invitation with a "Customized Time Zone" of its own.
+        let custom = "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VTIMEZONE\r\nTZID:Customized Time Zone\r\nBEGIN:STANDARD\r\nDTSTART:16010101T000000\r\nTZOFFSETFROM:+0000\r\nTZOFFSETTO:+0000\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:u\r\nDTSTART;TZID=\"Customized Time Zone\":20261022T100000\r\nDTEND;TZID=\"Customized Time Zone\":20261022T110000\r\nSUMMARY:Lunch\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let a = appointment_of(parse(custom)[0].find("VEVENT").unwrap(), "x".into()).unwrap();
+        let ten_utc = NaiveDate::from_ymd_opt(2026, 10, 22).unwrap().and_hms_opt(10, 0, 0).unwrap().and_utc().timestamp();
+        assert_eq!((a.start, a.end), (ten_utc, ten_utc + 3_600), "10:00 in a zone of +0000 is 10:00 UTC, 12:00 in Amsterdam");
+
+        // Its summer and winter time with yearly rules, and a Windows name.
+        let rules = "BEGIN:VCALENDAR\r\nBEGIN:VTIMEZONE\r\nTZID:Eigen zone\r\nBEGIN:STANDARD\r\nDTSTART:16010101T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10\r\nEND:STANDARD\r\nBEGIN:DAYLIGHT\r\nDTSTART:16010101T020000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:a\r\nDTSTART;TZID=Eigen zone:20261022T120000\r\nDTEND;TZID=Eigen zone:20261102T120000\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let a = appointment_of(parse(rules)[0].find("VEVENT").unwrap(), "x".into()).unwrap();
+        assert_eq!(a.start, ten_utc, "summer time: +0200");
+        let nov = NaiveDate::from_ymd_opt(2026, 11, 2).unwrap().and_hms_opt(11, 0, 0).unwrap().and_utc().timestamp();
+        assert_eq!(a.end, nov, "after the last Sunday of October: +0100");
+        let windows = rules.replace("Eigen zone:", "W. Europe Standard Time:");
+        let a = appointment_of(parse(&windows)[0].find("VEVENT").unwrap(), "x".into()).unwrap();
+        assert_eq!((a.start, a.end), (ten_utc, nov), "a Windows name is its IANA zone");
+    }
+
+    #[test]
+    fn a_zone_named_in_a_calendar_gets_its_description() {
+        let mut root = new_calendar("VEVENT", "u");
+        root.find_mut("VEVENT").unwrap().props.push(Prop {
+            name: "DTSTART".into(),
+            params: vec![("TZID".into(), "Europe/Amsterdam".into())],
+            raw: "20261022T120000".into(),
+        });
+        add_timezones(&mut root);
+        let text = root.serialize();
+        assert!(text.contains("BEGIN:VTIMEZONE\r\nTZID:Europe/Amsterdam\r\n"), "{text}");
+        assert!(text.contains("TZOFFSETTO:+0200\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\n"), "{text}");
+        assert!(text.contains("TZOFFSETTO:+0100\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\n"), "{text}");
+        add_timezones(&mut root);
+        assert_eq!(root.serialize().matches("BEGIN:VTIMEZONE").count(), 1, "once");
+        // What we describe, we read back with the same clock.
+        let back = parse(&text);
+        let start = back[0].find("VEVENT").and_then(|e| e.prop("DTSTART")).and_then(moment).map(|(t, _)| t);
+        assert_eq!(start, Some(NaiveDate::from_ymd_opt(2026, 10, 22).unwrap().and_hms_opt(10, 0, 0).unwrap().and_utc().timestamp()));
+    }
 
     #[test]
     fn a_meeting_goes_to_the_server_and_comes_back() {

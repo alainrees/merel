@@ -2007,12 +2007,18 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         }
         ui.add_space(8.0);
     }
-    if let Some(b) = body.as_ref().filter(|b| !b.attachments.is_empty()) {
+    // The calendar part of an invitation or an answer is the strip above, not a file of its own,
+    // as Outlook shows it; only a named .ics stays a tile.
+    let files: Vec<&mailcraft_mime::Attachment> = body
+        .as_ref()
+        .map(|b| b.attachments.iter().filter(|a| !(invitation::is_calendar(a) && !a.name.to_ascii_lowercase().ends_with(".ics"))).collect())
+        .unwrap_or_default();
+    if let Some(b) = body.as_ref().filter(|_| !files.is_empty()) {
         let mut save = None;
         let mut save_all = false;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-            for a in &b.attachments {
+            for a in files.iter().copied() {
                 let size = size_text(a.size);
                 let label = format!("📎 {}  ({size})", a.name);
                 let r = helder::file_tile(ui, t, &a.name, &size, &label, !in_junk);
@@ -2023,7 +2029,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 }
             }
             // Several attachments: one click saves them all, as Outlook's "Alle bijlagen opslaan".
-            if !in_junk && b.attachments.len() > 1 {
+            if !in_junk && files.len() > 1 {
                 helder::quiet(ui, t, |ui| {
                     if helder::tool_button(ui, t, helder::Icon::Download, attachments::SAVE_ALL)
                         .on_hover_text("Zet alle bijlagen van dit bericht in je map Downloads, elk onder zijn eigen naam.")
@@ -2038,7 +2044,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             app.save_attachment(&a);
         }
         if save_all {
-            app.save_attachments(&b.attachments);
+            app.save_attachments(&files.iter().map(|a| (*a).clone()).collect::<Vec<_>>());
         }
         // Thumbnails of the pictures, as Outlook previews them; a click opens the full picture.
         // Not in Junk, where nothing of a message is decoded beyond its text.
@@ -3034,6 +3040,7 @@ mod tests {
         }
         h.run();
         h.get_by_label("Sanne heeft geaccepteerd: Lunch");
+        assert!(h.query_all_by_label_contains("📎 bijlage").count() == 0, "the calendar part is the strip, not a file");
         assert!(h.query_all_by_label_contains("Deze vergadering staat niet in je agenda.").count() >= 1);
         assert!(h.query_by_label("Aan agenda toevoegen").is_none(), "an answer is not an invitation");
     }

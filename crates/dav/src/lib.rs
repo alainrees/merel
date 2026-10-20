@@ -553,6 +553,7 @@ impl DavClient {
             if let Some(inner) = root.find_mut(kind) {
                 write(inner);
             }
+            ical::add_timezones(&mut root);
             // The file name keeps to safe characters, whatever the UID holds.
             let name: String = uid.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@') { c } else { '-' }).collect();
             let url = format!("{collection}{name}.ics");
@@ -573,6 +574,7 @@ impl DavClient {
         if let Some(inner) = root.find_mut(kind) {
             write(inner);
         }
+        ical::add_timezones(root);
         self.put(&url, "text/calendar; charset=utf-8", root, resource.etag.as_deref())?;
         Ok(id.to_string())
     }
