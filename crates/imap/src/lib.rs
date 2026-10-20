@@ -282,6 +282,33 @@ fn kind_of(name: &str, attrs: &[NameAttribute<'_>]) -> FolderKind {
     mailcraft_mailbox::kind_from_name(name)
 }
 
+fn is_special_use(a: &NameAttribute<'_>) -> bool {
+    matches!(a, NameAttribute::Sent | NameAttribute::Drafts | NameAttribute::Junk | NameAttribute::Trash | NameAttribute::Archive)
+}
+
+/// Each special folder once: when two folders would both be the junk folder (a `\Junk`
+/// "Junk" and a "spam" known only by its name, say), the one the server marks wins, else the
+/// first listed, and the others keep their own names as ordinary folders. `bool` is whether the
+/// server marked the folder with a SPECIAL-USE attribute.
+fn one_per_kind(listed: Vec<(RemoteFolder, bool)>) -> Vec<RemoteFolder> {
+    let winner = |kind: FolderKind| {
+        let all: Vec<(usize, bool)> =
+            listed.iter().enumerate().filter(|(_, (f, _))| f.kind == kind && f.selectable).map(|(i, (_, marked))| (i, *marked)).collect();
+        all.iter().find(|(_, marked)| *marked).or(all.first()).map(|(i, _)| *i)
+    };
+    listed
+        .iter()
+        .enumerate()
+        .map(|(i, (f, _))| {
+            let mut f = f.clone();
+            if f.kind != FolderKind::Other && winner(f.kind) != Some(i) {
+                f.kind = FolderKind::Other;
+            }
+            f
+        })
+        .collect()
+}
+
 /// Whether a BODYSTRUCTURE holds anything a person would call an attachment.
 fn has_attachment(b: &BodyStructure<'_>) -> bool {
     let disposition_attachment =
@@ -311,15 +338,19 @@ impl ImapClient {
 
     pub fn folders(&mut self) -> Result<Vec<RemoteFolder>> {
         let names = self.session.list(None, Some("*"))?;
-        let mut out: Vec<RemoteFolder> = names
+        let listed: Vec<(RemoteFolder, bool)> = names
             .iter()
-            .map(|n| RemoteFolder {
-                path: n.name().to_string(),
-                name: n.name().rsplit(['/', '.']).next().unwrap_or(n.name()).to_string(),
-                kind: kind_of(n.name(), n.attributes()),
-                selectable: !n.attributes().iter().any(|a| matches!(a, NameAttribute::NoSelect)),
+            .map(|n| {
+                let folder = RemoteFolder {
+                    path: n.name().to_string(),
+                    name: n.name().rsplit(['/', '.']).next().unwrap_or(n.name()).to_string(),
+                    kind: kind_of(n.name(), n.attributes()),
+                    selectable: !n.attributes().iter().any(|a| matches!(a, NameAttribute::NoSelect)),
+                };
+                (folder, n.attributes().iter().any(is_special_use))
             })
             .collect();
+        let mut out = one_per_kind(listed);
         if !out.iter().any(|f| f.kind == FolderKind::Inbox) {
             out.insert(0, RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true });
         }
@@ -806,6 +837,30 @@ mod tests {
         client.read_greeting().unwrap();
         let session = client.login("a", "b").map_err(|(e, _)| e).unwrap();
         (ImapClient { session, selected: None }, rx)
+    }
+
+    #[test]
+    fn two_junk_folders_become_one_junk_folder_and_one_named_folder() {
+        let f = |path: &str, kind| RemoteFolder { path: path.into(), name: path.rsplit('.').next().unwrap().into(), kind, selectable: true };
+        let listed = vec![
+            (f("INBOX", FolderKind::Inbox), false),
+            (f("INBOX.spam", FolderKind::Junk), false),
+            (f("INBOX.Junk", FolderKind::Junk), true),
+            (f("INBOX.Trash", FolderKind::Deleted), false),
+            (f("Trash", FolderKind::Deleted), false),
+        ];
+        let kinds: Vec<(String, FolderKind)> = one_per_kind(listed).into_iter().map(|f| (f.path, f.kind)).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ("INBOX".into(), FolderKind::Inbox),
+                ("INBOX.spam".into(), FolderKind::Other),
+                ("INBOX.Junk".into(), FolderKind::Junk),
+                ("INBOX.Trash".into(), FolderKind::Deleted),
+                ("Trash".into(), FolderKind::Other),
+            ],
+            "the marked one wins, else the first"
+        );
     }
 
     #[test]
