@@ -9,6 +9,7 @@ use mailcraft_engine::{CommandError, followup, tasks::TaskFilter};
 use mailcraft_model::{Frequency, MessageHeader, Priority, Repeat, Task};
 
 use crate::calendar::{to_local, to_timestamp, today};
+use crate::helder::{self, Icon};
 use crate::{MailApp, Tokens};
 
 const DATE_FORMAT: &str = "%d-%m-%Y";
@@ -346,106 +347,120 @@ fn detail(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         });
         return;
     };
-    ui.label(RichText::new(&task.title).size(22.0).strong().color(if task.done { t.text_dim } else { t.text }));
-    ui.add_space(8.0);
-    let row = |ui: &mut Ui, label: &str, value: String| {
+    helder::quiet(ui, t, |ui| {
         ui.horizontal(|ui| {
-            ui.add_sized([110.0, 20.0], egui::Label::new(RichText::new(label).color(t.text_dim)));
-            ui.label(RichText::new(value).color(t.text));
+            if helder::tool_button(ui, t, Icon::Pencil, "Bewerken").clicked() {
+                app.edit_selected_task();
+            }
+            let flip = if task.done { "Heropenen" } else { "Voltooien" };
+            if helder::tool_button(ui, t, Icon::SquareCheck, flip).clicked() {
+                app.run("task.complete", serde_json::Value::Null);
+            }
         });
+    });
+    ui.add_space(12.0);
+    ui.label(RichText::new(&task.title).size(22.0).strong().color(if task.done { t.text_dim } else { t.text }));
+    ui.add_space(4.0);
+    let row = |ui: &mut Ui, icon: Icon, label: &str, value: String| {
+        helder::icon_row(ui, t, icon, |ui| ui.label(RichText::new(value).size(14.0).color(t.text))).on_hover_text(label);
     };
-    row(ui, "Status", if task.done { "Voltooid".into() } else { "Open".into() });
-    row(ui, "Vervaldatum", task.due.map(due_label).unwrap_or_else(|| "Geen".into()));
-    row(ui, "Prioriteit", priority_label(task.priority).into());
+    row(ui, Icon::CircleCheck, "Status", if task.done { "Voltooid".into() } else { "Open".into() });
+    row(ui, Icon::Calendar, "Vervaldatum", task.due.map(due_label).unwrap_or_else(|| "Geen vervaldatum".into()));
+    row(ui, Icon::Flag, "Prioriteit", format!("Prioriteit {}", priority_label(task.priority).to_lowercase()));
     if let Some(r) = task.repeat {
-        row(ui, "Herhalen", r.describe());
+        row(ui, Icon::Repeat, "Herhalen", r.describe());
     }
     if !app.engine.session.item_accounts.is_empty() {
-        row(ui, "Opgeslagen in", crate::contacts::store_name(&app.engine.session, task.account_id.as_deref()));
+        row(ui, Icon::Folder, "Opgeslagen in", crate::contacts::store_name(&app.engine.session, task.account_id.as_deref()));
     }
     if !task.notes.is_empty() {
-        ui.add_space(8.0);
-        ui.label(RichText::new("Notities").color(t.text_dim));
-        ui.label(RichText::new(&task.notes).color(t.text));
+        helder::rule(ui, t);
+        helder::icon_row(ui, t, Icon::Notes, |ui| ui.add(egui::Label::new(RichText::new(&task.notes).size(14.0).color(t.text)).wrap()));
     }
-    ui.add_space(14.0);
-    ui.horizontal(|ui| {
-        if ui.add(egui::Button::new("Bewerken").min_size(vec2(90.0, 26.0))).clicked() {
-            app.edit_selected_task();
-        }
-        let flip = if task.done { "Heropenen" } else { "Voltooien" };
-        if ui.add(egui::Button::new(flip).min_size(vec2(90.0, 26.0))).clicked() {
-            app.run("task.complete", serde_json::Value::Null);
-        }
-    });
 }
 
 fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let session = &app.engine.session;
     let Some(editor) = app.tasks.editor.as_mut() else { return };
-    ui.label(RichText::new(if editor.id.is_some() { "Taak bewerken" } else { "Nieuwe taak" }).size(18.0).strong().color(t.text));
-    ui.add_space(8.0);
+    let mut save = false;
+    let mut cancel = false;
+    helder::quiet(ui, t, |ui| {
+        ui.horizontal(|ui| {
+            save = helder::primary_button(ui, t, Icon::Save, "Opslaan").clicked();
+            helder::bar_separator(ui, t);
+            cancel = helder::tool_button(ui, t, Icon::X, "Annuleren").clicked();
+        });
+    });
+    ui.add_space(12.0);
+    let width = ui.available_width().min(620.0) - 44.0;
+    ui.horizontal(|ui| {
+        helder::indent(ui);
+        ui.label(RichText::new(if editor.id.is_some() { "Taak bewerken" } else { "Nieuwe taak" }).size(13.0).color(t.text_dim));
+    });
+    helder::icon_row(ui, t, Icon::Type, |ui| helder::underline_field(ui, t, &mut editor.title, "Titel toevoegen", width, true));
     if editor.id.is_none() {
-        crate::contacts::store_picker(ui, t, session, 110.0, &mut editor.account_id);
+        crate::contacts::store_picker(ui, t, session, &mut editor.account_id);
         if !editor.account_id.is_empty() {
             // A repeat is kept on this computer only: a server would not know it.
             editor.repeat = None;
         }
     }
-    let field = |ui: &mut Ui, label: &str, value: &mut String, width: f32| {
-        ui.horizontal(|ui| {
-            ui.add_sized([110.0, 22.0], egui::Label::new(RichText::new(label).color(t.text)));
-            ui.add(egui::TextEdit::singleline(value).desired_width(width));
-        });
-    };
-    field(ui, "Titel", &mut editor.title, 320.0);
-    field(ui, "Vervaldatum", &mut editor.due, 110.0);
-    ui.horizontal(|ui| {
-        ui.add_sized([110.0, 22.0], egui::Label::new(RichText::new("Prioriteit").color(t.text)));
+    helder::icon_row(ui, t, Icon::Calendar, |ui| {
+        helder::underline_field(ui, t, &mut editor.due, "Vervaldatum (dd-mm-jjjj)", 200.0, false)
+            .on_hover_text("Vervaldatum als dag-maand-jaar, of leeg voor geen deadline.")
+    });
+    helder::icon_row(ui, t, Icon::Flag, |ui| {
+        ui.label(RichText::new("Prioriteit").size(14.0).color(t.text));
+        ui.add_space(4.0);
         for p in [Priority::Low, Priority::Normal, Priority::High] {
-            ui.radio_value(&mut editor.priority, p, priority_label(p));
+            if helder::chip(ui, t, priority_label(p), editor.priority == p).clicked() {
+                editor.priority = p;
+            }
         }
     });
     if editor.account_id.is_empty() {
-        ui.horizontal(|ui| {
-            ui.add_sized([110.0, 22.0], egui::Label::new(RichText::new("Herhalen").color(t.text)));
-            let name = REPEATS.iter().find(|(f, _)| *f == editor.repeat).map(|(_, n)| *n).unwrap_or("Niet");
-            egui::ComboBox::from_id_salt("task-repeat").width(110.0).selected_text(name).show_ui(ui, |ui| {
+        let name = REPEATS.iter().find(|(f, _)| *f == editor.repeat).map(|(_, n)| *n).unwrap_or("Niet");
+        let shown = if editor.repeat.is_none() { "Niet herhalen" } else { name };
+        helder::icon_row(ui, t, Icon::Repeat, |ui| {
+            helder::select(ui, t, shown, 160.0, |ui| {
                 for (f, name) in REPEATS {
-                    ui.selectable_value(&mut editor.repeat, f, name);
+                    if ui.selectable_label(editor.repeat == f, if f.is_none() { "Niet herhalen" } else { name }).clicked() {
+                        editor.repeat = f;
+                        ui.close();
+                    }
                 }
             });
             if let Some(f) = editor.repeat {
-                ui.label(RichText::new("om de").color(t.text));
-                ui.add(egui::DragValue::new(&mut editor.interval).range(1..=99));
                 let unit = match f {
                     Frequency::Daily => "dagen",
                     Frequency::Weekly => "weken",
                     Frequency::Monthly => "maanden",
                     Frequency::Yearly => "jaar",
                 };
-                ui.label(RichText::new(unit).color(t.text));
+                ui.add_space(8.0);
+                ui.label(RichText::new("om de").size(14.0).color(t.text));
+                let mut text = editor.interval.max(1).to_string();
+                if helder::number_field(ui, t, &mut text, "1").changed()
+                    && let Ok(n) = text.trim().parse::<u32>()
+                {
+                    editor.interval = n.clamp(1, 99);
+                }
+                ui.label(RichText::new(unit).size(14.0).color(t.text));
             }
         });
+        if editor.repeat.is_some() {
+            helder::note(ui, t, "Na Voltooien komt de taak terug met de volgende vervaldatum.");
+        }
     }
-    ui.horizontal(|ui| {
-        ui.add_sized([110.0, 22.0], egui::Label::new(RichText::new("Notities").color(t.text)));
-        ui.add(egui::TextEdit::multiline(&mut editor.notes).desired_width(320.0).desired_rows(4));
-    });
-    ui.label(RichText::new("Vervaldatum als dag-maand-jaar, of leeg voor geen deadline.").size(11.5).color(t.text_dim));
-    if editor.repeat.is_some() {
-        ui.label(RichText::new("Na Voltooien komt de taak terug met de volgende vervaldatum.").size(11.5).color(t.text_dim));
-    }
+    ui.add_space(4.0);
+    helder::notes_box(ui, t, &mut editor.notes, width);
     if let Some(e) = &editor.error {
-        ui.label(RichText::new(e).color(t.flag));
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            helder::indent(ui);
+            ui.label(RichText::new(e).color(t.flag));
+        });
     }
-    ui.add_space(8.0);
-    let mut save = false;
-    let mut cancel = false;
-    ui.horizontal(|ui| {
-        save = ui.add(egui::Button::new(RichText::new("Opslaan").color(t.on_accent)).fill(t.accent).min_size(vec2(90.0, 26.0))).clicked();
-        cancel = ui.add(egui::Button::new("Annuleren").min_size(vec2(90.0, 26.0))).clicked();
-    });
     if save {
         match editor.params() {
             Ok(params) => match app.engine.run("task.save", &params) {

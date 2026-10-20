@@ -2452,8 +2452,9 @@ mod tests {
         h.run();
         {
             let e = h.state_mut().contacts.editor.as_mut().expect("editor");
-            e.name = "Noor Bakker".into();
-            e.emails = "noor@example.org".into();
+            e.first = "Noor".into();
+            e.last = "Bakker".into();
+            e.emails = vec!["noor@example.org".into()];
         }
         h.run();
         h.get_by_label("Opslaan").click();
@@ -2697,7 +2698,7 @@ mod tests {
         h.run();
         assert!(h.state().module == Module::People);
         let e = h.state().contacts.editor.as_ref().expect("the form for a new contact");
-        assert_eq!((e.id.as_deref(), e.name.as_str(), e.emails.as_str()), (None, "Nieuwsbrief", "news@example.org"));
+        assert_eq!((e.id.as_deref(), e.name().as_str(), e.emails.as_slice()), (None, "Nieuwsbrief", ["news@example.org".to_string()].as_slice()));
         h.get_by_label("Opslaan").click();
         h.run();
         assert_eq!(h.state().engine.session.contact_with_email("news@example.org").map(|c| c.name.as_str()), Some("Nieuwsbrief"));

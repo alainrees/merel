@@ -104,11 +104,14 @@ pub enum Icon {
     Moon,
     ArrowDownUp,
     Printer,
+    Phone,
+    Building,
+    Plus,
 }
 
 impl Icon {
     /// Every icon, for the test that each one loads.
-    pub const ALL: [Icon; 75] = [
+    pub const ALL: [Icon; 78] = [
         Icon::Archive,
         Icon::Bell,
         Icon::Calendar,
@@ -184,6 +187,9 @@ impl Icon {
         Icon::Moon,
         Icon::ArrowDownUp,
         Icon::Printer,
+        Icon::Phone,
+        Icon::Building,
+        Icon::Plus,
     ];
 
     /// The image's uri and its SVG source.
@@ -269,6 +275,9 @@ impl Icon {
             Icon::Moon => svg!("moon"),
             Icon::ArrowDownUp => svg!("arrow-down-up"),
             Icon::Printer => svg!("printer"),
+            Icon::Phone => svg!("phone"),
+            Icon::Building => svg!("building"),
+            Icon::Plus => svg!("plus"),
         }
     }
 
@@ -390,6 +399,50 @@ pub fn number_field(ui: &mut Ui, t: &Tokens, text: &mut String, hint: &str) -> R
     let stroke = if r.has_focus() { Stroke::new(2.0, t.accent) } else { Stroke::new(1.0, t.control_border) };
     ui.painter().rect_stroke(r.rect, CornerRadius::same(CONTROL_RADIUS), stroke, egui::StrokeKind::Inside);
     r
+}
+
+/// A link-like button that adds a row to a form, such as "E-mail toevoegen": a plus and the
+/// text in the app colour.
+pub fn add_link(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
+    ui.add(
+        egui::Button::image_and_text(Icon::Plus.image(ICON, t.accent_text), RichText::new(text).size(14.0).color(t.accent_text))
+            .frame_when_inactive(false)
+            .corner_radius(CONTROL_RADIUS)
+            .min_size(vec2(0.0, 32.0)),
+    )
+}
+
+/// A thin line across a form between its sections, with some room around it.
+pub fn rule(ui: &mut Ui, t: &Tokens) {
+    ui.add_space(8.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().min(620.0), 1.0), Sense::hover());
+    ui.painter().hline(rect.x_range(), rect.center().y, Stroke::new(1.0, t.card_border));
+    ui.add_space(8.0);
+}
+
+/// A form's notes: a soft box that grows with the text, with the notes icon before it.
+pub fn notes_box(ui: &mut Ui, t: &Tokens, text: &mut String, width: f32) -> Response {
+    ui.horizontal_top(|ui| {
+        let (rect, _) = ui.allocate_exact_size(vec2(ROW_ICON, BUTTON_HEIGHT), Sense::hover());
+        Icon::Notes.image(ICON, t.text_dim).paint_at(ui, Rect::from_center_size(rect.center(), vec2(ICON, ICON)));
+        Frame::new()
+            .fill(t.window)
+            .stroke(Stroke::new(1.0, t.card_border))
+            .corner_radius(CONTROL_RADIUS)
+            .inner_margin(8)
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(text)
+                        .frame(Frame::NONE)
+                        .hint_text(RichText::new("Notities toevoegen").color(t.text_dim))
+                        .font(FontId::proportional(FIELD_TEXT))
+                        .desired_width(width - 16.0)
+                        .desired_rows(4),
+                )
+            })
+            .inner
+    })
+    .inner
 }
 
 /// A quiet square button with only an icon; `label` is its tooltip and its name for a screen

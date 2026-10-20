@@ -6,6 +6,7 @@ use serde_json::json;
 use mailcraft_engine::CommandError;
 use mailcraft_model::Contact;
 
+use crate::helder::{self, Icon};
 use crate::{ComposeKind, MailApp, Module, Tokens};
 
 /// What the contacts module remembers between frames.
@@ -21,42 +22,66 @@ pub struct State {
 /// The search box's widget id, so Ctrl+E can put the cursor there.
 pub(crate) const SEARCH_BOX: &str = "contacts_search_box";
 
-/// The form's fields as text; addresses and phone numbers one per line or separated by `;`.
+/// The form's fields: the name in two parts, as Outlook asks for it, and each address and
+/// phone number on its own row.
 #[derive(Default)]
 pub struct Editor {
     pub id: Option<String>,
     /// Where a new contact goes: an account id, or empty for this computer.
     pub account_id: String,
-    pub name: String,
-    pub emails: String,
-    pub phones: String,
+    pub first: String,
+    pub last: String,
+    pub emails: Vec<String>,
+    pub phones: Vec<String>,
     pub company: String,
     pub notes: String,
     pub error: Option<String>,
 }
 
-fn split(s: &str) -> Vec<String> {
-    s.split([';', ',', '\n']).map(str::trim).filter(|p| !p.is_empty()).map(str::to_string).collect()
+/// The parts of a row, a pasted "a@b.nl; c@d.nl" giving two.
+fn split(rows: &[String]) -> Vec<String> {
+    rows.iter().flat_map(|r| r.split([';', ',', '\n'])).map(str::trim).filter(|p| !p.is_empty()).map(str::to_string).collect()
+}
+
+/// A full name as first name and the rest: "Sanne de Vries" is Sanne and "de Vries".
+pub fn split_name(name: &str) -> (String, String) {
+    match name.trim().split_once(char::is_whitespace) {
+        Some((first, last)) => (first.to_string(), last.trim().to_string()),
+        None => (name.trim().to_string(), String::new()),
+    }
 }
 
 impl Editor {
     pub fn from_contact(c: &Contact) -> Self {
+        let (first, last) = split_name(&c.name);
         Editor {
             id: Some(c.id.clone()),
             account_id: c.account_id.clone().unwrap_or_default(),
-            name: c.name.clone(),
-            emails: c.emails.join("\n"),
-            phones: c.phones.join("\n"),
+            first,
+            last,
+            emails: c.emails.clone(),
+            phones: c.phones.clone(),
             company: c.company.clone(),
             notes: c.notes.clone(),
             error: None,
         }
     }
 
+    /// A new contact with this name and address, as "Toevoegen aan contacten" starts one.
+    pub fn new_for(name: &str, email: &str) -> Self {
+        let (first, last) = split_name(name);
+        Editor { first, last, emails: vec![email.to_string()], ..Editor::default() }
+    }
+
+    /// The name the two fields make.
+    pub fn name(&self) -> String {
+        [self.first.trim(), self.last.trim()].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" ")
+    }
+
     /// The `contact.save` parameters.
     pub fn params(&self) -> serde_json::Value {
         let mut p = json!({
-            "name": self.name,
+            "name": self.name(),
             "emails": split(&self.emails),
             "phones": split(&self.phones),
             "company": self.company,
@@ -73,20 +98,26 @@ impl Editor {
 }
 
 /// A row to pick where a new item goes, when there is a choice: this computer or an account.
-pub(crate) fn store_picker(ui: &mut Ui, t: &Tokens, session: &mailcraft_engine::Session, label_width: f32, account_id: &mut String) {
+pub(crate) fn store_picker(ui: &mut Ui, t: &Tokens, session: &mailcraft_engine::Session, account_id: &mut String) {
     let accounts: Vec<(String, String)> = session.item_accounts().iter().map(|a| (a.id.clone(), a.name.clone())).collect();
     if accounts.is_empty() {
         return;
     }
     let name = accounts.iter().find(|(id, _)| id == account_id).map(|(_, n)| n.as_str()).unwrap_or("Op deze computer");
-    ui.horizontal(|ui| {
-        ui.add_sized([label_width, 22.0], egui::Label::new(RichText::new("Opslaan in").color(t.text)));
-        egui::ComboBox::from_id_salt(("store-picker", label_width as i32)).selected_text(name).width(320.0).show_ui(ui, |ui| {
-            ui.selectable_value(account_id, String::new(), "Op deze computer");
-            for (id, n) in &accounts {
-                ui.selectable_value(account_id, id.clone(), n);
+    helder::icon_row(ui, t, Icon::Folder, |ui| {
+        helder::select(ui, t, name, 260.0, |ui| {
+            if ui.selectable_label(account_id.is_empty(), "Op deze computer").clicked() {
+                account_id.clear();
+                ui.close();
             }
-        });
+            for (id, n) in &accounts {
+                if ui.selectable_label(account_id == id, n).clicked() {
+                    *account_id = id.clone();
+                    ui.close();
+                }
+            }
+        })
+        .on_hover_text("Opslaan in");
     });
 }
 
@@ -106,8 +137,8 @@ impl MailApp {
             self.contacts.editor = None;
             return;
         }
-        let name = if from.display() == from.email() { String::new() } else { from.display().to_string() };
-        self.contacts.editor = Some(Editor { name, emails: from.email().to_string(), ..Editor::default() });
+        let name = if from.display() == from.email() { "" } else { from.display() };
+        self.contacts.editor = Some(Editor::new_for(name, from.email()));
     }
 
     pub fn new_contact(&mut self) {
@@ -173,14 +204,17 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     let on = selected.as_deref() == Some(c.id.as_str());
                     let r = ui.add_sized(
                         [ui.available_width(), 44.0],
-                        egui::Button::new("").fill(if on { t.checked } else { Color32::TRANSPARENT }).frame_when_inactive(on),
+                        egui::Button::new("")
+                            .fill(if on { t.checked } else { Color32::TRANSPARENT })
+                            .frame_when_inactive(on)
+                            .stroke(egui::Stroke::NONE)
+                            .corner_radius(helder::CONTROL_RADIUS),
                     );
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &c.name));
                     let rect = r.rect.shrink2(vec2(8.0, 4.0));
                     let p = ui.painter();
                     let badge = egui::Rect::from_min_size(rect.left_top(), vec2(34.0, 34.0)).translate(vec2(0.0, 1.0));
-                    p.circle_filled(badge.center(), 17.0, t.accent);
-                    p.text(badge.center(), Align2::CENTER_CENTER, letter.to_string(), FontId::proportional(15.0), t.on_accent);
+                    helder::avatar(p, badge.center(), 17.0, &c.name, c.emails.first().map(String::as_str).unwrap_or(""));
                     let x = rect.left() + 44.0;
                     p.text(egui::pos2(x, rect.top() + 2.0), Align2::LEFT_TOP, &c.name, FontId::proportional(13.5), t.text);
                     let sub = c.emails.first().cloned().unwrap_or_else(|| c.company.clone());
@@ -203,14 +237,11 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         });
 }
 
-fn row(ui: &mut Ui, t: &Tokens, label: &str, value: &str) {
+fn row(ui: &mut Ui, t: &Tokens, icon: Icon, value: &str, hint: &str) {
     if value.is_empty() {
         return;
     }
-    ui.horizontal(|ui| {
-        ui.add_sized([90.0, 20.0], egui::Label::new(RichText::new(label).color(t.text_dim)));
-        ui.label(RichText::new(value).color(t.text));
-    });
+    helder::icon_row(ui, t, icon, |ui| ui.label(RichText::new(value).size(14.0).color(t.text))).on_hover_text(hint);
 }
 
 fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
@@ -220,52 +251,56 @@ fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         });
         return;
     };
-    ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(vec2(56.0, 56.0), Sense::hover());
-        ui.painter().circle_filled(rect.center(), 28.0, t.accent);
-        ui.painter().text(rect.center(), Align2::CENTER_CENTER, c.initial().to_string(), FontId::proportional(24.0), t.on_accent);
-        ui.vertical(|ui| {
-            ui.label(RichText::new(&c.name).size(22.0).strong().color(t.text));
-            if !c.company.is_empty() {
-                ui.label(RichText::new(&c.company).color(t.text_dim));
+    let mut export = false;
+    helder::quiet(ui, t, |ui| {
+        ui.horizontal(|ui| {
+            if helder::tool_button(ui, t, Icon::Pencil, "Bewerken").clicked() {
+                app.edit_selected_contact();
+            }
+            if helder::tool_button(ui, t, Icon::Download, crate::vcard::EXPORT)
+                .on_hover_text("Bewaart dit contact als .vcf-bestand in je map Downloads, om te delen of in een ander programma te openen.")
+                .clicked()
+            {
+                export = true;
             }
         });
     });
-    ui.add_space(14.0);
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(vec2(72.0, 72.0), Sense::hover());
+        helder::avatar(ui.painter(), rect.center(), 34.0, &c.name, c.emails.first().map(String::as_str).unwrap_or(""));
+        ui.add_space(8.0);
+        ui.vertical(|ui| {
+            ui.label(RichText::new(&c.name).size(22.0).strong().color(t.text));
+            if !c.company.is_empty() {
+                ui.label(RichText::new(&c.company).size(14.0).color(t.text_dim));
+            }
+        });
+    });
+    helder::rule(ui, t);
     let mut mail = false;
-    for (i, e) in c.emails.iter().enumerate() {
-        ui.horizontal(|ui| {
-            ui.add_sized([90.0, 20.0], egui::Label::new(RichText::new(if i == 0 { "E-mail" } else { "" }).color(t.text_dim)));
-            if ui.add(egui::Button::new(RichText::new(e).color(t.accent_text)).frame(false)).on_hover_text("Nieuw bericht aan dit adres").clicked() {
+    for e in &c.emails {
+        helder::icon_row(ui, t, Icon::Mail, |ui| {
+            if ui
+                .add(egui::Button::new(RichText::new(e).size(14.0).color(t.accent_text)).frame(false))
+                .on_hover_text("Nieuw bericht aan dit adres")
+                .clicked()
+            {
                 mail = true;
             }
         });
     }
-    for (i, p) in c.phones.iter().enumerate() {
-        row(ui, t, if i == 0 { "Telefoon" } else { "" }, p);
+    for p in &c.phones {
+        row(ui, t, Icon::Phone, p, "Telefoon");
     }
+    row(ui, t, Icon::Building, &c.company, "Bedrijf");
     if !app.engine.session.item_accounts.is_empty() {
-        row(ui, t, "Opgeslagen in", &store_name(&app.engine.session, c.account_id.as_deref()));
+        row(ui, t, Icon::Folder, &store_name(&app.engine.session, c.account_id.as_deref()), "Opgeslagen in");
     }
     if !c.notes.is_empty() {
-        ui.add_space(8.0);
-        ui.label(RichText::new("Notities").color(t.text_dim));
-        ui.label(RichText::new(&c.notes).color(t.text));
+        helder::rule(ui, t);
+        helder::icon_row(ui, t, Icon::Notes, |ui| ui.add(egui::Label::new(RichText::new(&c.notes).size(14.0).color(t.text)).wrap()));
     }
-    ui.add_space(14.0);
-    let mut export = false;
-    ui.horizontal(|ui| {
-        if ui.add(egui::Button::new("Bewerken").min_size(vec2(90.0, 26.0))).clicked() {
-            app.edit_selected_contact();
-        }
-        if ui
-            .add(egui::Button::new(crate::vcard::EXPORT).min_size(vec2(90.0, 26.0)))
-            .on_hover_text("Bewaart dit contact als .vcf-bestand in je map Downloads, om te delen of in een ander programma te openen.")
-            .clicked()
-        {
-            export = true;
-        }
-    });
     if export {
         app.export_selected_contact();
     }
@@ -274,40 +309,99 @@ fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
 }
 
-fn field(ui: &mut Ui, t: &Tokens, label: &str, value: &mut String, rows: usize) {
+/// Rows of one kind of field, such as the e-mail addresses: each on its own line with a way to
+/// take it out, then a link that adds one. Always at least one row to type in.
+fn rows(ui: &mut Ui, t: &Tokens, icon: Icon, values: &mut Vec<String>, hint: &str, add: &str, width: f32) {
+    if values.is_empty() {
+        values.push(String::new());
+    }
+    let mut remove = None;
+    let many = values.len() > 1;
+    for (i, v) in values.iter_mut().enumerate() {
+        ui.push_id((hint, i), |ui| {
+            helder::icon_row(ui, t, icon, |ui| {
+                helder::underline_field(ui, t, v, hint, width - 44.0, false);
+                if many && helder::quiet(ui, t, |ui| helder::icon_button(ui, t, Icon::X, &format!("{hint} weghalen"))).clicked() {
+                    remove = Some(i);
+                }
+            });
+        });
+    }
+    if let Some(i) = remove {
+        values.remove(i);
+    }
     ui.horizontal(|ui| {
-        ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new(label).color(t.text)));
-        if rows > 1 {
-            ui.add(egui::TextEdit::multiline(value).desired_width(320.0).desired_rows(rows));
-        } else {
-            ui.add(egui::TextEdit::singleline(value).desired_width(320.0));
+        helder::indent(ui);
+        if helder::quiet(ui, t, |ui| helder::add_link(ui, t, add)).clicked() {
+            values.push(String::new());
         }
+    });
+}
+
+fn heading(ui: &mut Ui, t: &Tokens, text: &str) {
+    ui.horizontal(|ui| {
+        helder::indent(ui);
+        ui.label(RichText::new(text).size(15.0).strong().color(t.text));
     });
 }
 
 fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let session = &app.engine.session;
     let Some(editor) = app.contacts.editor.as_mut() else { return };
-    ui.label(RichText::new(if editor.id.is_some() { "Contact bewerken" } else { "Nieuw contact" }).size(18.0).strong().color(t.text));
-    ui.add_space(8.0);
-    if editor.id.is_none() {
-        store_picker(ui, t, session, 90.0, &mut editor.account_id);
-    }
-    field(ui, t, "Naam", &mut editor.name, 1);
-    field(ui, t, "E-mail", &mut editor.emails, 2);
-    field(ui, t, "Telefoon", &mut editor.phones, 2);
-    field(ui, t, "Bedrijf", &mut editor.company, 1);
-    field(ui, t, "Notities", &mut editor.notes, 4);
-    ui.label(RichText::new("Meer adressen of nummers: elk op een eigen regel.").size(11.5).color(t.text_dim));
-    if let Some(e) = &editor.error {
-        ui.label(RichText::new(e).color(t.flag));
-    }
-    ui.add_space(8.0);
     let mut save = false;
     let mut cancel = false;
-    ui.horizontal(|ui| {
-        save = ui.add(egui::Button::new(RichText::new("Opslaan").color(t.on_accent)).fill(t.accent).min_size(vec2(90.0, 26.0))).clicked();
-        cancel = ui.add(egui::Button::new("Annuleren").min_size(vec2(90.0, 26.0))).clicked();
+    helder::quiet(ui, t, |ui| {
+        ui.horizontal(|ui| {
+            save = helder::primary_button(ui, t, Icon::Save, "Opslaan").clicked();
+            helder::bar_separator(ui, t);
+            cancel = helder::tool_button(ui, t, Icon::X, "Annuleren").clicked();
+        });
+    });
+    ui.add_space(12.0);
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        let width = ui.available_width().min(620.0);
+        ui.horizontal_top(|ui| {
+            // The contact's picture: its initials once there is a name, else a person.
+            let (rect, _) = ui.allocate_exact_size(vec2(96.0, 96.0), Sense::hover());
+            let name = editor.name();
+            let email = editor.emails.first().cloned().unwrap_or_default();
+            if name.is_empty() && email.trim().is_empty() {
+                ui.painter().circle(rect.center(), 46.0, t.window, egui::Stroke::new(1.5, t.control_border));
+                Icon::User.image(44.0, t.text_dim).paint_at(ui, egui::Rect::from_center_size(rect.center(), vec2(44.0, 44.0)));
+            } else {
+                helder::avatar(ui.painter(), rect.center(), 46.0, &name, &email);
+            }
+            ui.add_space(12.0);
+            ui.vertical(|ui| {
+                let field = (width - 108.0).max(200.0);
+                ui.label(RichText::new(if editor.id.is_some() { "Contact bewerken" } else { "Nieuw contact" }).size(13.0).color(t.text_dim));
+                ui.spacing_mut().item_spacing.y = 10.0;
+                helder::underline_field(ui, t, &mut editor.first, "Voornaam", field, true);
+                helder::underline_field(ui, t, &mut editor.last, "Achternaam", field, true);
+            });
+        });
+        ui.add_space(4.0);
+        if editor.id.is_none() {
+            store_picker(ui, t, session, &mut editor.account_id);
+        }
+        helder::rule(ui, t);
+        heading(ui, t, "E-mailadressen");
+        rows(ui, t, Icon::Mail, &mut editor.emails, "E-mailadres", "E-mail toevoegen", width);
+        helder::rule(ui, t);
+        heading(ui, t, "Telefoonnummers");
+        rows(ui, t, Icon::Phone, &mut editor.phones, "Telefoonnummer", "Nummer toevoegen", width);
+        helder::rule(ui, t);
+        heading(ui, t, "Werkgegevens");
+        helder::icon_row(ui, t, Icon::Building, |ui| helder::underline_field(ui, t, &mut editor.company, "Bedrijf", width - 44.0, false));
+        helder::rule(ui, t);
+        helder::notes_box(ui, t, &mut editor.notes, width - 44.0);
+        if let Some(e) = &editor.error {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                helder::indent(ui);
+                ui.label(RichText::new(e).color(t.flag));
+            });
+        }
     });
     if save {
         match app.engine.run("contact.save", &editor.params()) {
@@ -425,10 +519,12 @@ mod tests {
             account_id: None,
         };
         let e = Editor::from_contact(&c);
-        assert_eq!(e.emails, "a@b.nl\nc@d.nl");
+        assert_eq!(e.emails, ["a@b.nl", "c@d.nl"]);
         let p = e.params();
         assert_eq!(p["id"], "c1");
         assert_eq!(p["emails"].as_array().unwrap().len(), 2);
-        assert_eq!(split("a@b.nl; c@d.nl,  ,e@f.nl\n"), vec!["a@b.nl", "c@d.nl", "e@f.nl"]);
+        assert_eq!(split(&["a@b.nl; c@d.nl,  ".into(), "e@f.nl\n".into(), String::new()]), vec!["a@b.nl", "c@d.nl", "e@f.nl"]);
+        assert_eq!(split_name("Sanne de Vries"), ("Sanne".to_string(), "de Vries".to_string()));
+        assert_eq!(Editor::new_for("Nieuwsbrief", "n@b.nl").name(), "Nieuwsbrief");
     }
 }
