@@ -42,6 +42,7 @@ pub mod tasks;
 pub mod templates;
 pub mod theme;
 pub mod unsubscribe;
+pub mod updates;
 pub mod vcard;
 pub mod view;
 
@@ -164,6 +165,8 @@ pub struct MailApp {
     pub help: Option<help::HelpWindow>,
     /// What the "Beeld" tab chose; read from `view.json` at start.
     pub view: view::ViewPrefs,
+    /// The check for a newer release, and the release it found.
+    pub updates: updates::Updates,
     /// The conversations (by key) unfolded in the list, while the conversation view is on.
     pub expanded: std::collections::HashSet<String>,
     /// Whether the saved theme has been handed to egui yet (on the first frame).
@@ -271,6 +274,7 @@ impl MailApp {
             categories: None,
             help: None,
             view,
+            updates: updates::Updates::default(),
             expanded: std::collections::HashSet::new(),
             theme_applied: false,
             title: None,
@@ -316,6 +320,7 @@ impl MailApp {
         self.engine.poll();
         self.wake_snoozed();
         self.tick_read_timer(ui.ctx());
+        self.tick_updates(ui.ctx());
         let arrivals = self.engine.session.take_arrivals();
         if arrivals > 0 {
             self.notice = Some(Notice::info(if arrivals == 1 {
@@ -363,6 +368,7 @@ impl MailApp {
         search_folders::window(self, &ctx, &t);
         categories::window(self, &ctx, &t);
         help::window(self, &ctx, &t);
+        updates::window(self, &ctx, &t);
         drag_preview(self, &ctx, &t);
         calendar::drag_preview(self, &ctx, &t);
         if self.tab == Tab::Home && self.module == Module::Mail {
@@ -2207,6 +2213,57 @@ mod tests {
         egui_kittest::Harness::builder()
             .with_size(vec2(1280.0, 800.0))
             .build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(Engine::sample()))
+    }
+
+    #[test]
+    fn a_newer_release_is_offered_once_and_a_skipped_one_not_again() {
+        use updates::{Outcome, Release};
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Help").click();
+        h.run();
+        h.get_by_label(updates::CHECK);
+        let release = Release { version: "9.0.0".into(), notes: "Nieuw: van alles.".into() };
+        h.state_mut().finish_update_check(Outcome::Newer(release.clone()));
+        h.run();
+        h.get_by_label(updates::WINDOW);
+        h.get_by_label("Mailcraft 9.0.0 is beschikbaar.");
+        h.get_by_label("Nieuw: van alles.");
+        h.get_by_label(updates::DOWNLOAD);
+        h.get_by_label(updates::SKIP).click();
+        h.run();
+        assert!(h.state().updates.offer.is_none());
+        assert_eq!(h.state().view.skipped_version.as_deref(), Some("9.0.0"));
+        // The daily check keeps quiet about the skipped release, but asking still shows it.
+        h.state_mut().finish_update_check(Outcome::Newer(release.clone()));
+        assert!(h.state().updates.offer.is_none());
+        h.state_mut().finish_update_check(Outcome::Newer(Release { version: "9.1.0".into(), notes: String::new() }));
+        assert!(h.state().updates.offer.is_some());
+        h.run();
+        h.get_by_label(updates::LATER).click();
+        h.run();
+        assert!(h.state().updates.offer.is_none());
+        // Only an answer to the person's own question is spoken.
+        h.state_mut().finish_update_check(Outcome::UpToDate);
+        assert!(h.state().notice.is_none());
+        h.state_mut().finish_update_check(Outcome::Failed("offline".into()));
+        assert!(h.state().notice.is_none());
+    }
+
+    #[test]
+    fn the_daily_update_check_is_off_until_chosen_and_switched_in_over_mailcraft() {
+        let mut h = harness();
+        h.run();
+        assert_eq!(h.state().view.update_check, None);
+        assert!(!h.state().updates.running(), "nothing goes out before the person chose");
+        h.get_by_label("Help").click();
+        h.run();
+        h.get_by_label("Over Mailcraft").click();
+        h.run();
+        h.get_by_label(updates::AUTO).click();
+        h.run();
+        assert_eq!(h.state().view.update_check, Some(true));
+        assert!(h.state().updates.running(), "switching it on asks at once");
     }
 
     #[test]
