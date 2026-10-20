@@ -205,6 +205,7 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         // Google knows only free or busy; a tentative or out-of-office appointment reads as busy.
         show_as: if str_of(e, "transparency") == "transparent" { ShowAs::Free } else { ShowAs::Busy },
         categories: categories_of(e),
+        meeting: None,
     }
     .validated()
     .ok()

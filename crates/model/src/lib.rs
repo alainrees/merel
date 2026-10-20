@@ -19,8 +19,8 @@ mod templates;
 
 pub use address::{Address, AddressError, parse_address_list};
 pub use calendar::{
-    Appointment, AppointmentError, CALENDAR_COLORS, Calendar, Frequency, MAX_CALENDAR_NAME, MAX_INTERVAL, MAX_NOTES, MAX_OCCURRENCES, MAX_REMINDER,
-    Recurrence, ShowAs, describe_recurrence,
+    Appointment, AppointmentError, Attendee, CALENDAR_COLORS, Calendar, Frequency, MAX_ATTENDEES, MAX_CALENDAR_NAME, MAX_INTERVAL, MAX_NOTES,
+    MAX_OCCURRENCES, MAX_REMINDER, Meeting, Recurrence, Response, ShowAs, describe_recurrence,
 };
 pub use categories::{Category, CategoryColor, MAX_CATEGORY_NAME, MAX_ITEM_CATEGORIES, category_keyword, clean_categories};
 pub use contact::{Contact, ContactError};

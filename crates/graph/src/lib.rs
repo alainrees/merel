@@ -18,7 +18,10 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Utc};
 use mailcraft_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result, kind_from_name};
 use mailcraft_mime::ParsedHeader;
-use mailcraft_model::{Address, Appointment, Contact, FolderKind, Frequency, Importance, Priority, Recurrence, Server, ShowAs, Task, clean_text};
+use mailcraft_model::{
+    Address, Appointment, Attendee, Contact, FolderKind, Frequency, Importance, Meeting, Priority, Recurrence, Response, Server, ShowAs, Task,
+    clean_text,
+};
 use mailcraft_secrets::Secret;
 use serde_json::{Value, json};
 
@@ -216,9 +219,48 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
             .and_then(Value::as_array)
             .map(|l| l.iter().filter_map(Value::as_str).map(str::to_string).collect())
             .unwrap_or_default(),
+        meeting: meeting_of(e),
     }
     .validated()
     .ok()
+}
+
+/// The organiser and attendees with their answers, as Microsoft 365 tracks them for a meeting
+/// it sent; `None` without attendees.
+fn meeting_of(e: &Value) -> Option<Meeting> {
+    let attendees: Vec<Attendee> = e
+        .get("attendees")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter(|a| a.get("type").and_then(Value::as_str) != Some("resource"))
+        .map(|a| {
+            let who = a.get("emailAddress").unwrap_or(&Value::Null);
+            Attendee {
+                email: str_of(who, "address").to_string(),
+                name: str_of(who, "name").to_string(),
+                optional: a.get("type").and_then(Value::as_str) == Some("optional"),
+                response: match a.get("status").and_then(|s| s.get("response")).and_then(Value::as_str) {
+                    Some("accepted") => Response::Accepted,
+                    Some("tentativelyAccepted") => Response::Tentative,
+                    Some("declined") => Response::Declined,
+                    _ => Response::None,
+                },
+                replied: None,
+                proposed: None,
+            }
+        })
+        .collect();
+    if attendees.is_empty() {
+        return None;
+    }
+    let organizer = e.get("organizer").and_then(|o| o.get("emailAddress")).unwrap_or(&Value::Null);
+    Some(Meeting {
+        uid: str_of(e, "iCalUId").to_string(),
+        organizer: str_of(organizer, "address").to_string(),
+        organizer_name: str_of(organizer, "name").to_string(),
+        sequence: 0,
+        attendees,
+    })
 }
 
 fn contact_of(c: &Value) -> Option<Contact> {
@@ -641,7 +683,7 @@ impl Mailbox for GraphClient {
 impl ItemStore for GraphClient {
     fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>> {
         let path = format!(
-            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity,showAs,categories",
+            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity,showAs,categories,attendees,organizer,iCalUId",
             encode(&utc(from)),
             encode(&utc(to.max(from)))
         );
@@ -714,6 +756,23 @@ mod tests {
         assert_eq!(utc(1_792_000_000), "2026-10-14T17:46:40");
         assert_eq!(encode("AAMk=/x"), "AAMk%3D%2Fx");
         assert_eq!(moment(&json!({ "dateTime": "2026-10-14T17:46:40.0000000", "timeZone": "UTC" })), Some(1_792_000_000));
+    }
+
+    #[test]
+    fn a_meeting_brings_its_attendees_and_their_answers() {
+        let e = json!({ "id": "E1", "subject": "Lunch", "iCalUId": "040000008200E0",
+            "start": { "dateTime": "2026-10-14T17:46:40" }, "end": { "dateTime": "2026-10-14T18:46:40" },
+            "organizer": { "emailAddress": { "name": "Alain", "address": "alain@example.org" } },
+            "attendees": [
+                { "type": "required", "status": { "response": "accepted" }, "emailAddress": { "name": "Sanne", "address": "sanne@example.org" } },
+                { "type": "optional", "status": { "response": "tentativelyAccepted" }, "emailAddress": { "address": "ravi@example.org" } },
+                { "type": "resource", "status": { "response": "accepted" }, "emailAddress": { "address": "zaal@example.org" } }
+            ] });
+        let m = appointment_of(&e).unwrap().meeting.expect("a meeting");
+        assert_eq!((m.uid.as_str(), m.organizer.as_str()), ("040000008200E0", "alain@example.org"));
+        let people: Vec<(&str, bool, Response)> = m.attendees.iter().map(|a| (a.email.as_str(), a.optional, a.response)).collect();
+        assert_eq!(people, [("sanne@example.org", false, Response::Accepted), ("ravi@example.org", true, Response::Tentative)]);
+        assert!(appointment_of(&json!({ "id": "E2", "start": e["start"], "end": e["end"], "attendees": [] })).unwrap().meeting.is_none());
     }
 
     #[test]

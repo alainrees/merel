@@ -122,7 +122,9 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 /// left out, an existing appointment keeps its reminder. `private` marks the appointment as
 /// Outlook's "Privé"; false when left out. `show_as` is `free`, `tentative`, `busy` or `oof`;
 /// left out, an existing appointment keeps its status and a new one is busy. `categories` is
-/// a list of category names; left out, an existing appointment keeps its categories.
+/// a list of category names; left out, an existing appointment keeps its categories. `meeting`
+/// is a [`mailcraft_model::Meeting`] (organiser, attendees and their answers) or null for an
+/// appointment of your own; left out, an existing appointment keeps its meeting.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
         Some(id) => Some(s.appointment(id).ok_or(CommandError::NotFound)?.clone()),
@@ -163,6 +165,11 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         None => existing.as_ref().map(|a| a.categories.clone()).unwrap_or_default(),
         Some(v) => serde_json::from_value::<Vec<String>>(v.clone()).map_err(|_| CommandError::Param("categories"))?,
     };
+    let meeting = match params.get("meeting") {
+        None => existing.as_ref().and_then(|a| a.meeting.clone()),
+        Some(Value::Null) => None,
+        Some(v) => Some(serde_json::from_value::<mailcraft_model::Meeting>(v.clone()).map_err(|_| CommandError::Param("meeting"))?),
+    };
     let id = match (&existing, &account) {
         (Some(a), _) => a.id.clone(),
         (None, Some(account)) => s.pending_id(account),
@@ -184,6 +191,7 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         private: params.get("private").and_then(Value::as_bool).unwrap_or(false),
         show_as,
         categories,
+        meeting,
     }
     .validated()
     .map_err(|e| match e {

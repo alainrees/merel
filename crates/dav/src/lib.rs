@@ -542,15 +542,20 @@ impl DavClient {
     }
 
     /// Creates or replaces one calendar object (`VEVENT` or `VTODO`).
-    fn save_calendar_object(&mut self, id: &str, kind: &str, prefix: char, write: &dyn Fn(&mut Component)) -> Result<String> {
+    /// `uid` is the UID a new object gets (a meeting's, which its invitations carry), else a
+    /// fresh one.
+    fn save_calendar_object(&mut self, id: &str, kind: &str, prefix: char, uid: Option<&str>, write: &dyn Fn(&mut Component)) -> Result<String> {
         if id.is_empty() {
             let collection = self.first_calendar(kind == "VTODO")?;
-            let uid = self.uid();
+            let fresh = self.uid();
+            let uid = uid.filter(|u| !u.trim().is_empty()).unwrap_or(&fresh).to_string();
             let mut root = ical::new_calendar(kind, &uid);
             if let Some(inner) = root.find_mut(kind) {
                 write(inner);
             }
-            let url = format!("{collection}{uid}.ics");
+            // The file name keeps to safe characters, whatever the UID holds.
+            let name: String = uid.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@') { c } else { '-' }).collect();
+            let url = format!("{collection}{name}.ics");
             self.put(&url, "text/calendar; charset=utf-8", &root, None)?;
             return Ok(format!("{prefix}:{url}"));
         }
@@ -676,8 +681,10 @@ impl ItemStore for DavClient {
     fn save(&mut self, item: &Item) -> Result<String> {
         let id = item.id();
         match item {
-            Item::Appointment(a) => self.save_calendar_object(id, "VEVENT", 'e', &|c| ical::write_appointment(c, a)),
-            Item::Task(t) => self.save_calendar_object(id, "VTODO", 't', &|c| ical::write_task(c, t)),
+            Item::Appointment(a) => {
+                self.save_calendar_object(id, "VEVENT", 'e', a.meeting.as_ref().map(|m| m.uid.as_str()), &|c| ical::write_appointment(c, a))
+            }
+            Item::Task(t) => self.save_calendar_object(id, "VTODO", 't', None, &|c| ical::write_task(c, t)),
             Item::Contact(c) => {
                 if id.is_empty() {
                     let book = self

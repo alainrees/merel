@@ -2,13 +2,16 @@
 //! with a VEVENT becomes a strip over the message that names the appointment, when and where
 //! it is and who asks, with "Aan agenda toevoegen", which opens the appointment window filled in
 //! so the person looks before it is saved. Nothing is answered to the organiser: Mailcraft sends
-//! no acceptance, it only files the appointment in the person's own calendar.
+//! no acceptance, it only files the appointment in the person's own calendar. An answer to a
+//! meeting the person organises shows as Outlook shows it, "Sanne heeft geaccepteerd", and the
+//! engine has already filed it in the appointment.
 
 use chrono::NaiveDateTime;
 use egui::RichText;
 use mailcraft_dav::ical;
+use mailcraft_engine::meetings::{self, Answer};
 use mailcraft_mime::Attachment;
-use mailcraft_model::Appointment;
+use mailcraft_model::{Appointment, Response};
 
 use crate::{MailApp, Tokens, calendar, dates};
 
@@ -26,6 +29,8 @@ pub struct Invitation {
     pub organizer: String,
     /// The invitation withdraws the appointment (METHOD:CANCEL or STATUS:CANCELLED).
     pub cancelled: bool,
+    /// An attendee's answer (METHOD:REPLY or COUNTER) instead of an invitation.
+    pub answer: Option<Answer>,
 }
 
 /// Whether the attachment is a calendar part.
@@ -60,7 +65,8 @@ pub fn parse(text: &str) -> Option<Invitation> {
     if title.trim().is_empty() && appointment.is_none() {
         return None;
     }
-    Some(Invitation { title: if title.trim().is_empty() { "(zonder titel)".to_string() } else { title }, appointment, organizer, cancelled })
+    let answer = meetings::parse_answer(text);
+    Some(Invitation { title: if title.trim().is_empty() { "(zonder titel)".to_string() } else { title }, appointment, organizer, cancelled, answer })
 }
 
 /// "woensdag 21 oktober 10:00–11:30", or the days of an all-day appointment.
@@ -79,9 +85,52 @@ pub fn when(a: &Appointment) -> String {
     }
 }
 
+/// "Sanne de Vries heeft geaccepteerd" and the like, for an answer.
+pub fn answer_head(answer: &Answer) -> String {
+    let who = answer.attendee.label();
+    if answer.proposed.is_some() {
+        return format!("{who} stelt een nieuwe tijd voor");
+    }
+    match answer.attendee.response {
+        Response::Accepted => format!("{who} heeft geaccepteerd"),
+        Response::Tentative => format!("{who} heeft voorlopig geaccepteerd"),
+        Response::Declined => format!("{who} heeft afgewezen"),
+        Response::None => format!("{who} heeft nog niet besloten"),
+    }
+}
+
+/// The strip over an answer: who answered what, for which meeting and time; `filed` says the
+/// meeting in a calendar holds this answer.
+fn answer_strip(ui: &mut egui::Ui, t: &Tokens, inv: &Invitation, answer: &Answer, filed: bool) {
+    let (mark, color) = match answer.attendee.response {
+        Response::Accepted => ("✔", t.success),
+        Response::Declined => ("✕", t.flag),
+        _ => ("?", t.text_dim),
+    };
+    egui::Frame::new().fill(t.checked).corner_radius(4).inner_margin(8).show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(mark).strong().color(color));
+            ui.label(RichText::new(format!("{}: {}", answer_head(answer), inv.title)).strong().color(t.text));
+        });
+        let mut line = match (answer.proposed, &inv.appointment) {
+            (Some((start, end)), Some(a)) => format!("Voorgesteld: {}", when(&Appointment { start, end, all_day: false, ..a.clone() })),
+            (None, Some(a)) => when(a),
+            _ => String::new(),
+        };
+        let filed = if filed { "Bijgewerkt in je agenda." } else { "Deze vergadering staat niet in je agenda." };
+        line = if line.is_empty() { filed.to_string() } else { format!("{line} · {filed}") };
+        ui.label(RichText::new(line).size(12.0).color(t.text_dim));
+    });
+}
+
 /// The strip over the message; `in_calendar` says an appointment with this title and start is
-/// already in a calendar. Returns the appointment to add when the button was clicked.
+/// already in a calendar (for an answer: that the meeting holds it). Returns the appointment to
+/// add when the button was clicked.
 pub fn strip(ui: &mut egui::Ui, t: &Tokens, inv: &Invitation, in_calendar: bool) -> Option<Appointment> {
+    if let Some(answer) = &inv.answer {
+        answer_strip(ui, t, inv, answer, in_calendar);
+        return None;
+    }
     let mut add = None;
     let fill = if inv.cancelled { t.flag.gamma_multiply(0.15) } else { t.checked };
     egui::Frame::new().fill(fill).corner_radius(4).inner_margin(8).show(ui, |ui| {
@@ -118,6 +167,17 @@ impl MailApp {
     /// Whether a calendar already holds an appointment with this title at this start.
     pub fn has_appointment_like(&self, a: &Appointment) -> bool {
         self.engine.session.appointments.iter().any(|b| b.start == a.start && b.title.trim().eq_ignore_ascii_case(a.title.trim()))
+    }
+
+    /// Whether a meeting in a calendar holds `answer`: the attendee's answer, and a proposed time.
+    pub fn has_answer(&self, answer: &Answer) -> bool {
+        self.engine.session.appointments.iter().filter_map(|a| a.meeting.as_ref()).filter(|m| m.uid == answer.uid).any(|m| {
+            m.attendees.iter().any(|p| {
+                p.email.eq_ignore_ascii_case(&answer.attendee.email)
+                    && (p.response == answer.attendee.response || answer.proposed.is_some())
+                    && (answer.proposed.is_none() || p.proposed == answer.proposed)
+            })
+        })
     }
 
     /// Opens the appointment window with the invitation filled in, for the person's own calendar.

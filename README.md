@@ -139,9 +139,17 @@ back; the cross on a tab unticks that calendar. The choice is kept in `view.json
 the bottom edge of an appointment can be dragged too, to make it longer or shorter by the half hour. The calendar's
 side pane lists the open tasks; drag one onto a day or an hour and the appointment window opens for it, with the
 task's title and notes filled in, so planning a task is one drag and "Opslaan". The appointment window also has
-"Genodigden": with addresses there the button reads "Verzenden", which saves the appointment, notes who was
-invited and mails each of them a meeting request (the appointment as a `text/calendar` attachment with the organiser
-and attendees) from the calendar's account, as Outlook does; replies are ordinary mail and nothing is tracked. "Doorsturen…"
+"Genodigden": each address becomes a chip on that line (with "Optioneel" for a second line of optional attendees),
+and the button reads "Verzenden", which saves the appointment as a meeting and mails each attendee a meeting request
+(the appointment as a `text/calendar` attachment with the organiser and attendees) from the calendar's account, as
+Outlook does. Answers (accepted, tentative, declined, a new time proposed) are filed in the meeting by themselves:
+inbox mail that reads like an answer is fetched, and its iTIP `REPLY` or `COUNTER` updates the attendee, but only when
+it comes from that attendee for the current version of the meeting. The chips then show ✔, ? or ✕, the window counts
+the answers and offers a proposed time; the answer itself shows as "Sanne heeft geaccepteerd". A meeting that changed
+sends "Update verzenden" (a new time asks everyone again), people taken off get a cancellation, and "Vergadering
+annuleren" calls it off for everyone. The attendees travel to CalDAV with `SCHEDULE-AGENT=CLIENT`, so a scheduling
+server does not mail them twice; meetings from Exchange and Microsoft 365 bring their attendees and answers along. An
+appointment that is over says "Deze gebeurtenis vindt plaats in het verleden.". "Doorsturen…"
 in the window of a saved appointment opens a new message with the appointment in words and as a `text/calendar`
 attachment (`METHOD:PUBLISH`, no organiser or attendees), so someone else can put it in their own calendar, like
 forwarding an appointment in Outlook. In all three modules Ctrl+E goes to the search box and Esc clears it, as in the mail module. Contacts can be gathered in a

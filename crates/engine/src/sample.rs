@@ -197,6 +197,7 @@ fn appointments() -> Vec<Appointment> {
                 private: false,
                 show_as: mailcraft_model::ShowAs::Busy,
                 categories: if i == 0 { vec!["Blauwe categorie".into()] } else { Vec::new() },
+                meeting: None,
             })
         })
         .collect();
@@ -219,6 +220,7 @@ fn appointments() -> Vec<Appointment> {
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
             categories: Vec::new(),
+            meeting: None,
         });
     }
     list

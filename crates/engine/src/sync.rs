@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use mailcraft_mailbox::Item;
 use mailcraft_model::rich::Rich;
-use mailcraft_model::{Account, Appointment, Calendar, Contact, Task};
+use mailcraft_model::{Account, Appointment, Calendar, Contact, Meeting, Task};
 
 use crate::{CommandError, Job, Session};
 
@@ -145,6 +145,11 @@ impl Session {
             .filter(|a| a.calendar_id == calendar_id)
             .filter_map(|a| a.notes_rich.clone().map(|r| (a.id.clone(), (a.notes.clone(), r))))
             .collect();
+        // Meetings Mailcraft sent keep their attendees and answers here when the server does
+        // not track them (Exchange, Microsoft 365, Google); what a server does track wins, with
+        // the details of the answers filed here.
+        let meetings: HashMap<String, Meeting> =
+            self.appointments.iter().filter(|a| a.calendar_id == calendar_id).filter_map(|a| a.meeting.clone().map(|m| (a.id.clone(), m))).collect();
         let formatted_contacts: Formatted = self
             .contacts
             .iter()
@@ -162,6 +167,19 @@ impl Session {
             a.id = Self::local_item_id(account_id, &a.id);
             a.calendar_id = calendar_id.clone();
             a.notes_rich = kept_formatting(&formatted, &a.id, &a.notes);
+            if let Some(ours) = meetings.get(&a.id) {
+                match &mut a.meeting {
+                    None => a.meeting = Some(ours.clone()),
+                    Some(theirs) => {
+                        for t in &mut theirs.attendees {
+                            if let Some(o) = ours.attendees.iter().find(|o| o.email.eq_ignore_ascii_case(&t.email)) {
+                                t.replied = o.replied;
+                                t.proposed = o.proposed.filter(|_| t.response == o.response);
+                            }
+                        }
+                    }
+                }
+            }
             if a.all_day {
                 a.start = snap_to_midnight(a.start);
                 a.end = snap_to_midnight(a.end).max(a.start + 86_400);
@@ -267,6 +285,7 @@ mod tests {
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
             categories: Vec::new(),
+            meeting: None,
         }
     }
 
@@ -358,6 +377,32 @@ mod tests {
         synced(&mut s);
         assert!(s.contacts.iter().any(|c| c.id == "acc/C1" && c.notes_rich.as_ref() == Some(&rich)));
         assert!(s.tasks.iter().any(|t| t.id == "acc/T1" && t.notes_rich.as_ref() == Some(&rich)));
+    }
+
+    #[test]
+    fn a_meeting_keeps_its_people_when_the_server_does_not_track_them() {
+        let mut s = Session::with_accounts(vec![account("acc", "Werk")]);
+        connected(&mut s);
+        let a = appointment("A1", 1_792_000_000, 1_792_003_600, false);
+        s.apply(Event::Synced { account_id: "acc".into(), appointments: vec![a.clone()], contacts: Vec::new(), tasks: Vec::new() });
+        let sanne = mailcraft_model::Attendee {
+            email: "sanne@example.org".into(),
+            response: mailcraft_model::Response::Accepted,
+            replied: Some(5),
+            ..Default::default()
+        };
+        let ours = Meeting { uid: "m1".into(), organizer: "a@example.org".into(), attendees: vec![sanne.clone()], ..Meeting::default() };
+        if let Some(local) = s.appointments.iter_mut().find(|x| x.id == "acc/A1") {
+            local.meeting = Some(ours.clone());
+        }
+        s.apply(Event::Synced { account_id: "acc".into(), appointments: vec![a.clone()], contacts: Vec::new(), tasks: Vec::new() });
+        assert_eq!(s.appointment("acc/A1").and_then(|x| x.meeting.clone()), Some(ours.clone()), "the server had none, ours stays");
+        // A server that tracks the answers wins, with the time of our answer kept.
+        let theirs = Meeting { attendees: vec![mailcraft_model::Attendee { replied: None, ..sanne }], ..ours };
+        let tracked = Appointment { meeting: Some(theirs), ..a };
+        s.apply(Event::Synced { account_id: "acc".into(), appointments: vec![tracked], contacts: Vec::new(), tasks: Vec::new() });
+        let kept = s.appointment("acc/A1").and_then(|x| x.meeting.clone()).expect("a meeting");
+        assert_eq!(kept.attendees[0].replied, Some(5));
     }
 
     #[test]

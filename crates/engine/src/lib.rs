@@ -22,6 +22,7 @@ pub mod followup;
 pub mod groups;
 pub mod ignore;
 pub mod junk;
+pub mod meetings;
 pub mod openpgp;
 pub mod quicksteps;
 pub mod reminders;
@@ -846,6 +847,7 @@ impl Session {
                     }
                 }
                 self.recount_unread();
+                self.fetch_answers(&folder_id);
             }
             Event::Found { folder_id, query, result } => {
                 self.loading.remove(&format!("search/{folder_id}"));
@@ -879,6 +881,8 @@ impl Session {
                         m.to = header.to;
                     }
                 }
+                // An answer to a meeting the person organises goes into the appointment.
+                self.apply_answer_in(&message_id, &body.attachments);
                 self.bodies.insert(message_id, *body);
             }
             Event::Failed { account_id, what } => {
@@ -1663,6 +1667,7 @@ mod tests {
                 private: false,
                 show_as: mailcraft_model::ShowAs::Busy,
                 categories: Vec::new(),
+                meeting: None,
             }],
             contacts: Vec::new(),
             tasks: Vec::new(),

@@ -97,6 +97,137 @@ pub struct Appointment {
     /// the notes as text. `None` for plain notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes_rich: Option<crate::rich::Rich>,
+    /// Outlook's meeting: who organises it and who is invited, with their answers. `None` for
+    /// an appointment of your own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meeting: Option<Meeting>,
+}
+
+/// The most people one meeting invites.
+pub const MAX_ATTENDEES: usize = 500;
+
+/// A meeting: the appointment as the organiser sent it out (RFC 5546, iTIP), and what every
+/// attendee answered.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Meeting {
+    /// The iCalendar `UID` the invitations carry; the answers name it.
+    pub uid: String,
+    /// The organiser's address.
+    pub organizer: String,
+    /// The organiser's name, when known.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub organizer_name: String,
+    /// The iCalendar `SEQUENCE`: one up with every update sent that moves the meeting.
+    #[serde(default)]
+    pub sequence: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attendees: Vec<Attendee>,
+}
+
+/// One person invited to a meeting.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Attendee {
+    pub email: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    /// Outlook's "Optioneel": invited, but not needed.
+    #[serde(default)]
+    pub optional: bool,
+    #[serde(default)]
+    pub response: Response,
+    /// When the answer was sent (its `DTSTAMP`), so an older answer read later does not undo a
+    /// newer one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replied: Option<i64>,
+    /// Outlook's "Nieuwe tijd voorgesteld": the start and end the attendee asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed: Option<(i64, i64)>,
+}
+
+/// An attendee's answer, iCalendar's `PARTSTAT`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Response {
+    /// No answer yet (`NEEDS-ACTION`).
+    #[default]
+    None,
+    Accepted,
+    Tentative,
+    Declined,
+}
+
+impl Response {
+    /// The `PARTSTAT` value for this answer.
+    pub fn partstat(self) -> &'static str {
+        match self {
+            Response::None => "NEEDS-ACTION",
+            Response::Accepted => "ACCEPTED",
+            Response::Tentative => "TENTATIVE",
+            Response::Declined => "DECLINED",
+        }
+    }
+
+    /// The answer a `PARTSTAT` value stands for; anything unknown (delegated, …) is no answer.
+    pub fn of_partstat(value: &str) -> Response {
+        match value.trim().to_ascii_uppercase().as_str() {
+            "ACCEPTED" => Response::Accepted,
+            "TENTATIVE" => Response::Tentative,
+            "DECLINED" => Response::Declined,
+            _ => Response::None,
+        }
+    }
+}
+
+impl Attendee {
+    /// The name to show: the name, else the address.
+    pub fn label(&self) -> &str {
+        if self.name.trim().is_empty() { &self.email } else { self.name.trim() }
+    }
+}
+
+impl Meeting {
+    /// The attendee with this address, compared without case.
+    pub fn attendee_mut(&mut self, email: &str) -> Option<&mut Attendee> {
+        self.attendees.iter_mut().find(|a| a.email.eq_ignore_ascii_case(email.trim()))
+    }
+
+    /// Whether `email` organises the meeting.
+    pub fn organized_by(&self, email: &str) -> bool {
+        self.organizer.eq_ignore_ascii_case(email.trim())
+    }
+
+    /// How many attendees gave each answer: accepted, tentative, declined, none.
+    pub fn tally(&self) -> [usize; 4] {
+        let mut n = [0; 4];
+        for a in &self.attendees {
+            n[match a.response {
+                Response::Accepted => 0,
+                Response::Tentative => 1,
+                Response::Declined => 2,
+                Response::None => 3,
+            }] += 1;
+        }
+        n
+    }
+
+    /// Cleans the names, drops attendees without a valid address or listed twice, and the
+    /// organiser from the attendees.
+    fn validated(mut self) -> Self {
+        self.uid = self.uid.chars().filter(|c| c.is_ascii_graphic()).take(255).collect();
+        self.organizer = self.organizer.trim().to_string();
+        self.organizer_name = clean_text(self.organizer_name.trim());
+        let mut seen: Vec<String> = vec![self.organizer.to_lowercase()];
+        self.attendees.retain_mut(|a| {
+            a.email = a.email.trim().to_string();
+            a.name = clean_text(a.name.trim());
+            let key = a.email.to_lowercase();
+            let ok = crate::Address::new(None, &a.email).is_ok() && !seen.contains(&key);
+            seen.push(key);
+            ok
+        });
+        self.attendees.truncate(MAX_ATTENDEES);
+        self
+    }
 }
 
 /// How an appointment shows in your availability, Outlook's "Weergeven als". Travels as the
@@ -323,6 +454,7 @@ impl Appointment {
         }
         self.reminder = self.reminder.map(|m| m.min(MAX_REMINDER));
         self.categories = crate::clean_categories(std::mem::take(&mut self.categories));
+        self.meeting = self.meeting.take().map(Meeting::validated);
         if let Some(r) = self.recurrence.take() {
             let r = r.normalized();
             if self.end - self.start > r.shortest_gap() {
@@ -431,6 +563,7 @@ mod tests {
             private: false,
             show_as: ShowAs::Busy,
             categories: Vec::new(),
+            meeting: None,
         }
     }
 

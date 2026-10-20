@@ -10,7 +10,7 @@ use egui::{Align2, Color32, CornerRadius, FontId, Margin, Rect, RichText, Sense,
 use serde_json::json;
 
 use mailcraft_engine::{CommandError, tasks::TaskFilter};
-use mailcraft_model::{Appointment, Frequency, Recurrence, ShowAs, Task, describe_recurrence};
+use mailcraft_model::{Appointment, Attendee, Frequency, Meeting, Recurrence, ShowAs, Task, describe_recurrence};
 
 use crate::helder::{self, Icon};
 use crate::{MailApp, Module, Tokens};
@@ -237,9 +237,20 @@ pub struct Editor {
     pub calendar_id: Option<String>,
     pub title: String,
     pub location: String,
-    /// The addresses to invite, as typed; "Verzenden" then saves the appointment and mails them
-    /// a meeting request from the calendar's account. Empty for an appointment of your own.
+    /// The addresses to invite, as typed; a finished address (after `;`, `,` or Enter) becomes a
+    /// chip in `invited`. "Verzenden" then saves the appointment and mails everyone a meeting
+    /// request from the calendar's account. Empty for an appointment of your own.
     pub attendees: String,
+    /// Outlook's "Optioneel": the addresses typed on that line.
+    pub optional: String,
+    /// Whether the Optioneel line shows.
+    pub show_optional: bool,
+    /// The people invited, as chips with their answers.
+    pub invited: Vec<Attendee>,
+    /// The meeting as it was saved, when the appointment is one.
+    pub meeting: Option<Meeting>,
+    /// The attendees came from the notes line of an older version; the meeting is made on save.
+    pub legacy: bool,
     pub all_day: bool,
     pub start_date: String,
     pub start_time: String,
@@ -310,6 +321,11 @@ impl Editor {
             title: String::new(),
             location: String::new(),
             attendees: String::new(),
+            optional: String::new(),
+            show_optional: false,
+            invited: Vec::new(),
+            meeting: None,
+            legacy: false,
             all_day: false,
             start_date: start.format(DATE_FORMAT).to_string(),
             start_time: start.format(TIME_FORMAT).to_string(),
@@ -352,7 +368,18 @@ impl Editor {
         e.end_date = end.format(DATE_FORMAT).to_string();
         e.end_time = end.format(TIME_FORMAT).to_string();
         e.notes = a.notes.clone();
-        e.notes_editor = crate::rich_edit::Editor::new("appointment-notes", &a.notes, a.notes_rich.clone());
+        e.meeting = a.meeting.clone();
+        e.invited = a.meeting.as_ref().map(|m| m.attendees.clone()).unwrap_or_default();
+        // An older version kept the people on a line in the notes; they come back as chips.
+        if a.meeting.is_none()
+            && let Some((people, notes)) = mailcraft_engine::meetings::legacy_attendees(&a.notes)
+        {
+            e.invited = people;
+            e.notes = notes;
+            e.legacy = true;
+        }
+        e.show_optional = e.invited.iter().any(|p| p.optional);
+        e.notes_editor = crate::rich_edit::Editor::new("appointment-notes", &e.notes, a.notes_rich.clone());
         if let Some(r) = &a.recurrence {
             e.repeat = Some(r.frequency);
             e.interval = r.interval.to_string();
@@ -1631,6 +1658,161 @@ impl Editor {
             self.end_time = end.format(TIME_FORMAT).to_string();
         }
     }
+
+    /// Everyone the window invites: the chips, then what is still typed on both lines; or what
+    /// is wrong with the typed addresses.
+    pub fn all_attendees(&self) -> Result<Vec<Attendee>, String> {
+        let mut all = self.invited.clone();
+        for (text, optional) in [(&self.attendees, false), (&self.optional, true)] {
+            for a in crate::meeting::attendees(text)? {
+                if !all.iter().any(|p| p.email.eq_ignore_ascii_case(a.email())) {
+                    all.push(crate::meeting::attendee(&a, optional));
+                }
+            }
+        }
+        Ok(all)
+    }
+
+    /// Whether anyone is invited or being typed.
+    pub fn has_attendees(&self) -> bool {
+        !self.invited.is_empty() || !self.attendees.trim().is_empty() || !self.optional.trim().is_empty()
+    }
+
+    /// Turns the finished addresses typed on a line (those before the last `;` or `,`, or all of
+    /// them when `whole`) into chips; text that is not an address yet stays typed.
+    pub fn chip_typed(&mut self, optional: bool, whole: bool) {
+        let text = if optional { &mut self.optional } else { &mut self.attendees };
+        let cut = if whole { Some(text.len()) } else { text.rfind([';', ',']).map(|i| i + 1) };
+        let Some(cut) = cut else { return };
+        let Ok(list) = crate::meeting::attendees(&text[..cut]) else { return };
+        let rest = text[cut..].trim_start().to_string();
+        *text = rest;
+        for a in list {
+            if !self.invited.iter().any(|p| p.email.eq_ignore_ascii_case(a.email())) {
+                self.invited.push(crate::meeting::attendee(&a, optional));
+            }
+        }
+    }
+
+    /// Whether the window differs from `stored` in what the attendees must hear about: the
+    /// title, the time, the place, the repetition or who is invited.
+    pub fn changed_for_attendees(&self, stored: &Appointment) -> bool {
+        let Ok(p) = self.params() else { return true };
+        let before: Vec<String> = match (&stored.meeting, mailcraft_engine::meetings::legacy_attendees(&stored.notes)) {
+            (Some(m), _) => m.attendees.iter().map(|a| a.email.to_lowercase()).collect(),
+            (None, Some((people, _))) => people.iter().map(|a| a.email.to_lowercase()).collect(),
+            (None, None) => Vec::new(),
+        };
+        let mut now: Vec<String> = self.all_attendees().unwrap_or_default().iter().map(|a| a.email.to_lowercase()).collect();
+        let mut before = before;
+        now.sort();
+        before.sort();
+        p["title"].as_str().map(str::trim) != Some(stored.title.trim())
+            || p["location"].as_str().map(str::trim) != Some(stored.location.trim())
+            || p["start"].as_i64() != Some(stored.start)
+            || p["end"].as_i64() != Some(stored.end)
+            || p["all_day"].as_bool() != Some(stored.all_day)
+            || serde_json::from_value::<Option<Recurrence>>(p["recurrence"].clone()).ok().flatten().map(|r| r.normalized())
+                != stored.recurrence.clone().map(|r| r.normalized())
+            || now != before
+    }
+
+    /// Puts `start` and `end` in the time fields, as "Voorgestelde tijd overnemen" does.
+    pub fn set_times(&mut self, start: i64, end: i64) {
+        let (s, e) = (to_local(start), to_local(end));
+        self.start_date = s.format(DATE_FORMAT).to_string();
+        self.start_time = s.format(TIME_FORMAT).to_string();
+        self.end_date = e.format(DATE_FORMAT).to_string();
+        self.end_time = e.format(TIME_FORMAT).to_string();
+    }
+}
+
+/// What the main button of the appointment window does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MainAction {
+    Save,
+    /// Saves and mails the invitations.
+    Send,
+    /// Saves and mails the change to the attendees.
+    Update,
+}
+
+/// The line "Deze gebeurtenis vindt plaats in het verleden." over an appointment that is over.
+pub const IN_THE_PAST: &str = "Deze gebeurtenis vindt plaats in het verleden.";
+/// The button by a proposed new time that puts it in the fields.
+pub const TAKE_PROPOSAL: &str = "Voorgestelde tijd overnemen";
+
+/// The label of the chip button that takes `a` off the meeting.
+pub fn remove_attendee_label(a: &Attendee) -> String {
+    format!("{} verwijderen", a.label())
+}
+
+/// One invited person as a chip: the answer's mark, the name, and ✕ to take them off when the
+/// person organises the meeting. Returns whether ✕ was clicked.
+fn attendee_chip(ui: &mut Ui, t: &Tokens, a: &Attendee, removable: bool) -> bool {
+    let mut off = false;
+    let hover = format!("{} · {}", a.email, crate::meeting::response_label(a.response));
+    egui::Frame::new().fill(t.checked).corner_radius(14).inner_margin(Margin { left: 10, right: 6, top: 3, bottom: 3 }).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let mark = crate::meeting::response_mark(a.response);
+        if !mark.is_empty() {
+            let color = match a.response {
+                mailcraft_model::Response::Accepted => t.success,
+                mailcraft_model::Response::Declined => t.flag,
+                _ => t.text_dim,
+            };
+            ui.label(RichText::new(mark).size(13.0).strong().color(color)).on_hover_text(crate::meeting::response_label(a.response));
+        }
+        ui.label(RichText::new(a.label()).size(13.0).color(t.text)).on_hover_text(&hover);
+        if removable {
+            let r = ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(t.text_dim)).frame_when_inactive(false).min_size(vec2(18.0, 18.0)));
+            let label = remove_attendee_label(a);
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+            off = r.on_hover_text("Haalt deze genodigde van de vergadering").clicked();
+        } else {
+            ui.add_space(4.0);
+        }
+    });
+    off
+}
+
+/// One line of attendees, as Outlook's: the chips, then the field where more are typed.
+fn attendee_line(ui: &mut Ui, t: &Tokens, editor: &mut Editor, optional: bool, organiser: bool, wide: f32) -> Option<String> {
+    let mut off = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.set_max_width(wide);
+        for a in editor.invited.iter().filter(|a| a.optional == optional) {
+            if attendee_chip(ui, t, a, organiser) {
+                off = Some(a.email.clone());
+            }
+        }
+        if organiser {
+            let hint = match (optional, editor.invited.iter().any(|a| a.optional == optional)) {
+                (true, _) => "Optionele genodigden toevoegen",
+                (false, false) => "Genodigden toevoegen",
+                (false, true) => "",
+            };
+            let room = (ui.available_width() - if optional { 0.0 } else { 90.0 }).max(160.0);
+            let text = if optional { &mut editor.optional } else { &mut editor.attendees };
+            let r = helder::underline_field(ui, t, text, hint, room, false);
+            let r = r.on_hover_text(if optional { crate::meeting::OPTIONAL } else { crate::meeting::FIELD });
+            let entered = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if r.changed() || entered {
+                editor.chip_typed(optional, entered);
+                if entered {
+                    r.request_focus();
+                }
+            }
+        }
+        if !optional && organiser && !editor.show_optional {
+            helder::right(ui, |ui| {
+                if helder::add_link(ui, t, crate::meeting::OPTIONAL).on_hover_text("Nodigt iemand uit die er niet bij hoeft te zijn").clicked() {
+                    editor.show_optional = true;
+                }
+            });
+        }
+    });
+    off
 }
 
 /// An appointment as the day preview of the window draws it.
@@ -1758,7 +1940,20 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         app.engine.session.calendars.iter().map(|c| (c.id.clone(), c.name.clone(), Color32::from_rgb(c.color[0], c.color[1], c.color[2]))).collect();
     let local_calendars: Vec<String> = app.engine.session.calendars.iter().filter(|c| c.account_id.is_none()).map(|c| c.id.clone()).collect();
     let preview = app.calendar.editor.as_ref().and_then(|e| day_of(app, e, t));
+    let stored = app.calendar.editor.as_ref().and_then(|e| e.id.as_ref()).and_then(|id| app.engine.session.appointment(id)).cloned();
     let Some(editor) = app.calendar.editor.as_mut() else { return };
+    let organiser = editor.meeting.as_ref().is_none_or(|m| crate::meeting::organised_here(&app.engine.session, m));
+    // As Outlook: an appointment with people sends, a meeting that changed sends the update.
+    let action = if !organiser || !editor.has_attendees() && editor.meeting.is_none() {
+        MainAction::Save
+    } else if editor.meeting.is_none() && !editor.legacy {
+        MainAction::Send
+    } else if stored.as_ref().is_none_or(|s| editor.changed_for_attendees(s)) {
+        MainAction::Update
+    } else {
+        MainAction::Save
+    };
+    let calls_off = organiser && editor.meeting.as_ref().is_some_and(|m| !m.attendees.is_empty()) && editor.occurrence.is_none();
     let mut save = false;
     let mut delete = false;
     let mut skip = false;
@@ -1773,12 +1968,12 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     helder::item_window(ctx, t, "appointment-window", title, vec2(980.0, 760.0), &mut open, |ui| {
         helder::quiet(ui, t, |ui| {
             ui.horizontal(|ui| {
-                let sends = !editor.attendees.trim().is_empty();
-                let main = if sends {
-                    helder::primary_button(ui, t, Icon::Send, "Verzenden")
-                        .on_hover_text("Slaat de afspraak op en mailt de genodigden een uitnodiging voor hun agenda.")
-                } else {
-                    helder::primary_button(ui, t, Icon::Save, "Opslaan")
+                let main = match action {
+                    MainAction::Send => helder::primary_button(ui, t, Icon::Send, "Verzenden")
+                        .on_hover_text("Slaat de afspraak op en mailt de genodigden een uitnodiging voor hun agenda."),
+                    MainAction::Update => helder::primary_button(ui, t, Icon::Send, crate::meeting::SEND_UPDATE)
+                        .on_hover_text("Slaat de wijziging op en mailt hem de genodigden; wie eraf is gehaald, krijgt een annulering."),
+                    MainAction::Save => helder::primary_button(ui, t, Icon::Save, "Opslaan"),
                 };
                 save = main.clicked();
                 helder::bar_separator(ui, t);
@@ -1833,6 +2028,10 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                                 }
                             });
                             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, DELETE_MENU));
+                        } else if calls_off {
+                            delete = helder::tool_button(ui, t, Icon::CalendarX, crate::meeting::CANCEL_MEETING)
+                                .on_hover_text("Haalt de vergadering uit je agenda en mailt de genodigden een annulering.")
+                                .clicked();
                         } else {
                             delete = helder::tool_button(ui, t, Icon::Trash, "Verwijderen").clicked();
                         }
@@ -1868,35 +2067,24 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         }
     }
     if save {
-        match editor.params().and_then(|p| crate::meeting::attendees(&editor.attendees).map(|a| (p, a))) {
-            Ok((mut params, attendees)) => {
-                // An invitation goes out from the calendar's account; without a real one the
-                // appointment is not saved either, so nothing half happens.
+        editor.chip_typed(false, true);
+        editor.chip_typed(true, true);
+        match editor.params().and_then(|p| editor.all_attendees().map(|a| (p, a))) {
+            Ok((params, people)) => {
                 let calendar = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _, _)| id.clone()));
-                let account = if attendees.is_empty() { None } else { crate::meeting::account_for(&app.engine.session, calendar.as_deref()) };
-                if !attendees.is_empty() && account.is_none() {
-                    editor.error = Some(crate::meeting::NO_ACCOUNT.to_string());
-                } else {
-                    if !attendees.is_empty() {
-                        params["notes"] = json!(crate::meeting::noted(&editor.notes, &attendees));
-                    }
-                    match app.engine.run("appointment.save", &params) {
-                        Ok(()) => {
-                            if let Some(account) = account
-                                && let Some(a) = app.engine.session.selected_appointment().cloned()
-                            {
-                                let draft = crate::meeting::draft(&a, &account.address, attendees);
-                                app.engine.send(&account.id, draft);
-                            }
-                            close = true;
+                match save_meeting(app, params, people, action, organiser, stored.as_ref(), calendar.as_deref()) {
+                    Ok(()) => close = true,
+                    Err(e) => {
+                        if let Some(editor) = app.calendar.editor.as_mut() {
+                            editor.error = Some(e);
                         }
-                        Err(e) => editor.error = Some(describe(&e)),
                     }
                 }
             }
             Err(e) => editor.error = Some(e),
         }
     }
+    let Some(editor) = app.calendar.editor.as_mut() else { return };
     if forward && let Some(id) = editor.id.clone() {
         match app.engine.session.appointment(&id).cloned() {
             Some(a) => {
@@ -1907,14 +2095,107 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         }
     }
     if delete && let Some(id) = editor.id.clone() {
+        let calendar = editor.calendar_id.clone();
         match app.engine.run("appointment.delete", &json!({ "id": id })) {
-            Ok(()) => close = true,
-            Err(e) => editor.error = Some(describe(&e)),
+            Ok(()) => {
+                // A meeting called off: everyone hears it, from the account it went out from.
+                if calls_off
+                    && let Some(a) = &stored
+                    && let Some(account) = crate::meeting::account_for(&app.engine.session, calendar.as_deref())
+                    && let Some(d) = crate::meeting::cancellation(a, &a.meeting.clone().map(|m| m.attendees).unwrap_or_default())
+                {
+                    app.engine.send(&account.id, d);
+                }
+                close = true;
+            }
+            Err(e) => {
+                if let Some(editor) = app.calendar.editor.as_mut() {
+                    editor.error = Some(describe(&e));
+                }
+            }
         }
     }
     if close {
         app.calendar.editor = None;
     }
+}
+
+/// Saves the window's appointment with its meeting and mails what the attendees must get: the
+/// invitation, the update, and a cancellation to anyone taken off. Without a real account to
+/// send from, nothing is saved, so nothing half happens.
+fn save_meeting(
+    app: &mut MailApp,
+    mut params: serde_json::Value,
+    people: Vec<Attendee>,
+    action: MainAction,
+    organiser: bool,
+    stored: Option<&Appointment>,
+    calendar: Option<&str>,
+) -> Result<(), String> {
+    let Some(editor) = app.calendar.editor.as_ref() else { return Ok(()) };
+    if !organiser {
+        // Someone else's meeting: the people are theirs to change.
+        return app.engine.run("appointment.save", &params).map_err(|e| describe(&e));
+    }
+    let old = editor.meeting.clone();
+    let account = if people.is_empty() && old.is_none() { None } else { crate::meeting::account_for(&app.engine.session, calendar) };
+    if account.is_none() && (!people.is_empty() || action != MainAction::Save) {
+        return Err(crate::meeting::NO_ACCOUNT.to_string());
+    }
+    // A meeting of an older version gets the UID its invitations went out with.
+    let old = match (old, &account, stored) {
+        (None, Some(acc), Some(s)) if editor.legacy => Some(Meeting {
+            uid: crate::meeting::legacy_uid(s, &acc.address),
+            organizer: acc.address.email().to_string(),
+            organizer_name: acc.address.display().to_string(),
+            sequence: 0,
+            attendees: editor.invited.clone(),
+        }),
+        (old, _, _) => old,
+    };
+    let moved = stored.is_some_and(|s| params["start"].as_i64() != Some(s.start) || params["end"].as_i64() != Some(s.end));
+    let meeting = match (&account, people.is_empty()) {
+        (Some(acc), false) => {
+            let mut m = old.clone().unwrap_or_else(|| Meeting {
+                uid: crate::meeting::new_uid(&acc.address),
+                organizer: acc.address.email().to_string(),
+                organizer_name: if acc.address.display() == acc.address.email() { String::new() } else { acc.address.display().to_string() },
+                ..Meeting::default()
+            });
+            if action == MainAction::Update {
+                m.sequence += 1;
+            }
+            // A new time asks everyone again, as Outlook does.
+            m.attendees = people
+                .iter()
+                .cloned()
+                .map(|a| if moved { Attendee { response: mailcraft_model::Response::None, replied: None, proposed: None, ..a } } else { a })
+                .collect();
+            Some(m)
+        }
+        _ => None,
+    };
+    params["meeting"] = json!(meeting);
+    let removed: Vec<Attendee> = old
+        .as_ref()
+        .map(|m| m.attendees.iter().filter(|a| !people.iter().any(|p| p.email.eq_ignore_ascii_case(&a.email))).cloned().collect())
+        .unwrap_or_default();
+    app.engine.run("appointment.save", &params).map_err(|e| describe(&e))?;
+    let Some(account) = account else { return Ok(()) };
+    let saved = app.engine.session.selected_appointment().cloned();
+    if let Some(a) = &saved
+        && action != MainAction::Save
+        && let Some(d) = crate::meeting::request(a, action == MainAction::Update)
+    {
+        app.engine.send(&account.id, d);
+    }
+    if action == MainAction::Update
+        && let Some(a) = saved
+        && let Some(d) = crate::meeting::cancellation(&Appointment { meeting: old.map(|m| Meeting { sequence: m.sequence + 1, ..m }), ..a }, &removed)
+    {
+        app.engine.send(&account.id, d);
+    }
+    Ok(())
 }
 
 /// The form of the appointment window, one row per subject with its icon before it.
@@ -1927,6 +2208,17 @@ fn form(
     local_calendars: &[String],
 ) {
     let wide = ui.available_width() - helder::ROW_ICON - 12.0;
+    // As Outlook says over an appointment that is over.
+    if editor.end().is_some_and(|end| end < Local::now().naive_local()) {
+        egui::Frame::new().fill(t.warning.gamma_multiply(0.18)).corner_radius(8).inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.add(Icon::Info.image(helder::ICON, t.text));
+                ui.label(RichText::new(IN_THE_PAST).color(t.text));
+            });
+        });
+        ui.add_space(4.0);
+    }
     // Which calendar: a choice for a new appointment when there is more than one, a fact
     // otherwise.
     let current = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _, _)| id.clone()));
@@ -1970,12 +2262,70 @@ fn form(
     if let Some(name) = off {
         editor.categories.retain(|c| *c != name);
     }
-    helder::icon_row(ui, t, Icon::Users, |ui| helder::underline_field(ui, t, &mut editor.attendees, "Genodigden toevoegen", wide, false))
-        .on_hover_text(crate::meeting::FIELD);
-    if !editor.attendees.trim().is_empty() {
+    // The people, as chips on the line where they were added, with what they answered.
+    let organiser = editor.meeting.as_ref().is_none_or(|m| crate::meeting::organised_here(session, m));
+    let mut off = helder::icon_row(ui, t, Icon::Users, |ui| attendee_line(ui, t, editor, false, organiser, wide));
+    if organiser && !editor.attendees.trim().is_empty() {
         ui.horizontal(|ui| {
             helder::indent(ui);
             ui.vertical(|ui| crate::contacts::complete_addresses(ui, t, session, &mut editor.attendees));
+        });
+        editor.chip_typed(false, false);
+    }
+    if editor.show_optional || editor.invited.iter().any(|a| a.optional) {
+        ui.horizontal(|ui| {
+            helder::indent(ui);
+            ui.label(RichText::new(crate::meeting::OPTIONAL).size(13.0).color(t.text_dim));
+            off = off.take().or(attendee_line(ui, t, editor, true, organiser, wide - 80.0));
+        });
+        if organiser && !editor.optional.trim().is_empty() {
+            ui.horizontal(|ui| {
+                helder::indent(ui);
+                ui.vertical(|ui| crate::contacts::complete_addresses(ui, t, session, &mut editor.optional));
+            });
+            editor.chip_typed(true, false);
+        }
+    }
+    if let Some(email) = off {
+        editor.invited.retain(|a| a.email != email);
+    }
+    // Who answered what, and a new time someone asked for, as Outlook's tracking.
+    if let Some(m) = &editor.meeting
+        && !m.attendees.is_empty()
+    {
+        helder::note(ui, t, &format!("Reacties: {}.", crate::meeting::tally_line(m)));
+    }
+    let proposals: Vec<(String, i64, i64)> = editor.invited.iter().filter_map(|a| a.proposed.map(|(s, e)| (a.label().to_string(), s, e))).collect();
+    for (who, start, end) in proposals {
+        let when = crate::invitation::when(&Appointment {
+            id: String::new(),
+            calendar_id: String::new(),
+            title: String::new(),
+            start,
+            end,
+            all_day: false,
+            location: String::new(),
+            notes: String::new(),
+            notes_rich: None,
+            recurrence: None,
+            reminder: None,
+            private: false,
+            show_as: ShowAs::Busy,
+            categories: Vec::new(),
+            meeting: None,
+        });
+        ui.horizontal_wrapped(|ui| {
+            helder::indent(ui);
+            ui.label(RichText::new(format!("{who} stelt een nieuwe tijd voor: {when}.")).size(12.0).color(t.text));
+            if organiser
+                && ui
+                    .add(egui::Button::new(RichText::new(TAKE_PROPOSAL).size(13.0).color(t.accent_text)).frame_when_inactive(false))
+                    .on_hover_text("Zet deze tijd in het venster; met Update verzenden hoort iedereen het.")
+                    .clicked()
+            {
+                editor.set_times(start, end);
+                editor.all_day = false;
+            }
         });
     }
     helder::icon_row(ui, t, Icon::Clock, |ui| {
@@ -2129,6 +2479,7 @@ mod tests {
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
             categories: Vec::new(),
+            meeting: None,
         };
         let moved = to_local(dropped_start(&a, d(2026, 10, 23), None).unwrap());
         assert_eq!((moved.date(), moved.time()), (d(2026, 10, 23), NaiveTime::from_hms_opt(14, 0, 0).unwrap()), "a month drop keeps the time");
@@ -2199,6 +2550,7 @@ mod tests {
             private: true,
             show_as: mailcraft_model::ShowAs::Busy,
             categories: Vec::new(),
+            meeting: None,
         };
         assert!(Editor::from_appointment(&a, None).private);
         assert_eq!(chip_title(&a), "🔒 Dokter");
@@ -2311,6 +2663,7 @@ mod tests {
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
             categories: Vec::new(),
+            meeting: None,
         };
         let back = Editor::from_appointment(&a, None);
         assert_eq!((back.start_date.as_str(), back.end_date.as_str()), ("21-10-2026", "21-10-2026"));
@@ -2372,6 +2725,7 @@ mod tests {
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
             categories: Vec::new(),
+            meeting: None,
         };
         let back = Editor::from_appointment(&a, Some(a.start + 86_400 * 61));
         assert_eq!((back.repeat, back.interval.as_str(), back.ends, back.count.as_str()), (Some(Frequency::Monthly), "2", Ends::AfterCount, "8"));

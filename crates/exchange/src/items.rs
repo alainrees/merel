@@ -12,7 +12,7 @@
 
 use chrono::{DateTime, Datelike, Local, TimeZone, Utc};
 use mailcraft_mailbox::{Item, ItemStore, MailboxError, Result};
-use mailcraft_model::{Address, Appointment, Contact, Frequency, Priority, Recurrence, ShowAs, Task, clean_text};
+use mailcraft_model::{Address, Appointment, Attendee, Contact, Frequency, Meeting, Priority, Recurrence, Response, ShowAs, Task, clean_text};
 use roxmltree::Node;
 
 use crate::{EwsClient, categories_of, child, esc, find, parse, parse_datetime, response_messages, text};
@@ -72,9 +72,44 @@ fn appointment_of(node: Node<'_, '_>) -> Option<Appointment> {
             _ => ShowAs::Busy,
         },
         categories: categories_of(node),
+        meeting: meeting_of(node),
     }
     .validated()
     .ok()
+}
+
+/// The `Name` and SMTP `EmailAddress` of a `Mailbox`; an X.500 address is of no use here.
+fn mailbox_of(node: Node<'_, '_>) -> Option<(String, String)> {
+    let mailbox = child(node, "Mailbox")?;
+    if text(mailbox, "RoutingType").is_some_and(|r| r != "SMTP") {
+        return None;
+    }
+    let email = text(mailbox, "EmailAddress").filter(|e| Address::new(None, e).is_ok())?;
+    Some((text(mailbox, "Name").unwrap_or("").to_string(), email.to_string()))
+}
+
+/// The organiser and attendees with their answers, as Exchange tracks them for a meeting it
+/// sent; `None` without attendees.
+fn meeting_of(node: Node<'_, '_>) -> Option<Meeting> {
+    let mut attendees = Vec::new();
+    for (list, optional) in [("RequiredAttendees", false), ("OptionalAttendees", true)] {
+        let Some(list) = child(node, list) else { continue };
+        for a in list.children().filter(|n| n.is_element() && n.tag_name().name() == "Attendee") {
+            let Some((name, email)) = mailbox_of(a) else { continue };
+            let response = match text(a, "ResponseType") {
+                Some("Accept") => Response::Accepted,
+                Some("Tentative") => Response::Tentative,
+                Some("Decline") => Response::Declined,
+                _ => Response::None,
+            };
+            attendees.push(Attendee { email, name, optional, response, replied: None, proposed: None });
+        }
+    }
+    if attendees.is_empty() {
+        return None;
+    }
+    let (organizer_name, organizer) = child(node, "Organizer").and_then(mailbox_of).unwrap_or_default();
+    Some(Meeting { uid: text(node, "UID").unwrap_or("").to_string(), organizer, organizer_name, sequence: 0, attendees })
 }
 
 /// The `Entry` texts of a `name`d collection (`EmailAddresses`, `PhoneNumbers`), in order.
@@ -394,6 +429,10 @@ impl ItemStore for EwsClient {
             "calendar:IsAllDayEvent",
             "calendar:LegacyFreeBusyStatus",
             "calendar:Location",
+            "calendar:UID",
+            "calendar:Organizer",
+            "calendar:RequiredAttendees",
+            "calendar:OptionalAttendees",
         ]);
         self.fetch(&ids, &props, appointment_of)
     }
@@ -565,6 +604,23 @@ mod tests {
     }
 
     #[test]
+    fn a_meeting_brings_its_attendees_and_their_answers() {
+        let xml = reply(concat!(
+            "<t:CalendarItem><t:ItemId Id=\"M1\"/><t:Subject>Lunch</t:Subject><t:UID>040000008200E0</t:UID>",
+            "<t:Start>2026-10-14T17:46:40Z</t:Start><t:End>2026-10-14T18:46:40Z</t:End>",
+            "<t:Organizer><t:Mailbox><t:Name>Alain</t:Name><t:EmailAddress>alain@example.org</t:EmailAddress><t:RoutingType>SMTP</t:RoutingType></t:Mailbox></t:Organizer>",
+            "<t:RequiredAttendees><t:Attendee><t:Mailbox><t:Name>Sanne</t:Name><t:EmailAddress>sanne@example.org</t:EmailAddress><t:RoutingType>SMTP</t:RoutingType></t:Mailbox><t:ResponseType>Accept</t:ResponseType></t:Attendee>",
+            "<t:Attendee><t:Mailbox><t:EmailAddress>/o=ORG/cn=x</t:EmailAddress><t:RoutingType>EX</t:RoutingType></t:Mailbox></t:Attendee></t:RequiredAttendees>",
+            "<t:OptionalAttendees><t:Attendee><t:Mailbox><t:EmailAddress>ravi@example.org</t:EmailAddress></t:Mailbox><t:ResponseType>Decline</t:ResponseType></t:Attendee></t:OptionalAttendees>",
+            "</t:CalendarItem>",
+        ));
+        let m = first(&xml, appointment_of).unwrap().meeting.expect("a meeting");
+        assert_eq!((m.uid.as_str(), m.organizer.as_str(), m.organizer_name.as_str()), ("040000008200E0", "alain@example.org", "Alain"));
+        let people: Vec<(&str, bool, Response)> = m.attendees.iter().map(|a| (a.email.as_str(), a.optional, a.response)).collect();
+        assert_eq!(people, [("sanne@example.org", false, Response::Accepted), ("ravi@example.org", true, Response::Declined)]);
+    }
+
+    #[test]
     fn calendar_items_become_appointments() {
         let xml = reply(concat!(
             "<t:CalendarItem><t:ItemId Id=\"AAk1\" ChangeKey=\"x\"/><t:Subject>Overleg</t:Subject><t:Body BodyType=\"Text\">Agenda:\n- punt 1</t:Body>",
@@ -642,6 +698,7 @@ mod tests {
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
             categories: Vec::new(),
+            meeting: None,
         };
         let xml = appointment_fields(&a).create();
         assert_eq!(

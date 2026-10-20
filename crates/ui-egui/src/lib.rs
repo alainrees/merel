@@ -1919,7 +1919,10 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     // header is not to be trusted.
     // A meeting invitation, as Outlook shows one over the message.
     if !in_junk && let Some(inv) = body.as_ref().and_then(|b| invitation::from_attachments(&b.attachments)) {
-        let known = inv.appointment.as_ref().is_some_and(|a| app.has_appointment_like(a));
+        let known = match &inv.answer {
+            Some(answer) => app.has_answer(answer),
+            None => inv.appointment.as_ref().is_some_and(|a| app.has_appointment_like(a)),
+        };
         if let Some(a) = invitation::strip(ui, t, &inv, known) {
             app.add_invitation(&a);
         }
@@ -2921,6 +2924,128 @@ mod tests {
         h.get_by_label("Verzenden").click();
         h.run();
         h.get_by_label(meeting::BAD_ADDRESSES);
+    }
+
+    fn with_real_account(h: &mut egui_kittest::Harness<'static, MailApp>) {
+        let s = &mut h.state_mut().engine.session;
+        s.accounts.insert(
+            0,
+            mailcraft_model::Account {
+                id: "acc".into(),
+                name: "MXroute".into(),
+                address: mailcraft_model::Address::new(Some("Alain Rees"), "alain@voorbeeld.nl").unwrap(),
+                username: "alain@voorbeeld.nl".into(),
+                protocol: mailcraft_model::Protocol::ImapSmtp,
+                auth: mailcraft_model::Auth::Password,
+                incoming: Some(mailcraft_model::Server { host: "127.0.0.1".into(), port: 1, tls: mailcraft_model::Tls::Implicit }),
+                outgoing: None,
+                dav: None,
+                signature: String::new(),
+            },
+        );
+        s.selected_folder = None;
+    }
+
+    #[test]
+    fn invited_people_stay_as_chips_and_their_answers_show_in_the_meeting() {
+        let mut h = harness();
+        with_real_account(&mut h);
+        let tomorrow = chrono::Local::now().naive_local() + chrono::TimeDelta::days(1);
+        let mut e = calendar::Editor::new_at(tomorrow.date().and_hms_opt(12, 0, 0).unwrap());
+        e.title = "Lunch".into();
+        e.attendees = "Alain Rees <alain@werk.example.org>; ".into();
+        h.state_mut().calendar.editor = Some(e);
+        h.run();
+        {
+            let e = h.state().calendar.editor.as_ref().expect("editor");
+            assert_eq!((e.invited.len(), e.attendees.as_str()), (1, ""), "the finished address became a chip");
+        }
+        h.get_by_label("Alain Rees verwijderen");
+        assert!(h.query_by_label(calendar::IN_THE_PAST).is_none());
+        h.get_by_label("Verzenden").click();
+        h.run_steps(3);
+        assert!(h.state().calendar.editor.is_none(), "sent and closed");
+        let a = h.state().engine.session.appointments.iter().find(|a| a.title == "Lunch").cloned().expect("saved");
+        assert!(!a.notes.contains("Genodigden"), "the people are not in the notes: {:?}", a.notes);
+        let m = a.meeting.clone().expect("a meeting");
+        assert_eq!((m.organizer.as_str(), m.attendees.len(), m.attendees[0].email.as_str()), ("alain@voorbeeld.nl", 1, "alain@werk.example.org"));
+        assert_eq!(h.state().engine.session.outbox.len(), 1, "the invitation went to the outbox");
+
+        // The acceptance comes in and is filed.
+        let reply = format!(
+            "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:{}\r\nDTSTAMP:20261020T210000Z\r\nDTSTART:20261027T110000Z\r\nDTEND:20261027T120000Z\r\nSUMMARY:Lunch\r\nATTENDEE;CN=Alain Rees;PARTSTAT=ACCEPTED:mailto:alain@werk.example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+            m.uid
+        );
+        let answer = mailcraft_engine::meetings::parse_answer(&reply).expect("an answer");
+        assert!(h.state_mut().engine.session.apply_answer(&answer, "alain@werk.example.org").is_some());
+        h.state_mut().open_appointment(&a.id, a.start);
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains("1 geaccepteerd").count() >= 1, "the window says who answered");
+        assert!(h.query_by_label("Opslaan").is_some(), "an unchanged meeting is only saved");
+        // Taking the person off sends them a cancellation with the update.
+        h.get_by_label("Alain Rees verwijderen").click();
+        h.run_steps(3);
+        h.get_by_label(meeting::SEND_UPDATE).click();
+        h.run_steps(3);
+        assert_eq!(h.state().engine.session.outbox.len(), 2, "the cancellation went out too");
+        let a = h.state().engine.session.appointments.iter().find(|a| a.title == "Lunch").cloned().expect("saved");
+        assert!(a.meeting.is_none(), "nobody is invited any more");
+    }
+
+    #[test]
+    fn a_meeting_sent_by_an_older_version_shows_its_people_as_chips() {
+        let mut h = harness();
+        with_real_account(&mut h);
+        let id = {
+            let s = &mut h.state_mut().engine.session;
+            let a = s.appointments.iter_mut().find(|a| a.title == "Lunch met Sanne").expect("sample");
+            a.notes = "Genodigden: Alain Rees <alain@werk.example.org>".into();
+            a.id.clone()
+        };
+        let start = h.state().engine.session.appointment(&id).map(|a| a.start).unwrap();
+        h.state_mut().open_appointment(&id, start);
+        h.run();
+        let e = h.state().calendar.editor.as_ref().expect("editor");
+        assert_eq!((e.invited.len(), e.notes.as_str(), e.legacy), (1, "", true));
+        h.get_by_label("Alain Rees verwijderen");
+        assert!(h.query_by_label("Opslaan").is_some(), "nothing changed, so nothing is sent again");
+        h.get_by_label("Opslaan").click();
+        h.run();
+        let a = h.state().engine.session.appointment(&id).cloned().expect("saved");
+        let m = a.meeting.expect("now a meeting");
+        assert!(m.uid.ends_with("@mailcraft.voorbeeld.nl") && m.uid.contains(&format!("-{start}@")), "{}", m.uid);
+        assert!(a.notes.is_empty() && h.state().engine.session.outbox.is_empty());
+    }
+
+    #[test]
+    fn an_answer_in_the_mail_says_who_accepted() {
+        let mut h = harness();
+        {
+            let s = &mut h.state_mut().engine.session;
+            let ics = "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:x1@mailcraft.example.org\r\nDTSTART:20261027T110000Z\r\nDTEND:20261027T120000Z\r\nSUMMARY:Lunch\r\nATTENDEE;CN=Sanne;PARTSTAT=ACCEPTED:mailto:sanne@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+            let part = mailcraft_mime::Attachment {
+                name: "invite.ics".into(),
+                mime: "text/calendar".into(),
+                size: ics.len(),
+                bytes: std::sync::Arc::from(ics.as_bytes()),
+            };
+            s.bodies.insert("m3".into(), mailcraft_engine::Body { text: "Geaccepteerd".into(), attachments: vec![part], ..Default::default() });
+            s.selected_message = Some("m3".into());
+        }
+        h.run();
+        h.get_by_label("Sanne heeft geaccepteerd: Lunch");
+        assert!(h.query_all_by_label_contains("Deze vergadering staat niet in je agenda.").count() >= 1);
+        assert!(h.query_by_label("Aan agenda toevoegen").is_none(), "an answer is not an invitation");
+    }
+
+    #[test]
+    fn a_past_appointment_says_so() {
+        let mut h = harness();
+        let mut e = calendar::Editor::new_at(chrono::Local::now().naive_local() - chrono::TimeDelta::days(2));
+        e.title = "Gisteren".into();
+        h.state_mut().calendar.editor = Some(e);
+        h.run();
+        h.get_by_label(calendar::IN_THE_PAST);
     }
 
     #[test]

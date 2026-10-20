@@ -128,6 +128,8 @@ pub trait Mailbox: Send {
 
 /// An appointment, contact or task on its way to or from a store. Its `id` is the store's
 /// own (empty for one that does not exist there yet); the engine maps it to a session id.
+// Items travel one at a time (boxed inside a job), so the size of the largest does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Item {
     Appointment(Appointment),

@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use chrono_tz::Tz;
-use mailcraft_model::{Appointment, Contact, Priority, ShowAs, Task, clean_text};
+use mailcraft_model::{Appointment, Attendee, Contact, Meeting, Priority, Response, ShowAs, Task, clean_text};
 
 /// One `NAME;PARAM=value:value` line, with the value as written (escapes intact).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -322,9 +322,92 @@ pub fn appointment_of(event: &Component, id: String) -> Option<Appointment> {
         private: private_class(&event.text("CLASS")),
         show_as: show_as_of(event),
         categories: categories_of(event),
+        meeting: meeting_of(event),
     }
     .validated()
     .ok()
+}
+
+/// The address in a `mailto:` value, without the scheme.
+pub fn mailto(p: &Prop) -> String {
+    let v = p.text();
+    let v = v.trim();
+    match v.get(..7) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("mailto:") => v[7..].trim().to_string(),
+        _ => v.to_string(),
+    }
+}
+
+/// The `CN` (common name) of an organiser or attendee, without quotes.
+pub fn common_name(p: &Prop) -> String {
+    p.param("CN").map(|n| n.trim_matches('"').trim().to_string()).unwrap_or_default()
+}
+
+/// One `ATTENDEE` property as an attendee: address, name, role and answer.
+pub fn attendee_of(p: &Prop) -> Attendee {
+    Attendee {
+        email: mailto(p),
+        name: common_name(p),
+        optional: p.param("ROLE").is_some_and(|r| r.eq_ignore_ascii_case("OPT-PARTICIPANT") || r.eq_ignore_ascii_case("NON-PARTICIPANT")),
+        response: p.param("PARTSTAT").map(Response::of_partstat).unwrap_or_default(),
+        replied: None,
+        proposed: None,
+    }
+}
+
+/// The meeting in a VEVENT that has an organiser and attendees; `None` for a plain appointment.
+/// The UID is Mailcraft's own `X-MAILCRAFT-UID` when the event has one (a meeting made from an
+/// appointment that was already on the server keeps the UID its invitations carry there).
+fn meeting_of(event: &Component) -> Option<Meeting> {
+    let organizer = event.prop("ORGANIZER")?;
+    let attendees: Vec<Attendee> = event.props.iter().filter(|p| p.name.eq_ignore_ascii_case("ATTENDEE")).map(attendee_of).collect();
+    if attendees.is_empty() {
+        return None;
+    }
+    let own = event.text("X-MAILCRAFT-UID");
+    Some(Meeting {
+        uid: if own.trim().is_empty() { event.text("UID") } else { own },
+        organizer: mailto(organizer),
+        organizer_name: common_name(organizer),
+        sequence: event.text("SEQUENCE").trim().parse().unwrap_or(0),
+        attendees,
+    })
+}
+
+/// `ORGANIZER;CN=Naam:mailto:adres`.
+pub fn organizer_prop(m: &Meeting) -> Prop {
+    let p = Prop { name: "ORGANIZER".into(), params: Vec::new(), raw: format!("mailto:{}", m.organizer) };
+    let name = m.organizer_name.replace('"', "");
+    if name.is_empty() || name.eq_ignore_ascii_case(&m.organizer) { p } else { p.with("CN", &name) }
+}
+
+/// `ATTENDEE;CN=…;ROLE=…;PARTSTAT=…;RSVP=TRUE:mailto:…`.
+pub fn attendee_prop(a: &Attendee) -> Prop {
+    let mut p = Prop { name: "ATTENDEE".into(), params: Vec::new(), raw: format!("mailto:{}", a.email) };
+    let name = a.name.replace('"', "");
+    if !name.is_empty() && !name.eq_ignore_ascii_case(&a.email) {
+        p = p.with("CN", &name);
+    }
+    p.with("ROLE", if a.optional { "OPT-PARTICIPANT" } else { "REQ-PARTICIPANT" }).with("PARTSTAT", a.response.partstat()).with("RSVP", "TRUE")
+}
+
+/// Writes the organiser and attendees of `m` (or takes them out). On a server they carry
+/// `SCHEDULE-AGENT=CLIENT` (RFC 6638): Mailcraft mails the invitations itself, so a server that
+/// schedules does not send them a second time.
+fn write_meeting(event: &mut Component, m: Option<&Meeting>) {
+    event.props.retain(|p| !p.name.eq_ignore_ascii_case("ATTENDEE"));
+    let Some(m) = m.filter(|m| !m.attendees.is_empty()) else {
+        event.set("ORGANIZER", None);
+        event.set("X-MAILCRAFT-UID", None);
+        return;
+    };
+    event.set("ORGANIZER", Some(organizer_prop(m).with("SCHEDULE-AGENT", "CLIENT")));
+    for a in &m.attendees {
+        event.props.push(attendee_prop(a).with("SCHEDULE-AGENT", "CLIENT"));
+    }
+    event.set_text("SEQUENCE", &m.sequence.to_string());
+    let uid = event.text("UID");
+    event.set_text("X-MAILCRAFT-UID", if uid.is_empty() || uid == m.uid { "" } else { &m.uid });
 }
 
 /// The names in every `CATEGORIES` property, which lists them split by unescaped commas.
@@ -485,6 +568,7 @@ pub fn write_appointment(event: &mut Component, a: &Appointment) {
     });
     event.set("CATEGORIES", categories);
     write_reminder(event, &a.title, a.reminder);
+    write_meeting(event, a.meeting.as_ref());
     stamp(event);
 }
 
@@ -612,6 +696,43 @@ mod tests {
     use super::*;
 
     const EVENT: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\nBEGIN:VTIMEZONE\r\nTZID:Europe/Amsterdam\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:abc@x\r\nDTSTAMP:20261001T120000Z\r\nDTSTART;TZID=Europe/Amsterdam:20261019T100000\r\nDTEND;TZID=Europe/Amsterdam:20261019T113000\r\nSUMMARY:Lunch met Sanne\\, Jan\r\nLOCATION:Kantine\r\nDESCRIPTION:Regel eerst\\n de offerte\r\n  en de rest\r\nBEGIN:VALARM\r\nTRIGGER:-PT15M\r\nACTION:DISPLAY\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    #[test]
+    fn a_meeting_goes_to_the_server_and_comes_back() {
+        let mut a = appointment_of(parse(EVENT)[0].find("VEVENT").unwrap(), "e:1".into()).unwrap();
+        assert!(a.meeting.is_none(), "a plain event is no meeting");
+        a.meeting = Some(Meeting {
+            uid: "m1@mailcraft.example.org".into(),
+            organizer: "alain@example.org".into(),
+            organizer_name: "Alain".into(),
+            sequence: 2,
+            attendees: vec![
+                Attendee { email: "sanne@example.org".into(), name: "Sanne".into(), response: Response::Accepted, ..Attendee::default() },
+                Attendee { email: "ravi@example.org".into(), optional: true, ..Attendee::default() },
+            ],
+        });
+        let mut roots = parse(EVENT);
+        let event = roots[0].find_mut("VEVENT").unwrap();
+        write_appointment(event, &a);
+        let text = roots[0].serialize().replace("\r\n ", "");
+        assert!(text.contains("ORGANIZER;CN=Alain;SCHEDULE-AGENT=CLIENT:mailto:alain@example.org\r\n"), "{text}");
+        assert!(
+            text.contains("ATTENDEE;CN=Sanne;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE;SCHEDULE-AGENT=CLIENT:mailto:sanne@example.org"),
+            "{text}"
+        );
+        assert!(
+            text.contains("UID:abc@x\r\n") && text.contains("X-MAILCRAFT-UID:m1@mailcraft.example.org\r\n") && text.contains("SEQUENCE:2\r\n"),
+            "{text}"
+        );
+        let back = appointment_of(parse(&text)[0].find("VEVENT").unwrap(), "e:1".into()).unwrap();
+        assert_eq!(back.meeting, a.meeting, "the server keeps the meeting with its answers");
+
+        // Taking everyone off leaves a plain appointment.
+        let mut roots = parse(&text);
+        write_appointment(roots[0].find_mut("VEVENT").unwrap(), &Appointment { meeting: None, ..back });
+        let plain = roots[0].serialize();
+        assert!(!plain.contains("ATTENDEE") && !plain.contains("ORGANIZER") && !plain.contains("X-MAILCRAFT-UID"), "{plain}");
+    }
 
     #[test]
     fn events_are_read_with_their_time_zone_and_written_back_whole() {
