@@ -11,6 +11,7 @@ mod contact;
 mod groups;
 mod junk;
 mod quicksteps;
+pub mod rich;
 mod rules;
 mod safety;
 mod task;
@@ -313,6 +314,9 @@ impl Importance {
 pub struct Draft {
     pub to: Vec<Address>,
     pub cc: Vec<Address>,
+    /// Blind copies: they get the message, the others do not see them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bcc: Vec<Address>,
     pub subject: String,
     pub body: String,
     /// The Message-ID this answers, if any.
@@ -335,6 +339,9 @@ pub struct Draft {
     /// it goes out only when every recipient's certificate is known.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub encrypt: bool,
+    /// The formatting over `body`; with it the message goes out as HTML with the text beside it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rich: Option<rich::Rich>,
 }
 
 impl Draft {
@@ -386,6 +393,8 @@ pub struct StoredDraft {
     pub to: String,
     #[serde(default)]
     pub cc: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub bcc: String,
     #[serde(default)]
     pub subject: String,
     #[serde(default)]
@@ -411,6 +420,9 @@ pub struct StoredDraft {
     /// See [`Draft::encrypt`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub encrypt: bool,
+    /// See [`Draft::rich`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rich: Option<rich::Rich>,
 }
 
 impl StoredDraft {
@@ -418,12 +430,18 @@ impl StoredDraft {
     pub fn to_draft(&self) -> Result<Draft, String> {
         let to = parse_address_list(&self.to).map_err(|_| "Controleer de adressen bij Aan.".to_string())?;
         let cc = parse_address_list(&self.cc).map_err(|_| "Controleer de adressen bij CC.".to_string())?;
+        let bcc = parse_address_list(&self.bcc).map_err(|_| "Controleer de adressen bij BCC.".to_string())?;
         if to.is_empty() {
             return Err("Vul ten minste één ontvanger in bij Aan.".into());
         }
+        let rich = self.rich.clone().map(|mut r| {
+            r.fit(&self.body);
+            r
+        });
         Ok(Draft {
             to,
             cc,
+            bcc,
             subject: self.subject.clone(),
             body: self.body.clone(),
             in_reply_to: self.in_reply_to.clone(),
@@ -432,6 +450,7 @@ impl StoredDraft {
             read_receipt: self.read_receipt,
             sign: self.sign,
             encrypt: self.encrypt,
+            rich: rich.filter(|r| !r.is_plain()),
         })
     }
 
@@ -439,8 +458,12 @@ impl StoredDraft {
     pub fn cleaned(mut self) -> Self {
         self.to = clean_text(self.to.trim());
         self.cc = clean_text(self.cc.trim());
+        self.bcc = clean_text(self.bcc.trim());
         self.subject = clean_text(self.subject.trim());
         self.body = self.body.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).take(MAX_DRAFT_BODY).collect();
+        if let Some(r) = &mut self.rich {
+            r.fit(&self.body);
+        }
         self
     }
 
@@ -448,6 +471,7 @@ impl StoredDraft {
     pub fn is_blank(&self) -> bool {
         self.to.trim().is_empty()
             && self.cc.trim().is_empty()
+            && self.bcc.trim().is_empty()
             && self.subject.trim().is_empty()
             && self.body.trim().is_empty()
             && self.attachments.is_empty()

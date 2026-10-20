@@ -13,6 +13,7 @@ base64 = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 chrono-tz = { workspace = true }
 
 [lints]

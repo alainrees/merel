@@ -181,6 +181,17 @@ in one go (move to a folder, mark as read, flag, give categories). Each step is 
 ribbon, and the first nine of an account also answer to Ctrl+Shift+1 to 9. They are kept in
 `quick_steps.json`.
 
+The compose window is laid out as Outlook's: Van (a list with several accounts), Aan with CC,
+BCC and the address book at its end, Onderwerp with "Urgentie" at its end, and Outlook's
+formatting bar over the text: undo and redo, paste, typeface (Inter, DejaVu Serif, DejaVu Sans
+Mono, all carried by the app) and size, clear formatting, text colour, highlight, bold, italic,
+underline, bullets and numbering, and under "⋯" strikethrough, indentation and alignment, with
+Ctrl/⌘+B, I, U, Z and Y. A formatted message goes out as HTML with the text beside it; the
+HTML is written by the app itself from the formatting, with every character of the text escaped,
+so nothing typed or pasted becomes markup. A message with blind copies (BCC) names them only in
+the envelope. A few seconds after each change the window keeps the message under Concepten and
+says "Concept is zojuist opgeslagen".
+
 Templates are saved pieces of text, as Outlook's "Mijn sjablonen": the "Sjablonen" menu in the
 compose window drops one into the message above the signature and the quoted text, "Tekst
 opslaan als sjabloon…" keeps what you wrote so far under a name, and "Sjablonen beheren…" opens
@@ -349,6 +360,16 @@ installer per platform, built by `.github/workflows/release.yml` when a tag `vX.
 | macOS 11+ (Apple Silicon and Intel) | `Mailcraft-X.Y.Z-macos.dmg` | Drag Mailcraft to Applications. The app has a free ad-hoc signature, not an Apple one, so the first start needs "Open Anyway" under System Settings > Privacy & Security. |
 | Windows 10+ (x64) | `Mailcraft-X.Y.Z-windows-setup.exe` | A short wizard in Dutch or English; installs for the current user without administrator rights. SmartScreen asks once, under "More info". |
 | Linux (x86_64) | `Mailcraft-X.Y.Z-linux-x86_64.AppImage` or `mailcraft_X.Y.Z-1_amd64.deb` | Make the AppImage executable and run it, or install the .deb on Debian or Ubuntu. |
+
+The first start on a computer opens "Welkom bij Mailcraft", four short steps that can be left at
+any point: what Mailcraft is, adding an account (opens Bestand), whether to check daily for a new
+version, and light or dark. It comes once; every choice stays changeable in its usual place.
+
+Mailcraft tells you when a newer release is out: "Updates" on the Help tab asks GitHub right
+away, and "Elke dag controleren op een nieuwe versie" in "Over Mailcraft" asks once a day (off
+until you switch it on). A newer version opens a small window with its release notes,
+"Downloaden" (the release page in the browser), "Deze versie overslaan" and "Later". Nothing is
+downloaded or installed by the app itself, and the question carries no account or identifier.
 
 The packaging files live in `packaging/`: the app icon, `macos/bundle.sh` with `Info.plist`,
 `windows/mailcraft.iss` for Inno Setup and `linux/` with the desktop entry and the AppImage script.

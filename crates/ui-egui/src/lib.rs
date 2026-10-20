@@ -34,6 +34,7 @@ pub mod receipt;
 pub mod reminders;
 pub mod remote;
 pub mod resend;
+pub mod rich_edit;
 pub mod rules;
 pub mod search_folders;
 mod signature;
@@ -41,8 +42,10 @@ pub mod tasks;
 pub mod templates;
 pub mod theme;
 pub mod unsubscribe;
+pub mod updates;
 pub mod vcard;
 pub mod view;
+pub mod welcome;
 
 use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
 use serde_json::{Value, json};
@@ -163,6 +166,10 @@ pub struct MailApp {
     pub help: Option<help::HelpWindow>,
     /// What the "Beeld" tab chose; read from `view.json` at start.
     pub view: view::ViewPrefs,
+    /// The check for a newer release, and the release it found.
+    pub updates: updates::Updates,
+    /// The step of the first-start welcome, while it is open.
+    pub welcome: Option<welcome::Step>,
     /// The conversations (by key) unfolded in the list, while the conversation view is on.
     pub expanded: std::collections::HashSet<String>,
     /// Whether the saved theme has been handed to egui yet (on the first frame).
@@ -240,7 +247,7 @@ impl MailApp {
     pub fn new(mut engine: Engine) -> Self {
         let view = view::ViewPrefs::load(engine.config_path());
         engine.session.sort = view.sort;
-        MailApp {
+        let mut app = MailApp {
             engine,
             module: Module::Mail,
             tab: Tab::Home,
@@ -270,10 +277,14 @@ impl MailApp {
             categories: None,
             help: None,
             view,
+            updates: updates::Updates::default(),
+            welcome: None,
             expanded: std::collections::HashSet::new(),
             theme_applied: false,
             title: None,
-        }
+        };
+        app.welcome = welcome::due(&app).then_some(welcome::Step::Hello);
+        app
     }
 
     /// Runs a command; an error is shown, never raised. Deleting a message that is in the
@@ -315,6 +326,7 @@ impl MailApp {
         self.engine.poll();
         self.wake_snoozed();
         self.tick_read_timer(ui.ctx());
+        self.tick_updates(ui.ctx());
         let arrivals = self.engine.session.take_arrivals();
         if arrivals > 0 {
             self.notice = Some(Notice::info(if arrivals == 1 {
@@ -362,6 +374,8 @@ impl MailApp {
         search_folders::window(self, &ctx, &t);
         categories::window(self, &ctx, &t);
         help::window(self, &ctx, &t);
+        updates::window(self, &ctx, &t);
+        welcome::window(self, &ctx, &t);
         drag_preview(self, &ctx, &t);
         calendar::drag_preview(self, &ctx, &t);
         if self.tab == Tab::Home && self.module == Module::Mail {
@@ -2206,6 +2220,106 @@ mod tests {
         egui_kittest::Harness::builder()
             .with_size(vec2(1280.0, 800.0))
             .build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(Engine::sample()))
+    }
+
+    #[test]
+    fn the_welcome_walks_through_its_steps_and_comes_only_once() {
+        let mut h = harness();
+        h.run();
+        assert!(h.state().welcome.is_none(), "the sample has no settings folder, so no welcome");
+        h.state_mut().welcome = Some(welcome::Step::Hello);
+        h.run();
+        assert!(h.query_all_by_label(welcome::WINDOW).count() >= 1);
+        h.get_by_label("Stap 1 van 4");
+        h.get_by_label(welcome::NEXT).click();
+        h.run();
+        h.get_by_label(welcome::ADD_ACCOUNT);
+        h.get_by_label(welcome::BACK).click();
+        h.run();
+        h.get_by_label("Stap 1 van 4");
+        h.get_by_label(welcome::NEXT).click();
+        h.run();
+        h.get_by_label(welcome::NEXT).click();
+        h.run();
+        h.get_by_label(welcome::UPDATES_OFF);
+        assert_eq!(h.state().view.update_check, Some(false), "shown is chosen: no until said otherwise");
+        h.get_by_label(welcome::UPDATES_ON).click();
+        h.run();
+        assert_eq!(h.state().view.update_check, Some(true));
+        h.get_by_label(welcome::NEXT).click();
+        h.run();
+        h.get_by_label("Donker").click();
+        h.run();
+        assert_eq!(h.state().view.theme, view::ThemeChoice::Dark);
+        h.get_by_label(welcome::DONE).click();
+        h.run();
+        assert!(h.state().welcome.is_none());
+        assert!(h.state().view.welcomed);
+        assert!(!welcome::due(h.state()));
+    }
+
+    #[test]
+    fn adding_an_account_from_the_welcome_opens_the_account_form() {
+        let mut h = harness();
+        h.state_mut().welcome = Some(welcome::Step::Account);
+        h.run();
+        h.get_by_label(welcome::ADD_ACCOUNT).click();
+        h.run();
+        assert!(h.state().welcome.is_none());
+        assert!(h.state().view.welcomed);
+        assert_eq!(h.state().view.update_check, Some(false), "skipped means no daily check");
+        assert_eq!(h.state().tab, Tab::File);
+    }
+
+    #[test]
+    fn a_newer_release_is_offered_once_and_a_skipped_one_not_again() {
+        use updates::{Outcome, Release};
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Help").click();
+        h.run();
+        h.get_by_label(updates::CHECK);
+        let release = Release { version: "9.0.0".into(), notes: "Nieuw: van alles.".into() };
+        h.state_mut().finish_update_check(Outcome::Newer(release.clone()));
+        h.run();
+        h.get_by_label(updates::WINDOW);
+        h.get_by_label("Mailcraft 9.0.0 is beschikbaar.");
+        h.get_by_label("Nieuw: van alles.");
+        h.get_by_label(updates::DOWNLOAD);
+        h.get_by_label(updates::SKIP).click();
+        h.run();
+        assert!(h.state().updates.offer.is_none());
+        assert_eq!(h.state().view.skipped_version.as_deref(), Some("9.0.0"));
+        // The daily check keeps quiet about the skipped release, but asking still shows it.
+        h.state_mut().finish_update_check(Outcome::Newer(release.clone()));
+        assert!(h.state().updates.offer.is_none());
+        h.state_mut().finish_update_check(Outcome::Newer(Release { version: "9.1.0".into(), notes: String::new() }));
+        assert!(h.state().updates.offer.is_some());
+        h.run();
+        h.get_by_label(updates::LATER).click();
+        h.run();
+        assert!(h.state().updates.offer.is_none());
+        // Only an answer to the person's own question is spoken.
+        h.state_mut().finish_update_check(Outcome::UpToDate);
+        assert!(h.state().notice.is_none());
+        h.state_mut().finish_update_check(Outcome::Failed("offline".into()));
+        assert!(h.state().notice.is_none());
+    }
+
+    #[test]
+    fn the_daily_update_check_is_off_until_chosen_and_switched_in_over_mailcraft() {
+        let mut h = harness();
+        h.run();
+        assert_eq!(h.state().view.update_check, None);
+        assert!(!h.state().updates.running(), "nothing goes out before the person chose");
+        h.get_by_label("Help").click();
+        h.run();
+        h.get_by_label("Over Mailcraft").click();
+        h.run();
+        h.get_by_label(updates::AUTO).click();
+        h.run();
+        assert_eq!(h.state().view.update_check, Some(true));
+        assert!(h.state().updates.running(), "switching it on asks at once");
     }
 
     #[test]

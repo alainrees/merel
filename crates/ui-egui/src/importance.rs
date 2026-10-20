@@ -36,26 +36,34 @@ pub fn strip(ui: &mut Ui, t: &Tokens, importance: Importance) {
     ui.add_space(8.0);
 }
 
-/// The chooser in the compose window: a menu with Hoog, Normaal and Laag, named after the
-/// current choice so an urgent message shows that it is one.
-pub fn chooser(ui: &mut Ui, t: &Tokens, importance: &mut Importance) {
-    let (text, color) = match *importance {
-        Importance::High => ("Urgentie: hoog", t.flag),
-        Importance::Low => ("Urgentie: laag", t.accent_text),
-        Importance::Normal => ("Urgentie: normaal", t.text),
+/// The small menu at the end of the compose window's subject line, as in Outlook: "Urgentie"
+/// with a chevron, red "Urgentie: hoog" or blue "Urgentie: laag" once chosen. A screen reader
+/// always hears the current choice.
+pub fn subject_menu(ui: &mut Ui, t: &Tokens, importance: &mut Importance) {
+    let (text, label, color) = match *importance {
+        Importance::High => ("Urgentie: hoog", "Urgentie: hoog", t.flag),
+        Importance::Low => ("Urgentie: laag", "Urgentie: laag", t.accent_text),
+        Importance::Normal => ("Urgentie", "Urgentie: normaal", t.text_dim),
     };
-    let label = RichText::new(text).size(14.0).color(color);
-    crate::helder::menu_button(ui, t, Some(crate::helder::Icon::CircleAlert), label, |ui| {
-        for (value, name, hint) in [
-            (Importance::High, "Hoog", "De ontvanger ziet een rood uitroepteken bij het bericht, zoals in Outlook."),
-            (Importance::Normal, "Normaal", "Geen teken bij het bericht."),
-            (Importance::Low, "Laag", "De ontvanger ziet een blauw pijltje omlaag: het kan wachten."),
-        ] {
+    let button = egui::Button::new(RichText::new(text).size(14.0).color(color))
+        .right_text(crate::helder::Icon::ChevronDown.image(14.0, color))
+        .frame_when_inactive(false)
+        .corner_radius(crate::helder::CONTROL_RADIUS)
+        .min_size(egui::vec2(0.0, 28.0));
+    let (r, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
+        for (value, name, hint) in OPTIONS {
             if ui.selectable_label(*importance == value, name).on_hover_text(hint).clicked() {
                 *importance = value;
                 ui.close();
             }
         }
-    })
-    .on_hover_text("Hoe dringend het bericht is; gaat mee als de kopteksten Importance en X-Priority.");
+    });
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    let _ = r.on_hover_text("Hoe dringend het bericht is; gaat mee als de kopteksten Importance en X-Priority.");
 }
+
+const OPTIONS: [(Importance, &str, &str); 3] = [
+    (Importance::High, "Hoog", "De ontvanger ziet een rood uitroepteken bij het bericht, zoals in Outlook."),
+    (Importance::Normal, "Normaal", "Geen teken bij het bericht."),
+    (Importance::Low, "Laag", "De ontvanger ziet een blauw pijltje omlaag: het kan wachten."),
+];
