@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use mailcraft_engine::view::{Filter, Sort};
+use mailcraft_engine::view::Sort;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -229,14 +229,7 @@ impl MailApp {
 pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     let mut changed = false;
     if app.module == Module::Mail {
-        group(ui, t, "Weergeven", |ui| {
-            for f in Filter::ALL {
-                if ui.selectable_label(app.engine.session.filter == f, f.dutch_name()).clicked() {
-                    app.run("view.filter", json!({ "filter": f }));
-                }
-            }
-        });
-        ui.separator();
+        // The list's filters are chips over the list itself; the category stays here.
         group(ui, t, "Categorie", |ui| {
             let current = app.engine.session.category_filter.clone();
             let names: Vec<String> = app.engine.session.categories.iter().map(|c| c.name.clone()).collect();

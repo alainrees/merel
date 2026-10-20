@@ -591,7 +591,104 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
     }
 }
 
+/// The quick filters over the message list; the rest are in the list's filter menu.
+const LIST_CHIPS: [mailcraft_engine::view::Filter; 4] = [
+    mailcraft_engine::view::Filter::All,
+    mailcraft_engine::view::Filter::Unread,
+    mailcraft_engine::view::Filter::Flagged,
+    mailcraft_engine::view::Filter::Attachments,
+];
+
+/// The filter menu's name over the message list.
+pub(crate) const LIST_FILTER: &str = "Filteren";
+
+/// The search bar at the top of the window, as the new Outlook has it: one field for the
+/// mail, with the recent searches, "Alle mappen" and, while searching, the way to keep the
+/// search as a search folder.
+fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let searching = app.engine.session.is_searching();
+    let mut save_search = false;
+    let mut remember: Option<String> = None;
+    let mut recent_pick: Option<Option<String>> = None;
+    let recents = app.view.recent_searches.clone();
+    egui::Panel::top("searchbar")
+        .show_separator_line(false)
+        .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin { left: 12, right: 12, top: 8, bottom: 2 }))
+        .show(ui, |ui| {
+            let width = ui.available_width().min(560.0);
+            let extra = 300.0;
+            ui.horizontal(|ui| {
+                ui.add_space(((ui.available_width() - width - extra) / 2.0).max(0.0));
+                let session = &mut app.engine.session;
+                let hint = if session.search_all {
+                    "Zoeken in alle mappen, bijvoorbeeld van:sanne heeft:bijlage"
+                } else {
+                    "Zoeken in deze map, bijvoorbeeld van:sanne heeft:bijlage"
+                };
+                let box_r = helder::search_field(ui, t, &mut session.search, egui::Id::new(SEARCH_BOX), hint, width)
+                    .on_hover_text(mailcraft_engine::search::HINT);
+                // Leaving the box (Enter, a click elsewhere) is when the words count as a search.
+                if box_r.lost_focus() && !session.search.trim().is_empty() {
+                    remember = Some(session.search.clone());
+                }
+                helder::quiet(ui, t, |ui| {
+                    if !recents.is_empty() {
+                        // Outlook's "Recente zoekopdrachten": the last words typed, to search again.
+                        ui.menu_button(view::RECENT_MENU, |ui| {
+                            for q in &recents {
+                                if ui.button(q).clicked() {
+                                    recent_pick = Some(Some(q.clone()));
+                                    ui.close();
+                                }
+                            }
+                            ui.separator();
+                            if ui.button(view::RECENT_CLEAR).clicked() {
+                                recent_pick = Some(None);
+                                ui.close();
+                            }
+                        })
+                        .response
+                        .on_hover_text(view::RECENT_HINT);
+                    }
+                    if searching && ui.small_button("✕").on_hover_text("Zoekopdracht wissen").clicked() {
+                        session.search.clear();
+                    }
+                    if searching && ui.small_button("Zoekmap").on_hover_text("Deze zoekopdracht bewaren als zoekmap in het mappenvenster").clicked() {
+                        save_search = true;
+                    }
+                    ui.checkbox(&mut session.search_all, "Alle mappen")
+                        .on_hover_text("Zoek in alle mappen van alle accounts, in de berichten die Mailcraft al heeft opgehaald.");
+                });
+            });
+        });
+    if save_search {
+        app.ask_search_folder();
+    }
+    if let Some(q) = remember {
+        app.view.remember_search(&q);
+        let ctx = ui.ctx().clone();
+        app.save_view(&ctx);
+    }
+    match recent_pick {
+        Some(Some(q)) => {
+            app.engine.session.search = q.clone();
+            app.view.remember_search(&q);
+            let ctx = ui.ctx().clone();
+            app.save_view(&ctx);
+        }
+        Some(None) => {
+            app.view.recent_searches.clear();
+            let ctx = ui.ctx().clone();
+            app.save_view(&ctx);
+        }
+        None => {}
+    }
+}
+
 fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    if app.module == Module::Mail {
+        search_bar(app, ui, t);
+    }
     egui::Panel::top("tabs").show_separator_line(false).frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin::symmetric(8, 4))).show(
         ui,
         |ui| {
@@ -937,7 +1034,7 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             // Outlook's "Favorieten": the pinned folders of every account, above the accounts.
             let favorites: Vec<mailcraft_model::Folder> = app.view.favorites.iter().filter_map(|id| app.engine.session.folder(id).cloned()).collect();
             if !favorites.is_empty() {
-                ui.label(RichText::new("★ Favorieten").strong().color(t.text));
+                ui.label(RichText::new("★ Favorieten").size(12.0).strong().color(t.text_dim));
                 ui.add_space(4.0);
                 for f in &favorites {
                     let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
@@ -956,8 +1053,11 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 ui.add_space(12.0);
             }
             for account in &app.engine.session.accounts {
+                // Each account under a small heading: its name and address, as the design has it.
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(account.address.email()).strong().color(t.text));
+                    let (name, email) = (account.address.display(), account.address.email());
+                    let heading = if name == email { email.to_string() } else { format!("{name} · {email}") };
+                    ui.label(RichText::new(heading).size(12.0).strong().color(t.text_dim));
                     let (dot, tip) = match app.engine.session.status.get(&account.id) {
                         Some(AccountStatus::Online) => (t.accent, "Verbonden"),
                         Some(AccountStatus::Connecting) => (t.text_dim, "Verbinden…"),
@@ -1164,54 +1264,45 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let searching = app.engine.session.is_searching();
             let count = if searching { Some(app.engine.session.visible_messages().len()) } else { None };
             let mut server_search = false;
-            let mut save_search = false;
-            let mut remember: Option<String> = None;
-            let mut recent_pick: Option<Option<String>> = None;
-            let recents = app.view.recent_searches.clone();
-            egui::Frame::NONE.inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
+            let mut filter_pick: Option<mailcraft_engine::view::Filter> = None;
+            egui::Frame::NONE.inner_margin(Margin { left: 12, right: 8, top: 12, bottom: 6 }).show(ui, |ui| {
                 let title = match count {
                     Some(n) => format!("Zoekresultaten ({n})"),
                     None => folder_name,
                 };
-                ui.label(RichText::new(title).size(18.0).strong().color(t.text));
-                ui.add_space(6.0);
+                let current = app.engine.session.filter;
                 ui.horizontal(|ui| {
-                    let session = &mut app.engine.session;
-                    let hint = if session.search_all { "Zoeken in alle mappen" } else { "Zoeken in deze map" };
-                    let menu_w = if recents.is_empty() { 0.0 } else { 30.0 };
-                    let width = (ui.available_width() - menu_w - if searching { 240.0 } else { 150.0 }).max(80.0);
-                    let box_r = helder::search_field(ui, t, &mut session.search, egui::Id::new(SEARCH_BOX), hint, width)
-                        .on_hover_text(mailcraft_engine::search::HINT);
-                    // Leaving the box (Enter, a click elsewhere) is when the words count as a search.
-                    if box_r.lost_focus() && !session.search.trim().is_empty() {
-                        remember = Some(session.search.clone());
-                    }
-                    if !recents.is_empty() {
-                        // Outlook's "Recente zoekopdrachten": the last words typed, to search again.
-                        ui.menu_button(view::RECENT_MENU, |ui| {
-                            for q in &recents {
-                                if ui.button(q).clicked() {
-                                    recent_pick = Some(Some(q.clone()));
-                                    ui.close();
+                    ui.label(RichText::new(title).size(18.0).strong().color(t.text));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        // The filters that do not fit as chips, with the order of the list on the Beeld tab.
+                        helder::quiet(ui, t, |ui| {
+                            let button = egui::Button::image(helder::Icon::ListFilter.image(helder::ICON, t.text))
+                                .frame_when_inactive(false)
+                                .corner_radius(helder::CONTROL_RADIUS)
+                                .min_size(vec2(32.0, 32.0));
+                            let (r, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
+                                for f in mailcraft_engine::view::Filter::ALL {
+                                    if ui.selectable_label(current == f, f.dutch_name()).clicked() {
+                                        filter_pick = Some(f);
+                                        ui.close();
+                                    }
                                 }
+                            });
+                            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, LIST_FILTER));
+                            r.on_hover_text("Filteren, ook op gesluimerde berichten. De volgorde kies je op het tabblad Beeld.");
+                        });
+                    });
+                });
+                ui.add_space(4.0);
+                // Outlook's quick filters, as chips over the list.
+                helder::quiet(ui, t, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for f in LIST_CHIPS {
+                            if helder::chip(ui, t, f.dutch_name(), current == f).clicked() {
+                                filter_pick = Some(f);
                             }
-                            ui.separator();
-                            if ui.button(view::RECENT_CLEAR).clicked() {
-                                recent_pick = Some(None);
-                                ui.close();
-                            }
-                        })
-                        .response
-                        .on_hover_text(view::RECENT_HINT);
-                    }
-                    if searching && ui.small_button("✕").on_hover_text("Zoekopdracht wissen").clicked() {
-                        session.search.clear();
-                    }
-                    if searching && ui.small_button("Zoekmap").on_hover_text("Deze zoekopdracht bewaren als zoekmap in het mappenvenster").clicked() {
-                        save_search = true;
-                    }
-                    ui.checkbox(&mut session.search_all, "Alle mappen")
-                        .on_hover_text("Zoek in alle mappen van alle accounts, in de berichten die Mailcraft al heeft opgehaald.");
+                        }
+                    });
                 });
                 // The server can look where Mailcraft has not: older mail, and the text itself.
                 let session = &app.engine.session;
@@ -1242,27 +1333,8 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     }
                 }
             });
-            if save_search {
-                app.ask_search_folder();
-            }
-            if let Some(q) = remember {
-                app.view.remember_search(&q);
-                let ctx = ui.ctx().clone();
-                app.save_view(&ctx);
-            }
-            match recent_pick {
-                Some(Some(q)) => {
-                    app.engine.session.search = q.clone();
-                    app.view.remember_search(&q);
-                    let ctx = ui.ctx().clone();
-                    app.save_view(&ctx);
-                }
-                Some(None) => {
-                    app.view.recent_searches.clear();
-                    let ctx = ui.ctx().clone();
-                    app.save_view(&ctx);
-                }
-                None => {}
+            if let Some(f) = filter_pick {
+                app.run("view.filter", json!({ "filter": f }));
             }
             if server_search {
                 let _ = app.engine.run("search.server", &serde_json::Value::Null);
@@ -1346,11 +1418,17 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     } else {
                         Color32::TRANSPARENT
                     };
-                    p.rect_filled(rect, CornerRadius::ZERO, fill);
-                    if !m.flags.seen {
-                        p.rect_filled(egui::Rect::from_min_size(rect.min, vec2(3.0, rect.height())), CornerRadius::ZERO, t.accent);
+                    // Each row a soft rounded block, as the design draws them; unread ones keep
+                    // their blue bar at the left.
+                    let block = rect.shrink2(vec2(6.0, 2.0));
+                    p.rect_filled(block, CornerRadius::same(helder::CONTROL_RADIUS), fill);
+                    if on {
+                        p.rect_stroke(block, CornerRadius::same(helder::CONTROL_RADIUS), Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
                     }
-                    p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, t.border));
+                    if !m.flags.seen {
+                        let bar = egui::Rect::from_min_size(block.min + vec2(0.0, 8.0), vec2(3.0, block.height() - 16.0));
+                        p.rect_filled(bar, CornerRadius::same(2), t.accent);
+                    }
                     let shift = if row.indent {
                         32.0
                     } else if row.fold.is_some() {
@@ -1358,8 +1436,13 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     } else {
                         0.0
                     };
-                    let x = rect.left() + 14.0 + shift;
-                    let w = rect.width() - 28.0 - shift;
+                    // The sender's avatar, left of the three lines.
+                    let avatar = if compact { 0.0 } else { 44.0 };
+                    if !compact {
+                        helder::avatar(p, egui::pos2(rect.left() + 32.0 + shift, rect.top() + 26.0), 16.0, m.from.display(), m.from.email());
+                    }
+                    let x = rect.left() + 14.0 + shift + avatar;
+                    let w = rect.width() - 28.0 - shift - avatar;
                     let from_color = if m.flags.seen { t.text } else { t.accent_text };
                     let mut from = clip(m.from.display(), 34);
                     if let Some(fold) = &row.fold {
@@ -1401,7 +1484,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     p.text(
                         egui::pos2(x, rect.top() + 34.0),
                         egui::Align2::LEFT_CENTER,
-                        clip(&m.subject, if squares > 0.0 { 40 } else { 48 }),
+                        clip(&m.subject, if squares > 0.0 { 34 } else { 42 }),
                         egui::FontId::proportional(13.0),
                         if m.flags.seen { t.text } else { t.accent_text },
                     );
@@ -1413,7 +1496,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         p.text(
                             egui::pos2(x, rect.top() + 52.0),
                             egui::Align2::LEFT_CENTER,
-                            clip(&preview, 56),
+                            clip(&preview, 48),
                             egui::FontId::proportional(12.0),
                             t.text_dim,
                         );
@@ -1569,6 +1652,12 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         });
         return;
     }
+    let in_junk = app.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk);
+    // "Snel antwoorden", as the new Outlook has it under a message: one click to a reply.
+    if !in_junk && quick_reply(ui, t, m.from.display()) {
+        app.open_compose(ComposeKind::Reply);
+        return;
+    }
     ui.label(RichText::new(&m.subject).size(20.0).strong().color(t.text));
     ui.add_space(10.0);
     importance::strip(ui, t, m.importance);
@@ -1611,7 +1700,6 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             app.run("message.flag", Value::Null);
         }
     }
-    let in_junk = app.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk);
     if in_junk {
         // A message in the Junk folder: a warning, the links, attachments and pictures switched
         // off (as Outlook does), and the way back for a sender who is not junk.
@@ -1651,34 +1739,57 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             return;
         }
     }
+    let mut reply: Option<ComposeKind> = None;
+    let mut sender = false;
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
-        ui.painter().circle_filled(rect.center(), 20.0, t.accent);
-        let initial = m.from.display().chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, initial, egui::FontId::proportional(18.0), t.on_accent);
+        helder::avatar(ui.painter(), rect.center(), 20.0, m.from.display(), m.from.email());
         ui.vertical(|ui| {
-            ui.label(RichText::new(format!("{} <{}>", m.from.display(), m.from.email())).color(t.text));
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.label(RichText::new(m.from.display()).strong().color(t.text));
+                if m.from.display() != m.from.email() {
+                    ui.label(RichText::new(format!("<{}>", m.from.email())).color(t.text_dim));
+                }
+            });
             let to: Vec<&str> = m.to.iter().map(|a| a.display()).collect();
-            ui.label(RichText::new(format!("Aan: {}", to.join("; "))).size(12.0).color(t.text_dim));
+            ui.label(RichText::new(format!("Aan: {} · {}", to.join("; "), dates::long(m.date))).size(12.0).color(t.text_dim));
         });
-        let mut sender = false;
-        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-            ui.label(RichText::new(dates::long(m.date)).size(12.0).color(t.text_dim));
-            let known = app.engine.session.contact_with_email(m.from.email()).is_some();
-            let (label, hint) = if known {
-                ("Contact openen", "Deze afzender staat in je contacten; opent de kaart.")
-            } else {
-                (
-                    "Toevoegen aan contacten",
-                    "Maakt een contact met de naam en het adres van deze afzender; je kunt het nog aanvullen voor je opslaat.",
-                )
-            };
-            sender = ui.small_button(label).on_hover_text(hint).clicked();
+        // The answers at hand in the message's own header, and the sender's contact card.
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            helder::quiet(ui, t, |ui| {
+                let known = app.engine.session.contact_with_email(m.from.email()).is_some();
+                let (label, hint, icon) = if known {
+                    ("Contact openen", "Deze afzender staat in je contacten; opent de kaart.", helder::Icon::User)
+                } else {
+                    (
+                        "Toevoegen aan contacten",
+                        "Maakt een contact met de naam en het adres van deze afzender; je kunt het nog aanvullen voor je opslaat.",
+                        helder::Icon::UserPlus,
+                    )
+                };
+                sender = header_button(ui, t, icon, label).on_hover_text(hint).clicked();
+                if !in_junk {
+                    for (icon, label, kind) in [
+                        (helder::Icon::Forward, HEADER_FORWARD, ComposeKind::Forward),
+                        (helder::Icon::ReplyAll, HEADER_REPLY_ALL, ComposeKind::ReplyAll),
+                        (helder::Icon::Reply, HEADER_REPLY, ComposeKind::Reply),
+                    ] {
+                        if header_button(ui, t, icon, label).on_hover_text(label).clicked() {
+                            reply = Some(kind);
+                        }
+                    }
+                }
+            });
         });
-        if sender {
-            app.open_or_add_sender(&m.from);
-        }
     });
+    if sender {
+        app.open_or_add_sender(&m.from);
+    }
+    if let Some(kind) = reply {
+        app.open_compose(kind);
+        return;
+    }
     ui.add_space(8.0);
     let message_id = m.id.clone();
     let names = m.categories.clone();
@@ -1830,27 +1941,27 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         let mut save = None;
         let mut save_all = false;
         ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
             for a in &b.attachments {
-                let chip = egui::Button::new(RichText::new(format!("📎 {}  ({})", a.name, size_text(a.size))).size(12.0).color(t.text))
-                    .fill(t.panel)
-                    .stroke(Stroke::new(1.0, t.border))
-                    .corner_radius(CornerRadius::same(4));
+                let size = size_text(a.size);
+                let label = format!("📎 {}  ({size})", a.name);
+                let r = helder::file_tile(ui, t, &a.name, &size, &label, !in_junk);
                 if in_junk {
-                    ui.add_enabled(false, chip)
-                        .on_disabled_hover_text("Uitgeschakeld in Ongewenste e-mail. Klik op Geen ongewenst als je deze afzender vertrouwt.");
-                } else if ui.add(chip).on_hover_text("Opslaan in je map Downloads. Mailcraft opent bijlagen niet zelf.").clicked() {
+                    r.on_hover_text("Uitgeschakeld in Ongewenste e-mail. Klik op Geen ongewenst als je deze afzender vertrouwt.");
+                } else if r.on_hover_text("Opslaan in je map Downloads. Mailcraft opent bijlagen niet zelf.").clicked() {
                     save = Some(a.clone());
                 }
             }
             // Several attachments: one click saves them all, as Outlook's "Alle bijlagen opslaan".
-            if !in_junk
-                && b.attachments.len() > 1
-                && ui
-                    .small_button(attachments::SAVE_ALL)
-                    .on_hover_text("Zet alle bijlagen van dit bericht in je map Downloads, elk onder zijn eigen naam.")
-                    .clicked()
-            {
-                save_all = true;
+            if !in_junk && b.attachments.len() > 1 {
+                helder::quiet(ui, t, |ui| {
+                    if helder::tool_button(ui, t, helder::Icon::Download, attachments::SAVE_ALL)
+                        .on_hover_text("Zet alle bijlagen van dit bericht in je map Downloads, elk onder zijn eigen naam.")
+                        .clicked()
+                    {
+                        save_all = true;
+                    }
+                });
             }
         });
         if let Some(a) = save {
@@ -1913,6 +2024,52 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
         ui.add(egui::Label::new(RichText::new(text).color(if body.is_some() || sample { t.text } else { t.text_dim }).size(14.0)).wrap());
     });
+}
+
+/// The answer buttons in the reading pane's header; named apart from the ribbon's own.
+pub(crate) const HEADER_REPLY: &str = "Antwoorden";
+pub(crate) const HEADER_REPLY_ALL: &str = "Allen antwoorden";
+pub(crate) const HEADER_FORWARD: &str = "Bericht doorsturen";
+/// The bar under a message that starts a reply.
+pub(crate) const QUICK_REPLY: &str = "Snel antwoorden";
+
+/// A quiet square icon button in the reading pane's header.
+fn header_button(ui: &mut Ui, t: &Tokens, icon: helder::Icon, label: &str) -> egui::Response {
+    let r = ui.add(
+        egui::Button::image(icon.image(helder::ICON, t.text))
+            .frame_when_inactive(false)
+            .corner_radius(helder::CONTROL_RADIUS)
+            .min_size(vec2(34.0, 34.0)),
+    );
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    r
+}
+
+/// The "Snel antwoorden aan …" bar at the foot of the reading pane. Whether it was clicked.
+fn quick_reply(ui: &mut Ui, t: &Tokens, to: &str) -> bool {
+    let first = to.split_whitespace().next().unwrap_or(to);
+    egui::Panel::bottom("quick-reply")
+        .show_separator_line(false)
+        .frame(egui::Frame::NONE.inner_margin(Margin { left: 0, right: 0, top: 10, bottom: 0 }))
+        .show(ui, |ui| {
+            let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, QUICK_REPLY));
+            let p = ui.painter();
+            let fill = if r.hovered() { t.hover } else { t.card };
+            p.rect(rect, CornerRadius::same(helder::CONTROL_RADIUS), fill, Stroke::new(1.0, t.control_border), egui::StrokeKind::Inside);
+            let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + 20.0, rect.center().y), vec2(16.0, 16.0));
+            helder::Icon::Reply.image(16.0, t.text_dim).paint_at(ui, icon);
+            let p = ui.painter();
+            p.text(
+                egui::pos2(rect.left() + 38.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                format!("Snel antwoorden aan {first}…"),
+                egui::FontId::proportional(14.0),
+                t.text_dim,
+            );
+            r.on_hover_text("Opent een antwoord aan de afzender.").clicked()
+        })
+        .inner
 }
 
 /// The first line of the strip above a message that shows signs of phishing.

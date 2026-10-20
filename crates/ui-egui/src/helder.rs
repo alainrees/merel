@@ -69,6 +69,7 @@ pub enum Icon {
     ReplyAll,
     Save,
     Send,
+    Download,
     Search,
     Paperclip,
     FileText,
@@ -95,7 +96,7 @@ pub enum Icon {
 
 impl Icon {
     /// Every icon, for the test that each one loads.
-    pub const ALL: [Icon; 62] = [
+    pub const ALL: [Icon; 63] = [
         Icon::Archive,
         Icon::Bell,
         Icon::Calendar,
@@ -136,6 +137,7 @@ impl Icon {
         Icon::ReplyAll,
         Icon::Save,
         Icon::Send,
+        Icon::Download,
         Icon::Search,
         Icon::Paperclip,
         Icon::FileText,
@@ -208,6 +210,7 @@ impl Icon {
             Icon::ReplyAll => svg!("reply-all"),
             Icon::Save => svg!("save"),
             Icon::Send => svg!("send"),
+            Icon::Download => svg!("download"),
             Icon::Search => svg!("search"),
             Icon::Paperclip => svg!("paperclip"),
             Icon::FileText => svg!("file-text"),
@@ -467,6 +470,78 @@ pub fn search_field(ui: &mut Ui, t: &Tokens, text: &mut String, id: egui::Id, hi
         .inner
 }
 
+/// The colours of the round avatars before a sender's name; each carries white initials at
+/// WCAG AA.
+pub const AVATAR_COLORS: [Color32; 8] = [
+    Color32::from_rgb(0x1F, 0x5F, 0xA8),
+    Color32::from_rgb(0x2E, 0x6E, 0x50),
+    Color32::from_rgb(0x6B, 0x4F, 0xA8),
+    Color32::from_rgb(0x8A, 0x53, 0x00),
+    Color32::from_rgb(0xA1, 0x1F, 0x35),
+    Color32::from_rgb(0x0F, 0x66, 0x6E),
+    Color32::from_rgb(0x4A, 0x4E, 0x54),
+    Color32::from_rgb(0x8C, 0x2F, 0x86),
+];
+
+/// One or two letters for a person: the first letters of the first and last word of the
+/// name, or the first letter of the address.
+pub fn initials(name: &str) -> String {
+    let words: Vec<&str> = name.split_whitespace().filter(|w| w.chars().next().is_some_and(char::is_alphanumeric)).collect();
+    let first = |w: &str| w.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+    match words.as_slice() {
+        [] => String::new(),
+        [one] => first(one),
+        [a, .., b] => first(a) + &first(b),
+    }
+}
+
+/// A round avatar with `name`'s initials, its colour fixed by `email` so a person keeps theirs.
+pub fn avatar(p: &egui::Painter, center: egui::Pos2, radius: f32, name: &str, email: &str) {
+    let hash = email.to_lowercase().bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)));
+    let color = AVATAR_COLORS[hash as usize % AVATAR_COLORS.len()];
+    p.circle_filled(center, radius, color);
+    let text = if initials(name).is_empty() { initials(email) } else { initials(name) };
+    p.text(center, egui::Align2::CENTER_CENTER, text, FontId::proportional(radius * 0.8), Color32::WHITE);
+}
+
+/// A row of choices shown as rounded chips, such as Alles, Ongelezen; the lit one is `on`.
+pub fn chip(ui: &mut Ui, t: &Tokens, text: &str, on: bool) -> Response {
+    let color = if on { t.accent_text } else { t.text };
+    ui.add(
+        egui::Button::new(RichText::new(text).size(13.0).color(color))
+            .fill(if on { t.checked } else { Color32::TRANSPARENT })
+            .frame_when_inactive(on)
+            .selected(on)
+            .stroke(Stroke::NONE)
+            .corner_radius(14)
+            .min_size(vec2(0.0, 28.0)),
+    )
+}
+
+/// A file as a tile: its kind, name and size. Its label is `label`, for screen readers and
+/// the tests.
+pub fn file_tile(ui: &mut Ui, t: &Tokens, name: &str, size: &str, label: &str, enabled: bool) -> Response {
+    let font = FontId::proportional(13.0);
+    let small = FontId::proportional(12.0);
+    let name_w = ui.painter().layout_no_wrap(name.to_owned(), font.clone(), Color32::WHITE).size().x;
+    let width = (10.0 + 28.0 + 10.0 + name_w.min(220.0) + 14.0).max(140.0);
+    let (rect, r) = ui.allocate_exact_size(vec2(width, 44.0), if enabled { Sense::click() } else { Sense::hover() });
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    let p = ui.painter();
+    let fill = if r.hovered() && enabled { t.hover } else { t.card };
+    p.rect(rect, CornerRadius::same(CONTROL_RADIUS), fill, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
+    let badge = egui::Rect::from_min_size(egui::pos2(rect.left() + 10.0, rect.center().y - 14.0), vec2(28.0, 28.0));
+    p.rect_filled(badge, 6, t.checked);
+    let kind: String = std::path::Path::new(name).extension().and_then(|e| e.to_str()).unwrap_or("").to_uppercase().chars().take(4).collect();
+    p.text(badge.center(), egui::Align2::CENTER_CENTER, kind, FontId::proportional(9.0), t.accent_text);
+    let x = badge.right() + 10.0;
+    let text_color = if enabled { t.text } else { t.text_disabled };
+    let clip = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(rect.right() - 8.0, rect.bottom()));
+    p.with_clip_rect(clip).text(egui::pos2(x, rect.top() + 7.0), egui::Align2::LEFT_TOP, name, font, text_color);
+    p.text(egui::pos2(x, rect.top() + 25.0), egui::Align2::LEFT_TOP, size, small, t.text_dim);
+    r
+}
+
 /// The line under a field, or under a button that opens a list.
 pub fn underline(ui: &Ui, t: &Tokens, r: &Response) {
     let stroke = if r.has_focus() { Stroke::new(2.0, t.accent) } else { Stroke::new(1.0, t.control_border) };
@@ -527,6 +602,16 @@ pub fn right<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn avatars_carry_white_initials_at_wcag_aa() {
+        for c in AVATAR_COLORS {
+            assert!(crate::theme::contrast(Color32::WHITE, c) >= 4.5, "{c:?}");
+        }
+        assert_eq!(initials("Marieke de Vries"), "MV");
+        assert_eq!(initials("Studio"), "S");
+        assert_eq!(initials("  "), "");
+    }
 
     #[test]
     fn every_icon_is_a_white_svg_on_a_24_grid() {
