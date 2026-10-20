@@ -361,6 +361,12 @@ installer per platform, built by `.github/workflows/release.yml` when a tag `vX.
 | Windows 10+ (x64) | `Mailcraft-X.Y.Z-windows-setup.exe` | A short wizard in Dutch or English; installs for the current user without administrator rights. SmartScreen asks once, under "More info". |
 | Linux (x86_64) | `Mailcraft-X.Y.Z-linux-x86_64.AppImage` or `mailcraft_X.Y.Z-1_amd64.deb` | Make the AppImage executable and run it, or install the .deb on Debian or Ubuntu. |
 
+Mailcraft tells you when a newer release is out: "Updates" on the Help tab asks GitHub right
+away, and "Elke dag controleren op een nieuwe versie" in "Over Mailcraft" asks once a day (off
+until you switch it on). A newer version opens a small window with its release notes,
+"Downloaden" (the release page in the browser), "Deze versie overslaan" and "Later". Nothing is
+downloaded or installed by the app itself, and the question carries no account or identifier.
+
 The packaging files live in `packaging/`: the app icon, `macos/bundle.sh` with `Info.plist`,
 `windows/mailcraft.iss` for Inno Setup and `linux/` with the desktop entry and the AppImage script.
 

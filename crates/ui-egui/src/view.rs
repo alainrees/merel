@@ -124,6 +124,11 @@ pub struct ViewPrefs {
     /// out of the views, the search list and the printed page, as in Outlook when a calendar is
     /// unticked. Reminders still come.
     pub hidden_calendars: Vec<String>,
+    /// Whether Mailcraft asks GitHub once a day for a newer release: `None` until the person
+    /// has chosen, which counts as no (see [`crate::updates`]).
+    pub update_check: Option<bool>,
+    /// The release the person chose to skip ("Deze versie overslaan"); a newer one is offered.
+    pub skipped_version: Option<String>,
 }
 
 /// How many recent searches the menu next to the search box keeps.
@@ -149,6 +154,8 @@ impl Default for ViewPrefs {
             search_folders: Vec::new(),
             recent_searches: Vec::new(),
             hidden_calendars: Vec::new(),
+            update_check: None,
+            skipped_version: None,
         }
     }
 }
