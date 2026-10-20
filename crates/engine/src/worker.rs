@@ -55,7 +55,21 @@ impl Worker {
         let id = account.id.clone();
         let name = format!("mailbox-{id}");
         let keys = self.keys.clone();
-        if thread::Builder::new().name(name).spawn(move || serve(account, credentials, keys, rx, events)).is_ok() {
+        let run = move || {
+            let id = account.id.clone();
+            let reporter = events.clone();
+            // A bug in a protocol library must not leave the account on "Verbinden…" for good.
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| serve(account, credentials, keys, rx, events)));
+            if let Err(panic) = outcome {
+                let detail =
+                    panic.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| panic.downcast_ref::<String>().cloned()).unwrap_or_default();
+                log::error!("{id}: the connection thread stopped: {detail}");
+                let what =
+                    format!("Mailcraft liep vast bij het verbinden ({}). Herstart Mailcraft; meld het als het blijft gebeuren.", clip(&detail));
+                let _ = reporter.send(Event::Failed { account_id: id, what });
+            }
+        };
+        if thread::Builder::new().name(name).spawn(run).is_ok() {
             self.accounts.insert(id, tx);
         } else {
             let _ = self.events.send(Event::Failed { account_id: id, what: "Kon geen achtergrondtaak starten.".into() });

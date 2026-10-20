@@ -12,6 +12,7 @@ mailcraft-mailbox = { workspace = true }
 mailcraft-imap = { workspace = true }
 mailcraft-secrets = { workspace = true }
 ureq = { workspace = true }
+rustls = { workspace = true }
 roxmltree = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }

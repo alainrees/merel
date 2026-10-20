@@ -376,7 +376,12 @@ impl GoogleItems {
     /// when Google cannot say.
     pub fn connect(token: &Secret) -> Option<Self> {
         let agent = ureq::Agent::new_with_config(
-            ureq::config::Config::builder().timeout_global(Some(Duration::from_secs(60))).http_status_as_error(false).user_agent("Mailcraft").build(),
+            ureq::config::Config::builder()
+                .tls_config(tls())
+                .timeout_global(Some(Duration::from_secs(60)))
+                .http_status_as_error(false)
+                .user_agent("Mailcraft")
+                .build(),
         );
         let store = GoogleItems { agent, token: token.clone() };
         match store.scopes() {
@@ -529,6 +534,16 @@ impl ItemStore for GoogleItems {
         let url = if id.starts_with("people/") { format!("{url}:deleteContact") } else { url };
         self.call("DELETE", &url, None).map(drop)
     }
+}
+
+/// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
+/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// agent without this panics on its first request.
+fn tls() -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+        .build()
 }
 
 #[cfg(test)]

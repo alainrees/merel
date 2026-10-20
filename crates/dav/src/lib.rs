@@ -286,6 +286,7 @@ impl DavClient {
     pub fn connect(dav: &Dav, username: &str, password: Secret) -> Result<Self> {
         let agent = ureq::Agent::new_with_config(
             ureq::config::Config::builder()
+                .tls_config(tls())
                 .timeout_global(Some(Duration::from_secs(60)))
                 .timeout_connect(Some(CONNECT_TIMEOUT))
                 .http_status_as_error(false)
@@ -718,9 +719,31 @@ impl ItemStore for DavClient {
     }
 }
 
+/// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
+/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// agent without this panics on its first request.
+fn tls() -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+        .build()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unreachable_server_is_an_error_not_a_crash() {
+        // Nothing listens on port 1. Before the agent had its certificate settings, the first
+        // request panicked inside ureq and took the account's connection thread with it.
+        let dav = Dav::new("https://127.0.0.1:1/", "").unwrap();
+        match DavClient::connect(&dav, "a", Secret::new("b")) {
+            Err(MailboxError::Connect { host, .. }) => assert_eq!(host, "127.0.0.1:1"),
+            Err(e) => panic!("expected a connection error, got {e}"),
+            Ok(_) => panic!("connected to nothing"),
+        }
+    }
 
     #[test]
     fn urls_resolve_like_a_browser() {
