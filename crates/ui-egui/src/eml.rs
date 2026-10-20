@@ -66,7 +66,7 @@ impl MailApp {
     pub fn forward_as_attachment(&mut self) {
         let Some(m) = self.engine.session.selected().cloned() else { return };
         if self.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk) {
-            self.notice = Some(NOT_FROM_JUNK.to_string());
+            self.notice = Some(crate::Notice::warning(NOT_FROM_JUNK));
             return;
         }
         let bytes = self.source_of(&m);
@@ -82,10 +82,10 @@ impl MailApp {
     }
 
     /// Outlook's "Opslaan als": the selected message as an `.eml` file in the Downloads folder,
-    /// named after its subject, never over an existing file. The status bar says where it went.
+    /// named after its subject, never over an existing file. A notice says where it went.
     pub fn save_as_file(&mut self) {
         let Some(dir) = crate::attachments::downloads_dir() else {
-            self.notice = Some("Bericht niet opgeslagen: geen map Downloads gevonden.".into());
+            self.notice = Some(crate::Notice::error("Bericht niet opgeslagen: geen map Downloads gevonden."));
             return;
         };
         self.save_as_into(&dir);
@@ -94,17 +94,17 @@ impl MailApp {
     /// Writes the selected message into `dir` as an `.eml` file; the path when it went in.
     pub(crate) fn save_as_into(&mut self, dir: &Path) -> Option<PathBuf> {
         let Some(m) = self.engine.session.selected().cloned() else {
-            self.notice = Some(NOTHING_TO_SAVE.to_string());
+            self.notice = Some(crate::Notice::warning(NOTHING_TO_SAVE));
             return None;
         };
         let bytes = self.source_of(&m);
         match crate::attachments::save_to(dir, &file_name(&m.subject), &bytes) {
             Ok(path) => {
-                self.notice = Some(format!("Bericht opgeslagen als {}", path.display()));
+                self.notice = Some(crate::attachments::saved("Bericht", &path));
                 Some(path)
             }
             Err(e) => {
-                self.notice = Some(format!("Bericht niet opgeslagen: {e}"));
+                self.notice = Some(crate::Notice::error(format!("Bericht niet opgeslagen: {e}")));
                 None
             }
         }
@@ -133,7 +133,12 @@ mod tests {
         assert_eq!(first.file_name().and_then(|n| n.to_str()), Some(file_name(&m.subject).as_str()));
         let source = std::fs::read_to_string(&first).expect("readable");
         assert!(source.contains(&format!("Subject: {}", m.subject)) && source.contains(m.from.email()), "{source}");
-        assert!(app.notice.as_deref().is_some_and(|n| n.starts_with("Bericht opgeslagen als ")), "{:?}", app.notice);
+        let notice = app.notice.clone().expect("a notice");
+        assert!(
+            notice.starts_with("Bericht opgeslagen in ") && !notice.contains(&*dir.to_string_lossy()),
+            "only the names, not the path: {notice:?}"
+        );
+        assert_eq!((notice.tone, notice.reveal.as_ref()), (crate::notice::Tone::Success, Some(&first)), "good news, with a way to the file");
 
         let second = app.save_as_into(&dir).expect("a second copy gets its own name");
         assert_ne!(first, second);
