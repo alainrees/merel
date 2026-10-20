@@ -45,6 +45,7 @@ pub mod unsubscribe;
 pub mod updates;
 pub mod vcard;
 pub mod view;
+pub mod welcome;
 
 use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
 use serde_json::{Value, json};
@@ -167,6 +168,8 @@ pub struct MailApp {
     pub view: view::ViewPrefs,
     /// The check for a newer release, and the release it found.
     pub updates: updates::Updates,
+    /// The step of the first-start welcome, while it is open.
+    pub welcome: Option<welcome::Step>,
     /// The conversations (by key) unfolded in the list, while the conversation view is on.
     pub expanded: std::collections::HashSet<String>,
     /// Whether the saved theme has been handed to egui yet (on the first frame).
@@ -244,7 +247,7 @@ impl MailApp {
     pub fn new(mut engine: Engine) -> Self {
         let view = view::ViewPrefs::load(engine.config_path());
         engine.session.sort = view.sort;
-        MailApp {
+        let mut app = MailApp {
             engine,
             module: Module::Mail,
             tab: Tab::Home,
@@ -275,10 +278,13 @@ impl MailApp {
             help: None,
             view,
             updates: updates::Updates::default(),
+            welcome: None,
             expanded: std::collections::HashSet::new(),
             theme_applied: false,
             title: None,
-        }
+        };
+        app.welcome = welcome::due(&app).then_some(welcome::Step::Hello);
+        app
     }
 
     /// Runs a command; an error is shown, never raised. Deleting a message that is in the
@@ -369,6 +375,7 @@ impl MailApp {
         categories::window(self, &ctx, &t);
         help::window(self, &ctx, &t);
         updates::window(self, &ctx, &t);
+        welcome::window(self, &ctx, &t);
         drag_preview(self, &ctx, &t);
         calendar::drag_preview(self, &ctx, &t);
         if self.tab == Tab::Home && self.module == Module::Mail {
@@ -2213,6 +2220,55 @@ mod tests {
         egui_kittest::Harness::builder()
             .with_size(vec2(1280.0, 800.0))
             .build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(Engine::sample()))
+    }
+
+    #[test]
+    fn the_welcome_walks_through_its_steps_and_comes_only_once() {
+        let mut h = harness();
+        h.run();
+        assert!(h.state().welcome.is_none(), "the sample has no settings folder, so no welcome");
+        h.state_mut().welcome = Some(welcome::Step::Hello);
+        h.run();
+        assert!(h.query_all_by_label(welcome::WINDOW).count() >= 1);
+        h.get_by_label("Stap 1 van 4");
+        h.get_by_label(welcome::NEXT).click();
+        h.run();
+        h.get_by_label(welcome::ADD_ACCOUNT);
+        h.get_by_label(welcome::BACK).click();
+        h.run();
+        h.get_by_label("Stap 1 van 4");
+        h.get_by_label(welcome::NEXT).click();
+        h.run();
+        h.get_by_label(welcome::NEXT).click();
+        h.run();
+        h.get_by_label(welcome::UPDATES_OFF);
+        assert_eq!(h.state().view.update_check, Some(false), "shown is chosen: no until said otherwise");
+        h.get_by_label(welcome::UPDATES_ON).click();
+        h.run();
+        assert_eq!(h.state().view.update_check, Some(true));
+        h.get_by_label(welcome::NEXT).click();
+        h.run();
+        h.get_by_label("Donker").click();
+        h.run();
+        assert_eq!(h.state().view.theme, view::ThemeChoice::Dark);
+        h.get_by_label(welcome::DONE).click();
+        h.run();
+        assert!(h.state().welcome.is_none());
+        assert!(h.state().view.welcomed);
+        assert!(!welcome::due(h.state()));
+    }
+
+    #[test]
+    fn adding_an_account_from_the_welcome_opens_the_account_form() {
+        let mut h = harness();
+        h.state_mut().welcome = Some(welcome::Step::Account);
+        h.run();
+        h.get_by_label(welcome::ADD_ACCOUNT).click();
+        h.run();
+        assert!(h.state().welcome.is_none());
+        assert!(h.state().view.welcomed);
+        assert_eq!(h.state().view.update_check, Some(false), "skipped means no daily check");
+        assert_eq!(h.state().tab, Tab::File);
     }
 
     #[test]
