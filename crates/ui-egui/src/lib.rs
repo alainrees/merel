@@ -1667,13 +1667,16 @@ fn message_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         return;
     };
     let mut open = true;
-    egui::Window::new(format!("✉ {subject}"))
-        .id(egui::Id::new("message-window"))
-        .open(&mut open)
-        .default_size(vec2(760.0, 560.0))
-        .resizable(true)
-        .frame(egui::Frame::window(&ctx.global_style()).fill(t.reading).inner_margin(Margin::same(16)))
-        .show(ctx, |ui| reading_pane(app, ui, t));
+    helder::os_window(ctx, t, "message-window", &format!("✉ {subject}"), vec2(820.0, 640.0), &mut open, |ui| {
+        // Esc closes it, also when it is a window of its own and the main window does not see the key.
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            app.message_window = false;
+        }
+        egui::Frame::new().fill(t.reading).corner_radius(helder::CARD_RADIUS).inner_margin(Margin::same(16)).show(ui, |ui| {
+            ui.set_min_size(ui.available_size());
+            reading_pane(app, ui, t)
+        });
+    });
     if !open {
         app.message_window = false;
     }
@@ -2491,8 +2494,9 @@ mod tests {
         h.run();
         {
             let e = h.state_mut().contacts.editor.as_mut().expect("editor");
-            e.name = "Noor Bakker".into();
-            e.emails = "noor@example.org".into();
+            e.first = "Noor".into();
+            e.last = "Bakker".into();
+            e.emails = vec!["noor@example.org".into()];
         }
         h.run();
         h.get_by_label("Opslaan").click();
@@ -2736,7 +2740,7 @@ mod tests {
         h.run();
         assert!(h.state().module == Module::People);
         let e = h.state().contacts.editor.as_ref().expect("the form for a new contact");
-        assert_eq!((e.id.as_deref(), e.name.as_str(), e.emails.as_str()), (None, "Nieuwsbrief", "news@example.org"));
+        assert_eq!((e.id.as_deref(), e.name().as_str(), e.emails.as_slice()), (None, "Nieuwsbrief", ["news@example.org".to_string()].as_slice()));
         h.get_by_label("Opslaan").click();
         h.run();
         assert_eq!(h.state().engine.session.contact_with_email("news@example.org").map(|c| c.name.as_str()), Some("Nieuwsbrief"));
@@ -3760,6 +3764,42 @@ mod tests {
     }
 
     #[test]
+    fn the_buttons_of_the_appointment_window_never_overlap() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.state_mut().calendar.view = calendar::View::Week;
+        h.run();
+        let focus = h.state().calendar.focus;
+        h.state_mut().calendar.focus = focus.checked_add_days(chrono::Days::new(7)).expect("next week");
+        h.run();
+        h.get_by_label_contains("Weekstart").click();
+        h.run();
+        {
+            // The widest the bar gets: an invitation to send, the longest reminder and status.
+            let e = h.state_mut().calendar.editor.as_mut().expect("the series opens");
+            e.attendees = "sanne@example.org".into();
+            e.reminder = Some(0);
+            e.show_as = mailcraft_model::ShowAs::Tentative;
+            e.private = true;
+        }
+        h.run();
+        h.run();
+        // Left to right, each button ends before the next one starts.
+        let rects = [
+            h.get_by_label("Verzenden").rect(),
+            h.get_by_label_contains("Voorlopig").rect(),
+            h.get_by_label("Op het moment zelf").rect(),
+            h.get_by_label(calendar::PRIVATE).rect(),
+            h.get_by_label(crate::meeting::FORWARD).rect(),
+            h.get_by_label(calendar::DELETE_MENU).rect(),
+            h.get_by_label("Annuleren").rect(),
+        ];
+        for pair in rects.windows(2) {
+            assert!(pair[0].max.x <= pair[1].min.x + 0.5, "{:?} runs into {:?}", pair[0], pair[1]);
+        }
+    }
+
+    #[test]
     fn a_weekly_appointment_shows_every_week_and_one_time_can_be_skipped() {
         let mut h = harness();
         h.state_mut().module = Module::Calendar;
@@ -3779,7 +3819,9 @@ mod tests {
         assert_eq!(editor.repeat, Some(mailcraft_model::Frequency::Weekly));
         let clicked = editor.occurrence.expect("the clicked occurrence is remembered");
         assert!(clicked > series_start && clicked - series_start <= 8 * 86_400, "it is next week's, not the first");
-        h.get_by_label("Deze keer overslaan").click();
+        h.get_by_label(calendar::DELETE_MENU).click();
+        h.run();
+        h.get_by_label(calendar::SKIP_ONE).click();
         h.run();
         assert!(h.state().calendar.editor.is_none());
         assert!(h.query_all_by_label_contains("Weekstart").next().is_none(), "the skipped time is gone from this week");

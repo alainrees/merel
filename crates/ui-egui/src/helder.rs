@@ -104,6 +104,9 @@ pub enum Icon {
     Moon,
     ArrowDownUp,
     Printer,
+    Phone,
+    Building,
+    Plus,
     ArrowLeft,
     ArrowRight,
     TriangleAlert,
@@ -111,7 +114,7 @@ pub enum Icon {
 
 impl Icon {
     /// Every icon, for the test that each one loads.
-    pub const ALL: [Icon; 78] = [
+    pub const ALL: [Icon; 81] = [
         Icon::Archive,
         Icon::Bell,
         Icon::Calendar,
@@ -187,6 +190,9 @@ impl Icon {
         Icon::Moon,
         Icon::ArrowDownUp,
         Icon::Printer,
+        Icon::Phone,
+        Icon::Building,
+        Icon::Plus,
         Icon::ArrowLeft,
         Icon::ArrowRight,
         Icon::TriangleAlert,
@@ -275,6 +281,9 @@ impl Icon {
             Icon::Moon => svg!("moon"),
             Icon::ArrowDownUp => svg!("arrow-down-up"),
             Icon::Printer => svg!("printer"),
+            Icon::Phone => svg!("phone"),
+            Icon::Building => svg!("building"),
+            Icon::Plus => svg!("plus"),
             Icon::ArrowLeft => svg!("arrow-left"),
             Icon::ArrowRight => svg!("arrow-right"),
             Icon::TriangleAlert => svg!("triangle-alert"),
@@ -363,6 +372,86 @@ pub fn nav_item(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str, on: bool) -> R
     icon.image(ICON, color).paint_at(ui, Rect::from_min_size(pos2(left, rect.center().y - ICON / 2.0), vec2(ICON, ICON)));
     ui.painter().text(pos2(left + ICON + 10.0, rect.center().y), egui::Align2::LEFT_CENTER, label, FontId::proportional(14.0), color);
     r
+}
+
+/// A day of the week as a round button, lit in the app colour while `on`, as Outlook's
+/// repeat pane shows the days; a screen reader hears a checkbox named `text`.
+pub fn day_toggle(ui: &mut Ui, t: &Tokens, text: &str, on: bool) -> Response {
+    let (rect, r) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::click());
+    r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, text));
+    let (fill, stroke, color) = if on {
+        (t.accent, Stroke::NONE, t.on_accent)
+    } else {
+        (if r.hovered() { t.hover } else { t.card }, Stroke::new(1.0, t.control_border), t.text)
+    };
+    let p = ui.painter();
+    p.circle(rect.center(), 16.5, fill, stroke);
+    if r.has_focus() {
+        p.circle_stroke(rect.center(), 19.0, Stroke::new(2.0, t.accent));
+    }
+    p.text(rect.center(), egui::Align2::CENTER_CENTER, text, FontId::proportional(13.0), color);
+    r
+}
+
+/// A small field for a number, in a rounded box, such as "Om de 2 weken".
+pub fn number_field(ui: &mut Ui, t: &Tokens, text: &mut String, hint: &str) -> Response {
+    let r = ui.add_sized(
+        vec2(48.0, 30.0),
+        egui::TextEdit::singleline(text)
+            .frame(Frame::NONE)
+            .hint_text(RichText::new(hint).size(FIELD_TEXT).color(t.text_dim))
+            .font(FontId::proportional(FIELD_TEXT))
+            .text_color(t.text)
+            .horizontal_align(Align::Center)
+            .vertical_align(Align::Center),
+    );
+    let stroke = if r.has_focus() { Stroke::new(2.0, t.accent) } else { Stroke::new(1.0, t.control_border) };
+    ui.painter().rect_stroke(r.rect, CornerRadius::same(CONTROL_RADIUS), stroke, egui::StrokeKind::Inside);
+    r
+}
+
+/// A link-like button that adds a row to a form, such as "E-mail toevoegen": a plus and the
+/// text in the app colour.
+pub fn add_link(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
+    ui.add(
+        egui::Button::image_and_text(Icon::Plus.image(ICON, t.accent_text), RichText::new(text).size(14.0).color(t.accent_text))
+            .frame_when_inactive(false)
+            .corner_radius(CONTROL_RADIUS)
+            .min_size(vec2(0.0, 32.0)),
+    )
+}
+
+/// A thin line across a form between its sections, with some room around it.
+pub fn rule(ui: &mut Ui, t: &Tokens) {
+    ui.add_space(8.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().min(620.0), 1.0), Sense::hover());
+    ui.painter().hline(rect.x_range(), rect.center().y, Stroke::new(1.0, t.card_border));
+    ui.add_space(8.0);
+}
+
+/// A form's notes: a soft box that grows with the text, with the notes icon before it.
+pub fn notes_box(ui: &mut Ui, t: &Tokens, text: &mut String, width: f32) -> Response {
+    ui.horizontal_top(|ui| {
+        let (rect, _) = ui.allocate_exact_size(vec2(ROW_ICON, BUTTON_HEIGHT), Sense::hover());
+        Icon::Notes.image(ICON, t.text_dim).paint_at(ui, Rect::from_center_size(rect.center(), vec2(ICON, ICON)));
+        Frame::new()
+            .fill(t.window)
+            .stroke(Stroke::new(1.0, t.card_border))
+            .corner_radius(CONTROL_RADIUS)
+            .inner_margin(8)
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(text)
+                        .frame(Frame::NONE)
+                        .hint_text(RichText::new("Notities toevoegen").color(t.text_dim))
+                        .font(FontId::proportional(FIELD_TEXT))
+                        .desired_width(width - 16.0)
+                        .desired_rows(4),
+                )
+            })
+            .inner
+    })
+    .inner
 }
 
 /// A quiet square button with only an icon; `label` is its tooltip and its name for a screen
@@ -703,6 +792,57 @@ pub fn note(ui: &mut Ui, t: &Tokens, text: &str) {
         indent(ui);
         ui.add(egui::Label::new(RichText::new(text).size(12.0).color(t.text_dim)).wrap());
     });
+}
+
+/// A window of its own, as Outlook opens a message, an appointment or a new mail: the system's
+/// title bar with its close, minimise and zoom buttons, on macOS, Windows and Linux alike.
+/// Closing it from the title bar clears `open`. Where the platform cannot open a second
+/// window (and in the tests) it is drawn as a window inside the main one.
+pub fn os_window<R>(
+    ctx: &egui::Context,
+    t: &Tokens,
+    id: &str,
+    title: &str,
+    size: egui::Vec2,
+    open: &mut bool,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    let builder = egui::ViewportBuilder::default().with_title(title).with_inner_size(size).with_min_inner_size(vec2(480.0, 360.0));
+    let mut add = Some(add);
+    let mut out = None;
+    ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), builder, |ui, class| {
+        let Some(add) = add.take() else { return };
+        if class == egui::ViewportClass::EmbeddedWindow {
+            out = Some(add(ui));
+            return;
+        }
+        if ui.input(|i| i.viewport().close_requested()) {
+            *open = false;
+        }
+        egui::CentralPanel::default().frame(Frame::NONE.fill(t.window).inner_margin(12)).show(ui, |ui| {
+            out = Some(add(ui));
+        });
+    });
+    out
+}
+
+/// Lays out `add` at the right end of a row of buttons. Unlike [`right`] it never draws over
+/// what came before: it takes the width it needed last frame, and when the row has no room
+/// left it follows straight on, so the window grows rather than the buttons overlapping.
+pub fn trailing<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let id = ui.id().with("trailing");
+    let gap = ui.spacing().item_spacing.x;
+    // Until the group has been measured once, it follows on, so it cannot stretch the window.
+    let width: Option<f32> = ui.ctx().data(|d| d.get_temp(id));
+    ui.add_space(width.map_or(gap, |w| (ui.available_width() - w - gap).max(gap)));
+    let width = width.unwrap_or(-1.0);
+    let inner = ui.scope(add);
+    let used = inner.response.rect.width();
+    if (used - width).abs() > 0.5 {
+        ui.ctx().data_mut(|d| d.insert_temp(id, used));
+        ui.ctx().request_discard("the trailing buttons changed width");
+    }
+    inner.inner
 }
 
 /// Lays out `add` from the right edge of what is left of the row.

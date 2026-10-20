@@ -1491,30 +1491,54 @@ fn repeat_fields(ui: &mut Ui, t: &Tokens, editor: &mut Editor) {
         Frequency::Monthly => "maanden",
         Frequency::Yearly => "jaar",
     };
-    ui.horizontal(|ui| {
+    ui.add_space(2.0);
+    row(ui, |ui| {
         helder::indent(ui);
-        ui.label(RichText::new("Om de").color(t.text));
-        helder::underline_field(ui, t, &mut editor.interval, "1", 32.0, false);
-        ui.label(RichText::new(unit).color(t.text));
+        ui.label(RichText::new("Om de").size(14.0).color(t.text));
+        helder::number_field(ui, t, &mut editor.interval, "1");
+        ui.label(RichText::new(unit).size(14.0).color(t.text));
     });
     if frequency == Frequency::Weekly {
-        ui.horizontal(|ui| {
+        ui.add_space(4.0);
+        row(ui, |ui| {
             helder::indent(ui);
+            ui.spacing_mut().item_spacing.x = 6.0;
             for (i, name) in WEEKDAYS_SHORT.iter().enumerate() {
-                ui.checkbox(&mut editor.weekdays[i], *name);
+                if helder::day_toggle(ui, t, name, editor.weekdays[i]).clicked() {
+                    editor.weekdays[i] = !editor.weekdays[i];
+                }
             }
         });
     }
-    ui.horizontal(|ui| {
+    ui.add_space(4.0);
+    row(ui, |ui| {
         helder::indent(ui);
-        ui.label(RichText::new("Eindigt").color(t.text));
-        ui.radio_value(&mut editor.ends, Ends::Never, "Nooit");
-        ui.radio_value(&mut editor.ends, Ends::OnDate, "Op");
-        ui.add_enabled_ui(editor.ends == Ends::OnDate, |ui| helder::underline_field(ui, t, &mut editor.until, "31-12-2026", 92.0, false));
-        ui.radio_value(&mut editor.ends, Ends::AfterCount, "Na");
-        ui.add_enabled_ui(editor.ends == Ends::AfterCount, |ui| helder::underline_field(ui, t, &mut editor.count, "10", 32.0, false));
-        ui.label(RichText::new("keer").color(t.text));
+        ui.label(RichText::new("Eindigt").size(14.0).color(t.text));
+        ui.add_space(4.0);
+        for (ends, name) in [(Ends::Never, "Nooit"), (Ends::OnDate, "Op een datum"), (Ends::AfterCount, "Na een aantal keer")] {
+            if helder::chip(ui, t, name, editor.ends == ends).clicked() {
+                editor.ends = ends;
+            }
+        }
     });
+    match editor.ends {
+        Ends::Never => {}
+        Ends::OnDate => {
+            row(ui, |ui| {
+                helder::indent(ui);
+                ui.label(RichText::new("Tot en met").size(14.0).color(t.text));
+                helder::underline_field(ui, t, &mut editor.until, "31-12-2026", 110.0, false);
+            });
+        }
+        Ends::AfterCount => {
+            row(ui, |ui| {
+                helder::indent(ui);
+                ui.label(RichText::new("Na").size(14.0).color(t.text));
+                helder::number_field(ui, t, &mut editor.count, "10");
+                ui.label(RichText::new("keer").size(14.0).color(t.text));
+            });
+        }
+    }
     // What the fields add up to, in words, as long as they parse.
     if let Ok(start) = NaiveDate::parse_from_str(editor.start_date.trim(), DATE_FORMAT)
         && let Ok(Some(r)) = editor.recurrence(start)
@@ -1525,6 +1549,11 @@ fn repeat_fields(ui: &mut Ui, t: &Tokens, editor: &mut Editor) {
         }
         helder::note(ui, t, &text);
     }
+}
+
+/// A row whose label and fields share one centre line.
+fn row<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.allocate_ui_with_layout(vec2(ui.available_width(), 30.0), egui::Layout::left_to_right(egui::Align::Center), add).inner
 }
 
 /// The times a time field's list offers: every half hour.
@@ -1700,6 +1729,12 @@ fn show_as_color(show_as: ShowAs, t: &Tokens) -> Color32 {
     }
 }
 
+/// The menu of an opened time of a series that removes this time or the whole series, and
+/// its two choices.
+pub const DELETE_MENU: &str = "Verwijderen…";
+pub const SKIP_ONE: &str = "Deze keer overslaan";
+pub const DELETE_SERIES: &str = "Hele reeks verwijderen";
+
 /// The appointment window, when one is open: a command bar on top, the form in a card, and
 /// the day it falls on beside it.
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
@@ -1718,7 +1753,8 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         (Some(_), Some(_)) => "Herhaalde afspraak",
         (Some(_), None) => "Afspraak",
     };
-    egui::Window::new(title).collapsible(false).resizable(false).frame(helder::window_frame(ctx, t)).default_width(940.0).show(ctx, |ui| {
+    let mut open = true;
+    helder::os_window(ctx, t, "appointment-window", title, vec2(980.0, 760.0), &mut open, |ui| {
         helder::quiet(ui, t, |ui| {
             ui.horizontal(|ui| {
                 let sends = !editor.attendees.trim().is_empty();
@@ -1758,18 +1794,34 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     forward = helder::tool_button(ui, t, Icon::Forward, crate::meeting::FORWARD)
                         .on_hover_text("Opent een nieuw bericht met de afspraak als bijlage, zodat iemand anders hem in zijn agenda kan zetten.")
                         .clicked();
-                    if editor.occurrence.is_some() {
-                        skip = helder::tool_button(ui, t, Icon::CalendarX, "Deze keer overslaan")
-                            .on_hover_text("Alleen deze keer vervalt; de reeks blijft.")
-                            .clicked();
-                    }
                 }
-                helder::right(ui, |ui| {
-                    close = helder::tool_button(ui, t, Icon::X, "Annuleren").clicked();
+                // The right-hand group keeps its own width, so the bar never draws it over the
+                // buttons before it; the window grows instead.
+                helder::trailing(ui, |ui| {
                     if editor.id.is_some() {
-                        let label = if editor.occurrence.is_some() { "Reeks verwijderen" } else { "Verwijderen" };
-                        delete = helder::tool_button(ui, t, Icon::Trash, label).clicked();
+                        if editor.occurrence.is_some() {
+                            // As Outlook's "Verwijderen" of a series: this time, or the whole series.
+                            let r = helder::menu_button(ui, t, Some(Icon::Trash), RichText::new("Verwijderen").size(14.0).color(t.text), |ui| {
+                                ui.set_min_width(200.0);
+                                if ui
+                                    .add(egui::Button::image_and_text(Icon::CalendarX.image(helder::ICON, t.text), SKIP_ONE))
+                                    .on_hover_text("Alleen deze keer vervalt; de reeks blijft.")
+                                    .clicked()
+                                {
+                                    skip = true;
+                                    ui.close();
+                                }
+                                if ui.add(egui::Button::image_and_text(Icon::Trash.image(helder::ICON, t.text), DELETE_SERIES)).clicked() {
+                                    delete = true;
+                                    ui.close();
+                                }
+                            });
+                            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, DELETE_MENU));
+                        } else {
+                            delete = helder::tool_button(ui, t, Icon::Trash, "Verwijderen").clicked();
+                        }
                     }
+                    close = helder::tool_button(ui, t, Icon::X, "Annuleren").clicked();
                 });
             });
         });
@@ -1792,6 +1844,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             }
         });
     });
+    close |= !open;
     if skip && let (Some(id), Some(start)) = (editor.id.clone(), editor.occurrence) {
         match app.engine.run("appointment.skip", &json!({ "id": id, "start": start })) {
             Ok(()) => close = true,

@@ -440,12 +440,6 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         Ok(d) if c.encrypt => app.engine.missing_certificates(&account, &[d.to, d.cc].concat()),
         _ => Vec::new(),
     };
-    // Files dropped onto the window become attachments; files hovering over it get a hint.
-    if !sending {
-        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
-        c.add_files(dropped);
-    }
-    let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
     let mut open = true;
     let mut send = false;
     let mut schedule: Option<i64> = None;
@@ -469,14 +463,16 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         if name == email { email.to_string() } else { format!("{name} · {email}") }
     });
     let templates = app.engine.session.templates_sorted();
-    egui::Window::new(if c.stored.is_some() { "Concept" } else { "Nieuw bericht" })
-        .open(&mut open)
-        .default_size(vec2(860.0, 620.0))
-        .min_size(vec2(520.0, 360.0))
-        .collapsible(false)
-        .frame(helder::window_frame(ctx, t))
-        .show(ctx, |ui| {
-            ui.add_enabled_ui(!sending, |ui| {
+    let title = if c.stored.is_some() { "Concept" } else { "Nieuw bericht" };
+    helder::os_window(ctx, t, "compose-window", title, vec2(900.0, 700.0), &mut open, |ui| {
+        // Files dropped onto the window become attachments; files hovering over it get a hint.
+        // The window's own input, as it may be a window of its own.
+        if !sending {
+            let dropped: Vec<PathBuf> = ui.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
+            c.add_files(dropped);
+        }
+        let hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
+        ui.add_enabled_ui(!sending, |ui| {
                 // The Helder command bar: the blue send button with its "later" half, then quiet
                 // icon buttons, and on the right what puts the message away.
                 helder::quiet(ui, t, |ui| {
@@ -656,7 +652,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     });
                 });
             });
-        });
+    });
     if discard {
         let stored = c.stored.clone();
         app.compose = None;
