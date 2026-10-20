@@ -132,6 +132,7 @@ pub fn remote_urls(doc: &Document) -> Vec<String> {
 fn fetch(url: &str) -> Result<Arc<[u8]>, String> {
     let agent = ureq::Agent::new_with_config(
         ureq::config::Config::builder()
+            .tls_config(tls())
             .timeout_global(Some(TIMEOUT))
             .http_status_as_error(false)
             .https_only(true)
@@ -156,6 +157,16 @@ fn fetch(url: &str) -> Result<Arc<[u8]>, String> {
         return Err("empty".into());
     }
     Ok(Arc::from(bytes))
+}
+
+/// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
+/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// agent without this panics on its first request.
+fn tls() -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+        .build()
 }
 
 #[cfg(test)]
