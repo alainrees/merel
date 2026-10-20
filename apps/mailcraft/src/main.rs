@@ -25,6 +25,7 @@ const ICON: &[u8] = include_bytes!("../../../packaging/icon-256.png");
 
 fn main() -> eframe::Result {
     mailcraft_oauth::install_crypto();
+    mailcraft_touch_bar::guard();
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Mailcraft")
         .with_app_id("mailcraft")

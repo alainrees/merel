@@ -11,6 +11,7 @@ mailcraft-engine = { workspace = true }
 mailcraft-secrets = { workspace = true }
 mailcraft-oauth = { workspace = true }
 mailcraft-ui-egui = { workspace = true }
+mailcraft-touch-bar = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
 log = { workspace = true }

@@ -464,7 +464,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     });
     let templates = app.engine.session.templates_sorted();
     let title = if c.stored.is_some() { "Concept" } else { "Nieuw bericht" };
-    helder::os_window(ctx, t, "compose-window", title, vec2(900.0, 700.0), &mut open, |ui| {
+    helder::item_window(ctx, t, "compose-window", title, vec2(900.0, 700.0), &mut open, |ui| {
         // Files dropped onto the window become attachments; files hovering over it get a hint.
         // The window's own input, as it may be a window of its own.
         if !sending {

@@ -27,6 +27,7 @@ mailcraft-store = { path = "crates/store" }
 mailcraft-dav = { path = "crates/dav" }
 mailcraft-smime = { path = "crates/smime" }
 mailcraft-pgp = { path = "crates/pgp" }
+mailcraft-touch-bar = { path = "crates/touch-bar" }
 
 # foundation
 thiserror = "2"
