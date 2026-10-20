@@ -244,6 +244,7 @@ fn contact_of(c: &Value) -> Option<Contact> {
         company: str_of(c, "companyName").to_string(),
         notes: str_of(c, "personalNotes").to_string(),
         account_id: None,
+        notes_rich: None,
     }
     .validated()
     .ok()
@@ -264,6 +265,7 @@ fn task_of(t: &Value) -> Option<Task> {
         completed: t.get("completedDateTime").and_then(moment),
         account_id: None,
         repeat: None,
+        notes_rich: None,
     }
     .validated()
     .ok()

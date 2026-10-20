@@ -20,6 +20,15 @@ use mailcraft_model::{Account, Appointment, Calendar, Contact, Task};
 
 use crate::{CommandError, Job, Session};
 
+/// Local formatting of synced notes by item id, with the text it lies over.
+type Formatted = HashMap<String, (String, Rich)>;
+
+/// The formatting kept for the notes of a synced item: the local one while the server sent the
+/// same text back, none once the notes changed elsewhere.
+fn kept_formatting(formatted: &Formatted, id: &str, notes: &str) -> Option<Rich> {
+    formatted.get(id).filter(|(text, _)| text == notes).map(|(_, rich)| rich.clone())
+}
+
 /// How far back and ahead appointments are fetched, in days.
 pub const PAST_DAYS: i64 = 90;
 pub const FUTURE_DAYS: i64 = 400;
@@ -130,21 +139,29 @@ impl Session {
         let calendar_id = self.ensure_calendar(account_id);
         // Servers keep notes as text; the formatting stays on this computer for as long as the
         // text it lies over comes back unchanged.
-        let formatted: HashMap<String, (String, Rich)> = self
+        let formatted: Formatted = self
             .appointments
             .iter()
             .filter(|a| a.calendar_id == calendar_id)
             .filter_map(|a| a.notes_rich.clone().map(|r| (a.id.clone(), (a.notes.clone(), r))))
             .collect();
+        let formatted_contacts: Formatted = self
+            .contacts
+            .iter()
+            .filter(|c| c.account_id.as_deref() == Some(account_id))
+            .filter_map(|c| c.notes_rich.clone().map(|r| (c.id.clone(), (c.notes.clone(), r))))
+            .collect();
+        let formatted_tasks: Formatted = self
+            .tasks
+            .iter()
+            .filter(|t| t.account_id.as_deref() == Some(account_id))
+            .filter_map(|t| t.notes_rich.clone().map(|r| (t.id.clone(), (t.notes.clone(), r))))
+            .collect();
         self.appointments.retain(|a| a.calendar_id != calendar_id);
         self.appointments.extend(appointments.into_iter().map(|mut a| {
             a.id = Self::local_item_id(account_id, &a.id);
             a.calendar_id = calendar_id.clone();
-            if let Some((notes, rich)) = formatted.get(&a.id)
-                && *notes == a.notes
-            {
-                a.notes_rich = Some(rich.clone());
-            }
+            a.notes_rich = kept_formatting(&formatted, &a.id, &a.notes);
             if a.all_day {
                 a.start = snap_to_midnight(a.start);
                 a.end = snap_to_midnight(a.end).max(a.start + 86_400);
@@ -155,6 +172,7 @@ impl Session {
         self.contacts.extend(contacts.into_iter().map(|mut c| {
             c.id = Self::local_item_id(account_id, &c.id);
             c.account_id = Some(account_id.to_string());
+            c.notes_rich = kept_formatting(&formatted_contacts, &c.id, &c.notes);
             c
         }));
         self.tasks.retain(|t| t.account_id.as_deref() != Some(account_id));
@@ -162,6 +180,7 @@ impl Session {
             t.id = Self::local_item_id(account_id, &t.id);
             t.account_id = Some(account_id.to_string());
             t.due = t.due.map(snap_to_midnight);
+            t.notes_rich = kept_formatting(&formatted_tasks, &t.id, &t.notes);
             t
         }));
         if self.selected_appointment().is_none() {
@@ -318,10 +337,27 @@ mod tests {
             local.notes_rich = Some(rich.clone());
         }
         s.apply(Event::Synced { account_id: "acc".into(), appointments: vec![a.clone()], contacts: Vec::new(), tasks: Vec::new() });
-        assert_eq!(s.appointment("acc/A1").and_then(|x| x.notes_rich.clone()), Some(rich), "same text, same formatting");
+        assert_eq!(s.appointment("acc/A1").and_then(|x| x.notes_rich.clone()), Some(rich.clone()), "same text, same formatting");
         a.notes = "Agenda, gewijzigd op de server".into();
         s.apply(Event::Synced { account_id: "acc".into(), appointments: vec![a], contacts: Vec::new(), tasks: Vec::new() });
         assert_eq!(s.appointment("acc/A1").and_then(|x| x.notes_rich.clone()), None, "changed elsewhere: the text wins");
+
+        // Contacts and tasks the same way.
+        let contact = Contact { id: "C1".into(), name: "Noor".into(), notes: "Agenda".into(), ..Contact::default() };
+        let task = Task { id: "T1".into(), title: "Bellen".into(), notes: "Agenda".into(), ..Task::default() };
+        let synced = |s: &mut Session| {
+            s.apply(Event::Synced { account_id: "acc".into(), appointments: Vec::new(), contacts: vec![contact.clone()], tasks: vec![task.clone()] })
+        };
+        synced(&mut s);
+        for c in s.contacts.iter_mut().filter(|c| c.id == "acc/C1") {
+            c.notes_rich = Some(rich.clone());
+        }
+        for t in s.tasks.iter_mut().filter(|t| t.id == "acc/T1") {
+            t.notes_rich = Some(rich.clone());
+        }
+        synced(&mut s);
+        assert!(s.contacts.iter().any(|c| c.id == "acc/C1" && c.notes_rich.as_ref() == Some(&rich)));
+        assert!(s.tasks.iter().any(|t| t.id == "acc/T1" && t.notes_rich.as_ref() == Some(&rich)));
     }
 
     #[test]

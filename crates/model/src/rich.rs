@@ -184,6 +184,16 @@ pub fn line_of(text: &str, pos: usize) -> usize {
     text.chars().take(pos).filter(|c| *c == '\n').count()
 }
 
+/// `rich` fitted over `text`, or `None` when there is nothing to keep: how an item stores the
+/// formatting of its notes.
+pub fn fitted(rich: Option<Rich>, text: &str) -> Option<Rich> {
+    rich.map(|mut r| {
+        r.fit(text);
+        r
+    })
+    .filter(|r| !r.is_plain())
+}
+
 impl Rich {
     /// Plain formatting over `text`.
     pub fn plain(text: &str) -> Self {

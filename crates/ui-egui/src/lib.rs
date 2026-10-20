@@ -122,6 +122,8 @@ pub struct MailApp {
     tab: Tab,
     form: AccountForm,
     pub compose: Option<Compose>,
+    /// Messages on their way after their window closed, as Outlook's Postvak UIT.
+    pub sending: Vec<compose::Sending>,
     pub calendar: calendar::State,
     pub contacts: contacts::State,
     pub tasks: tasks::State,
@@ -254,6 +256,7 @@ impl MailApp {
             tab: Tab::Home,
             form: AccountForm::default(),
             compose: None,
+            sending: Vec::new(),
             calendar: calendar::State::default(),
             contacts: contacts::State::default(),
             tasks: tasks::State::default(),
@@ -356,6 +359,7 @@ impl MailApp {
         ribbon(self, ui, &t);
         status_bar(self, ui, &t);
         let ctx = ui.ctx().clone();
+        compose::follow_sending(self);
         compose::show(self, &ctx, &t);
         calendar::window(self, &ctx, &t);
         calendar::goto_window(self, &ctx, &t);
@@ -2851,6 +2855,51 @@ mod tests {
         h.get_by_label("1 december 2026").click();
         h.run();
         assert_eq!(h.state().tasks.editor.as_ref().expect("editor").due, "01-12-2026");
+    }
+
+    #[test]
+    fn contact_and_task_notes_have_the_formatting_bar_and_keep_their_formatting() {
+        // Selects "Agenda" in the notes of the open form and makes it bold, as a drag and a
+        // click on the bar would.
+        fn bold_first_word(h: &mut egui_kittest::Harness<'static, MailApp>, id: egui::Id) {
+            h.get_by_label("Notities").focus();
+            h.run();
+            let mut state = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(6))));
+            state.store(&h.ctx, id);
+            h.run();
+            h.get_by_label(rich_edit::BOLD).click();
+            h.run();
+            h.get_by_label("Opslaan").click();
+            h.run();
+        }
+        let mut h = harness();
+        h.state_mut().module = Module::People;
+        h.state_mut().new_contact();
+        if let Some(e) = h.state_mut().contacts.editor.as_mut() {
+            e.first = "Noor".into();
+            e.notes = "Agenda\nbelt liever".into();
+        }
+        let id = h.state().contacts.editor.as_ref().map(|e| e.notes_editor.id()).expect("form");
+        h.run();
+        bold_first_word(&mut h, id);
+        let c = h.state().engine.session.contacts.iter().find(|c| c.name == "Noor").cloned().expect("saved");
+        let rich = c.notes_rich.clone().expect("formatted");
+        assert!(rich.style_of(0).bold && !rich.style_of(7).bold, "{:?}", rich.runs);
+        assert!(contacts::Editor::from_contact(&c).notes_editor.rich.style_of(0).bold, "the form shows it again");
+
+        h.state_mut().module = Module::Tasks;
+        h.state_mut().new_task();
+        if let Some(e) = h.state_mut().tasks.editor.as_mut() {
+            e.title = "Overleg voorbereiden".into();
+            e.notes = "Agenda\nbegroting".into();
+        }
+        let id = h.state().tasks.editor.as_ref().map(|e| e.notes_editor.id()).expect("form");
+        h.run();
+        bold_first_word(&mut h, id);
+        let task = h.state().engine.session.tasks.iter().find(|t| t.title == "Overleg voorbereiden").cloned().expect("saved");
+        assert!(task.notes_rich.as_ref().is_some_and(|r| r.style_of(0).bold), "{:?}", task.notes_rich);
+        assert!(tasks::Editor::from_task(&task).notes_editor.rich.style_of(0).bold);
     }
 
     #[test]

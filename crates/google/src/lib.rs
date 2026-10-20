@@ -296,6 +296,7 @@ fn contact_of(p: &Value) -> Option<Contact> {
         company: first_str(p, "organizations", "name").to_string(),
         notes: first_str(p, "biographies", "value").to_string(),
         account_id: None,
+        notes_rich: None,
     }
     .validated()
     .ok()
@@ -329,6 +330,7 @@ fn task_of(t: &Value) -> Option<Task> {
         completed: t.get("completed").and_then(Value::as_str).and_then(|c| DateTime::parse_from_rfc3339(c).ok()).map(|d| d.timestamp()),
         account_id: None,
         repeat: None,
+        notes_rich: None,
     }
     .validated()
     .ok()

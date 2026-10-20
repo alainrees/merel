@@ -225,6 +225,8 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         completed: existing.as_ref().and_then(|t| t.completed),
         account_id: account.clone(),
         repeat,
+        // Formatting that does not parse is dropped: the notes stay, as text.
+        notes_rich: params.get("notes_rich").and_then(|v| serde_json::from_value(v.clone()).ok()),
     }
     .validated()
     .map_err(|e| match e {

@@ -24,7 +24,6 @@ pub(crate) const SEARCH_BOX: &str = "contacts_search_box";
 
 /// The form's fields: the name in two parts, as Outlook asks for it, and each address and
 /// phone number on its own row.
-#[derive(Default)]
 pub struct Editor {
     pub id: Option<String>,
     /// Where a new contact goes: an account id, or empty for this computer.
@@ -35,7 +34,29 @@ pub struct Editor {
     pub phones: Vec<String>,
     pub company: String,
     pub notes: String,
+    /// The formatting of the notes, with the bar over them as in the message window.
+    pub notes_editor: crate::rich_edit::Editor,
     pub error: Option<String>,
+}
+
+/// The notes editor's salt: a contact's form shows one at a time.
+const NOTES: &str = "contact-notes";
+
+impl Default for Editor {
+    fn default() -> Self {
+        Editor {
+            id: None,
+            account_id: String::new(),
+            first: String::new(),
+            last: String::new(),
+            emails: Vec::new(),
+            phones: Vec::new(),
+            company: String::new(),
+            notes: String::new(),
+            notes_editor: crate::rich_edit::Editor::new(NOTES, "", None),
+            error: None,
+        }
+    }
 }
 
 /// The parts of a row, a pasted "a@b.nl; c@d.nl" giving two.
@@ -63,6 +84,7 @@ impl Editor {
             phones: c.phones.clone(),
             company: c.company.clone(),
             notes: c.notes.clone(),
+            notes_editor: crate::rich_edit::Editor::new(NOTES, &c.notes, c.notes_rich.clone()),
             error: None,
         }
     }
@@ -86,6 +108,7 @@ impl Editor {
             "phones": split(&self.phones),
             "company": self.company,
             "notes": self.notes,
+            "notes_rich": self.notes_editor.stored(&self.notes),
         });
         if let Some(id) = &self.id {
             p["id"] = json!(id);
@@ -394,7 +417,7 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         heading(ui, t, "Werkgegevens");
         helder::icon_row(ui, t, Icon::Building, |ui| helder::underline_field(ui, t, &mut editor.company, "Bedrijf", width - 44.0, false));
         helder::rule(ui, t);
-        helder::notes_box(ui, t, &mut editor.notes, width - 44.0);
+        helder::notes_box(ui, t, &mut editor.notes_editor, &mut editor.notes, width - 44.0, 100.0);
         if let Some(e) = &editor.error {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -517,6 +540,7 @@ mod tests {
             company: String::new(),
             notes: String::new(),
             account_id: None,
+            notes_rich: None,
         };
         let e = Editor::from_contact(&c);
         assert_eq!(e.emails, ["a@b.nl", "c@d.nl"]);

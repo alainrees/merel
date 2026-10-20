@@ -190,9 +190,12 @@ Ctrl/⌘+B, I, U, Z and Y. A formatted message goes out as HTML with the text be
 HTML is written by the app itself from the formatting, with every character of the text escaped,
 so nothing typed or pasted becomes markup. A message with blind copies (BCC) names them only in
 the envelope. A few seconds after each change the window keeps the message under Concepten and
-says "Concept is zojuist opgeslagen". The same bar sits over the notes of an appointment; the formatting is kept
+says "Concept is zojuist opgeslagen". The same bar sits over the notes of an appointment, a contact and a task; the formatting is kept
 on this computer, servers get the notes as text, and a sync keeps the formatting as long as the
 text comes back unchanged.
+"Verzenden" closes the window at once, as in Outlook, and the message goes out behind it: it stays
+under Concepten until the server has it, the notice at the top says "Bericht verzonden.", and when
+sending fails the window comes back with the reason.
 
 Templates are saved pieces of text, as Outlook's "Mijn sjablonen": the "Sjablonen" menu in the
 compose window drops one into the message above the signature and the quoted text, "Tekst

@@ -483,27 +483,24 @@ pub fn rule(ui: &mut Ui, t: &Tokens) {
     ui.add_space(8.0);
 }
 
-/// A form's notes: a soft box that grows with the text, with the notes icon before it.
-pub fn notes_box(ui: &mut Ui, t: &Tokens, text: &mut String, width: f32) -> Response {
+/// The notes of a form with Outlook's formatting bar over them, as in the message and
+/// appointment windows.
+pub fn notes_box(ui: &mut Ui, t: &Tokens, ed: &mut crate::rich_edit::Editor, text: &mut String, width: f32, min_height: f32) -> Response {
+    ui.horizontal(|ui| {
+        indent(ui);
+        ui.vertical(|ui| {
+            ui.set_width(width);
+            crate::rich_edit::bar(ui, t, ed, text);
+        });
+    });
     ui.horizontal_top(|ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(ROW_ICON, BUTTON_HEIGHT), Sense::hover());
         Icon::Notes.image(ICON, t.text_dim).paint_at(ui, Rect::from_center_size(rect.center(), vec2(ICON, ICON)));
-        Frame::new()
-            .fill(t.window)
-            .stroke(Stroke::new(1.0, t.card_border))
-            .corner_radius(CONTROL_RADIUS)
-            .inner_margin(8)
-            .show(ui, |ui| {
-                ui.add(
-                    egui::TextEdit::multiline(text)
-                        .frame(Frame::NONE)
-                        .hint_text(RichText::new("Notities toevoegen").color(t.text_dim))
-                        .font(FontId::proportional(FIELD_TEXT))
-                        .desired_width(width - 16.0)
-                        .desired_rows(4),
-                )
-            })
-            .inner
+        ui.vertical(|ui| {
+            ui.set_width(width);
+            crate::rich_edit::edit(ui, t, ed, text, "Notities", "Notities toevoegen", min_height)
+        })
+        .inner
     })
     .inner
 }

@@ -126,6 +126,7 @@ mod tests {
             company: "Studio ArtCraft".into(),
             notes: "Ontwerpt de schetsen;\nbelt liever.".into(),
             account_id: None,
+            notes_rich: None,
         };
         let text = export(&c);
         assert!(

@@ -283,7 +283,7 @@ mod tests {
         harness.get_by_label("Verzenden").click();
         harness.run();
         let c = harness.state().compose.as_ref().unwrap();
-        assert!(c.draft_id.is_none() && c.error.as_deref().is_some_and(|e| e.contains(missing)), "not sent in the clear");
+        assert!(harness.state().sending.is_empty() && c.error.as_deref().is_some_and(|e| e.contains(missing)), "not sent in the clear");
         assert!(c.as_stored().encrypt, "kept with the draft");
         harness.state_mut().compose = None;
         harness.run();

@@ -108,6 +108,7 @@ fn contact_of(node: Node<'_, '_>) -> Option<Contact> {
         company: text(node, "CompanyName").unwrap_or("").to_string(),
         notes: body_text(node),
         account_id: None,
+        notes_rich: None,
     }
     .validated()
     .ok()
@@ -129,6 +130,7 @@ fn task_of(node: Node<'_, '_>) -> Option<Task> {
         completed: text(node, "CompleteDate").and_then(parse_datetime),
         account_id: None,
         repeat: None,
+        notes_rich: None,
     }
     .validated()
     .ok()
@@ -693,6 +695,7 @@ mod tests {
             company: String::new(),
             notes: "n".into(),
             account_id: None,
+            notes_rich: None,
         };
         let xml = contact_fields(&c).create();
         assert_eq!(

@@ -2030,21 +2030,7 @@ fn form(
     ui.add_space(4.0);
     // The notes with Outlook's formatting bar over them, as in the message window.
     ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        helder::indent(ui);
-        ui.vertical(|ui| {
-            ui.set_width(wide);
-            crate::rich_edit::bar(ui, t, &mut editor.notes_editor, &mut editor.notes);
-        });
-    });
-    ui.horizontal_top(|ui| {
-        let (rect, _) = ui.allocate_exact_size(vec2(helder::ROW_ICON, helder::BUTTON_HEIGHT), Sense::hover());
-        Icon::Notes.image(helder::ICON, t.text_dim).paint_at(ui, Rect::from_center_size(rect.center(), vec2(helder::ICON, helder::ICON)));
-        ui.vertical(|ui| {
-            ui.set_width(wide);
-            crate::rich_edit::edit(ui, t, &mut editor.notes_editor, &mut editor.notes, "Notities", "Notities toevoegen", 140.0);
-        });
-    });
+    helder::notes_box(ui, t, &mut editor.notes_editor, &mut editor.notes, wide, 140.0);
     if let Some(e) = &editor.error {
         ui.add_space(4.0);
         ui.horizontal(|ui| {

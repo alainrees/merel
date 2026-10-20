@@ -60,8 +60,6 @@ pub struct Compose {
     /// The fields as the window opened with them (addresses, subject, signature, quote);
     /// unchanged means nothing was written.
     initial: String,
-    /// Set once Send is pressed; tracks the draft in the session's outbox.
-    pub draft_id: Option<u64>,
     pub error: Option<String>,
     /// The moment the message goes out, when it was put aside with "Later verzenden".
     pub send_at: Option<i64>,
@@ -211,7 +209,6 @@ impl Compose {
             encrypt: false,
             check: None,
             initial: String::new(),
-            draft_id: None,
             error: None,
         };
         let Some((m, text, me)) = original else { return c };
@@ -427,6 +424,18 @@ impl MailApp {
         self.compose = Some(c);
     }
 
+    /// Sends the open message the way Outlook does: the window closes at once and the message
+    /// goes out behind it. Until the server has it, it stays under Concepten, so quitting in
+    /// between loses nothing; a failure brings the window back.
+    fn send_in_background(&mut self, account: &str, draft: Draft) {
+        self.keep_draft();
+        let Some(mut c) = self.compose.take() else { return };
+        c.changed_at = None;
+        c.saved_at = None;
+        let outbox = self.engine.send(account, draft);
+        self.sending.push(Sending { outbox, window: Box::new(c) });
+    }
+
     /// Opens a draft that was put aside, to write on or send.
     pub fn open_draft(&mut self, id: &str) {
         if let Some(d) = self.engine.session.draft(id) {
@@ -479,27 +488,45 @@ impl MailApp {
     }
 }
 
+/// A message on its way after its window closed: its entry in the session's outbox and the
+/// window, to bring back when sending fails.
+pub struct Sending {
+    pub outbox: u64,
+    window: Box<Compose>,
+}
+
+/// Follows the messages on their way: one that went out says so and leaves Concepten, one
+/// that failed comes back in its window with the reason, as soon as no other message is open.
+pub fn follow_sending(app: &mut MailApp) {
+    let mut i = 0;
+    while i < app.sending.len() {
+        match app.engine.session.outbox.get(&app.sending[i].outbox).cloned() {
+            Some(SendState::Sent) => {
+                let done = app.sending.remove(i);
+                app.forget_draft(done.window.stored.as_deref());
+                app.notice = Some(crate::Notice::success(SENT));
+            }
+            Some(SendState::Failed(e)) if app.compose.is_none() => {
+                let mut c = app.sending.remove(i).window;
+                c.error = Some(e);
+                app.compose = Some(*c);
+                app.notice = Some(crate::Notice::error(NOT_SENT));
+            }
+            // Sending, or failed while another message is open: that one comes first.
+            _ => i += 1,
+        }
+    }
+}
+
+/// What the notice says once a message went out.
+pub const SENT: &str = "Bericht verzonden.";
+
+/// What the notice says when a message could not go out; the window says why.
+pub const NOT_SENT: &str = "Het bericht is niet verzonden. Het venster staat weer open, met de reden.";
+
 /// Draws the window when there is one. Returns after the window closes itself.
 pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(c) = app.compose.as_mut() else { return };
-    // Follow the draft through the outbox.
-    if let Some(id) = c.draft_id {
-        match app.engine.session.outbox.get(&id) {
-            Some(SendState::Sent) => {
-                let stored = c.stored.clone();
-                app.compose = None;
-                app.forget_draft(stored.as_deref());
-                app.notice = Some(crate::Notice::success("Bericht verzonden."));
-                return;
-            }
-            Some(SendState::Failed(e)) => {
-                c.error = Some(e.clone());
-                c.draft_id = None;
-            }
-            _ => {}
-        }
-    }
-    let sending = c.draft_id.is_some();
     let account =
         if c.account_id.is_empty() { app.engine.session.current_account().map(|a| a.id.clone()).unwrap_or_default() } else { c.account_id.clone() };
     let certificate = app.engine.certificate(&account);
@@ -556,12 +583,10 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     helder::item_window(ctx, t, "compose-window", title, vec2(900.0, 700.0), &mut open, |ui| {
         // Files dropped onto the window become attachments; files hovering over it get a hint.
         // The window's own input, as it may be a window of its own.
-        if !sending {
-            let dropped: Vec<PathBuf> = ui.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
-            c.add_files(dropped);
-        }
+        let dropped: Vec<PathBuf> = ui.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
+        c.add_files(dropped);
         let hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
-        ui.add_enabled_ui(!sending, |ui| {
+        ui.scope(|ui| {
                 // The Helder command bar: the blue send button with its "later" half, then quiet
                 // icon buttons, and on the right what puts the message away.
                 helder::quiet(ui, t, |ui| {
@@ -638,9 +663,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                             {
                                 put_aside = true;
                             }
-                            if sending {
-                                ui.label(RichText::new("Verzenden…").color(t.text_dim));
-                            } else if hovering {
+                            if hovering {
                                 ui.label(RichText::new("Laat los om toe te voegen").color(t.accent_text));
                             }
                         });
@@ -792,7 +815,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         app.forget_draft(stored.as_deref());
         return;
     }
-    if (put_aside || !open) && !sending {
+    if put_aside || !open {
         app.put_aside();
         return;
     }
@@ -870,7 +893,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         match c.draft() {
             Ok(draft) => {
                 c.error = None;
-                c.draft_id = Some(app.engine.send(&account, draft));
+                app.send_in_background(&account, draft);
             }
             Err(e) => c.error = Some(e),
         }
@@ -883,9 +906,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         c.seen = state;
         c.changed_at = Some(now);
     }
-    if let Some(at) = c.changed_at
-        && c.draft_id.is_none()
-    {
+    if let Some(at) = c.changed_at {
         let wait = AUTOSAVE_AFTER - (now - at);
         if wait > 0.0 {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
@@ -1258,6 +1279,47 @@ mod tests {
     }
 
     #[test]
+    fn verzenden_closes_the_window_at_once_and_a_failure_brings_it_back() {
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let start = |app: &mut MailApp, subject: &str| {
+            app.open_compose(Kind::New);
+            if let Some(c) = app.compose.as_mut() {
+                c.to = "sanne@example.org".into();
+                c.subject = subject.into();
+                c.body = "Hoi".into();
+            }
+            // As send_in_background does, with an outbox entry the test decides about.
+            app.keep_draft();
+            let window = Box::new(app.compose.take().expect("open"));
+            let outbox = 900 + app.sending.len() as u64;
+            app.engine.session.outbox.insert(outbox, SendState::Sending);
+            app.sending.push(Sending { outbox, window });
+            outbox
+        };
+        let first = start(&mut app, "Planning");
+        follow_sending(&mut app);
+        assert!(app.compose.is_none() && app.sending.len() == 1, "on its way, the window gone");
+        assert_eq!(app.engine.session.drafts.len(), 1, "kept under Concepten until the server has it");
+        app.engine.session.outbox.insert(first, SendState::Sent);
+        follow_sending(&mut app);
+        assert!(app.sending.is_empty() && app.engine.session.drafts.is_empty());
+        assert_eq!(app.notice.as_deref(), Some(SENT));
+
+        // A failure waits for the open window, then comes back with the reason.
+        let second = start(&mut app, "Offerte");
+        app.engine.session.outbox.insert(second, SendState::Failed("De server weigert het bericht.".into()));
+        app.open_compose(Kind::New);
+        follow_sending(&mut app);
+        assert_eq!(app.sending.len(), 1, "the open message comes first");
+        app.compose = None;
+        follow_sending(&mut app);
+        let c = app.compose.as_ref().expect("back");
+        assert_eq!((c.subject.as_str(), c.error.as_deref()), ("Offerte", Some("De server weigert het bericht.")));
+        assert_eq!(app.notice.as_deref(), Some(NOT_SENT));
+        assert_eq!(app.engine.session.drafts.len(), 1, "still under Concepten");
+    }
+
+    #[test]
     fn send_asks_first_about_a_missing_attachment_or_subject_and_sends_on_toch_verzenden() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
@@ -1272,7 +1334,7 @@ mod tests {
         h.get_by_label("Verzenden").click();
         h.run();
         let c = h.state().compose.as_ref().expect("the window stays");
-        assert_eq!(c.draft_id, None, "not sent yet");
+        assert!(h.state().sending.is_empty(), "not sent yet");
         assert_eq!(c.check.as_ref().map(|k| k.warnings.clone()), Some(vec![NO_ATTACHMENT, NO_SUBJECT]));
         h.get_by_label(&format!("⚠ {NO_ATTACHMENT}"));
         h.get_by_label(&format!("⚠ {NO_SUBJECT}"));
@@ -1420,6 +1482,7 @@ mod tests {
             company: String::new(),
             notes: String::new(),
             account_id: None,
+            notes_rich: None,
         });
         app.open_compose(Kind::New);
         let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);

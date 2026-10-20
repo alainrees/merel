@@ -75,7 +75,6 @@ impl Default for State {
 }
 
 /// The form's fields as text.
-#[derive(Default)]
 pub struct Editor {
     pub id: Option<String>,
     /// Where a new task goes: an account id, or empty for this computer.
@@ -88,7 +87,29 @@ pub struct Editor {
     pub repeat: Option<Frequency>,
     /// Every so many units; 0 counts as 1.
     pub interval: u32,
+    /// The formatting of the notes, with the bar over them as in the message window.
+    pub notes_editor: crate::rich_edit::Editor,
     pub error: Option<String>,
+}
+
+/// The notes editor's salt: a task's form shows one at a time.
+const NOTES: &str = "task-notes";
+
+impl Default for Editor {
+    fn default() -> Self {
+        Editor {
+            id: None,
+            account_id: String::new(),
+            title: String::new(),
+            due: String::new(),
+            priority: Priority::default(),
+            notes: String::new(),
+            repeat: None,
+            interval: 0,
+            notes_editor: crate::rich_edit::Editor::new(NOTES, "", None),
+            error: None,
+        }
+    }
 }
 
 /// The repeat choices of the form, with their names.
@@ -113,6 +134,7 @@ impl Editor {
             notes: t.notes.clone(),
             repeat: t.repeat.map(|r| r.frequency),
             interval: t.repeat.map(|r| r.interval).unwrap_or(1),
+            notes_editor: crate::rich_edit::Editor::new(NOTES, &t.notes, t.notes_rich.clone()),
             error: None,
         }
     }
@@ -142,7 +164,7 @@ impl Editor {
         if self.repeat.is_some() && (due.is_none() || !self.account_id.is_empty()) {
             return Err(REPEAT_NEEDS_DUE.into());
         }
-        let mut p = json!({ "title": self.title, "notes": self.notes, "due": due, "priority": priority, "repeat": self.repeat() });
+        let mut p = json!({ "title": self.title, "notes": self.notes, "due": due, "priority": priority, "repeat": self.repeat(), "notes_rich": self.notes_editor.stored(&self.notes) });
         if let Some(id) = &self.id {
             p["id"] = json!(id);
         }
@@ -456,7 +478,7 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         }
     }
     ui.add_space(4.0);
-    helder::notes_box(ui, t, &mut editor.notes, width);
+    helder::notes_box(ui, t, &mut editor.notes_editor, &mut editor.notes, width, 100.0);
     if let Some(e) = &editor.error {
         ui.add_space(6.0);
         ui.horizontal(|ui| {

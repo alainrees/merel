@@ -23,6 +23,10 @@ pub struct Contact {
     /// The account the contact lives in; `None` for one kept only on this computer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
+    /// The formatting over `notes`, kept on this computer; servers get the notes as text.
+    /// `None` for plain notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes_rich: Option<crate::rich::Rich>,
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -39,6 +43,7 @@ impl Contact {
         self.name = clean_text(self.name.trim());
         self.company = clean_text(self.company.trim());
         self.notes = self.notes.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).take(MAX_NOTES).collect();
+        self.notes_rich = crate::rich::fitted(self.notes_rich.take(), &self.notes);
         let mut emails = Vec::new();
         for e in &self.emails {
             let e = e.trim().to_ascii_lowercase();
@@ -92,6 +97,7 @@ mod tests {
             company: "Studio".into(),
             notes: "a\u{1}b".into(),
             account_id: None,
+            notes_rich: None,
         }
         .validated()
         .unwrap();

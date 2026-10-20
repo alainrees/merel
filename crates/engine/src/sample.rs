@@ -134,6 +134,7 @@ fn tasks() -> Vec<Task> {
             completed: done.then(|| due(0)).flatten(),
             account_id: None,
             repeat: None,
+            notes_rich: None,
         }
         .validated()
         .ok()
@@ -158,6 +159,7 @@ fn contacts() -> Vec<Contact> {
             company: company.into(),
             notes: String::new(),
             account_id: None,
+            notes_rich: None,
         }
         .validated()
         .ok()

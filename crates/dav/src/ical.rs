@@ -506,6 +506,7 @@ pub fn task_of(todo: &Component, id: String) -> Option<Task> {
         completed: todo.prop("COMPLETED").and_then(moment).map(|(ts, _)| ts),
         account_id: None,
         repeat: None,
+        notes_rich: None,
     }
     .validated()
     .ok()
@@ -554,6 +555,7 @@ pub fn contact_of(card: &Component, id: String) -> Option<Contact> {
         company: card.text("ORG").split(';').next().unwrap_or("").trim().to_string(),
         notes: card.text("NOTE"),
         account_id: None,
+        notes_rich: None,
     }
     .validated()
     .ok()

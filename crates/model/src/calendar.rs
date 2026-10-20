@@ -314,14 +314,7 @@ impl Appointment {
         self.title = clean_text(self.title.trim());
         self.location = clean_text(self.location.trim());
         self.notes = self.notes.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).take(MAX_NOTES).collect();
-        self.notes_rich = self
-            .notes_rich
-            .take()
-            .map(|mut r| {
-                r.fit(&self.notes);
-                r
-            })
-            .filter(|r| !r.is_plain());
+        self.notes_rich = crate::rich::fitted(self.notes_rich.take(), &self.notes);
         if self.title.is_empty() {
             return Err(AppointmentError::NoTitle);
         }

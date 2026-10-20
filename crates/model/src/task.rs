@@ -49,6 +49,10 @@ pub struct Task {
     /// for tasks kept on this computer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repeat: Option<Repeat>,
+    /// The formatting over `notes`, kept on this computer; servers get the notes as text.
+    /// `None` for plain notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes_rich: Option<crate::rich::Rich>,
 }
 
 fn one() -> u32 {
@@ -110,6 +114,7 @@ impl Task {
     pub fn validated(mut self) -> Result<Self, TaskError> {
         self.title = clean_text(self.title.trim());
         self.notes = self.notes.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).take(MAX_NOTES).collect();
+        self.notes_rich = crate::rich::fitted(self.notes_rich.take(), &self.notes);
         if self.title.is_empty() {
             return Err(TaskError::NoTitle);
         }
