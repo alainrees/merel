@@ -451,6 +451,19 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 const LABEL_WIDTH: f32 = 150.0;
 
 /// A form row: its label, then an underlined field.
+/// Under the name field: what the name is for, and why an address there is no good.
+fn name_hint(ui: &mut Ui, t: &Tokens, name: &str) {
+    let (text, color) = if name.contains('@') {
+        ("Vul je echte naam in, geen e-mailadres: een adres als naam laat je mail op nep lijken en Outlook zet er \"Niet-geverifieerd\" bij.", t.flag)
+    } else {
+        ("De naam die ontvangers bij je mail zien, bijvoorbeeld Alain Rees.", t.text_dim)
+    };
+    ui.horizontal(|ui| {
+        ui.add_space(LABEL_WIDTH + ui.spacing().item_spacing.x);
+        ui.label(RichText::new(text).size(12.0).color(color));
+    });
+}
+
 fn field(ui: &mut Ui, t: &Tokens, label: &str, value: &mut String, password: bool) {
     ui.horizontal(|ui| {
         caption(ui, t, label);
@@ -535,6 +548,7 @@ fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         ui.add_space(6.0);
     }
     field(ui, t, "Naam", &mut f.name, false);
+    name_hint(ui, t, &f.name);
     field(ui, t, "E-mailadres", &mut f.email, false);
     if !exchange {
         ui.horizontal(|ui| {

@@ -33,7 +33,14 @@ pub enum SmtpError {
 
 fn mailbox(a: &Address) -> Result<Mailbox, SmtpError> {
     let addr = a.email().parse::<lettre::Address>().map_err(|e| SmtpError::Build(e.to_string()))?;
-    Ok(Mailbox::new(a.name.clone(), addr))
+    Ok(Mailbox::new(display_name(a), addr))
+}
+
+/// The name shown with an address, left out when it is an address itself: a display name like
+/// `alain@voorbeeld.nl <alain@voorbeeld.nl>` is what spoofed mail looks like, Outlook marks it
+/// "Niet-geverifieerd", and with the `@` it also went out base64-encoded.
+fn display_name(a: &Address) -> Option<String> {
+    a.name.as_deref().map(str::trim).filter(|n| !n.is_empty() && !n.contains('@')).map(str::to_string)
 }
 
 /// A Message-ID under the sender's own domain: lettre's default would put the computer's
@@ -165,6 +172,17 @@ pub fn send_raw(server: &Server, username: &str, credential: &Credential, messag
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_name_that_is_an_address_is_left_out() {
+        let named = |name: &str| Address::new(Some(name), "alain@voorbeeld.nl").unwrap();
+        assert_eq!(display_name(&named("alain@voorbeeld.nl")), None);
+        assert_eq!(display_name(&named("Alain <alain@voorbeeld.nl>")), None);
+        assert_eq!(display_name(&named("Alain Rees")).as_deref(), Some("Alain Rees"));
+        let draft = Draft { to: vec![named("Alain Rees")], subject: "test".into(), body: "hoi".into(), ..Draft::default() };
+        let raw = String::from_utf8(build(&named("alain@voorbeeld.nl"), &draft).unwrap().formatted()).unwrap();
+        assert!(raw.contains("From: alain@voorbeeld.nl\r\n"), "{raw}");
+    }
 
     #[test]
     fn builds_a_plain_text_message_with_threading_headers() {
