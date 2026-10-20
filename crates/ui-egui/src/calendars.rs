@@ -238,7 +238,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         };
         match result {
             Ok(()) => close = true,
-            Err(e) => app.notice = Some(describe(&e)),
+            Err(e) => app.notice = Some(crate::Notice::warning(describe(&e))),
         }
     }
     if !close {

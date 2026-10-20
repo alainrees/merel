@@ -465,13 +465,13 @@ impl MailApp {
     pub fn drop_appointment(&mut self, id: &str, day: NaiveDate, time: Option<NaiveTime>) {
         let Some(a) = self.engine.session.appointment(id) else { return };
         let Some(start) = dropped_start(a, day, time) else {
-            self.notice = Some("Die tijd bestaat niet in deze tijdzone.".into());
+            self.notice = Some(crate::Notice::warning("Die tijd bestaat niet in deze tijdzone."));
             return;
         };
         if start == a.start {
             return;
         }
-        self.notice = self.engine.run("appointment.move", &json!({ "id": id, "start": start })).err().map(|e| describe(&e));
+        self.notice = self.engine.run("appointment.move", &json!({ "id": id, "start": start })).err().map(|e| notice(&e));
     }
 
     /// A task was dropped on `day` (at `time` in the hour grid): the appointment window opens
@@ -493,7 +493,7 @@ impl MailApp {
         if r.end == a.end {
             return;
         }
-        self.notice = self.engine.run("appointment.resize", &json!({ "id": id, "end": r.end })).err().map(|e| describe(&e));
+        self.notice = self.engine.run("appointment.resize", &json!({ "id": id, "end": r.end })).err().map(|e| notice(&e));
     }
 
     /// Selects an appointment and opens it in the window; `start` is the occurrence that was
@@ -2014,6 +2014,14 @@ pub const CLEAR_CATEGORIES: &str = "Alle categorieën wissen";
 /// The label of the button that takes `name` off the appointment in its window.
 pub fn remove_category_label(name: &str) -> String {
     format!("Categorie {name} weghalen")
+}
+
+/// A failed change as a notice: a store that cannot write is an error, the rest the person can mend.
+fn notice(e: &CommandError) -> crate::Notice {
+    match e {
+        CommandError::Store(_) => crate::Notice::error(describe(e)),
+        _ => crate::Notice::warning(describe(e)),
+    }
 }
 
 fn describe(e: &CommandError) -> String {

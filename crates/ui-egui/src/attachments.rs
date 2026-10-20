@@ -1,6 +1,6 @@
 //! Saving an attachment to the Downloads folder, and the preview of a picture. Nothing is
 //! opened or run: the file is written under a name cleaned of paths and control characters,
-//! never over an existing one, and the status bar says where it went. A picture attachment
+//! never over an existing one, and a notice says where it went. A picture attachment
 //! gets a thumbnail under the message and a window with the full picture, decoded by the same
 //! image loader the HTML view uses; other kinds are only saved.
 
@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use mailcraft_mime::Attachment;
 
+use crate::notice::{Notice, file_name, folder_name};
 use crate::{MailApp, Tokens};
 
 /// Longest file name written, in characters.
@@ -170,15 +171,22 @@ pub fn preview_label(name: &str) -> String {
     format!("Voorbeeld van {name}")
 }
 
+/// The notice for a file that went into a folder: its name and the folder's, not the whole
+/// path, with a button that shows the file.
+pub fn saved(what: &str, path: &Path) -> Notice {
+    let dir = path.parent().map(folder_name).unwrap_or_default();
+    Notice::success(format!("{what} opgeslagen in {dir}: {}", file_name(path))).revealing(path)
+}
+
 impl MailApp {
-    /// Saves the attachment under Downloads and says in the status bar where it went.
+    /// Saves the attachment under Downloads and says where it went.
     pub fn save_attachment(&mut self, a: &Attachment) {
         self.notice = Some(match downloads_dir() {
             Some(dir) => match save_to(&dir, &a.name, &a.bytes) {
-                Ok(path) => format!("Bijlage opgeslagen als {}", path.display()),
-                Err(e) => format!("Bijlage niet opgeslagen: {e}"),
+                Ok(path) => saved("Bijlage", &path),
+                Err(e) => Notice::error(format!("Bijlage niet opgeslagen: {e}")),
             },
-            None => "Bijlage niet opgeslagen: geen map Downloads gevonden.".into(),
+            None => Notice::error("Bijlage niet opgeslagen: geen map Downloads gevonden."),
         });
     }
 
@@ -186,10 +194,13 @@ impl MailApp {
     pub fn save_attachments(&mut self, list: &[Attachment]) {
         self.notice = Some(match downloads_dir() {
             Some(dir) => match save_all(&dir, list) {
-                (n, None) => format!("{n} bijlagen opgeslagen in {}", dir.display()),
-                (n, Some(problem)) => format!("{n} van {} bijlagen opgeslagen in {}; {problem}", list.len(), dir.display()),
+                (n, None) => Notice::success(format!("{n} bijlagen opgeslagen in {}.", folder_name(&dir))).revealing(&dir),
+                (0, Some(problem)) => Notice::error(format!("Bijlagen niet opgeslagen: {problem}")),
+                (n, Some(problem)) => {
+                    Notice::warning(format!("{n} van {} bijlagen opgeslagen in {}; {problem}", list.len(), folder_name(&dir))).revealing(&dir)
+                }
             },
-            None => "Bijlagen niet opgeslagen: geen map Downloads gevonden.".into(),
+            None => Notice::error("Bijlagen niet opgeslagen: geen map Downloads gevonden."),
         });
     }
 }

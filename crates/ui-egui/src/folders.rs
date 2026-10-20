@@ -68,7 +68,7 @@ impl MailApp {
     pub fn rename_folder(&mut self, id: String) {
         let Some(f) = self.engine.session.folder(&id).cloned() else { return };
         if f.kind != FolderKind::Other {
-            self.notice = Some(SPECIAL.to_string());
+            self.notice = Some(crate::Notice::info(SPECIAL));
             return;
         }
         self.folder_edit = Some(FolderEdit::new(Action::Rename { id }, f.name));
@@ -78,7 +78,7 @@ impl MailApp {
     pub fn delete_folder(&mut self, id: String) {
         let Some(f) = self.engine.session.folder(&id).cloned() else { return };
         if f.kind != FolderKind::Other {
-            self.notice = Some(SPECIAL.to_string());
+            self.notice = Some(crate::Notice::info(SPECIAL));
             return;
         }
         self.folder_edit = Some(FolderEdit::new(Action::Delete { id }, f.name));

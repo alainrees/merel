@@ -106,11 +106,12 @@ pub enum Icon {
     Printer,
     ArrowLeft,
     ArrowRight,
+    TriangleAlert,
 }
 
 impl Icon {
     /// Every icon, for the test that each one loads.
-    pub const ALL: [Icon; 77] = [
+    pub const ALL: [Icon; 78] = [
         Icon::Archive,
         Icon::Bell,
         Icon::Calendar,
@@ -188,6 +189,7 @@ impl Icon {
         Icon::Printer,
         Icon::ArrowLeft,
         Icon::ArrowRight,
+        Icon::TriangleAlert,
     ];
 
     /// The image's uri and its SVG source.
@@ -275,6 +277,7 @@ impl Icon {
             Icon::Printer => svg!("printer"),
             Icon::ArrowLeft => svg!("arrow-left"),
             Icon::ArrowRight => svg!("arrow-right"),
+            Icon::TriangleAlert => svg!("triangle-alert"),
         }
     }
 
