@@ -6,8 +6,8 @@ use mailcraft_model::Importance;
 
 use crate::Tokens;
 
-pub const HIGH_STRIP: &str = "! Dit bericht is met hoge urgentie verzonden.";
-pub const LOW_STRIP: &str = "↓ Dit bericht is met lage urgentie verzonden.";
+pub const HIGH_STRIP: &str = "Dit bericht is met hoge urgentie verzonden.";
+pub const LOW_STRIP: &str = "Dit bericht is met lage urgentie verzonden.";
 
 /// The mark the list shows before the date: a red "!" for high, a blue arrow for low.
 pub fn mark(importance: Importance, t: &Tokens) -> Option<(&'static str, Color32)> {
@@ -25,8 +25,13 @@ pub fn strip(ui: &mut Ui, t: &Tokens, importance: Importance) {
         Importance::Low => (LOW_STRIP, t.checked),
         Importance::Normal => return,
     };
-    egui::Frame::new().fill(fill).corner_radius(4).inner_margin(8).show(ui, |ui| {
-        ui.label(RichText::new(text).color(t.text));
+    egui::Frame::new().fill(fill).corner_radius(crate::helder::CONTROL_RADIUS).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            let color = if importance == Importance::High { t.flag } else { t.accent_text };
+            ui.add(crate::helder::Icon::CircleAlert.image(16.0, color));
+            ui.label(RichText::new(text).color(t.text));
+        });
     });
     ui.add_space(8.0);
 }
