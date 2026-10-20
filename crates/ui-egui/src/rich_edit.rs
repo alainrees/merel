@@ -442,8 +442,9 @@ fn layout(ui: &Ui, t: &Tokens, text: &str, rich: &Rich, wrap: f32) -> Arc<Galley
     Arc::new(merged)
 }
 
-/// The text field. `label` is its name for a screen reader; `min_height` the least it takes.
-pub fn edit(ui: &mut Ui, t: &Tokens, ed: &mut Editor, text: &mut String, label: &str, min_height: f32) -> Response {
+/// The text field. `label` is its name for a screen reader, `hint` the grey text it shows while
+/// empty; `min_height` the least it takes.
+pub fn edit(ui: &mut Ui, t: &Tokens, ed: &mut Editor, text: &mut String, label: &str, hint: &str, min_height: f32) -> Response {
     ed.catch_up(text);
     let ctx = ui.ctx().clone();
     // The editor's own keys, before the field sees them: its undo would not know the formatting.
@@ -491,6 +492,7 @@ pub fn edit(ui: &mut Ui, t: &Tokens, ed: &mut Editor, text: &mut String, label: 
         .margin(egui::Margin::symmetric(4, 8))
         .desired_width(f32::INFINITY)
         .min_size(vec2(0.0, min_height))
+        .hint_text(RichText::new(hint).size(helder::FIELD_TEXT).color(t.text_dim))
         .layouter(&mut layouter)
         .show(ui);
     if *text != before {
@@ -731,7 +733,7 @@ mod tests {
                 ui.ctx().set_fonts(crate::fonts::definitions());
                 let t = Tokens::light();
                 bar(ui, &t, &mut s.ed, &mut s.text);
-                edit(ui, &t, &mut s.ed, &mut s.text, "Bericht", 200.0);
+                edit(ui, &t, &mut s.ed, &mut s.text, "Bericht", "", 200.0);
             },
             state,
         )

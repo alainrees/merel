@@ -156,7 +156,7 @@ pub enum Job {
     SaveItem {
         account_id: String,
         local_id: String,
-        item: Item,
+        item: Box<Item>,
     },
     DeleteItem {
         account_id: String,
@@ -1657,6 +1657,7 @@ mod tests {
                 all_day: false,
                 location: String::new(),
                 notes: String::new(),
+                notes_rich: None,
                 recurrence: None,
                 reminder: None,
                 private: false,

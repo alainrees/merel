@@ -2671,6 +2671,33 @@ mod tests {
     }
 
     #[test]
+    fn the_appointment_notes_have_the_formatting_bar_and_keep_their_formatting() {
+        let mut h = harness();
+        let mut e = calendar::Editor::new_at(chrono::Local::now().naive_local());
+        e.title = "Werkoverleg".into();
+        e.notes = "Agenda\nbegroting".into();
+        let id = e.notes_editor.id();
+        h.state_mut().calendar.editor = Some(e);
+        h.run();
+        h.get_by_label("Notities").focus();
+        h.run();
+        // "Agenda" selected, as dragging over it would.
+        let mut state = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(6))));
+        state.store(&h.ctx, id);
+        h.run();
+        h.get_by_label(rich_edit::BOLD).click();
+        h.run();
+        h.get_by_label("Opslaan").click();
+        h.run();
+        let a = h.state().engine.session.appointments.iter().find(|a| a.title == "Werkoverleg").cloned().expect("saved");
+        let rich = a.notes_rich.clone().expect("formatted");
+        assert!(rich.style_of(0).bold && !rich.style_of(7).bold, "{:?}", rich.runs);
+        let back = calendar::Editor::from_appointment(&a, None);
+        assert!(back.notes_editor.rich.style_of(0).bold, "the window shows it again");
+    }
+
+    #[test]
     fn an_appointment_with_attendees_offers_verzenden_and_needs_a_real_account() {
         let mut h = harness();
         let mut e = calendar::Editor::new_at(chrono::Local::now().naive_local());
