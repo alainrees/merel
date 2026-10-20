@@ -36,8 +36,9 @@ zeroize = { version = "1", features = ["derive"] }
 directories = "6"
 
 # mail
-# IMAP over rustls; certificates checked by the platform verifier (system trust store).
-imap = { version = "3.0.0-alpha.15", default-features = false, features = ["rustls-tls"] }
+# IMAP protocol only; Mailcraft opens the TCP and TLS connection itself (rustls with the
+# platform verifier, timeouts on every step) and hands it over.
+imap = { version = "3.0.0-alpha.15", default-features = false }
 mail-parser = "0.11"
 imap-proto = "0.16"
 html2text = "0.17"
@@ -52,6 +53,8 @@ rustls-native-certs = "0.8"
 pgp = { version = "0.21", default-features = false }
 rand = "0.8"
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
+# The computer's own certificate check (Keychain on macOS), for IMAP like ureq and lettre do.
+rustls-platform-verifier = "0.7"
 # The offline cache is sealed with ChaCha20-Poly1305 from the same crypto library rustls uses.
 aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys"] }
 # S/MIME: PKCS#12 import, and the CMS structures of signed mail; the signing itself is aws-lc-rs.

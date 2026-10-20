@@ -140,7 +140,7 @@ puts every member's address in the field. Groups live in `contact_groups.json` o
 brings its own calendar, contacts and tasks along (Google Calendar, People and Tasks for Gmail), and so
 does an IMAP account with a CalDAV/CardDAV server next to it (Fastmail, iCloud, Nextcloud and the like): they
 appear next to the local ones, changes go straight to the server, and a new item asks whether
-it belongs on this computer or in the account. Everything an account showed is kept in an
+it belongs on this computer or in the account. When that calendar server cannot be reached, the mail still connects and the account's card says what went wrong with the calendar. A mail server that does not answer, or a port with the wrong choice between TLS and STARTTLS, gives a plain error within a minute instead of "Verbinden…" without end. Everything an account showed is kept in an
 encrypted offline cache, so the window fills at once on the next start and mail you opened
 before can be read without a connection, and changes you make without one (flags, moves,
 appointments, contacts, tasks) wait and reach the server when it is back, even after a restart.

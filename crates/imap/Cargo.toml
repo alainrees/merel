@@ -10,6 +10,8 @@ mailcraft-mime = { workspace = true }
 mailcraft-mailbox = { workspace = true }
 imap = { workspace = true }
 imap-proto = { workspace = true }
+rustls = { workspace = true }
+rustls-platform-verifier = { workspace = true }
 mailcraft-secrets = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }

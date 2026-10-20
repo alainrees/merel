@@ -118,6 +118,11 @@ pub trait Mailbox: Send {
     fn items(&mut self) -> Option<&mut dyn ItemStore> {
         None
     }
+    /// Why the appointments, contacts and tasks the account asked for are not there (a
+    /// calendar server next to the mail that could not be reached); the mail works regardless.
+    fn items_error(&self) -> Option<&MailboxError> {
+        None
+    }
     fn logout(self: Box<Self>);
 }
 
