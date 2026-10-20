@@ -1214,7 +1214,9 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let title = if app.calendar.is_searching() { "Zoekresultaten".to_string() } else { period_title(app.calendar.view, app.calendar.focus) };
             ui.label(RichText::new(title).size(helder::TITLE_TEXT).strong().color(t.text));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if app.calendar.is_searching() && ui.small_button("✕").on_hover_text("Zoekopdracht wissen").clicked() {
+                if app.calendar.is_searching()
+                    && crate::helder::quiet(ui, t, |ui| crate::helder::icon_button(ui, t, crate::helder::Icon::X, crate::SEARCH_CLEAR)).clicked()
+                {
                     app.calendar.query.clear();
                 }
                 let width = ui.available_width().clamp(80.0, 280.0);

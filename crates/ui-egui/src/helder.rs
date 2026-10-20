@@ -92,11 +92,23 @@ pub enum Icon {
     UsersRound,
     X,
     Zap,
+    PanelRight,
+    PanelBottom,
+    EyeOff,
+    Rows,
+    MessagesSquare,
+    ListTree,
+    Hash,
+    Monitor,
+    Sun,
+    Moon,
+    ArrowDownUp,
+    Printer,
 }
 
 impl Icon {
     /// Every icon, for the test that each one loads.
-    pub const ALL: [Icon; 63] = [
+    pub const ALL: [Icon; 75] = [
         Icon::Archive,
         Icon::Bell,
         Icon::Calendar,
@@ -160,6 +172,18 @@ impl Icon {
         Icon::UsersRound,
         Icon::X,
         Icon::Zap,
+        Icon::PanelRight,
+        Icon::PanelBottom,
+        Icon::EyeOff,
+        Icon::Rows,
+        Icon::MessagesSquare,
+        Icon::ListTree,
+        Icon::Hash,
+        Icon::Monitor,
+        Icon::Sun,
+        Icon::Moon,
+        Icon::ArrowDownUp,
+        Icon::Printer,
     ];
 
     /// The image's uri and its SVG source.
@@ -233,6 +257,18 @@ impl Icon {
             Icon::UsersRound => svg!("users-round"),
             Icon::X => svg!("x"),
             Icon::Zap => svg!("zap"),
+            Icon::PanelRight => svg!("panel-right"),
+            Icon::PanelBottom => svg!("panel-bottom"),
+            Icon::EyeOff => svg!("eye-off"),
+            Icon::Rows => svg!("rows-3"),
+            Icon::MessagesSquare => svg!("messages-square"),
+            Icon::ListTree => svg!("list-tree"),
+            Icon::Hash => svg!("hash"),
+            Icon::Monitor => svg!("monitor"),
+            Icon::Sun => svg!("sun"),
+            Icon::Moon => svg!("moon"),
+            Icon::ArrowDownUp => svg!("arrow-down-up"),
+            Icon::Printer => svg!("printer"),
         }
     }
 
@@ -276,6 +312,61 @@ pub fn tool_button(ui: &mut Ui, t: &Tokens, icon: Icon, text: &str) -> Response 
             .corner_radius(CONTROL_RADIUS)
             .min_size(vec2(0.0, BUTTON_HEIGHT)),
     )
+}
+
+/// Runs `add` with buttons drawn as the Helder style's secondary buttons, for forms and
+/// settings: a white face, a thin border and rounded corners, a soft fill under the pointer.
+pub fn secondary<R>(ui: &mut Ui, t: &Tokens, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope(|ui| {
+        let v = ui.visuals_mut();
+        for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
+            w.corner_radius = CornerRadius::same(CONTROL_RADIUS);
+            w.expansion = 0.0;
+            w.bg_stroke = Stroke::new(1.0, t.control_border);
+        }
+        v.widgets.inactive.weak_bg_fill = t.card;
+        v.widgets.hovered.weak_bg_fill = t.hover;
+        v.widgets.active.weak_bg_fill = t.checked;
+        v.widgets.open.weak_bg_fill = t.hover;
+        ui.spacing_mut().button_padding = vec2(12.0, 6.0);
+        ui.spacing_mut().interact_size.y = 32.0;
+        add(ui)
+    })
+    .inner
+}
+
+/// A row of a side menu: an icon and a label, lit while `on`.
+pub fn nav_item(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str, on: bool) -> Response {
+    let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), BUTTON_HEIGHT), Sense::click());
+    r.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, on, label));
+    let color = if on { t.accent_text } else { t.text };
+    let fill = if on {
+        Some(t.checked)
+    } else if r.hovered() {
+        Some(t.hover)
+    } else {
+        None
+    };
+    if let Some(fill) = fill {
+        ui.painter().rect_filled(rect, CornerRadius::same(CONTROL_RADIUS), fill);
+    }
+    let left = rect.left() + 12.0;
+    icon.image(ICON, color).paint_at(ui, Rect::from_min_size(pos2(left, rect.center().y - ICON / 2.0), vec2(ICON, ICON)));
+    ui.painter().text(pos2(left + ICON + 10.0, rect.center().y), egui::Align2::LEFT_CENTER, label, FontId::proportional(14.0), color);
+    r
+}
+
+/// A quiet square button with only an icon; `label` is its tooltip and its name for a screen
+/// reader.
+pub fn icon_button(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str) -> Response {
+    let r = ui.add(
+        egui::Button::image(icon.image(ICON, t.text))
+            .frame_when_inactive(false)
+            .corner_radius(CONTROL_RADIUS)
+            .min_size(vec2(BUTTON_HEIGHT, BUTTON_HEIGHT)),
+    );
+    r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label));
+    r.on_hover_text(label)
 }
 
 /// A quiet button that stays lit while `on`, such as "Privé".
@@ -343,7 +434,7 @@ pub fn card_frame(t: &Tokens) -> Frame {
 /// Whether a ribbon button shows only its icon; its name is then a tooltip and stays its label
 /// for a screen reader. These are the actions everyone knows by their icon.
 pub fn ribbon_icon_only(label: &str) -> bool {
-    matches!(label, "Verwijderen" | "Archiveren" | "Ongewenst" | "Gelezen" | "Ongelezen" | "Vlag" | "Beheren…")
+    matches!(label, "Verwijderen" | "Archiveren" | "Ongewenst" | "Gelezen" | "Ongelezen" | "Vlag" | "Beheren…" | "Systeem" | "Licht" | "Donker")
 }
 
 /// Whether a ribbon button is its ribbon's blue main button: making something new.
@@ -382,6 +473,17 @@ pub fn ribbon_icon(label: &str, glyph: &str) -> Option<Icon> {
         "Nieuwe taak" => Icon::CircleCheck,
         "Nieuwe map" => Icon::FolderPlus,
         "Map leegmaken" => Icon::Eraser,
+        "Rechts" => Icon::PanelRight,
+        "Onder" => Icon::PanelBottom,
+        "Uit" => Icon::EyeOff,
+        "Compact" => Icon::Rows,
+        "Gesprekken" => Icon::MessagesSquare,
+        "Groepen" => Icon::ListTree,
+        "Weeknummers" => Icon::Hash,
+        "Werkuren" => Icon::Clock,
+        "Systeem" => Icon::Monitor,
+        "Licht" => Icon::Sun,
+        "Donker" => Icon::Moon,
         "Opruimen" => Icon::Sparkles,
         _ => match glyph {
             "🗑" => Icon::Trash,

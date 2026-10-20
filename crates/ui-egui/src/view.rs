@@ -9,6 +9,7 @@ use mailcraft_engine::view::Sort;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::helder::{self, Icon};
 use crate::{MailApp, Module, Tokens};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,6 +39,14 @@ impl ThemeChoice {
             ThemeChoice::System => "Systeem",
             ThemeChoice::Light => "Licht",
             ThemeChoice::Dark => "Donker",
+        }
+    }
+
+    fn hint(self) -> &'static str {
+        match self {
+            ThemeChoice::System => "Licht of donker zoals de computer staat ingesteld",
+            ThemeChoice::Light => "Licht thema",
+            ThemeChoice::Dark => "Donker thema",
         }
     }
 
@@ -76,7 +85,9 @@ impl MarkRead {
 }
 
 /// The menu in the Leesvenster group that holds the [`MarkRead`] choice.
-pub const MARK_READ_MENU: &str = "◉ ▾";
+pub const MARK_READ_MENU: &str = "Gelezen markeren";
+/// The Categorie menu's choice that shows every message.
+pub const ALL_CATEGORIES: &str = "Alle categorieën";
 
 /// What the person chose on the "Beeld" tab.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,9 +125,8 @@ pub struct ViewPrefs {
 
 /// How many recent searches the menu next to the search box keeps.
 pub const RECENT_SEARCHES: usize = 10;
-/// The menu's button and its hover text.
-pub const RECENT_MENU: &str = "🕒";
-pub const RECENT_HINT: &str = "Recente zoekopdrachten";
+/// The menu's button, which a screen reader and the hover text name.
+pub const RECENT_MENU: &str = "Recente zoekopdrachten";
 pub const RECENT_CLEAR: &str = "Lijst wissen";
 
 impl Default for ViewPrefs {
@@ -229,113 +239,133 @@ impl MailApp {
 pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     let mut changed = false;
     if app.module == Module::Mail {
-        // The list's filters are chips over the list itself; the category stays here.
+        // The list's filters are chips over the list itself; the category stays here, as a menu
+        // like "Categoriseren" on the Start tab.
         group(ui, t, "Categorie", |ui| {
             let current = app.engine.session.category_filter.clone();
             let names: Vec<String> = app.engine.session.categories.iter().map(|c| c.name.clone()).collect();
             let mut pick: Option<Option<String>> = None;
-            egui::ComboBox::from_id_salt("view-category").selected_text(current.clone().unwrap_or_else(|| "Alle".to_string())).width(100.0).show_ui(
-                ui,
-                |ui| {
-                    if ui.selectable_label(current.is_none(), "Alle").clicked() {
-                        pick = Some(None);
+            let shown = current.clone().unwrap_or_else(|| ALL_CATEGORIES.to_string());
+            helder::menu_button(ui, t, Some(Icon::Tag), shown, |ui| {
+                ui.set_min_width(180.0);
+                if ui.selectable_label(current.is_none(), ALL_CATEGORIES).clicked() {
+                    pick = Some(None);
+                    ui.close();
+                }
+                for n in names {
+                    if ui.selectable_label(current.as_deref() == Some(n.as_str()), &n).clicked() {
+                        pick = Some(Some(n));
+                        ui.close();
                     }
-                    for n in names {
-                        if ui.selectable_label(current.as_deref() == Some(n.as_str()), &n).clicked() {
-                            pick = Some(Some(n));
-                        }
-                    }
-                },
-            );
+                }
+            })
+            .on_hover_text("Alleen berichten met deze categorie tonen");
             if let Some(name) = pick {
                 app.run("view.category", json!({ "name": name }));
             }
         });
-        ui.separator();
         group(ui, t, "Sorteren", |ui| {
             let mut sort = app.view.sort;
-            egui::ComboBox::from_id_salt("view-sort").selected_text(sort.dutch_name()).width(92.0).show_ui(ui, |ui| {
+            helder::menu_button(ui, t, Some(Icon::ArrowDownUp), sort.dutch_name(), |ui| {
+                ui.set_min_width(160.0);
                 for s in Sort::ALL {
-                    ui.selectable_value(&mut sort, s, s.dutch_name());
+                    if ui.selectable_value(&mut sort, s, s.dutch_name()).clicked() {
+                        ui.close();
+                    }
                 }
-            });
+            })
+            .on_hover_text("Volgorde van de berichtenlijst");
             if sort != app.view.sort {
                 app.view.sort = sort;
                 app.run("view.sort", json!({ "sort": sort }));
                 changed = true;
             }
         });
-        ui.separator();
+        helder::bar_separator(ui, t);
         group(ui, t, "Leesvenster", |ui| {
-            for (pane, name) in [(ReadingPane::Right, "Rechts"), (ReadingPane::Bottom, "Onder"), (ReadingPane::Off, "Uit")] {
-                let hint =
-                    if pane == ReadingPane::Off { "Geen leesvenster; Enter of een dubbelklik opent het bericht in een eigen venster" } else { "" };
-                if ui.selectable_label(app.view.reading_pane == pane, name).on_hover_text(hint).clicked() {
+            for (pane, name, hint) in [
+                (ReadingPane::Right, "Rechts", "Het leesvenster rechts van de berichtenlijst"),
+                (ReadingPane::Bottom, "Onder", "Het leesvenster onder de berichtenlijst"),
+                (ReadingPane::Off, "Uit", "Geen leesvenster; Enter of een dubbelklik opent het bericht in een eigen venster"),
+            ] {
+                if crate::ribbon_toggle_hint(ui, t, name, app.view.reading_pane == pane, hint) {
                     app.view.reading_pane = pane;
                     changed = true;
                 }
             }
             // When an opened message counts as read, as Outlook's reading-pane options.
             let mut choice = app.view.mark_read;
-            ui.menu_button(MARK_READ_MENU, |ui| {
-                for m in MarkRead::ALL {
-                    if ui.selectable_label(choice == m, m.dutch_name()).clicked() {
-                        choice = m;
-                        ui.close();
+            let button = egui::Button::image(Icon::MailCheck.image(helder::ICON, t.accent_text))
+                .right_text(Icon::ChevronDown.image(14.0, t.text_dim))
+                .frame_when_inactive(false)
+                .corner_radius(helder::CONTROL_RADIUS)
+                .min_size(egui::vec2(0.0, helder::BUTTON_HEIGHT));
+            let r = egui::containers::menu::MenuButton::from_button(button)
+                .ui(ui, |ui| {
+                    ui.label(egui::RichText::new("Als gelezen markeren").size(12.0).color(t.text_dim));
+                    for m in MarkRead::ALL {
+                        if ui.selectable_label(choice == m, m.dutch_name()).clicked() {
+                            choice = m;
+                            ui.close();
+                        }
                     }
-                }
-            })
-            .response
-            .on_hover_text(format!("Gelezen markeren: wanneer een geopend bericht als gelezen telt. Nu: {}.", choice.dutch_name().to_lowercase()));
+                })
+                .0;
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, MARK_READ_MENU));
+            r.on_hover_text(format!("{MARK_READ_MENU}: wanneer een geopend bericht als gelezen telt. Nu: {}.", choice.dutch_name().to_lowercase()));
             if choice != app.view.mark_read {
                 app.view.mark_read = choice;
                 changed = true;
             }
         });
-        ui.separator();
+        helder::bar_separator(ui, t);
         group(ui, t, "Lijst", |ui| {
-            if ui.checkbox(&mut app.view.compact, "Compact").on_hover_text("Rijen zonder voorbeeldregel, zodat er meer berichten passen").changed() {
-                changed = true;
-            }
-            if ui
-                .checkbox(&mut app.view.conversations, "Gesprekken")
-                .on_hover_text("Berichten over hetzelfde onderwerp als één gesprek achter het nieuwste bericht; het pijltje ervoor toont de rest.")
-                .changed()
-            {
-                changed = true;
-            }
-            if ui
-                .checkbox(&mut app.view.groups, "Groepen")
-                .on_hover_text("Kopjes Vandaag, Gisteren, Deze week, Vorige week, Deze maand… boven de berichten, zoals in Outlook; alleen bij sorteren op datum.")
-                .changed()
-            {
-                changed = true;
+            for (on, label, hint) in [
+                (&mut app.view.compact, "Compact", "Rijen zonder voorbeeldregel, zodat er meer berichten passen"),
+                (
+                    &mut app.view.conversations,
+                    "Gesprekken",
+                    "Berichten over hetzelfde onderwerp als één gesprek achter het nieuwste bericht; het pijltje ervoor toont de rest.",
+                ),
+                (
+                    &mut app.view.groups,
+                    "Groepen",
+                    "Kopjes Vandaag, Gisteren, Deze week, Vorige week, Deze maand… boven de berichten, zoals in Outlook; alleen bij sorteren op datum.",
+                ),
+            ] {
+                if switch(ui, t, on, label, hint) {
+                    changed = true;
+                }
             }
         });
-        ui.separator();
+        helder::bar_separator(ui, t);
     }
     if app.module == Module::Calendar {
         group(ui, t, "Agenda", |ui| {
-            if ui
-                .checkbox(&mut app.view.week_numbers, "Weeknummers")
-                .on_hover_text("Het weeknummer links van elke week in de maand- en weekweergave, zoals in Outlook.")
-                .changed()
-            {
+            if switch(
+                ui,
+                t,
+                &mut app.view.week_numbers,
+                "Weeknummers",
+                "Het weeknummer links van elke week in de maand- en weekweergave, zoals in Outlook.",
+            ) {
                 changed = true;
             }
-            if ui
-                .checkbox(&mut app.view.work_hours, crate::calendar::WORK_HOURS)
-                .on_hover_text("De uren buiten 8:00-17:00 en het weekend grijs in de dag- en weekweergave, zoals in Outlook.")
-                .changed()
-            {
+            if switch(
+                ui,
+                t,
+                &mut app.view.work_hours,
+                crate::calendar::WORK_HOURS,
+                "De uren buiten 8:00-17:00 en het weekend grijs in de dag- en weekweergave, zoals in Outlook.",
+            ) {
                 changed = true;
             }
         });
-        ui.separator();
+        helder::bar_separator(ui, t);
     }
     group(ui, t, "Thema", |ui| {
         for choice in ThemeChoice::ALL {
-            if ui.selectable_label(app.view.theme == choice, choice.dutch_name()).clicked() {
+            if crate::ribbon_toggle_hint(ui, t, choice.dutch_name(), app.view.theme == choice, choice.hint()) {
                 app.view.theme = choice;
                 changed = true;
             }
@@ -345,6 +375,16 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
         let ctx = ui.ctx().clone();
         app.save_view(&ctx);
     }
+}
+
+/// An on/off choice on the ribbon: a button with its icon that stays lit while on, as the
+/// view buttons of the new Outlook; a screen reader hears a checkbox.
+fn switch(ui: &mut egui::Ui, t: &Tokens, on: &mut bool, label: &str, hint: &str) -> bool {
+    let clicked = crate::ribbon_toggle_hint(ui, t, label, *on, hint);
+    if clicked {
+        *on = !*on;
+    }
+    clicked
 }
 
 /// A ribbon group: its controls in a row, its name in small print underneath, like Outlook.
