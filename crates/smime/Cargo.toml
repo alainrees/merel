@@ -4,6 +4,7 @@ description = "S/MIME: the person's own certificate from a PKCS#12 file, and sig
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 p12-keystore = { workspace = true }

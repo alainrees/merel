@@ -4,6 +4,7 @@ description = "Microsoft 365 through Microsoft Graph: mail, calendar, contacts a
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 mailcraft-model = { workspace = true }

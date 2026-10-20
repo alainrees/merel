@@ -4,6 +4,7 @@ description = "HTML mail reduced to a small, safe layout tree the reading pane c
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 mailcraft-model = { workspace = true }

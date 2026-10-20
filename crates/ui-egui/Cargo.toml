@@ -4,6 +4,7 @@ description = "Outlook-style front end in the ArtCraft look: ribbon, folder pane
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 mailcraft-model = { workspace = true }
