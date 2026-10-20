@@ -181,6 +181,17 @@ in one go (move to a folder, mark as read, flag, give categories). Each step is 
 ribbon, and the first nine of an account also answer to Ctrl+Shift+1 to 9. They are kept in
 `quick_steps.json`.
 
+The compose window is laid out as Outlook's: Van (a list with several accounts), Aan with CC,
+BCC and the address book at its end, Onderwerp with "Urgentie" at its end, and Outlook's
+formatting bar over the text: undo and redo, paste, typeface (Inter, DejaVu Serif, DejaVu Sans
+Mono, all carried by the app) and size, clear formatting, text colour, highlight, bold, italic,
+underline, bullets and numbering, and under "⋯" strikethrough, indentation and alignment, with
+Ctrl/⌘+B, I, U, Z and Y. A formatted message goes out as HTML with the text beside it; the
+HTML is written by the app itself from the formatting, with every character of the text escaped,
+so nothing typed or pasted becomes markup. A message with blind copies (BCC) names them only in
+the envelope. A few seconds after each change the window keeps the message under Concepten and
+says "Concept is zojuist opgeslagen".
+
 Templates are saved pieces of text, as Outlook's "Mijn sjablonen": the "Sjablonen" menu in the
 compose window drops one into the message above the signature and the quoted text, "Tekst
 opslaan als sjabloon…" keeps what you wrote so far under a name, and "Sjablonen beheren…" opens

@@ -5,6 +5,12 @@
 //! message goes, the window looks for what Outlook warns about too: a text that speaks of an
 //! attachment while none is on, and an empty subject; it then asks once, and sends on "Toch
 //! verzenden".
+//!
+//! The window is laid out as Outlook's: Van (a list when there are several accounts), Aan with
+//! CC, BCC and the address book at its end, Onderwerp with the urgency at its end, then the
+//! formatting bar over the text (see [`crate::rich_edit`]). While the window is open the
+//! message is kept as a draft a few seconds after each change, and the window says so at the
+//! bottom: "Concept is zojuist opgeslagen".
 
 use std::path::{Path, PathBuf};
 
@@ -16,7 +22,7 @@ use mailcraft_model::{Address, Draft, DraftAttachment, FolderKind, Importance, M
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 
 use crate::helder::{self, Icon};
-use crate::{MailApp, Tokens, calendar, dates};
+use crate::{MailApp, Tokens, calendar, dates, rich_edit};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -29,8 +35,21 @@ pub enum Kind {
 pub struct Compose {
     pub to: String,
     pub cc: String,
+    pub bcc: String,
+    /// Whether the CC and BCC lines show; a line with addresses always does.
+    pub show_cc: bool,
+    pub show_bcc: bool,
     pub subject: String,
     pub body: String,
+    /// The formatting over `body`, and the editor's undo and selection.
+    pub editor: rich_edit::Editor,
+    /// Opened from a draft put aside, so the window is called "Concept".
+    from_draft: bool,
+    /// When the window last kept the message as a draft by itself (seconds since the epoch).
+    pub saved_at: Option<i64>,
+    /// The fields as last seen, and when they last changed (egui time), for the automatic save.
+    seen: String,
+    changed_at: Option<f64>,
     pub in_reply_to: Option<String>,
     /// Files going along, in the order they were added.
     pub attachments: Vec<DraftAttachment>,
@@ -171,8 +190,16 @@ impl Compose {
         let mut c = Compose {
             to: String::new(),
             cc: String::new(),
+            bcc: String::new(),
+            show_cc: false,
+            show_bcc: false,
             subject: String::new(),
             body: String::new(),
+            editor: rich_edit::Editor::new("compose", "", None),
+            from_draft: false,
+            saved_at: None,
+            seen: String::new(),
+            changed_at: None,
             in_reply_to: None,
             attachments: Vec::new(),
             account_id: String::new(),
@@ -233,8 +260,11 @@ impl Compose {
         let mut c = Compose::new(Kind::New, None);
         c.to = d.to.clone();
         c.cc = d.cc.clone();
+        c.bcc = d.bcc.clone();
         c.subject = d.subject.clone();
         c.body = d.body.clone();
+        c.editor = rich_edit::Editor::new("compose", &d.body, d.rich.clone());
+        c.from_draft = true;
         c.in_reply_to = d.in_reply_to.clone();
         c.attachments = d.attachments.clone();
         c.account_id = d.account_id.clone();
@@ -244,6 +274,7 @@ impl Compose {
         c.read_receipt = d.read_receipt;
         c.sign = d.sign;
         c.encrypt = d.encrypt;
+        c.seen = c.state();
         c
     }
 
@@ -251,11 +282,28 @@ impl Compose {
     pub fn opened_from(mut self, account_id: &str) -> Self {
         self.account_id = account_id.to_string();
         self.initial = self.fingerprint();
+        self.seen = self.state();
         self
     }
 
     fn fingerprint(&self) -> String {
-        format!("{}\n{}\n{}\n{}", self.to, self.cc, self.subject, self.body)
+        format!("{}\n{}\n{}\n{}\n{}", self.to, self.cc, self.bcc, self.subject, self.body)
+    }
+
+    /// Everything that is worth saving again when it changes, formatting and options included.
+    fn state(&self) -> String {
+        let files: Vec<(&str, usize)> = self.attachments.iter().map(|a| (a.name.as_str(), a.bytes.len())).collect();
+        format!(
+            "{}\n{:?}\n{:?} {:?} {} {:?} {} {:?}",
+            self.fingerprint(),
+            self.editor.stored(&self.body),
+            files,
+            self.importance,
+            self.read_receipt,
+            self.sign,
+            self.encrypt,
+            self.send_at
+        )
     }
 
     /// The window as a draft to put aside; the id is the one it continues, or empty for a new one.
@@ -265,6 +313,7 @@ impl Compose {
             account_id: self.account_id.clone(),
             to: self.to.clone(),
             cc: self.cc.clone(),
+            bcc: self.bcc.clone(),
             subject: self.subject.clone(),
             body: self.body.clone(),
             in_reply_to: self.in_reply_to.clone(),
@@ -275,6 +324,7 @@ impl Compose {
             read_receipt: self.read_receipt,
             sign: self.sign,
             encrypt: self.encrypt,
+            rich: self.editor.stored(&self.body),
         }
     }
 
@@ -284,7 +334,11 @@ impl Compose {
         if !self.attachments.is_empty() {
             return false;
         }
-        let empty = self.to.trim().is_empty() && self.cc.trim().is_empty() && self.subject.trim().is_empty() && self.body.trim().is_empty();
+        let empty = self.to.trim().is_empty()
+            && self.cc.trim().is_empty()
+            && self.bcc.trim().is_empty()
+            && self.subject.trim().is_empty()
+            && self.body.trim().is_empty();
         empty || self.fingerprint() == self.initial
     }
 
@@ -380,6 +434,22 @@ impl MailApp {
         }
     }
 
+    /// Keeps the open message as a draft without closing the window, quietly: the window says
+    /// so at its bottom, and a failure is left for closing the window to report.
+    fn keep_draft(&mut self) {
+        let Some(params) = self.compose.as_ref().and_then(|c| serde_json::to_value(c.as_stored()).ok()) else { return };
+        let notice = self.notice.take();
+        self.run("draft.save", params);
+        let failed = std::mem::replace(&mut self.notice, notice).is_some();
+        let id = self.engine.session.last_draft.clone();
+        if let Some(c) = self.compose.as_mut()
+            && !failed
+        {
+            c.stored = id;
+            c.saved_at = Some(Local::now().timestamp());
+        }
+    }
+
     /// Closes the compose window. What was written is put aside as a draft; an untouched
     /// window, or one emptied on purpose, leaves nothing behind.
     fn put_aside(&mut self) {
@@ -437,7 +507,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let can_sign = certificate.is_some() || pgp_key.is_some();
     // The recipients encrypted mail cannot reach yet, for want of their certificate.
     let missing = match c.draft() {
-        Ok(d) if c.encrypt => app.engine.missing_certificates(&account, &[d.to, d.cc].concat()),
+        Ok(d) if c.encrypt => app.engine.missing_certificates(&account, &[d.to, d.cc, d.bcc].concat()),
         _ => Vec::new(),
     };
     let mut open = true;
@@ -458,12 +528,31 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             _ => c.check = None,
         }
     }
-    let from = app.engine.session.accounts.iter().find(|a| a.id == account).map(|a| {
-        let (name, email) = (a.address.display(), a.address.email());
-        if name == email { email.to_string() } else { format!("{name} · {email}") }
-    });
+    // The accounts the message can go out from, as "Naam (adres)".
+    let accounts: Vec<(String, String)> = app
+        .engine
+        .session
+        .accounts
+        .iter()
+        .map(|a| {
+            let (name, email) = (a.address.display(), a.address.email());
+            (a.id.clone(), if name == email { email.to_string() } else { format!("{name} ({email})") })
+        })
+        .collect();
+    let from = accounts.iter().find(|(id, _)| *id == account).map(|(_, label)| label.clone());
+    let mut new_from: Option<String> = None;
+    let mut picked_contact: Option<String> = None;
+    let contacts: Vec<String> = app
+        .engine
+        .session
+        .contacts
+        .iter()
+        .filter_map(|p| p.emails.first().map(|e| if p.name.trim().is_empty() { e.clone() } else { format!("{} <{e}>", p.name.trim()) }))
+        .collect();
     let templates = app.engine.session.templates_sorted();
-    let title = if c.stored.is_some() { "Concept" } else { "Nieuw bericht" };
+    let now = ctx.input(|i| i.time);
+    let saved_text = c.saved_at.map(saved_text);
+    let title = if c.from_draft { "Concept" } else { "Nieuw bericht" };
     helder::os_window(ctx, t, "compose-window", title, vec2(900.0, 700.0), &mut open, |ui| {
         // Files dropped onto the window become attachments; files hovering over it get a hint.
         // The window's own input, as it may be a window of its own.
@@ -499,7 +588,6 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                             pick = true;
                         }
                         template = crate::templates::menu(ui, t, &templates);
-                        crate::importance::chooser(ui, t, &mut c.importance);
                         if can_sign || c.sign == Some(true) {
                             let on = c.sign.unwrap_or(can_sign);
                             let hover = match (&certificate, &pgp_key) {
@@ -601,26 +689,70 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     ui.add_space(8.0);
                 }
                 // The message itself: one white card with the addresses, the subject, the
-                // attachments and the text.
-                helder::card_frame(t).inner_margin(Margin { left: 24, right: 24, top: 8, bottom: 16 }).show(ui, |ui| {
+                // attachments, the formatting bar and the text, and what the automatic save did.
+                helder::card_frame(t).inner_margin(Margin { left: 24, right: 24, top: 8, bottom: 10 }).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let wide = ui.available_width() - LABEL_WIDTH - 12.0;
                     if let Some(from) = &from {
                         address_row(ui, t, "Van", |ui| {
-                            ui.label(RichText::new(from).size(helder::FIELD_TEXT).color(t.text));
+                            if accounts.len() > 1 {
+                                let r = helder::select(ui, t, from, wide, |ui| {
+                                    for (id, label) in &accounts {
+                                        if ui.selectable_label(*id == account, label).clicked() {
+                                            new_from = Some(id.clone());
+                                            ui.close();
+                                        }
+                                    }
+                                });
+                                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, FROM));
+                            } else {
+                                let r = ui
+                                    .allocate_ui_with_layout(vec2(wide, helder::BUTTON_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                        ui.set_min_size(vec2(wide, helder::BUTTON_HEIGHT));
+                                        ui.label(RichText::new(from).size(helder::FIELD_TEXT).color(t.text));
+                                    })
+                                    .response;
+                                helder::underline(ui, t, &r);
+                            }
                         });
                     }
-                    address_row(ui, t, "Aan", |ui| helder::underline_field(ui, t, &mut c.to, "Ontvangers toevoegen", wide, false));
+                    let show_cc = c.show_cc || !c.cc.trim().is_empty();
+                    let show_bcc = c.show_bcc || !c.bcc.trim().is_empty();
+                    address_row(ui, t, "Aan", |ui| {
+                        let r = helder::underline_field(ui, t, &mut c.to, "", wide - TO_BUTTONS, false);
+                        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Aan"));
+                        helder::quiet(ui, t, |ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
+                            if line_button(ui, t, "CC", show_cc).on_hover_text("Een kopie aan iemand anders; iedereen ziet wie hem kreeg.").clicked() {
+                                c.show_cc = !show_cc;
+                            }
+                            if line_button(ui, t, "BCC", show_bcc).on_hover_text("Een blinde kopie: de andere ontvangers zien niet dat deze persoon hem kreeg.").clicked() {
+                                c.show_bcc = !show_bcc;
+                            }
+                            address_book(ui, t, &contacts, &mut picked_contact);
+                        });
+                    });
                     crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut c.to);
-                    address_row(ui, t, "CC", |ui| helder::underline_field(ui, t, &mut c.cc, "", wide, false));
-                    crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut c.cc);
-                    ui.horizontal(|ui| {
-                        let width = if c.encrypt { ui.available_width() - 230.0 } else { ui.available_width() };
-                        helder::underline_field(ui, t, &mut c.subject, "Onderwerp toevoegen", width, true)
+                    if show_cc {
+                        address_row(ui, t, "CC", |ui| {
+                            helder::underline_field(ui, t, &mut c.cc, "", wide, false).widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "CC"));
+                        });
+                        crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut c.cc);
+                    }
+                    if show_bcc {
+                        address_row(ui, t, "BCC", |ui| {
+                            helder::underline_field(ui, t, &mut c.bcc, "", wide, false).widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "BCC"));
+                        });
+                        crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut c.bcc);
+                    }
+                    address_row(ui, t, "Onderwerp", |ui| {
+                        let room = wide - SUBJECT_MENU - if c.encrypt { 230.0 } else { 0.0 };
+                        helder::underline_field(ui, t, &mut c.subject, "", room, false)
                             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Onderwerp"));
                         if c.encrypt {
                             pill(ui, t, Icon::Lock, "Wordt versleuteld verzonden");
                         }
+                        helder::quiet(ui, t, |ui| crate::importance::subject_menu(ui, t, &mut c.importance));
                     });
                     if !c.attachments.is_empty() {
                         ui.add_space(12.0);
@@ -637,18 +769,19 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                         ui.add_space(6.0);
                         ui.label(RichText::new(e).color(t.flag));
                     }
-                    ui.add_space(8.0);
-                    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-                        let r = ui.add_sized(
-                            ui.available_size(),
-                            egui::TextEdit::multiline(&mut c.body)
-                                .frame(egui::Frame::NONE)
-                                .font(egui::FontId::proportional(helder::FIELD_TEXT))
-                                .text_color(t.text)
-                                .margin(Margin::symmetric(4, 8))
-                                .desired_width(f32::INFINITY),
-                        );
-                        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Bericht"));
+                    ui.add_space(10.0);
+                    rich_edit::bar(ui, t, &mut c.editor, &mut c.body);
+                    ui.add_space(4.0);
+                    let status = 22.0;
+                    egui::ScrollArea::vertical().auto_shrink(false).max_height(ui.available_height() - status).show(ui, |ui| {
+                        let height = ui.available_height();
+                        rich_edit::edit(ui, t, &mut c.editor, &mut c.body, "Bericht", height);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.set_height(status);
+                        if let Some(text) = &saved_text {
+                            helder::right(ui, |ui| ui.label(RichText::new(text).size(13.0).color(t.text_dim)));
+                        }
                     });
                 });
             });
@@ -662,6 +795,13 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     if (put_aside || !open) && !sending {
         app.put_aside();
         return;
+    }
+    if let Some(id) = new_from {
+        c.account_id = id;
+    }
+    if let Some(person) = picked_contact {
+        let to = c.to.trim_end().trim_end_matches([';', ',']).trim_end();
+        c.to = if to.is_empty() { format!("{person}; ") } else { format!("{to}; {person}; ") };
     }
     if let Some(i) = remove.filter(|i| *i < c.attachments.len()) {
         c.attachments.remove(i);
@@ -734,16 +874,112 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             }
             Err(e) => c.error = Some(e),
         }
+        return;
+    }
+    // Outlook keeps what is being written as a draft as it goes: a few seconds after the last
+    // change, so a crash or a closed laptop loses little.
+    let state = c.state();
+    if state != c.seen {
+        c.seen = state;
+        c.changed_at = Some(now);
+    }
+    if let Some(at) = c.changed_at
+        && c.draft_id.is_none()
+    {
+        let wait = AUTOSAVE_AFTER - (now - at);
+        if wait > 0.0 {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+        } else {
+            c.changed_at = None;
+            if !c.is_blank() {
+                app.keep_draft();
+                ctx.request_repaint();
+            }
+        }
+    }
+}
+
+/// Seconds after the last change that the window keeps the message as a draft.
+pub const AUTOSAVE_AFTER: f64 = 3.0;
+
+/// What the bottom of the window says after the automatic save.
+pub const SAVED_JUST_NOW: &str = "Concept is zojuist opgeslagen";
+
+fn saved_text(at: i64) -> String {
+    let now = Local::now();
+    if now.timestamp() - at < 60 {
+        return SAVED_JUST_NOW.to_string();
+    }
+    match DateTime::from_timestamp(at, 0).map(|t| t.with_timezone(&Local)) {
+        Some(t) => format!("Concept opgeslagen om {:02}:{:02}", t.hour(), t.minute()),
+        None => SAVED_JUST_NOW.to_string(),
     }
 }
 
 /// The width of the names before the address fields.
-const LABEL_WIDTH: f32 = 56.0;
+const LABEL_WIDTH: f32 = 96.0;
+/// The room CC, BCC and the address book take at the end of the Aan line.
+const TO_BUTTONS: f32 = 140.0;
+/// The room the urgency menu takes at the end of the subject line.
+const SUBJECT_MENU: f32 = 140.0;
+/// The Van list's name for a screen reader.
+pub const FROM: &str = "Van";
+/// The address book button at the end of the Aan line.
+pub const ADDRESS_BOOK: &str = "Adresboek";
+
+/// "CC" or "BCC" at the end of the Aan line: shows or hides that line.
+fn line_button(ui: &mut Ui, t: &Tokens, text: &str, on: bool) -> egui::Response {
+    let color = if on { t.accent_text } else { t.text };
+    let r = ui.add(
+        egui::Button::new(RichText::new(text).size(14.0).color(color))
+            .frame_when_inactive(false)
+            .selected(on)
+            .corner_radius(helder::CONTROL_RADIUS)
+            .min_size(vec2(36.0, 30.0)),
+    );
+    let label = format!("{text}-regel");
+    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &label));
+    r
+}
+
+/// The address book at the end of the Aan line: the contacts with an e-mail address, with a
+/// field to find one; a click puts the person on the Aan line.
+fn address_book(ui: &mut Ui, t: &Tokens, contacts: &[String], picked: &mut Option<String>) {
+    let button = egui::Button::image(Icon::AddressBook.image(helder::ICON, t.text))
+        .frame_when_inactive(false)
+        .corner_radius(helder::CONTROL_RADIUS)
+        .min_size(vec2(32.0, 30.0));
+    let (r, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
+        ui.set_min_width(280.0);
+        let id = egui::Id::new("compose-address-book");
+        let mut find: String = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_default();
+        ui.add(egui::TextEdit::singleline(&mut find).hint_text("Zoeken in contactpersonen").desired_width(f32::INFINITY));
+        ui.ctx().data_mut(|d| d.insert_temp(id, find.clone()));
+        let find = find.to_lowercase();
+        let found: Vec<&String> = contacts.iter().filter(|c| c.to_lowercase().contains(&find)).take(50).collect();
+        if found.is_empty() {
+            ui.label(RichText::new("Geen contactpersonen met een e-mailadres gevonden.").color(t.text_dim));
+        }
+        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+            for person in found {
+                if ui.selectable_label(false, person).clicked() {
+                    *picked = Some(person.clone());
+                    ui.close();
+                }
+            }
+        });
+    });
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, ADDRESS_BOOK));
+    let _ = r.on_hover_text("Kies ontvangers uit je contactpersonen.");
+}
 
 /// One row of the address block: the name in grey, then the field.
 fn address_row<R>(ui: &mut Ui, t: &Tokens, label: &str, add: impl FnOnce(&mut Ui) -> R) {
     ui.horizontal(|ui| {
-        ui.add_sized([LABEL_WIDTH, helder::BUTTON_HEIGHT], egui::Label::new(RichText::new(label).size(14.0).color(t.text_dim)));
+        ui.allocate_ui_with_layout(vec2(LABEL_WIDTH, helder::BUTTON_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.set_min_size(vec2(LABEL_WIDTH, helder::BUTTON_HEIGHT));
+            ui.label(RichText::new(label).size(14.0).color(t.text_dim));
+        });
         add(ui);
     });
 }
@@ -909,7 +1145,7 @@ mod tests {
         let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         harness.run();
         harness.step();
-        let heights: Vec<f32> = [SEND, LATER, PUT_ASIDE, ATTACH, "Urgentie: normaal", crate::templates::MENU, OPTIONS]
+        let heights: Vec<f32> = [SEND, LATER, PUT_ASIDE, ATTACH, crate::templates::MENU, OPTIONS]
             .iter()
             .map(|label| harness.get_by_label(label).rect().height())
             .collect();
@@ -1080,7 +1316,7 @@ mod tests {
         h.run();
         let c = h.state().compose.as_ref().expect("held back");
         assert!(c.check.as_ref().is_some_and(|k| k.later.is_some() && k.warnings == [NO_SUBJECT]));
-        assert!(h.state().engine.session.drafts.is_empty());
+        assert!(h.state().engine.session.drafts.iter().all(|d| d.send_at.is_none()), "not put aside with the moment yet");
         h.get_by_label(SEND_ANYWAY).click();
         h.run();
         assert!(h.state().compose.is_none(), "put aside with the moment");
@@ -1141,6 +1377,89 @@ mod tests {
         h.get_by_label("Sluiten").click();
         h.run();
         assert!(h.state().templates.is_none());
+    }
+
+    #[test]
+    fn the_window_keeps_the_message_as_a_draft_a_moment_after_a_change_and_says_so() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        app.open_compose(Kind::New);
+        let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        h.run();
+        assert!(h.query_by_label(SAVED_JUST_NOW).is_none());
+        if let Some(c) = h.state_mut().compose.as_mut() {
+            c.subject = "Planning".into();
+        }
+        h.run();
+        assert!(h.state().engine.session.drafts.is_empty(), "not straight away");
+        // As if the change was made a while ago.
+        if let Some(c) = h.state_mut().compose.as_mut() {
+            c.changed_at = Some(-AUTOSAVE_AFTER);
+        }
+        h.run();
+        let drafts = h.state().engine.session.drafts.clone();
+        assert_eq!(drafts.len(), 1);
+        let c = h.state().compose.as_ref().expect("the window stays open");
+        assert_eq!(c.stored.as_deref(), Some(drafts[0].id.as_str()), "later saves update the same draft");
+        h.get_by_label(SAVED_JUST_NOW);
+        h.get_by_label("Nieuw bericht");
+        assert_eq!(saved_text(Local::now().timestamp() - 3600).len(), "Concept opgeslagen om 00:00".len());
+    }
+
+    #[test]
+    fn cc_and_bcc_lines_show_on_request_and_the_address_book_fills_aan() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        app.engine.session.contacts.push(mailcraft_model::Contact {
+            id: "c1".into(),
+            name: "Ravi Kumar".into(),
+            emails: vec!["ravi@example.org".into()],
+            phones: Vec::new(),
+            company: String::new(),
+            notes: String::new(),
+            account_id: None,
+        });
+        app.open_compose(Kind::New);
+        let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        h.run();
+        assert!(h.query_by_label("CC").is_none() && h.query_by_label("BCC").is_none(), "hidden until asked for");
+        h.get_by_label("BCC-regel").click();
+        h.run();
+        assert_eq!(h.query_all_by_label("BCC").count(), 2, "the line's name and its field");
+        h.get_by_label(ADDRESS_BOOK).click();
+        h.run();
+        h.get_all_by_label("Ravi Kumar <ravi@example.org>").next().expect("the contact").click();
+        h.run();
+        let c = h.state_mut().compose.as_mut().expect("the window");
+        assert_eq!(c.to, "Ravi Kumar <ravi@example.org>; ");
+        c.bcc = "geheim@example.org".into();
+        let d = c.draft().expect("a draft");
+        assert_eq!(d.bcc.iter().map(|a| a.email()).collect::<Vec<_>>(), ["geheim@example.org"]);
+        assert!(Compose::from_stored(&c.as_stored()).bcc == "geheim@example.org", "the blind copy stays with the draft");
+    }
+
+    #[test]
+    fn formatting_from_the_bar_travels_with_the_draft() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        app.open_compose(Kind::New);
+        if let Some(c) = app.compose.as_mut() {
+            c.to = "sanne@example.org".into();
+            c.body = "Belangrijk: morgen vrij".into();
+        }
+        let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        h.run();
+        assert_eq!(h.state().compose.as_ref().and_then(|c| c.draft().ok()).map(|d| d.rich), Some(None), "plain text goes as plain text");
+        h.get_by_label(rich_edit::BULLETS).click();
+        h.run();
+        let c = h.state().compose.as_ref().expect("the window");
+        let rich = c.draft().ok().and_then(|d| d.rich).expect("formatted");
+        assert_eq!(rich.paras[0].list, mailcraft_model::rich::List::Bullet);
+        let again = Compose::from_stored(&c.as_stored());
+        assert_eq!(again.editor.rich.paras[0].list, mailcraft_model::rich::List::Bullet, "and comes back with it");
     }
 
     #[test]

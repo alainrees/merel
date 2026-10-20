@@ -49,8 +49,30 @@ fn message_id(from: &Address) -> String {
     format!("<{now:x}.{a:016x}{b:016x}@{domain}>")
 }
 
-/// The RFC 5322 message for `draft`, as the server will receive it.
+/// The RFC 5322 message for `draft`, as an SMTP server will receive it: blind copies are in
+/// the envelope and not in the header.
 pub fn build(from: &Address, draft: &Draft) -> Result<Message, SmtpError> {
+    build_message(from, draft, false)
+}
+
+/// The message for a mail store that sends it itself (Exchange, Microsoft 365, Gmail): those
+/// read the blind copies from the `Bcc` header and take it off before the message goes on.
+pub fn build_for_store(from: &Address, draft: &Draft) -> Result<Message, SmtpError> {
+    build_message(from, draft, true)
+}
+
+/// The body: the text alone, or with formatting the text beside an HTML version made from it,
+/// for the reader's program to choose.
+fn text_part(draft: &Draft) -> MultiPart {
+    let rich = draft.rich.as_ref().filter(|r| !r.is_plain());
+    let (plain, html) = match rich {
+        Some(r) => (r.to_plain(&draft.body), r.to_html(&draft.body)),
+        None => (draft.body.clone(), String::new()),
+    };
+    MultiPart::alternative().singlepart(SinglePart::plain(plain)).singlepart(SinglePart::html(html))
+}
+
+fn build_message(from: &Address, draft: &Draft, keep_bcc: bool) -> Result<Message, SmtpError> {
     if draft.to.is_empty() {
         return Err(SmtpError::Build("Vul ten minste één ontvanger in.".into()));
     }
@@ -63,6 +85,12 @@ pub fn build(from: &Address, draft: &Draft) -> Result<Message, SmtpError> {
     }
     for a in &draft.cc {
         b = b.cc(mailbox(a)?);
+    }
+    for a in &draft.bcc {
+        b = b.bcc(mailbox(a)?);
+    }
+    if keep_bcc && !draft.bcc.is_empty() {
+        b = b.keep_bcc();
     }
     if let Some(id) = &draft.in_reply_to {
         b = b.in_reply_to(id.clone()).references(id.clone());
@@ -82,10 +110,18 @@ pub fn build(from: &Address, draft: &Draft) -> Result<Message, SmtpError> {
     if draft.read_receipt {
         b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Disposition-Notification-To"), format!("<{}>", from.email())));
     }
+    let formatted = draft.rich.as_ref().is_some_and(|r| !r.is_plain());
     if draft.attachments.is_empty() {
+        if formatted {
+            return b.multipart(text_part(draft)).map_err(|e| SmtpError::Build(e.to_string()));
+        }
         return b.header(ContentType::TEXT_PLAIN).body(draft.body.clone()).map_err(|e| SmtpError::Build(e.to_string()));
     }
-    let mut parts = MultiPart::mixed().singlepart(SinglePart::builder().header(ContentType::TEXT_PLAIN).body(draft.body.clone()));
+    let mut parts = if formatted {
+        MultiPart::mixed().multipart(text_part(draft))
+    } else {
+        MultiPart::mixed().singlepart(SinglePart::builder().header(ContentType::TEXT_PLAIN).body(draft.body.clone()))
+    };
     for a in &draft.attachments {
         let kind =
             ContentType::parse(&a.mime).or_else(|_| ContentType::parse("application/octet-stream")).map_err(|e| SmtpError::Build(e.to_string()))?;
@@ -144,6 +180,7 @@ mod tests {
             read_receipt: true,
             sign: None,
             encrypt: false,
+            ..Draft::default()
         };
         let m = build(&from, &draft).unwrap();
         let text = String::from_utf8(m.formatted()).unwrap();
@@ -185,6 +222,45 @@ mod tests {
 
         let huge = Draft { attachments: vec![DraftAttachment::new("a.bin", vec![0; MAX_ATTACHMENTS + 1])], ..draft };
         assert!(build(&from, &huge).is_err());
+    }
+
+    #[test]
+    fn formatted_text_goes_as_html_beside_the_text_and_attachments_after_it() {
+        use mailcraft_model::DraftAttachment;
+        use mailcraft_model::rich::{List, Rich};
+        let from = Address::new(None, "jij@example.org").unwrap();
+        let body = "Agenda\nbegroting\nplanning";
+        let mut rich = Rich::plain(body);
+        rich.apply(0..6, |s| s.bold = true);
+        rich.apply_paras(1..3, |p| p.list = List::Bullet);
+        let draft = Draft { to: vec![Address::new(None, "sanne@example.org").unwrap()], body: body.into(), rich: Some(rich), ..Draft::default() };
+        let text = String::from_utf8(build(&from, &draft).unwrap().formatted()).unwrap();
+        assert!(text.contains("Content-Type: multipart/alternative"), "{text}");
+        assert!(text.contains("Content-Type: text/plain") && text.contains("Content-Type: text/html"), "{text}");
+        let parsed = mailcraft_mime::parse_body(text.as_bytes());
+        assert_eq!(parsed.text.trim().replace("\r\n", "\n"), "Agenda\n• begroting\n• planning", "the text part writes the bullets out");
+        assert!(parsed.rich.is_some() && !parsed.from_html, "the reader gets both parts");
+
+        let with_file = Draft { attachments: vec![DraftAttachment::new("a.txt", b"x".to_vec())], ..draft };
+        let text = String::from_utf8(build(&from, &with_file).unwrap().formatted()).unwrap();
+        assert!(text.contains("multipart/mixed") && text.contains("multipart/alternative"), "{text}");
+        assert_eq!(mailcraft_mime::parse_body(text.as_bytes()).attachments.len(), 1);
+    }
+
+    #[test]
+    fn blind_copies_are_in_the_envelope_and_only_in_the_header_for_a_store() {
+        let from = Address::new(None, "jij@example.org").unwrap();
+        let draft = Draft {
+            to: vec![Address::new(None, "sanne@example.org").unwrap()],
+            bcc: vec![Address::new(None, "geheim@example.org").unwrap()],
+            body: "Hoi".into(),
+            ..Draft::default()
+        };
+        let m = build(&from, &draft).unwrap();
+        assert!(m.envelope().to().iter().any(|a| a.to_string() == "geheim@example.org"));
+        assert!(!String::from_utf8(m.formatted()).unwrap().contains("geheim"), "SMTP readers do not see the blind copy");
+        let stored = String::from_utf8(build_for_store(&from, &draft).unwrap().formatted()).unwrap();
+        assert!(stored.contains("Bcc: geheim@example.org"), "{stored}");
     }
 
     #[test]

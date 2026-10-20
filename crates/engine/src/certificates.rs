@@ -108,7 +108,7 @@ pub fn outgoing(keys: &Keys, account: &Account, draft: &Draft, raw: Vec<u8>) -> 
         None => raw,
     };
     let own = keys.identities.read().ok().and_then(|map| map.get(&account.id).map(|i| i.certificate_der().to_vec()));
-    let recipients: Vec<&Address> = draft.to.iter().chain(&draft.cc).collect();
+    let recipients: Vec<&Address> = draft.to.iter().chain(&draft.cc).chain(&draft.bcc).collect();
     if let Some(key) = &pgp {
         let by_certificate = own.is_some() && (!draft.encrypt || missing(&keys.people, recipients.iter().copied()).is_empty());
         let by_key = !draft.encrypt || keys.openpgp.missing(recipients.iter().copied(), now()).is_empty();
