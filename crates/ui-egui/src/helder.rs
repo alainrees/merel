@@ -356,6 +356,42 @@ pub fn nav_item(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str, on: bool) -> R
     r
 }
 
+/// A day of the week as a round button, lit in the app colour while `on`, as Outlook's
+/// repeat pane shows the days; a screen reader hears a checkbox named `text`.
+pub fn day_toggle(ui: &mut Ui, t: &Tokens, text: &str, on: bool) -> Response {
+    let (rect, r) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::click());
+    r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, text));
+    let (fill, stroke, color) = if on {
+        (t.accent, Stroke::NONE, t.on_accent)
+    } else {
+        (if r.hovered() { t.hover } else { t.card }, Stroke::new(1.0, t.control_border), t.text)
+    };
+    let p = ui.painter();
+    p.circle(rect.center(), 16.5, fill, stroke);
+    if r.has_focus() {
+        p.circle_stroke(rect.center(), 19.0, Stroke::new(2.0, t.accent));
+    }
+    p.text(rect.center(), egui::Align2::CENTER_CENTER, text, FontId::proportional(13.0), color);
+    r
+}
+
+/// A small field for a number, in a rounded box, such as "Om de 2 weken".
+pub fn number_field(ui: &mut Ui, t: &Tokens, text: &mut String, hint: &str) -> Response {
+    let r = ui.add_sized(
+        vec2(48.0, 30.0),
+        egui::TextEdit::singleline(text)
+            .frame(Frame::NONE)
+            .hint_text(RichText::new(hint).size(FIELD_TEXT).color(t.text_dim))
+            .font(FontId::proportional(FIELD_TEXT))
+            .text_color(t.text)
+            .horizontal_align(Align::Center)
+            .vertical_align(Align::Center),
+    );
+    let stroke = if r.has_focus() { Stroke::new(2.0, t.accent) } else { Stroke::new(1.0, t.control_border) };
+    ui.painter().rect_stroke(r.rect, CornerRadius::same(CONTROL_RADIUS), stroke, egui::StrokeKind::Inside);
+    r
+}
+
 /// A quiet square button with only an icon; `label` is its tooltip and its name for a screen
 /// reader.
 pub fn icon_button(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str) -> Response {
@@ -694,6 +730,25 @@ pub fn note(ui: &mut Ui, t: &Tokens, text: &str) {
         indent(ui);
         ui.add(egui::Label::new(RichText::new(text).size(12.0).color(t.text_dim)).wrap());
     });
+}
+
+/// Lays out `add` at the right end of a row of buttons. Unlike [`right`] it never draws over
+/// what came before: it takes the width it needed last frame, and when the row has no room
+/// left it follows straight on, so the window grows rather than the buttons overlapping.
+pub fn trailing<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let id = ui.id().with("trailing");
+    let gap = ui.spacing().item_spacing.x;
+    // Until the group has been measured once, it follows on, so it cannot stretch the window.
+    let width: Option<f32> = ui.ctx().data(|d| d.get_temp(id));
+    ui.add_space(width.map_or(gap, |w| (ui.available_width() - w - gap).max(gap)));
+    let width = width.unwrap_or(-1.0);
+    let inner = ui.scope(add);
+    let used = inner.response.rect.width();
+    if (used - width).abs() > 0.5 {
+        ui.ctx().data_mut(|d| d.insert_temp(id, used));
+        ui.ctx().request_discard("the trailing buttons changed width");
+    }
+    inner.inner
 }
 
 /// Lays out `add` from the right edge of what is left of the row.
