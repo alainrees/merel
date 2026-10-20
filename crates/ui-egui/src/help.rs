@@ -3,7 +3,11 @@
 
 use egui::{RichText, vec2};
 
+use crate::helder::{self, Icon};
 use crate::{MailApp, Tokens, key_hint, ribbon_action_hint};
+
+/// The button in "Over Mailcraft" that shows the folder with this computer's settings.
+pub const OPEN_SETTINGS: &str = "Instellingenmap openen";
 
 /// The project page, for the "Op GitHub" button.
 pub const REPOSITORY: &str = "https://github.com/alainrees/mailcraft";
@@ -107,55 +111,71 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
 /// The open help window, if any.
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(which) = app.help else { return };
-    let mut close = false;
-    match which {
-        HelpWindow::Shortcuts => {
-            egui::Window::new("Sneltoetsen").collapsible(false).resizable(false).default_width(380.0).show(ctx, |ui| {
-                ui.label(RichText::new("In de mailmodule, zolang je niet in een tekstveld typt.").size(12.0).color(t.text_dim));
-                ui.add_space(6.0);
-                egui::Grid::new("shortcuts").num_columns(2).spacing(vec2(18.0, 6.0)).show(ui, |ui| {
-                    for (keys, what) in shortcut_list() {
-                        ui.label(RichText::new(keys).strong().color(t.text));
-                        ui.label(RichText::new(what).color(t.text));
-                        ui.end_row();
-                    }
+    let close = match which {
+        HelpWindow::Shortcuts => helder::dialog(ctx, t, "Sneltoetsen", 560.0, |ui| {
+            ui.label(RichText::new("In de mailmodule, zolang je niet in een tekstveld typt.").size(12.0).color(t.text_dim));
+            ui.add_space(6.0);
+            helder::card_frame(t).inner_margin(16).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                egui::ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
+                    egui::Grid::new("shortcuts").num_columns(2).spacing(vec2(18.0, 8.0)).show(ui, |ui| {
+                        for (keys, what) in shortcut_list() {
+                            ui.label(RichText::new(keys).size(14.0).strong().color(t.text));
+                            ui.add(egui::Label::new(RichText::new(what).size(14.0).color(t.text)).wrap());
+                            ui.end_row();
+                        }
+                    });
                 });
-                ui.add_space(8.0);
-                close = ui.button("Sluiten").clicked();
             });
-        }
-        HelpWindow::About => {
-            egui::Window::new("Over Mailcraft").collapsible(false).resizable(false).default_width(400.0).show(ctx, |ui| {
-                ui.label(RichText::new("Mailcraft").size(22.0).strong().color(t.text));
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(version_line()).color(t.text_dim));
-                    if ui.small_button("Kopiëren").on_hover_text("De versie naar het klembord, handig bij een foutmelding").clicked() {
-                        ui.ctx().copy_text(format!("Mailcraft {}", version_line().trim_start_matches("Versie ")));
-                    }
-                });
-                ui.add_space(8.0);
-                ui.label(RichText::new("Mail, agenda, contacten en taken voor de desktop, met de werkwijze van Outlook en de stijl van de ArtCraft-familie. Geschreven in Rust met egui; één programma voor macOS, Windows en Linux.").color(t.text));
-                ui.add_space(8.0);
-                ui.label(RichText::new("Veiligheid en privacy voorop: mail kan geen scripts uitvoeren, afbeeldingen van internet worden pas geladen als je erom vraagt, verbindingen lopen altijd over TLS, wachtwoorden staan in de sleutelhanger van het systeem en de offline cache is versleuteld.").color(t.text));
-                ui.add_space(8.0);
-                let mut auto = app.view.update_check == Some(true);
-                if ui
-                    .checkbox(&mut auto, crate::updates::AUTO)
-                    .on_hover_text("Mailcraft vraagt dan eens per dag bij GitHub naar de nieuwste versie; er gaat niets anders mee dan die vraag")
-                    .changed()
-                {
-                    app.view.update_check = Some(auto);
-                    app.save_view(ctx);
-                }
-                if let Some(f) = settings_folder(app) {
+        }),
+        HelpWindow::About => helder::dialog(ctx, t, "Over Mailcraft", 460.0, |ui| {
+            helder::card_frame(t).inner_margin(20).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        helder::badge(ui, t, Icon::Mail);
+                        ui.add_space(8.0);
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new("Mailcraft").size(18.0).strong().color(t.text));
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(version_line()).size(14.0).color(t.text_dim));
+                                helder::quiet(ui, t, |ui| {
+                                    if ui
+                                        .add(egui::Button::new(RichText::new("Kopiëren").size(12.0).color(t.accent_text)).frame_when_inactive(false))
+                                        .on_hover_text("De versie naar het klembord, handig bij een foutmelding")
+                                        .clicked()
+                                    {
+                                        ui.ctx().copy_text(format!("Mailcraft {}", version_line().trim_start_matches("Versie ")));
+                                    }
+                                });
+                            });
+                        });
+                    });
+                    ui.add_space(12.0);
+                    helder::paragraph(ui, t, "Mail, agenda, contacten en taken voor de desktop, met de werkwijze van Outlook en de stijl van de ArtCraft-familie. Geschreven in Rust met egui; één programma voor macOS, Windows en Linux.");
                     ui.add_space(8.0);
-                    ui.label(RichText::new(format!("Instellingen en cache: {}", f.display())).size(12.0).color(t.text_dim));
-                }
-                ui.add_space(8.0);
-                close = ui.button("Sluiten").clicked();
-            });
-        }
-    }
+                    helder::paragraph(ui, t, "Veiligheid en privacy voorop: mail kan geen scripts uitvoeren, afbeeldingen van internet worden pas geladen als je erom vraagt, verbindingen lopen altijd over TLS, wachtwoorden staan in de sleutelhanger van het systeem en de offline cache is versleuteld.");
+                    ui.add_space(8.0);
+                    let mut auto = app.view.update_check == Some(true);
+                    if helder::toggle(ui, t, &mut auto, crate::updates::AUTO)
+                        .on_hover_text("Mailcraft vraagt dan eens per dag bij GitHub naar de nieuwste versie; er gaat niets anders mee dan die vraag")
+                        .changed()
+                    {
+                        app.view.update_check = Some(auto);
+                        app.save_view(ctx);
+                    }
+                    if let Some(f) = settings_folder(app) {
+                        helder::quiet(ui, t, |ui| {
+                            if helder::tool_button(ui, t, Icon::FolderOpen, OPEN_SETTINGS)
+                                .on_hover_text("De map met je accounts, agenda, regels en de versleutelde cache")
+                                .clicked()
+                            {
+                                open_outside(app, &f.to_string_lossy());
+                            }
+                        });
+                    }
+                });
+        }),
+    };
     if close {
         app.help = None;
     }

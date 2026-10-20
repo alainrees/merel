@@ -7,16 +7,32 @@ use mailcraft_engine::{Engine, config};
 use mailcraft_secrets::Keychain;
 use mailcraft_ui_egui::MailApp;
 
-struct App(MailApp);
+#[cfg(target_os = "macos")]
+mod app_menu;
+
+struct App {
+    app: MailApp,
+    #[cfg(target_os = "macos")]
+    menu: Option<app_menu::AppMenu>,
+}
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.0.ui(ui);
+        #[cfg(target_os = "macos")]
+        if let Some(menu) = &self.menu {
+            for action in menu.actions() {
+                match action {
+                    app_menu::Action::About => self.app.help = Some(mailcraft_ui_egui::help::HelpWindow::About),
+                    app_menu::Action::Updates => self.app.check_for_updates(ui.ctx(), true),
+                }
+            }
+        }
+        self.app.ui(ui);
     }
 
     fn on_exit(&mut self) {
         // The offline cache is written a moment after each change; the last changes go now.
-        self.0.engine.flush();
+        self.app.engine.flush();
     }
 }
 
@@ -38,9 +54,13 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Mailcraft",
         options,
-        Box::new(|_cc| {
+        Box::new(|#[cfg_attr(not(target_os = "macos"), allow(unused_variables))] cc| {
             let engine = Engine::load(Arc::new(Keychain), config::default_path());
-            Ok(Box::new(App(MailApp::new(engine))))
+            Ok(Box::new(App {
+                app: MailApp::new(engine),
+                #[cfg(target_os = "macos")]
+                menu: app_menu::AppMenu::install(&cc.egui_ctx),
+            }))
         }),
     )
 }

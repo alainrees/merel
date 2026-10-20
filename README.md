@@ -367,6 +367,11 @@ The first start on a computer opens "Welkom bij Mailcraft", four short steps tha
 any point: what Mailcraft is, adding an account (opens Bestand), whether to check daily for a new
 version, and light or dark. It comes once; every choice stays changeable in its usual place.
 
+On macOS the app menu is Mailcraft's own, in Dutch: "Over Mailcraft" opens the window with the
+version and build, "Zoek naar updates…" checks at once, and Verberg/Stop Mailcraft carry the app's
+name (built with [muda](https://crates.io/crates/muda); there is no Edit menu, so Cmd+C and Cmd+V
+stay with the text fields).
+
 Mailcraft tells you when a newer release is out: "Updates" on the Help tab asks GitHub right
 away, and "Elke dag controleren op een nieuwe versie" in "Over Mailcraft" asks once a day (off
 until you switch it on). A newer version opens a small window with its release notes,

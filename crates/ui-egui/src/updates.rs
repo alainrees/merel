@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use egui::RichText;
 use serde_json::Value;
 
+use crate::helder::{self, Icon};
 use crate::help::REPOSITORY;
 use crate::theme::Tokens;
 use crate::{MailApp, Notice};
@@ -209,40 +210,57 @@ impl MailApp {
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(release) = app.updates.offer.clone() else { return };
     let mut close = false;
-    egui::Window::new(WINDOW).collapsible(false).resizable(false).default_width(420.0).show(ctx, |ui| {
-        ui.label(RichText::new(format!("Mailcraft {} is beschikbaar.", release.version)).size(16.0).strong().color(t.text));
-        ui.label(RichText::new(format!("Je gebruikt nu versie {}.", env!("CARGO_PKG_VERSION"))).color(t.text_dim));
-        if !release.notes.is_empty() {
-            ui.add_space(8.0);
-            egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
-                ui.label(RichText::new(&release.notes).color(t.text));
+    let closed = helder::dialog(ctx, t, WINDOW, 460.0, |ui| {
+        helder::card_frame(t).inner_margin(20).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                helder::badge(ui, t, Icon::Download);
+                ui.add_space(8.0);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(format!("Mailcraft {} is beschikbaar.", release.version)).size(18.0).strong().color(t.text));
+                    ui.label(RichText::new(format!("Je gebruikt nu versie {}.", env!("CARGO_PKG_VERSION"))).size(14.0).color(t.text_dim));
+                });
             });
-        }
-        ui.add_space(8.0);
-        ui.label(
-            RichText::new("Downloaden opent de pagina met de installatiebestanden in je browser. Installeer daarna over deze versie heen; je accounts en mail blijven bewaard.")
-                .size(12.0)
-                .color(t.text_dim),
-        );
-        ui.add_space(8.0);
+            if !release.notes.is_empty() {
+                ui.add_space(12.0);
+                egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| helder::paragraph(ui, t, &release.notes));
+            }
+            ui.add_space(12.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new("Downloaden opent de pagina met de installatiebestanden in je browser. Installeer daarna over deze versie heen; je accounts en mail blijven bewaard.")
+                        .size(12.0)
+                        .color(t.text_dim),
+                )
+                .wrap(),
+            );
+        });
+        ui.add_space(12.0);
         ui.horizontal(|ui| {
-            if ui.button(DOWNLOAD).clicked() {
-                if let Err(e) = open::that_detached(release.page()) {
-                    log::warn!("could not open the release page: {e}");
-                    app.notice = Some(Notice::error(format!("Openen is niet gelukt: {}", release.page())));
+            helder::quiet(ui, t, |ui| {
+                if helder::text_button(ui, t, SKIP).on_hover_text("Niet meer over deze versie beginnen; wel over een nieuwere").clicked() {
+                    app.view.skipped_version = Some(release.version.clone());
+                    app.save_view(ctx);
+                    close = true;
                 }
-                close = true;
-            }
-            if ui.button(SKIP).on_hover_text("Niet meer over deze versie beginnen; wel over een nieuwere").clicked() {
-                app.view.skipped_version = Some(release.version.clone());
-                app.save_view(ctx);
-                close = true;
-            }
-            if ui.button(LATER).clicked() {
-                close = true;
-            }
+            });
+            helder::right(ui, |ui| {
+                if helder::primary_button(ui, t, Icon::Download, DOWNLOAD).clicked() {
+                    if let Err(e) = open::that_detached(release.page()) {
+                        log::warn!("could not open the release page: {e}");
+                        app.notice = Some(Notice::error(format!("Openen is niet gelukt: {}", release.page())));
+                    }
+                    close = true;
+                }
+                helder::secondary(ui, t, |ui| {
+                    if ui.button(RichText::new(LATER).size(14.0).color(t.text)).clicked() {
+                        close = true;
+                    }
+                });
+            });
         });
     });
+    close |= closed;
     if close {
         app.updates.offer = None;
     }
