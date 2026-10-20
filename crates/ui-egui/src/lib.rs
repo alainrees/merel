@@ -3526,6 +3526,52 @@ mod tests {
     }
 
     #[test]
+    fn two_calendars_show_merged_with_tabs_or_side_by_side() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.state_mut().calendar.view = calendar::View::Day;
+        h.run();
+        assert!(h.query_by_label(&calendar::split_label("Mijn agenda")).is_none(), "one calendar needs no tabs");
+        h.state_mut().engine.run("calendar.add", &json!({ "name": "Sport" })).unwrap();
+        h.run();
+        assert!(h.query_by_label(&calendar::split_label("Mijn agenda")).is_some() && h.query_by_label(&calendar::close_label("Sport")).is_some());
+        let today = calendar::today();
+        let day =
+            format!("{} {} {}", calendar::weekday_name(today), chrono::Datelike::day(&today), calendar::month_name(chrono::Datelike::month(&today)));
+        assert!(h.query_by_label(&day).is_some(), "merged, one column for the day");
+
+        h.get_by_label(&calendar::split_label("Sport")).click();
+        h.run();
+        assert!(h.state().view.calendars_side_by_side);
+        assert!(
+            h.query_by_label(&format!("{day}, Mijn agenda")).is_some() && h.query_by_label(&format!("{day}, Sport")).is_some(),
+            "a column per calendar"
+        );
+        let mine = h.get_by_label(&format!("{day}, Mijn agenda")).rect();
+        let sport = h.get_by_label(&format!("{day}, Sport")).rect();
+        assert!(mine.max.x <= sport.min.x + 1.0, "side by side, in the side pane's order");
+        assert!(h.query_by_label(&calendar::merge_label("Sport")).is_some(), "the arrow now merges");
+
+        // A click in Sport's own hours makes the appointment there.
+        h.get_by_label(&format!("{day}, Sport")).click();
+        h.run();
+        let sport_id = h.state().engine.session.calendars.iter().find(|c| c.name == "Sport").unwrap().id.clone();
+        assert_eq!(h.state().calendar.editor.as_ref().and_then(|e| e.calendar_id.clone()), Some(sport_id.clone()));
+        h.state_mut().calendar.editor = None;
+        h.run();
+
+        h.get_by_label(&calendar::close_label("Sport")).click();
+        h.run();
+        assert!(!h.state().view.calendar_shown(&sport_id), "the cross unticks the calendar");
+        assert!(h.query_by_label(&format!("{day}, Mijn agenda")).is_none() && h.query_by_label(&day).is_some(), "one calendar left, one grid");
+        h.get_by_label("Sport").click();
+        h.run();
+        h.get_by_label(&calendar::merge_label("Mijn agenda")).click();
+        h.run();
+        assert!(!h.state().view.calendars_side_by_side, "merged again");
+    }
+
+    #[test]
     fn an_appointment_gets_and_loses_categories_in_its_window() {
         let mut h = harness();
         h.state_mut().module = Module::Calendar;
