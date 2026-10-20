@@ -289,7 +289,9 @@ one "Verzenden" invites everyone on the message, as in Outlook. Two more are abo
 zoeken" puts the address in the search box over every folder, and "Regel maken voor deze afzender…" opens the rules
 window with a rule for that address filled in. Hovering a ribbon button
 shows its shortcut, and the "Help" tab lists them all in one window; the same tab opens the folder
-that holds your settings and cache, the project page, and "Over Mailcraft" with the version.
+that holds your settings and cache, the project page, and "Over Mailcraft" with the version. The version names the commit the app was
+built from and its date (for example "Versie 0.1.0 (build 287797c van 2026-10-20)"), shown at the end
+of the Help tab and in "Over Mailcraft", where "Kopiëren" puts it on the clipboard for a bug report.
 
 ## Readability
 
