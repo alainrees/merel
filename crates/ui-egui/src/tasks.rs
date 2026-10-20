@@ -13,6 +13,8 @@ use crate::helder::{self, Icon};
 use crate::{MailApp, Tokens};
 
 const DATE_FORMAT: &str = "%d-%m-%Y";
+/// The calendar button beside the due date.
+pub const DUE_PICKER: &str = "Vervaldatum kiezen";
 
 /// Before the title of a repeating task in the list, as the calendar marks a series.
 const REPEAT_MARK: &str = "🔁";
@@ -407,7 +409,8 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     helder::icon_row(ui, t, Icon::Calendar, |ui| {
         helder::underline_field(ui, t, &mut editor.due, "Vervaldatum (dd-mm-jjjj)", 200.0, false)
-            .on_hover_text("Vervaldatum als dag-maand-jaar, of leeg voor geen deadline.")
+            .on_hover_text("Vervaldatum als dag-maand-jaar, of leeg voor geen deadline.");
+        crate::date_picker::button(ui, t, &mut editor.due, DUE_PICKER);
     });
     helder::icon_row(ui, t, Icon::Flag, |ui| {
         ui.label(RichText::new("Prioriteit").size(14.0).color(t.text));

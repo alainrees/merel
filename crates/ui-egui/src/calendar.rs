@@ -71,6 +71,11 @@ const DATE_FORMAT: &str = "%d-%m-%Y";
 pub const GOTO: &str = "Ga naar datum";
 pub const GOTO_HINT: &str = "Gebruik dag-maand-jaar, bijvoorbeeld 21-10-2026.";
 const GOTO_BOX: &str = "calendar_goto_box";
+const GOTO_PICKER: &str = "Dag kiezen";
+/// The calendar buttons beside the appointment's dates.
+pub const START_PICKER: &str = "Begindatum kiezen";
+pub const END_PICKER: &str = "Einddatum kiezen";
+pub const UNTIL_PICKER: &str = "Laatste datum van de reeks kiezen";
 
 /// A day typed as dag-maand-jaar, with or without leading zeros.
 pub fn parse_date(text: &str) -> Option<NaiveDate> {
@@ -92,10 +97,16 @@ pub fn goto_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut close = false;
     egui::Window::new(GOTO).collapsible(false).resizable(false).default_width(260.0).show(ctx, |ui| {
         ui.label(RichText::new("Welke dag wil je zien? (dag-maand-jaar)").color(t.text));
-        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0).id(egui::Id::new(GOTO_BOX)));
-        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            go = true;
-        }
+        ui.horizontal(|ui| {
+            let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0).id(egui::Id::new(GOTO_BOX)));
+            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                go = true;
+            }
+            // Picking a day from the month goes there at once.
+            if crate::date_picker::button(ui, t, &mut text, GOTO_PICKER).is_some() {
+                go = true;
+            }
+        });
         if parse_date(&text).is_none() {
             ui.label(RichText::new(GOTO_HINT).size(12.0).color(t.flag));
         }
@@ -191,16 +202,16 @@ fn midnight(d: NaiveDate) -> Option<i64> {
 }
 
 /// The Monday on or before `d`.
-fn week_start(d: NaiveDate) -> NaiveDate {
+pub(crate) fn week_start(d: NaiveDate) -> NaiveDate {
     d.checked_sub_days(Days::new(u64::from(d.weekday().num_days_from_monday()))).unwrap_or(d)
 }
 
-fn add_days(d: NaiveDate, n: i64) -> NaiveDate {
+pub(crate) fn add_days(d: NaiveDate, n: i64) -> NaiveDate {
     let moved = if n >= 0 { d.checked_add_days(Days::new(n.unsigned_abs())) } else { d.checked_sub_days(Days::new(n.unsigned_abs())) };
     moved.unwrap_or(d)
 }
 
-fn add_months(d: NaiveDate, n: i32) -> NaiveDate {
+pub(crate) fn add_months(d: NaiveDate, n: i32) -> NaiveDate {
     let moved = if n >= 0 { d.checked_add_months(Months::new(n.unsigned_abs())) } else { d.checked_sub_months(Months::new(n.unsigned_abs())) };
     moved.unwrap_or(d)
 }
@@ -842,7 +853,7 @@ fn chip(ui: &mut Ui, rect: Rect, label: &str, fill: Color32, show_as: ShowAs, se
 }
 
 /// A quiet square button with a chevron, for the previous or next day, week or month.
-fn nav_button(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str) -> egui::Response {
+pub(crate) fn nav_button(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str) -> egui::Response {
     let r = ui.add(
         egui::Button::image(icon.image(helder::ICON, t.text))
             .frame_when_inactive(false)
@@ -1532,7 +1543,7 @@ fn repeat_fields(ui: &mut Ui, t: &Tokens, editor: &mut Editor) {
             row(ui, |ui| {
                 helder::indent(ui);
                 ui.label(RichText::new("Tot en met").size(14.0).color(t.text));
-                helder::underline_field(ui, t, &mut editor.until, "31-12-2026", 110.0, false);
+                crate::date_picker::field(ui, t, &mut editor.until, "31-12-2026", 110.0, UNTIL_PICKER);
             });
         }
         Ends::AfterCount => {
@@ -1968,20 +1979,30 @@ fn form(
         });
     }
     helder::icon_row(ui, t, Icon::Clock, |ui| {
-        helder::underline_field(ui, t, &mut editor.start_date, "19-10-2026", 96.0, false);
+        let before = parse_date(&editor.start_date);
+        if let Some(start) = crate::date_picker::field(ui, t, &mut editor.start_date, "19-10-2026", 96.0, START_PICKER)
+            && let (Some(before), Some(end)) = (before, parse_date(&editor.end_date))
+        {
+            // The end moves along, so the appointment keeps its length.
+            editor.end_date = add_days(end, (start - before).num_days()).format(DATE_FORMAT).to_string();
+        }
         if !editor.all_day
             && let Some(time) = time_field(ui, t, &mut editor.start_time, "start")
         {
             editor.move_start(&time);
         }
         ui.label(RichText::new("tot").color(t.text_dim));
-        helder::underline_field(ui, t, &mut editor.end_date, "19-10-2026", 96.0, false);
+        crate::date_picker::field(ui, t, &mut editor.end_date, "19-10-2026", 96.0, END_PICKER);
         if !editor.all_day
             && let Some(time) = time_field(ui, t, &mut editor.end_time, "end")
         {
             editor.end_time = time;
         }
-        helder::right(ui, |ui| helder::toggle(ui, t, &mut editor.all_day, "Hele dag"));
+    });
+    // On a row of its own: beside the two dates with their calendar buttons it has no room.
+    ui.horizontal(|ui| {
+        helder::indent(ui);
+        helder::toggle(ui, t, &mut editor.all_day, "Hele dag");
     });
     // A calendar on this computer keeps a series as its rule. An account's server owns its
     // own series: a new appointment there can start one, but what comes back is listed and

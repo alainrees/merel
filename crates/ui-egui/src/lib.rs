@@ -14,6 +14,7 @@ mod certificate;
 pub mod cleanup;
 mod compose;
 pub mod contacts;
+mod date_picker;
 mod dates;
 pub mod eml;
 pub mod folders;
@@ -2808,6 +2809,48 @@ mod tests {
         assert!(rich.style_of(0).bold && !rich.style_of(7).bold, "{:?}", rich.runs);
         let back = calendar::Editor::from_appointment(&a, None);
         assert!(back.notes_editor.rich.style_of(0).bold, "the window shows it again");
+    }
+
+    #[test]
+    fn a_day_picked_from_the_calendar_fills_the_date_and_the_end_moves_along() {
+        let mut h = harness();
+        let mut e = calendar::Editor::new_at(chrono::Local::now().naive_local());
+        e.start_date = "05-10-2026".into();
+        e.end_date = "06-10-2026".into();
+        h.state_mut().calendar.editor = Some(e);
+        h.run();
+        h.get_by_label(calendar::START_PICKER).click();
+        h.run();
+        h.get_by_label("oktober 2026");
+        h.get_by_label("Volgende maand").click();
+        h.run();
+        h.get_by_label("november 2026");
+        h.get_by_label("12 november 2026").click();
+        h.run();
+        let e = h.state().calendar.editor.as_ref().expect("still open");
+        assert_eq!((e.start_date.as_str(), e.end_date.as_str()), ("12-11-2026", "13-11-2026"), "a day long, as before");
+        assert!(h.query_by_label("Volgende maand").is_none(), "the month closes once a day is picked");
+        h.get_by_label(calendar::END_PICKER).click();
+        h.run();
+        h.get_by_label("20 november 2026").click();
+        h.run();
+        assert_eq!(h.state().calendar.editor.as_ref().expect("open").end_date, "20-11-2026");
+    }
+
+    #[test]
+    fn a_task_due_day_can_be_picked_from_the_calendar() {
+        let mut h = harness();
+        h.state_mut().module = Module::Tasks;
+        h.run();
+        h.get_by_label("Nieuwe taak").click();
+        h.run();
+        h.state_mut().tasks.editor.as_mut().expect("editor").due = "30-11-2026".into();
+        h.run();
+        h.get_by_label(tasks::DUE_PICKER).click();
+        h.run();
+        h.get_by_label("1 december 2026").click();
+        h.run();
+        assert_eq!(h.state().tasks.editor.as_ref().expect("editor").due, "01-12-2026");
     }
 
     #[test]
