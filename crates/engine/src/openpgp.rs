@@ -30,8 +30,38 @@ pub struct PgpKeys {
 }
 
 impl PgpKeys {
+    /// The correspondents' keys and the public halves of the own keys, for the sent copies.
     fn people(&self) -> Vec<PublicKey> {
-        self.people.read().map(|p| p.values().cloned().collect()).unwrap_or_default()
+        let mut keys: Vec<PublicKey> = self.people.read().map(|p| p.values().cloned().collect()).unwrap_or_default();
+        if let Ok(own) = self.own.read() {
+            keys.extend(own.values().map(|k| k.public()));
+        }
+        keys
+    }
+
+    /// The own key of `account_id`.
+    pub fn own_key(&self, account_id: &str) -> Option<Arc<SecretKey>> {
+        self.own.read().ok()?.get(account_id).cloned()
+    }
+
+    /// The addresses among `addresses` without a known key mail can be encrypted to at `now`,
+    /// lowercase, each once.
+    pub fn missing<'a>(&self, addresses: impl Iterator<Item = &'a Address>, now: i64) -> Vec<String> {
+        let people = self.people.read().ok();
+        let mut out: Vec<String> = Vec::new();
+        for email in addresses.map(|a| a.email().to_lowercase()) {
+            let known = people.as_ref().and_then(|p| p.get(&email)).is_some_and(|k| k.can_encrypt(now));
+            if !known && !out.contains(&email) {
+                out.push(email);
+            }
+        }
+        out
+    }
+
+    /// The known keys of `addresses`.
+    pub fn keys_of<'a>(&self, addresses: impl Iterator<Item = &'a Address>) -> Vec<PublicKey> {
+        let Ok(people) = self.people.read() else { return Vec::new() };
+        addresses.filter_map(|a| people.get(&a.email().to_lowercase()).cloned()).collect()
     }
 
     /// What the PGP/MIME signature on `raw` says, if it has one.
@@ -270,5 +300,38 @@ mod tests {
         assert!(again.pgp_key("a1").is_none());
         assert!(!dir.join("cache").join("a1.pgpkey").exists(), "removing the account removes the key");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mail_from_an_account_with_a_key_is_signed_carries_autocrypt_and_encrypts_to_known_keys() {
+        use crate::certificates::{outgoing, parse_body};
+        use mailcraft_model::Draft;
+        let mut e = engine("alain@voorbeeld.nl");
+        let a = account("alain@voorbeeld.nl");
+        let raw = b"From: alain@voorbeeld.nl\r\nTo: jij@example.org\r\nSubject: Contract\r\nContent-Type: text/plain\r\n\r\nHallo\r\n".to_vec();
+        let draft = Draft { to: vec![jij()], subject: "Contract".into(), body: "Hallo".into(), ..Draft::default() };
+        assert_eq!(outgoing(&e.keys, &a, &draft, raw.clone()).unwrap(), raw, "no key: as it was");
+        e.import_pgp_key("a1", ALAIN, "geheim").unwrap();
+
+        let signed = outgoing(&e.keys, &a, &draft, raw.clone()).unwrap();
+        assert!(String::from_utf8_lossy(&signed).contains("application/pgp-signature"));
+        let (addr, key) = mailcraft_pgp::autocrypt(&signed).unwrap();
+        assert_eq!(addr, "alain@voorbeeld.nl");
+        assert_eq!(key.info().name, "Alain Tester");
+        let unsigned = outgoing(&e.keys, &a, &Draft { sign: Some(false), ..draft.clone() }, raw.clone()).unwrap();
+        assert!(!String::from_utf8_lossy(&unsigned).contains("multipart/signed") && mailcraft_pgp::autocrypt(&unsigned).is_some());
+
+        let secret = Draft { encrypt: true, ..draft.clone() };
+        let refused = outgoing(&e.keys, &a, &secret, raw.clone()).unwrap_err();
+        assert!(refused.contains("Van jij@example.org is nog geen certificaat of sleutel bekend"), "{refused}");
+        assert_eq!(e.missing_certificates("a1", &[jij()]), vec!["jij@example.org".to_string()]);
+        e.learn_autocrypt("x", Some(&jij()), &with_autocrypt("jij@example.org", SIGNED));
+        assert!(e.missing_certificates("a1", &[jij()]).is_empty());
+        let sent = outgoing(&e.keys, &a, &secret, raw).unwrap();
+        assert!(mailcraft_pgp::is_encrypted(&sent) && !sent.windows(5).any(|w| w == b"Hallo"));
+        let mine = parse_body(&e.keys, "a1", &sent);
+        assert_eq!(mine.encrypted, Some(Encryption::Opened));
+        assert!(mine.text.contains("Hallo"), "{}", mine.text);
+        assert!(matches!(mine.pgp_signature, Some(Verdict::Valid { signer }) if signer.covers("alain@voorbeeld.nl")), "own key");
     }
 }

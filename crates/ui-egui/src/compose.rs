@@ -51,11 +51,11 @@ pub struct Compose {
     /// Outlook's "Leesbevestiging vragen": the reader's program is asked to say when the message
     /// was read.
     pub read_receipt: bool,
-    /// Whether the message is signed with the account's S/MIME certificate; `None` follows the
-    /// account: signed when it has one.
+    /// Whether the message is signed with the account's S/MIME certificate or OpenPGP key;
+    /// `None` follows the account: signed when it has one.
     pub sign: Option<bool>,
-    /// Outlook's "Versleutelen": the message goes out encrypted (S/MIME) for its recipients
-    /// and the sender, and only when every recipient's certificate is known.
+    /// Outlook's "Versleutelen": the message goes out encrypted (S/MIME or OpenPGP) for its
+    /// recipients and the sender, and only when every recipient's certificate or key is known.
     pub encrypt: bool,
     /// What Send found worth a second look, with the moment chosen if "Later verzenden" was
     /// pressed; the window shows it and waits for "Toch verzenden" or a change to the message.
@@ -75,7 +75,7 @@ pub const NO_ATTACHMENT: &str = "Je schrijft over een bijlage, maar er zit er ge
 pub const NO_SUBJECT: &str = "Het bericht heeft geen onderwerp.";
 pub const SEND_ANYWAY: &str = "Toch verzenden";
 pub const LOOK_AGAIN: &str = "Nog even nakijken";
-/// The tick box that signs the message with the account's S/MIME certificate.
+/// The tick box that signs the message with the account's certificate or OpenPGP key.
 pub const SIGN: &str = "Ondertekenen";
 /// The send button.
 pub const SEND: &str = "Verzenden";
@@ -433,9 +433,11 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let account =
         if c.account_id.is_empty() { app.engine.session.current_account().map(|a| a.id.clone()).unwrap_or_default() } else { c.account_id.clone() };
     let certificate = app.engine.certificate(&account);
+    let pgp_key = app.engine.pgp_key(&account);
+    let can_sign = certificate.is_some() || pgp_key.is_some();
     // The recipients encrypted mail cannot reach yet, for want of their certificate.
     let missing = match c.draft() {
-        Ok(d) if c.encrypt => app.engine.missing_certificates(&[d.to, d.cc].concat()),
+        Ok(d) if c.encrypt => app.engine.missing_certificates(&account, &[d.to, d.cc].concat()),
         _ => Vec::new(),
     };
     // Files dropped onto the window become attachments; files hovering over it get a hint.
@@ -502,24 +504,29 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                         }
                         template = crate::templates::menu(ui, t, &templates);
                         crate::importance::chooser(ui, t, &mut c.importance);
-                        if certificate.is_some() || c.sign == Some(true) {
-                            let on = c.sign.unwrap_or(certificate.is_some());
-                            let hover = match &certificate {
-                                Some(info) => format!(
+                        if can_sign || c.sign == Some(true) {
+                            let on = c.sign.unwrap_or(can_sign);
+                            let hover = match (&certificate, &pgp_key) {
+                                (Some(info), _) => format!(
                                     "Zet je digitale handtekening onder het bericht (S/MIME), met het certificaat van {}, geldig tot {}. De ontvanger ziet dat het bericht van jou komt en onderweg niet is veranderd.",
                                     info.name,
                                     crate::dates::day(info.not_after)
                                 ),
-                                None => "Dit account heeft geen certificaat meer; importeer er een onder Bestand of zet dit uit.".to_string(),
+                                (None, Some(key)) => format!(
+                                    "Zet je digitale handtekening onder het bericht (OpenPGP), met de sleutel van {} ({}). De ontvanger ziet dat het bericht van jou komt en onderweg niet is veranderd.",
+                                    key.name,
+                                    key.grouped()
+                                ),
+                                (None, None) => "Dit account heeft geen certificaat of sleutel meer; importeer er een onder Bestand of zet dit uit.".to_string(),
                             };
                             if helder::toggle_button(ui, t, Icon::ShieldCheck, SIGN, on).on_hover_text(hover).clicked() {
                                 c.sign = Some(!on);
                             }
                         }
-                        if (certificate.is_some() || c.encrypt)
+                        if (can_sign || c.encrypt)
                             && helder::toggle_button(ui, t, Icon::Lock, ENCRYPT, c.encrypt)
                                 .on_hover_text(
-                                    "Versleutelt het bericht en de bijlagen (S/MIME), zodat alleen de ontvangers en jij het kunnen lezen. Het onderwerp gaat niet versleuteld. Dat lukt alleen naar mensen van wie je al een ondertekend bericht hebt gehad.",
+                                    "Versleutelt het bericht en de bijlagen (S/MIME of OpenPGP), zodat alleen de ontvangers en jij het kunnen lezen. Het onderwerp gaat niet versleuteld. Dat lukt alleen naar mensen van wie je al een ondertekend bericht hebt gehad.",
                                 )
                                 .clicked()
                         {
