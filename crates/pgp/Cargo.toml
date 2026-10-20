@@ -4,6 +4,7 @@ description = "OpenPGP for mail: the person's own key, PGP/MIME signatures and e
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 pgp = { workspace = true }
