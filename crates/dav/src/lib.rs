@@ -291,6 +291,8 @@ impl DavClient {
                 .timeout_connect(Some(CONNECT_TIMEOUT))
                 .http_status_as_error(false)
                 .max_redirects(0)
+                // PROPFIND and REPORT are WebDAV methods; ureq refuses them unless told.
+                .allow_non_standard_methods(true)
                 .user_agent("Mailcraft")
                 .build(),
         );

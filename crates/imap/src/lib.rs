@@ -239,22 +239,32 @@ pub struct ImapClient {
 
 const HEADER_FIELDS: &str = "BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID)]";
 
-/// A mailbox name as an IMAP quoted string. CR, LF and NUL can never be quoted, so they are
-/// refused outright.
-fn quote(name: &str) -> Result<String> {
+/// A mailbox name as it may go to the imap crate, which quotes it itself (SELECT, MOVE,
+/// CREATE, RENAME, DELETE, SUBSCRIBE). CR, LF and NUL can never be quoted, so they are refused.
+fn checked(name: &str) -> Result<&str> {
     if name.chars().any(|c| matches!(c, '\r' | '\n' | '\0')) {
         return Err(ImapError::BadName(name.chars().take(40).collect()));
     }
-    let mut out = String::with_capacity(name.len() + 2);
-    out.push('"');
-    for c in name.chars() {
+    Ok(name)
+}
+
+/// The inside of an IMAP quoted string: `"` and `\` escaped. For APPEND, which the imap crate
+/// puts between quotes without escaping.
+fn escaped(name: &str) -> Result<String> {
+    let mut out = String::with_capacity(name.len());
+    for c in checked(name)?.chars() {
         if c == '"' || c == '\\' {
             out.push('\\');
         }
         out.push(c);
     }
-    out.push('"');
     Ok(out)
+}
+
+/// A mailbox name as an IMAP quoted string, for the commands the imap crate passes on as they
+/// are (LIST patterns, COPY).
+fn quote(name: &str) -> Result<String> {
+    Ok(format!("\"{}\"", escaped(name)?))
 }
 
 /// Which special folder a mailbox is, from its SPECIAL-USE attributes, else from its name.
@@ -317,7 +327,7 @@ impl ImapClient {
     }
 
     fn select(&mut self, folder: &str) -> Result<imap::types::Mailbox> {
-        let mb = self.session.select(quote(folder)?)?;
+        let mb = self.session.select(checked(folder)?)?;
         self.selected = Some(folder.to_string());
         Ok(mb)
     }
@@ -396,12 +406,12 @@ impl ImapClient {
         if self.selected.as_deref() != Some(folder) {
             self.select(folder)?;
         }
-        let dest = quote(dest)?;
         let uid = uid.to_string();
-        if self.session.uid_mv(&uid, &dest).is_ok() {
+        // MOVE quotes the name itself; COPY sends it as given.
+        if self.session.uid_mv(&uid, checked(dest)?).is_ok() {
             return Ok(());
         }
-        self.session.uid_copy(&uid, &dest)?;
+        self.session.uid_copy(&uid, quote(dest)?)?;
         self.session.uid_store(&uid, "+FLAGS.SILENT (\\Deleted)")?;
         self.session.uid_expunge(&uid)?;
         Ok(())
@@ -468,7 +478,7 @@ impl ImapClient {
 
     /// Files a sent message in `folder`, marked read.
     pub fn append(&mut self, folder: &str, message: &[u8]) -> Result<()> {
-        let folder = quote(folder)?;
+        let folder = escaped(folder)?;
         self.session.append(&folder, message).flag(imap::types::Flag::Seen).finish()?;
         Ok(())
     }
@@ -513,7 +523,7 @@ impl ImapClient {
         if name.is_empty() || name.contains(&delimiter) || name.chars().any(|c| matches!(c, '\r' | '\n' | '\0' | '%' | '*')) {
             return Err(ImapError::BadName(name.chars().take(40).collect()));
         }
-        quote(folder)?;
+        checked(folder)?;
         let path = match folder.rsplit_once(delimiter.as_str()) {
             Some((parent, _)) => format!("{parent}{delimiter}{name}"),
             None => name.to_string(),
@@ -528,7 +538,7 @@ impl ImapClient {
 
     /// Removes `folder` and the messages in it; subfolders stay, as the protocol has it.
     pub fn delete_folder(&mut self, folder: &str) -> Result<()> {
-        quote(folder)?;
+        checked(folder)?;
         self.leave(folder)?;
         if let Err(e) = self.session.unsubscribe(folder) {
             log::debug!("could not unsubscribe from {folder}: {e}");
@@ -758,6 +768,58 @@ mod tests {
         assert_eq!(search_keys(&["factuur", "2026"], false).unwrap(), "TEXT \"factuur\" TEXT \"2026\"");
         assert_eq!(search_keys(&["a\"b"], false).unwrap(), "TEXT \"a\\\"b\"");
         assert_eq!(search_keys(&["café", "x"], true).unwrap(), "CHARSET UTF-8 TEXT {5+}\r\ncafé TEXT {1+}\r\nx");
+    }
+
+    /// A logged-in client on a fake server that answers every command with OK (and `+` to a
+    /// literal) and hands back the lines it was sent.
+    fn recording() -> (ImapClient, std::sync::mpsc::Receiver<String>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let port = server(move |mut s| {
+            let _ = s.write_all(b"* OK ready\r\n");
+            let mut pending = Vec::new();
+            let mut buf = [0u8; 4096];
+            while let Ok(n) = s.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                pending.extend_from_slice(&buf[..n]);
+                while let Some(end) = pending.windows(2).position(|w| w == b"\r\n") {
+                    let line = String::from_utf8_lossy(&pending[..end]).to_string();
+                    pending.drain(..end + 2);
+                    let reply = if line.ends_with('}') {
+                        "+ go\r\n".to_string()
+                    } else if let Some((tag, _)) = line.split_once(' ').filter(|(t, _)| t.starts_with('a')) {
+                        format!("{tag} OK done\r\n")
+                    } else {
+                        // The message itself after a literal: the APPEND's tag was on its first line.
+                        String::new()
+                    };
+                    let _ = tx.send(line);
+                    let _ = s.write_all(reply.as_bytes());
+                }
+            }
+        });
+        let tcp = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        // The fake server never ends an APPEND; its reply is not what the tests look at.
+        tcp.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut client = imap::Client::new(Box::new(tcp) as Conn);
+        client.read_greeting().unwrap();
+        let session = client.login("a", "b").map_err(|(e, _)| e).unwrap();
+        (ImapClient { session, selected: None }, rx)
+    }
+
+    #[test]
+    fn mailbox_names_are_quoted_once() {
+        let (mut c, rx) = recording();
+        c.select("Trash").unwrap();
+        c.move_to("INBOX", 7, "INBOX.Trash").unwrap();
+        let _ = c.append("INBOX.Sent", b"Subject: x\r\n\r\nhoi\r\n");
+        let sent: Vec<String> = rx.try_iter().collect();
+        let has = |want: &str| sent.iter().any(|l| l.ends_with(want));
+        assert!(has("SELECT \"Trash\""), "{sent:?}");
+        assert!(has("UID MOVE 7 \"INBOX.Trash\""), "{sent:?}");
+        assert!(sent.iter().any(|l| l.contains("APPEND \"INBOX.Sent\" ")), "{sent:?}");
+        assert!(!sent.iter().any(|l| l.contains("\"\\\"")), "nothing is quoted twice: {sent:?}");
     }
 
     #[test]
