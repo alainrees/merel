@@ -357,7 +357,7 @@ fn run(c: &mut dyn Mailbox, account: &Account, keys: &Keys, job: &Job) -> Result
         }
         // Only reached for a store that sends itself; SMTP accounts are served in `serve`.
         Job::Send { draft_id, draft, .. } => {
-            let signed = mailcraft_smtp::build(&account.address, draft)
+            let signed = mailcraft_smtp::build_for_store(&account.address, draft)
                 .map_err(|e| describe_smtp(&e))
                 .and_then(|message| outgoing(keys, account, draft, message.formatted()));
             let result = match signed {
