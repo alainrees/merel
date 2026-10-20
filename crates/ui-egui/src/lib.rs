@@ -379,6 +379,7 @@ impl MailApp {
         welcome::window(self, &ctx, &t);
         drag_preview(self, &ctx, &t);
         calendar::drag_preview(self, &ctx, &t);
+        helder::linger_closed_windows(&ctx);
         if self.tab == Tab::Home && self.module == Module::Mail {
             shortcuts(self, &ctx);
         } else if self.tab == Tab::Home {
@@ -1682,7 +1683,7 @@ fn message_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         return;
     };
     let mut open = true;
-    helder::item_window(ctx, t, "message-window", &format!("✉ {subject}"), vec2(820.0, 640.0), &mut open, |ui| {
+    helder::item_window(ctx, t, "message-window", &subject, vec2(820.0, 640.0), &mut open, |ui| {
         // Esc closes it, also when it is a window of its own and the main window does not see the key.
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             app.message_window = false;
@@ -4344,13 +4345,15 @@ mod tests {
         // The keys of the mail module work from the Start tab.
         h.get_by_label("Start").click();
         h.run();
+        let in_list = h.get_all_by_label("Planning voor donderdag").count();
         h.key_press(egui::Key::Enter);
         h.run();
         assert!(h.state().message_window);
-        h.get_by_label("✉ Planning voor donderdag");
+        // The window is titled with the subject, as the row in the list is.
+        assert!(h.get_all_by_label("Planning voor donderdag").count() > in_list);
         h.key_press(egui::Key::Escape);
         h.run();
-        assert!(!h.state().message_window && h.query_by_label("✉ Planning voor donderdag").is_none());
+        assert!(!h.state().message_window && h.get_all_by_label("Planning voor donderdag").count() == in_list);
         h.get_by_label("Beeld").click();
         h.run();
         h.get_by_label("Rechts").click();

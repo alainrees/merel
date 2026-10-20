@@ -848,10 +848,12 @@ pub fn note(ui: &mut Ui, t: &Tokens, text: &str) {
     });
 }
 
-/// A window for a message, an appointment or a new mail, drawn inside the main one with a close
-/// button that clears `open`. These are not native windows of their own: on macOS, closing a
-/// second native window aborts the app in AppKit's Touch Bar bookkeeping (winit), so they stay
-/// inside the main window until that is fixed upstream.
+/// A window of its own, as Outlook opens a message, an appointment or a new mail: the system's
+/// title bar with its close, minimise and zoom buttons and `title`, on macOS, Windows and Linux
+/// alike, and no title bar of ours under it. Closing it from the title bar clears `open`.
+/// Where the platform cannot open a second window (and in the tests) it is drawn as a window
+/// inside the main one. A closed window is hidden first and let go a few frames later (see
+/// [`linger_closed_windows`]).
 pub fn item_window<R>(
     ctx: &egui::Context,
     t: &Tokens,
@@ -861,15 +863,60 @@ pub fn item_window<R>(
     open: &mut bool,
     add: impl FnOnce(&mut Ui) -> R,
 ) -> Option<R> {
-    egui::Window::new(title)
-        .id(egui::Id::new(id))
-        .open(open)
-        .collapsible(false)
-        .resizable(false)
-        .frame(window_frame(ctx, t))
-        .default_width(size.x - 40.0)
-        .show(ctx, add)
-        .and_then(|r| r.inner)
+    let viewport = egui::ViewportId::from_hash_of(id);
+    ctx.data_mut(|d| d.get_temp_mut_or_default::<Windows>(egui::Id::new(WINDOWS)).shown.push(viewport));
+    let builder = egui::ViewportBuilder::default().with_title(title).with_visible(true).with_inner_size(size).with_min_inner_size(vec2(480.0, 360.0));
+    let mut add = Some(add);
+    let mut out = None;
+    ctx.show_viewport_immediate(viewport, builder, |ui, class| {
+        let Some(add) = add.take() else { return };
+        if class == egui::ViewportClass::EmbeddedWindow {
+            out = Some(add(ui));
+            return;
+        }
+        if ui.input(|i| i.viewport().close_requested()) {
+            *open = false;
+        }
+        egui::CentralPanel::default().frame(Frame::NONE.fill(t.window).inner_margin(12)).show(ui, |ui| {
+            out = Some(add(ui));
+        });
+    });
+    out
+}
+
+const WINDOWS: &str = "helder-item-windows";
+/// How many frames a closed window stays, hidden, before it is let go.
+const LINGER_FRAMES: u32 = 10;
+
+/// The item windows shown this frame and the last, and the closed ones still kept.
+#[derive(Clone, Default)]
+struct Windows {
+    shown: Vec<egui::ViewportId>,
+    last: Vec<egui::ViewportId>,
+    lingering: Vec<(egui::ViewportId, u32)>,
+}
+
+/// Keeps each item window that just closed for a few more frames, hidden, before it is let go.
+/// Closing a window at once, while AppKit still watches it for the Touch Bar, can abort the
+/// app on macOS; ordering it out first and letting go of it later, as winit and Zed's fixes
+/// for the same crash do, avoids that. Call once per frame, after every window was shown.
+pub fn linger_closed_windows(ctx: &egui::Context) {
+    let id = egui::Id::new(WINDOWS);
+    let mut w: Windows = ctx.data_mut(|d| std::mem::take(d.get_temp_mut_or_default::<Windows>(id)));
+    if !ctx.embed_viewports() {
+        for closed in w.last.iter().filter(|v| !w.shown.contains(v)) {
+            w.lingering.push((*closed, LINGER_FRAMES));
+        }
+        w.lingering.retain(|(v, _)| !w.shown.contains(v));
+        for (viewport, frames) in &mut w.lingering {
+            *frames -= 1;
+            ctx.show_viewport_immediate(*viewport, egui::ViewportBuilder::default().with_visible(false), |_, _| {});
+            ctx.request_repaint();
+        }
+        w.lingering.retain(|(_, frames)| *frames > 0);
+    }
+    w.last = std::mem::take(&mut w.shown);
+    ctx.data_mut(|d| d.insert_temp(id, w));
 }
 
 /// Lays out `add` at the right end of a row of buttons. Unlike [`right`] it never draws over
