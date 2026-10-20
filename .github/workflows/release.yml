@@ -1,0 +1,93 @@
+name: Release
+# A tag vX.Y.Z builds the installers for macOS, Windows and Linux and publishes them as a GitHub
+# release. A pull request that changes the packaging builds them too, as workflow artifacts, so a
+# broken installer shows up before the next release.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml", "packaging/**", "apps/mailcraft/**"]
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  CARGO_INCREMENTAL: 0
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p mailcraft --target aarch64-apple-darwin
+      - run: cargo build --release --locked -p mailcraft --target x86_64-apple-darwin
+      - run: packaging/macos/bundle.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p mailcraft
+      - name: Installer
+        shell: bash
+        run: |
+          choco install innosetup --no-progress -y
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/DAppVersion=$(packaging/version.sh)" packaging/windows/mailcraft.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  linux:
+    # The oldest supported runner: an AppImage only runs on systems at least as new as where it was built.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfuse2
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p mailcraft
+      - name: Debian package
+        run: |
+          cargo install cargo-deb --locked
+          mkdir -p dist
+          cargo deb -p mailcraft --no-build --output dist/
+      - name: AppImage
+        run: |
+          curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          sudo mv appimagetool /usr/local/bin/
+          packaging/linux/appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the version in Cargo.toml
+        run: test "${GITHUB_REF_NAME}" = "v$(packaging/version.sh)"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Mailcraft ${GITHUB_REF_NAME#v}" --generate-notes
