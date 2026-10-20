@@ -109,11 +109,19 @@ pub fn run(secrets: &Arc<dyn SecretStore>, sign_in: SignIn) -> Result<Account, S
     Ok(sign_in.account)
 }
 
-/// A new OAuth account from the form fields, with the provider's preset servers.
+/// A new OAuth account from the form fields, with the provider's preset servers. An empty
+/// client ID falls back to the one built into Mailcraft, where there is one.
 pub fn account(protocol: Protocol, name: &str, email: &str, client_id: &str) -> Result<Account, String> {
+    account_with(protocol, name, email, client_id, protocol.builtin_client_id())
+}
+
+fn account_with(protocol: Protocol, name: &str, email: &str, client_id: &str, builtin: Option<&str>) -> Result<Account, String> {
     let preset = protocol.preset().ok_or_else(|| "Kies Gmail of Microsoft 365.".to_string())?;
     let address = mailcraft_model::Address::new(Some(name.trim()), email.trim()).map_err(|_| "Vul een geldig e-mailadres in.".to_string())?;
-    let client_id = client_id.trim();
+    let client_id = match client_id.trim() {
+        "" => builtin.unwrap_or_default(),
+        own => own,
+    };
     if client_id.is_empty() || client_id.chars().any(|c| c.is_control() || c.is_whitespace()) {
         return Err("Vul de client-ID in die je bij de aanbieder hebt aangemaakt.".into());
     }
@@ -147,6 +155,16 @@ mod tests {
         assert!(matches!(a.auth, Auth::OAuth2 { ref scope, .. } if scope.starts_with("https://mail.google.com/ ") && scope.contains("/auth/tasks")));
         assert!(account(Protocol::ImapSmtp, "", "a@b.nl", "x").is_err());
         assert!(account(Protocol::Gmail, "", "a@b.nl", " ").is_err());
+    }
+
+    #[test]
+    fn an_empty_client_id_takes_the_builtin_one() {
+        let builtin = account_with(Protocol::Microsoft365, "", "a@outlook.com", " ", Some("built-in"));
+        assert!(matches!(builtin.unwrap().auth, Auth::OAuth2 { ref client_id, .. } if client_id == "built-in"));
+        let own = account_with(Protocol::Microsoft365, "", "a@outlook.com", "own", Some("built-in"));
+        assert!(matches!(own.unwrap().auth, Auth::OAuth2 { ref client_id, .. } if client_id == "own"));
+        assert!(account_with(Protocol::Microsoft365, "", "a@outlook.com", "", None).is_err());
+        assert_eq!(Protocol::Gmail.builtin_client_id(), None);
     }
 
     #[test]

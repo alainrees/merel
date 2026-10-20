@@ -582,12 +582,17 @@ fn oauth_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         None => {}
     }
     let busy = app.engine.session.sign_in.is_some();
+    // With Mailcraft's own registration the client ID is only for those who bring their own.
+    let builtin = app.form.kind.builtin_client_id().is_some();
     let (provider, secret_needed, help) = match app.form.kind {
         Protocol::Gmail => (
             "Google",
             true,
             "Maak in de Google Cloud Console een OAuth-client van het type Desktop app en vul de client-ID en het client-secret in. Zie docs/accounts.md.",
         ),
+        _ if builtin => {
+            ("Microsoft", false, "Vul je naam en e-mailadres in en log in bij Microsoft in je browser. Mailcraft ziet je wachtwoord niet.")
+        }
         _ => (
             "Microsoft",
             false,
@@ -600,7 +605,13 @@ fn oauth_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.add_enabled_ui(!busy, |ui| {
         field(ui, t, "Naam", &mut f.name, false);
         field(ui, t, "E-mailadres", &mut f.email, false);
-        field(ui, t, "Client-ID", &mut f.client_id, false);
+        if builtin {
+            egui::CollapsingHeader::new("Eigen client-ID (optioneel)").default_open(!f.client_id.is_empty()).show(ui, |ui| {
+                field(ui, t, "Client-ID", &mut f.client_id, false);
+            });
+        } else {
+            field(ui, t, "Client-ID", &mut f.client_id, false);
+        }
         if secret_needed {
             field(ui, t, "Client-secret", &mut f.client_secret, true);
         }
