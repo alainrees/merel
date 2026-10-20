@@ -8,6 +8,7 @@
 mod attachments;
 mod backstage;
 pub mod calendar;
+pub mod calendars;
 pub mod categories;
 mod certificate;
 pub mod cleanup;
@@ -334,6 +335,7 @@ impl MailApp {
         compose::show(self, &ctx, &t);
         calendar::window(self, &ctx, &t);
         calendar::goto_window(self, &ctx, &t);
+        calendars::window(self, &ctx, &t);
         groups::window(self, &ctx, &t);
         reminders::window(self, &ctx, &t);
         rules::window(self, &ctx, &t);
@@ -3521,6 +3523,54 @@ mod tests {
             let rect = h.get_by_label_contains(last).rect();
             assert!(rect.max.x <= 1280.0, "{last} on the {tab:?} tab ends at {} and falls off a 1280 px window", rect.max.x);
         }
+    }
+
+    #[test]
+    fn a_calendar_is_added_given_a_colour_renamed_and_deleted_from_the_side_pane() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.run();
+        h.get_by_label(calendars::ADD).click();
+        h.run();
+        h.get_by_label("Kleur Groen").click();
+        h.run();
+        h.state_mut().calendar.dialog = Some(calendars::Dialog::Add { name: "Sport".into(), color: [0x2E, 0x8B, 0x57] });
+        h.run();
+        h.get_by_label("Toevoegen").click();
+        h.run();
+        assert!(h.state().calendar.dialog.is_none(), "the window closes once the calendar is there");
+        let sport = h.state().engine.session.calendars.iter().find(|c| c.name == "Sport").cloned().unwrap();
+        assert_eq!(sport.color, [0x2E, 0x8B, 0x57]);
+        assert!(h.query_by_label("Sport").is_some(), "the new calendar is listed");
+
+        h.get_by_label(&calendars::options_label("Mijn agenda")).click();
+        h.run();
+        h.get_by_label("Kleur Rood").click();
+        h.run();
+        assert_eq!(h.state().engine.session.calendar("local").unwrap().color, [0xD4, 0x46, 0x46], "a colour from the menu is the calendar's");
+
+        h.get_by_label(&calendars::options_label("Sport")).click();
+        h.run();
+        h.get_by_label("Naam wijzigen…").click();
+        h.run();
+        assert!(matches!(h.state().calendar.dialog, Some(calendars::Dialog::Rename { .. })));
+        h.state_mut().calendar.dialog = Some(calendars::Dialog::Rename { id: sport.id.clone(), name: "Hardlopen".into() });
+        h.run();
+        h.get_by_label("Opslaan").click();
+        h.run();
+        assert_eq!(h.state().engine.session.calendar(&sport.id).unwrap().name, "Hardlopen");
+
+        h.get_by_label(&calendars::options_label("Hardlopen")).click();
+        h.run();
+        h.get_by_label("Verwijderen…").click();
+        h.run();
+        assert!(h.query_by_label_contains("Agenda \"Hardlopen\" verwijderen?").is_some(), "deleting asks first");
+        h.get_by_label(calendars::CONFIRM_DELETE).click();
+        h.run();
+        assert!(h.state().engine.session.calendar(&sport.id).is_none());
+        h.get_by_label(&calendars::options_label("Mijn agenda")).click();
+        h.run();
+        assert!(h.query_by_label("Verwijderen…").is_none(), "the last calendar on this computer cannot be deleted");
     }
 
     #[test]

@@ -140,6 +140,8 @@ pub struct State {
     pub resizing: Option<Resizing>,
     /// The day typed in the "Ga naar datum" window, while it is open.
     pub goto: Option<String>,
+    /// The window to add, rename or delete a calendar, while it is open.
+    pub dialog: Option<crate::calendars::Dialog>,
 }
 
 /// An appointment being stretched or shortened by its bottom edge.
@@ -151,7 +153,7 @@ pub struct Resizing {
 
 impl Default for State {
     fn default() -> Self {
-        State { view: View::Month, focus: today(), query: String::new(), editor: None, resizing: None, goto: None }
+        State { view: View::Month, focus: today(), query: String::new(), editor: None, resizing: None, goto: None, dialog: None }
     }
 }
 
@@ -619,23 +621,8 @@ fn side_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     app.calendar.view = View::Day;
                 }
             }
-            ui.add_space(16.0);
-            ui.label(RichText::new("Mijn agenda's").size(12.0).strong().color(t.text_dim));
-            ui.add_space(4.0);
-            let calendars: Vec<(String, String, [u8; 3])> =
-                app.engine.session.calendars.iter().map(|c| (c.id.clone(), c.name.clone(), c.color)).collect();
-            for (id, name, color) in calendars {
-                ui.horizontal(|ui| {
-                    let (rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
-                    ui.painter().rect_filled(rect, CornerRadius::same(3), Color32::from_rgb(color[0], color[1], color[2]));
-                    let mut shown = app.view.calendar_shown(&id);
-                    if ui.checkbox(&mut shown, RichText::new(name).color(t.text)).on_hover_text(CALENDAR_TICK_HINT).changed() {
-                        app.view.set_calendar_shown(&id, shown);
-                        let ctx = ui.ctx().clone();
-                        app.save_view(&ctx);
-                    }
-                });
-            }
+            ui.add_space(12.0);
+            crate::calendars::list(app, ui, t);
             task_list(app, ui, t);
         });
 }
@@ -1923,8 +1910,9 @@ mod tests {
             Color32::WHITE,
             Color32::BLACK,
         ];
+        let picked = mailcraft_model::CALENDAR_COLORS.map(|(_, c)| Color32::from_rgb(c[0], c[1], c[2]));
         for t in [Tokens::light(), Tokens::dark()] {
-            for c in colors {
+            for c in colors.into_iter().chain(picked) {
                 for show_as in [ShowAs::Free, ShowAs::Tentative, ShowAs::Busy, ShowAs::Oof] {
                     for hovered in [false, true] {
                         let look = chip_paint(c, show_as, hovered, &t);
