@@ -167,7 +167,7 @@ impl MailApp {
                 match done {
                     Ok(notice) => {
                         self.form.certificate = None;
-                        self.form.notice = Some(notice);
+                        self.form.notice = Some(crate::Notice::success(notice));
                     }
                     Err(e) => {
                         pending.password.zeroize();
@@ -178,11 +178,11 @@ impl MailApp {
             Action::Cancel => self.form.certificate = None,
             Action::Remove(Kind::Certificate, account_id) => {
                 self.engine.remove_certificate(&account_id);
-                self.form.notice = Some("Het certificaat is verwijderd; mail van dit account wordt niet meer ondertekend.".into());
+                self.form.notice = Some(crate::Notice::success("Het certificaat is verwijderd; mail van dit account wordt niet meer ondertekend."));
             }
             Action::Remove(Kind::OpenPgp, account_id) => {
                 self.engine.remove_pgp_key(&account_id);
-                self.form.notice = Some("De OpenPGP-sleutel is verwijderd.".into());
+                self.form.notice = Some(crate::Notice::success("De OpenPGP-sleutel is verwijderd."));
             }
         }
     }

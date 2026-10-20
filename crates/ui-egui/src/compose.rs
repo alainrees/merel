@@ -461,11 +461,11 @@ impl MailApp {
         match serde_json::to_value(c.as_stored()) {
             Ok(params) => {
                 self.run("draft.save", params);
-                if self.notice.is_none() {
-                    self.notice = Some("Concept bewaard. Je vindt het onder Concepten bij het account.".into());
+                if !self.notice.as_ref().is_some_and(|n| matches!(n.tone, crate::notice::Tone::Warning | crate::notice::Tone::Error)) {
+                    self.notice = Some(crate::Notice::success("Concept bewaard. Je vindt het onder Concepten bij het account."));
                 }
             }
-            Err(_) => self.notice = Some("Het concept kon niet worden bewaard.".into()),
+            Err(_) => self.notice = Some(crate::Notice::error("Het concept kon niet worden bewaard.")),
         }
     }
 
@@ -489,7 +489,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 let stored = c.stored.clone();
                 app.compose = None;
                 app.forget_draft(stored.as_deref());
-                app.notice = Some("Bericht verzonden.".into());
+                app.notice = Some(crate::Notice::success("Bericht verzonden."));
                 return;
             }
             Some(SendState::Failed(e)) => {
@@ -510,12 +510,6 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         Ok(d) if c.encrypt => app.engine.missing_certificates(&account, &[d.to, d.cc, d.bcc].concat()),
         _ => Vec::new(),
     };
-    // Files dropped onto the window become attachments; files hovering over it get a hint.
-    if !sending {
-        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
-        c.add_files(dropped);
-    }
-    let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
     let mut open = true;
     let mut send = false;
     let mut schedule: Option<i64> = None;
@@ -558,15 +552,16 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let templates = app.engine.session.templates_sorted();
     let now = ctx.input(|i| i.time);
     let saved_text = c.saved_at.map(saved_text);
-    egui::Window::new(if c.from_draft { "Concept" } else { "Nieuw bericht" })
-        .id(egui::Id::new("compose-window"))
-        .open(&mut open)
-        .default_size(vec2(860.0, 620.0))
-        .min_size(vec2(520.0, 360.0))
-        .collapsible(false)
-        .frame(helder::window_frame(ctx, t))
-        .show(ctx, |ui| {
-            ui.add_enabled_ui(!sending, |ui| {
+    let title = if c.from_draft { "Concept" } else { "Nieuw bericht" };
+    helder::os_window(ctx, t, "compose-window", title, vec2(900.0, 700.0), &mut open, |ui| {
+        // Files dropped onto the window become attachments; files hovering over it get a hint.
+        // The window's own input, as it may be a window of its own.
+        if !sending {
+            let dropped: Vec<PathBuf> = ui.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
+            c.add_files(dropped);
+        }
+        let hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
+        ui.add_enabled_ui(!sending, |ui| {
                 // The Helder command bar: the blue send button with its "later" half, then quiet
                 // icon buttons, and on the right what puts the message away.
                 helder::quiet(ui, t, |ui| {
@@ -790,7 +785,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     });
                 });
             });
-        });
+    });
     if discard {
         let stored = c.stored.clone();
         app.compose = None;
@@ -861,10 +856,10 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 app.notice = None;
                 app.put_aside();
                 if app.engine.session.last_draft.as_deref().and_then(|id| app.engine.session.draft(id)).is_some_and(|d| d.send_at == Some(ts)) {
-                    app.notice = Some(format!(
+                    app.notice = Some(crate::Notice::success(format!(
                         "Het bericht wordt verzonden op {} als Mailcraft dan draait. Tot die tijd staat het onder Concepten; open het daar om dat te veranderen.",
                         when_text(ts)
-                    ));
+                    )));
                 }
                 return;
             }

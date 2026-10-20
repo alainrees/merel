@@ -343,7 +343,12 @@ impl GraphClient {
             Credential::Password(_) => return Err(MailboxError::Protocol("Microsoft Graph needs a browser sign-in, not a password".into())),
         };
         let agent = ureq::Agent::new_with_config(
-            ureq::config::Config::builder().timeout_global(Some(Duration::from_secs(60))).http_status_as_error(false).user_agent("Mailcraft").build(),
+            ureq::config::Config::builder()
+                .tls_config(tls())
+                .timeout_global(Some(Duration::from_secs(60)))
+                .http_status_as_error(false)
+                .user_agent("Mailcraft")
+                .build(),
         );
         let time_zone = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into());
         let mut client = GraphClient { agent, base: format!("https://{host}/v1.0"), host, token, known: Vec::new(), time_zone, task_list: None };
@@ -355,7 +360,7 @@ impl GraphClient {
     #[cfg(test)]
     fn offline() -> Self {
         GraphClient {
-            agent: ureq::Agent::new_with_defaults(),
+            agent: ureq::Agent::new_with_config(ureq::config::Config::builder().tls_config(tls()).build()),
             base: "https://graph.microsoft.com/v1.0".into(),
             host: "graph.microsoft.com".into(),
             token: Secret::new(String::new()),
@@ -674,6 +679,16 @@ impl ItemStore for GraphClient {
         let path = self.path_of(id)?;
         self.call("DELETE", &path, None).map(drop)
     }
+}
+
+/// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
+/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// agent without this panics on its first request.
+fn tls() -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+        .build()
 }
 
 #[cfg(test)]

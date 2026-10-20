@@ -27,6 +27,7 @@ pub mod invitation;
 pub mod junk;
 pub mod meeting;
 pub mod message_menu;
+pub mod notice;
 pub mod print;
 pub mod quicksteps;
 pub mod receipt;
@@ -52,6 +53,7 @@ use mailcraft_model::{FolderKind, Warning};
 
 pub use backstage::AccountForm;
 pub use compose::{Compose, Kind as ComposeKind};
+pub use notice::Notice;
 
 pub use theme::{APP_COLOR, Tokens};
 
@@ -120,8 +122,8 @@ pub struct MailApp {
     pub calendar: calendar::State,
     pub contacts: contacts::State,
     pub tasks: tasks::State,
-    /// The last command error or note, shown in the status bar until the next action.
-    notice: Option<String>,
+    /// What the last action has to say, shown at the top of the window (see [`notice`]).
+    notice: Option<notice::Notice>,
     /// The message whose body is on screen; when it changes, its pictures leave the cache.
     shown_message: Option<String>,
     /// The message waiting to be marked read, and since when, for "Gelezen markeren: Na 5 seconden".
@@ -282,17 +284,23 @@ impl MailApp {
             self.delete_forever();
             return;
         }
-        self.notice = match self.engine.run(id, &params) {
-            Ok(()) => None,
+        match self.engine.run(id, &params) {
+            // A warning or error about an earlier step is over once the next one works; good
+            // news stays for its few seconds.
+            Ok(()) => {
+                if self.notice.as_ref().is_some_and(|n| matches!(n.tone, notice::Tone::Warning | notice::Tone::Error)) {
+                    self.notice = None;
+                }
+            }
             Err(e) => {
                 log::warn!("{id}: {e}");
-                Some(match e {
-                    mailcraft_engine::CommandError::NoSelection => "Selecteer eerst een bericht.".to_string(),
-                    mailcraft_engine::CommandError::NoFolder(_) => "Dit account heeft die map niet.".to_string(),
-                    e => e.to_string(),
-                })
+                self.notice = Some(match e {
+                    mailcraft_engine::CommandError::NoSelection => Notice::warning("Selecteer eerst een bericht."),
+                    mailcraft_engine::CommandError::NoFolder(_) => Notice::warning("Dit account heeft die map niet."),
+                    e => Notice::error(e.to_string()),
+                });
             }
-        };
+        }
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
@@ -310,16 +318,19 @@ impl MailApp {
         self.tick_read_timer(ui.ctx());
         let arrivals = self.engine.session.take_arrivals();
         if arrivals > 0 {
-            self.notice =
-                Some(if arrivals == 1 { "1 nieuw bericht ontvangen.".to_string() } else { format!("{arrivals} nieuwe berichten ontvangen.") });
+            self.notice = Some(Notice::info(if arrivals == 1 {
+                "1 nieuw bericht ontvangen.".to_string()
+            } else {
+                format!("{arrivals} nieuwe berichten ontvangen.")
+            }));
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
         }
         let hits = self.engine.session.take_rule_hits();
         if hits > 0 {
-            self.notice = Some(rules::rule_notice(hits));
+            self.notice = Some(Notice::info(rules::rule_notice(hits)));
         }
         if let Some(failure) = self.engine.session.take_scheduled_failures().pop() {
-            self.notice = Some(failure);
+            self.notice = Some(Notice::error(failure));
         }
         let title = window_title(self.engine.session.inbox_unread());
         if self.title.as_deref() != Some(title.as_str()) {
@@ -359,6 +370,8 @@ impl MailApp {
         } else if self.tab == Tab::Home {
             module_shortcuts(self, &ctx);
         }
+        // What an action has to say floats just under the commands, where the person looks.
+        notice::toast(self, &ctx, &t, ui.available_rect_before_wrap().top());
         if self.tab == Tab::File {
             backstage::show(self, ui, &t);
             return;
@@ -1588,10 +1601,10 @@ impl MailApp {
             return;
         }
         self.run("message.wake_snoozed", Value::Null);
-        self.notice = Some(match due.as_slice() {
+        self.notice = Some(Notice::info(match due.as_slice() {
             [m] => format!("Gesluimerd bericht is terug: {}", m.subject),
             list => format!("{} gesluimerde berichten zijn terug.", list.len()),
-        });
+        }));
     }
 
     pub fn open_message(&mut self, id: &str) {
@@ -1655,13 +1668,16 @@ fn message_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         return;
     };
     let mut open = true;
-    egui::Window::new(format!("✉ {subject}"))
-        .id(egui::Id::new("message-window"))
-        .open(&mut open)
-        .default_size(vec2(760.0, 560.0))
-        .resizable(true)
-        .frame(egui::Frame::window(&ctx.global_style()).fill(t.reading).inner_margin(Margin::same(16)))
-        .show(ctx, |ui| reading_pane(app, ui, t));
+    helder::os_window(ctx, t, "message-window", &format!("✉ {subject}"), vec2(820.0, 640.0), &mut open, |ui| {
+        // Esc closes it, also when it is a window of its own and the main window does not see the key.
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            app.message_window = false;
+        }
+        egui::Frame::new().fill(t.reading).corner_radius(helder::CARD_RADIUS).inner_margin(Margin::same(16)).show(ui, |ui| {
+            ui.set_min_size(ui.available_size());
+            reading_pane(app, ui, t)
+        });
+    });
     if !open {
         app.message_window = false;
     }
@@ -1876,8 +1892,8 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         && signature::strip(ui, t, sig, m.from.email(), !in_junk)
     {
         match app.engine.trust_certificate(&message_id) {
-            Ok(()) => app.notice = Some("Het certificaat wordt vertrouwd; je kunt deze afzender nu ook versleuteld mailen.".into()),
-            Err(e) => app.notice = Some(e),
+            Ok(()) => app.notice = Some(Notice::success("Het certificaat wordt vertrouwd; je kunt deze afzender nu ook versleuteld mailen.")),
+            Err(e) => app.notice = Some(Notice::error(e)),
         }
     }
     // A list's mail offers the way off it, as Outlook does; not in the Junk folder, where the
@@ -2145,19 +2161,6 @@ fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let list = app.engine.session.visible_messages();
                 let unread = list.iter().filter(|m| !m.flags.seen).count();
                 ui.label(RichText::new(format!("Items: {}   Ongelezen: {}", list.len(), unread)).size(12.0).color(t.text_dim));
-                if let Some(n) = &app.notice {
-                    let col = if n.ends_with("verzonden.")
-                        || n.ends_with("ontvangen.")
-                        || n.starts_with("Bijlage opgeslagen")
-                        || n.starts_with("Concept bewaard")
-                        || n.starts_with("Regels toegepast")
-                    {
-                        t.accent_text
-                    } else {
-                        t.flag
-                    };
-                    ui.label(RichText::new(n).size(12.0).color(col));
-                }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let (txt, col) = if app.engine.session.is_sample() {
                         ("Voorbeeldmail · offline".to_string(), t.text_dim)
@@ -2204,6 +2207,43 @@ mod tests {
         egui_kittest::Harness::builder()
             .with_size(vec2(1280.0, 800.0))
             .build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(Engine::sample()))
+    }
+
+    #[test]
+    fn a_notice_shows_at_the_top_with_its_kind_and_goes_by_itself_unless_it_is_an_error() {
+        let mut h = harness();
+        h.run();
+        h.state_mut().notice = Some(Notice::success("Contact opgeslagen in Downloads: Ravi Kumar.vcf").revealing("/tmp/Ravi Kumar.vcf"));
+        h.run();
+        assert!(h.get_by_label(notice::CLOSE).rect().top() < 220.0, "just under the ribbon, where the person looks");
+        h.get_by_label(notice::REVEAL);
+        for _ in 0..30 {
+            h.step();
+        }
+        assert!(h.state().notice.is_none(), "good news goes by itself");
+
+        h.state_mut().notice = Some(Notice::error("Opslaan is mislukt."));
+        for _ in 0..60 {
+            h.step();
+        }
+        assert!(h.state().notice.is_some(), "an error waits to be read");
+        assert!(h.query_by_label(notice::REVEAL).is_none(), "nothing to show in a folder");
+        h.get_by_label(notice::CLOSE).click();
+        h.run();
+        assert!(h.state().notice.is_none());
+    }
+
+    #[test]
+    fn a_command_that_works_clears_an_earlier_error_but_not_good_news() {
+        let mut h = harness();
+        h.run();
+        h.state_mut().select_message("m1");
+        h.state_mut().notice = Some(Notice::error("Dit ging mis."));
+        h.state_mut().run("message.mark_read", Value::Null);
+        assert!(h.state().notice.is_none());
+        h.state_mut().notice = Some(Notice::success("Bericht verzonden."));
+        h.state_mut().run("message.mark_read", Value::Null);
+        assert_eq!(h.state().notice.as_deref(), Some("Bericht verzonden."));
     }
 
     #[test]
@@ -2455,8 +2495,9 @@ mod tests {
         h.run();
         {
             let e = h.state_mut().contacts.editor.as_mut().expect("editor");
-            e.name = "Noor Bakker".into();
-            e.emails = "noor@example.org".into();
+            e.first = "Noor".into();
+            e.last = "Bakker".into();
+            e.emails = vec!["noor@example.org".into()];
         }
         h.run();
         h.get_by_label("Opslaan").click();
@@ -2700,7 +2741,7 @@ mod tests {
         h.run();
         assert!(h.state().module == Module::People);
         let e = h.state().contacts.editor.as_ref().expect("the form for a new contact");
-        assert_eq!((e.id.as_deref(), e.name.as_str(), e.emails.as_str()), (None, "Nieuwsbrief", "news@example.org"));
+        assert_eq!((e.id.as_deref(), e.name().as_str(), e.emails.as_slice()), (None, "Nieuwsbrief", ["news@example.org".to_string()].as_slice()));
         h.get_by_label("Opslaan").click();
         h.run();
         assert_eq!(h.state().engine.session.contact_with_email("news@example.org").map(|c| c.name.as_str()), Some("Nieuwsbrief"));
@@ -3724,6 +3765,42 @@ mod tests {
     }
 
     #[test]
+    fn the_buttons_of_the_appointment_window_never_overlap() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.state_mut().calendar.view = calendar::View::Week;
+        h.run();
+        let focus = h.state().calendar.focus;
+        h.state_mut().calendar.focus = focus.checked_add_days(chrono::Days::new(7)).expect("next week");
+        h.run();
+        h.get_by_label_contains("Weekstart").click();
+        h.run();
+        {
+            // The widest the bar gets: an invitation to send, the longest reminder and status.
+            let e = h.state_mut().calendar.editor.as_mut().expect("the series opens");
+            e.attendees = "sanne@example.org".into();
+            e.reminder = Some(0);
+            e.show_as = mailcraft_model::ShowAs::Tentative;
+            e.private = true;
+        }
+        h.run();
+        h.run();
+        // Left to right, each button ends before the next one starts.
+        let rects = [
+            h.get_by_label("Verzenden").rect(),
+            h.get_by_label_contains("Voorlopig").rect(),
+            h.get_by_label("Op het moment zelf").rect(),
+            h.get_by_label(calendar::PRIVATE).rect(),
+            h.get_by_label(crate::meeting::FORWARD).rect(),
+            h.get_by_label(calendar::DELETE_MENU).rect(),
+            h.get_by_label("Annuleren").rect(),
+        ];
+        for pair in rects.windows(2) {
+            assert!(pair[0].max.x <= pair[1].min.x + 0.5, "{:?} runs into {:?}", pair[0], pair[1]);
+        }
+    }
+
+    #[test]
     fn a_weekly_appointment_shows_every_week_and_one_time_can_be_skipped() {
         let mut h = harness();
         h.state_mut().module = Module::Calendar;
@@ -3743,7 +3820,9 @@ mod tests {
         assert_eq!(editor.repeat, Some(mailcraft_model::Frequency::Weekly));
         let clicked = editor.occurrence.expect("the clicked occurrence is remembered");
         assert!(clicked > series_start && clicked - series_start <= 8 * 86_400, "it is next week's, not the first");
-        h.get_by_label("Deze keer overslaan").click();
+        h.get_by_label(calendar::DELETE_MENU).click();
+        h.run();
+        h.get_by_label(calendar::SKIP_ONE).click();
         h.run();
         assert!(h.state().calendar.editor.is_none());
         assert!(h.query_all_by_label_contains("Weekstart").next().is_none(), "the skipped time is gone from this week");

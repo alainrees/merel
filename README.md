@@ -37,7 +37,7 @@ delete, archive, move to junk or to any folder of the account ("Verplaatsen" in 
 the message onto a folder); changes go back to the server. A folder shows its newest 200
 messages and a button at the bottom of the list fetches the next 200, as often as needed. New mail
 comes in on its own: the inbox of every connected account and the open folder are refreshed every
-two minutes (calendar, contacts and tasks every five), the status bar counts new unread messages,
+two minutes (calendar, contacts and tasks every five), a notice counts new unread messages,
 the window asks for attention, and its title shows the unread mail in the inboxes of every account
 together ("Mailcraft (3)"), so the count is visible in the dock, taskbar or window switcher. Junk: the
 server's own filter stays the first line, and its Junk folder shows as "Ongewenste e-mail". On top of that,
@@ -220,7 +220,14 @@ temporary folder and opens it, and the browser's print dialog does the rest. In 
 appointment's time, title and place. "Opslaan als…" under "Bestand" (or Ctrl+S) saves the open message as an
 .eml file in the Downloads folder, like Outlook's "Save As": the message as it arrived, headers and all, when the
 cache still holds it, else a plain copy of its envelope and text; the file is named after the subject and a taken
-name gets " (2)". The status bar says where it went.
+name gets " (2)". A notice says where it went.
+
+What an action has to say appears the way the new Outlook shows it: a message bar at the top of the window, just
+under the ribbon, where the person was looking. Its icon and edge tell the kind apart, and a screen reader hears it
+too: green with a check for done, blue for information, amber with a triangle for a warning, red only for what
+failed. Good news and information go away after six seconds and a warning after twelve (never while the pointer
+rests on it); an error stays until it is closed. A saved file is named by itself and its folder, not by its full
+path, and "Toon in Finder" (Verkenner on Windows, the folder on Linux) shows it.
 
 A flag can carry a date, Outlook's "Opvolgen": the right-click menu's "Opvolgen" offers Vandaag, Morgen,
 Deze week (this week's Friday), Volgende week or Geen datum. The flag goes to the server as any flag does; the
@@ -286,7 +293,7 @@ recipient and S/MIME does not.
 
 A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
 hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the
-list until then and comes back unread, with a line in the status bar; the "Gesluimerd" filter on the Beeld tab shows
+list until then and comes back unread, with a notice; the "Gesluimerd" filter on the Beeld tab shows
 what is put off, a strip over such a message names the moment, and "Niet meer sluimeren" brings it back now. The list
 stays on this computer (`snoozed.json`, filed under the Message-ID so a move keeps it); the server only sees the
 unread flag when the message returns.

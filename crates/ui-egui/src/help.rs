@@ -73,7 +73,7 @@ fn settings_folder(app: &MailApp) -> Option<std::path::PathBuf> {
 fn open_outside(app: &mut MailApp, target: &str) {
     if let Err(e) = open::that_detached(target) {
         log::warn!("could not open {target}: {e}");
-        app.notice = Some(format!("Openen is niet gelukt: {target}"));
+        app.notice = Some(crate::Notice::error(format!("Openen is niet gelukt: {target}")));
     }
 }
 
