@@ -986,19 +986,156 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 }
 
 /// The week and day views: an all-day strip, then the hours.
+/// The calendars whose tick box is on, in the side pane's order.
+pub(crate) fn shown_calendars(app: &MailApp) -> Vec<(String, String, Color32)> {
+    app.engine
+        .session
+        .calendars
+        .iter()
+        .filter(|c| app.view.calendar_shown(&c.id))
+        .map(|c| (c.id.clone(), c.name.clone(), crate::calendars::rgb(c.color)))
+        .collect()
+}
+
+/// The panes of the day and week views: one merged pane (`None`), or with "Naast elkaar
+/// weergeven" and more than one calendar shown, one per calendar.
+pub(crate) fn panes(app: &MailApp) -> Vec<Option<String>> {
+    let shown = shown_calendars(app);
+    if app.view.calendars_side_by_side && shown.len() > 1 { shown.into_iter().map(|(id, _, _)| Some(id)).collect() } else { vec![None] }
+}
+
+/// The label of a calendar tab's button that puts the calendars side by side.
+pub fn split_label(name: &str) -> String {
+    format!("{name} naast elkaar weergeven")
+}
+
+/// The label of a calendar tab's button that merges the calendars into one grid again.
+pub fn merge_label(name: &str) -> String {
+    format!("{name} samenvoegen")
+}
+
+/// The label of a calendar tab's close button, which unticks the calendar.
+pub fn close_label(name: &str) -> String {
+    format!("{name} sluiten")
+}
+
+/// The height of the row of calendar tabs.
+const TAB_HEIGHT: f32 = 28.0;
+
+/// What a click on a calendar tab asks for.
+enum TabAction {
+    Toggle,
+    Close(String),
+}
+
+/// One calendar tab, Outlook's: the name on a tint of the calendar's colour with a bar in the
+/// full colour under it, an arrow that puts the calendars side by side or merges them, and a
+/// cross that unticks the calendar.
+fn calendar_tab(ui: &mut Ui, t: &Tokens, rect: Rect, id: &str, name: &str, color: Color32, split: bool) -> Option<TabAction> {
+    let p = ui.painter();
+    let tab = rect.shrink2(vec2(2.0, 0.0));
+    p.rect_filled(tab, CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, crate::theme::over(color, t.card, 0.25));
+    p.rect_filled(Rect::from_min_max(pos2(tab.left(), tab.bottom() - 3.0), tab.right_bottom()), CornerRadius::ZERO, color);
+    let button = 22.0;
+    let mut action = None;
+    let arrow = Rect::from_min_size(pos2(tab.left() + 3.0, tab.center().y - button / 2.0 - 1.5), vec2(button, button));
+    let close = Rect::from_min_size(pos2(tab.right() - button - 3.0, arrow.top()), vec2(button, button));
+    let (icon, label) = if split { (Icon::ArrowLeft, merge_label(name)) } else { (Icon::ArrowRight, split_label(name)) };
+    for (r, icon, label, what) in [(arrow, icon, label, TabAction::Toggle), (close, Icon::X, close_label(name), TabAction::Close(id.to_string()))] {
+        let resp = ui.interact(r, ui.make_persistent_id(("tab", id, &label)), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        if resp.hovered() || resp.has_focus() {
+            ui.painter().rect_filled(r, CornerRadius::same(4), crate::theme::over(color, t.card, 0.45));
+        }
+        icon.image(14.0, t.text).paint_at(ui, Rect::from_center_size(r.center(), vec2(14.0, 14.0)));
+        if resp.on_hover_text(&label).clicked() {
+            action = Some(what);
+        }
+    }
+    let text = Rect::from_min_max(pos2(arrow.right() + 4.0, tab.top()), pos2(close.left() - 2.0, tab.bottom() - 3.0));
+    let p = ui.painter();
+    let galley = p.layout_no_wrap(name.to_string(), FontId::proportional(13.0), t.text);
+    p.with_clip_rect(text).galley(pos2(text.left(), text.center().y - galley.size().y / 2.0), galley, t.text);
+    action
+}
+
+/// The lane of each appointment in a day column and how many lanes its group of overlapping
+/// appointments needs, so appointments at the same time stand side by side, as Outlook puts
+/// them. `items` are in order of start.
+fn lanes(items: &[(i64, i64)]) -> Vec<(usize, usize)> {
+    let mut out = vec![(0, 1); items.len()];
+    // The group being laid out: where it starts in `items`, when its last appointment ends,
+    // and when each of its lanes is free again.
+    let mut group = 0;
+    let mut group_end = i64::MIN;
+    let mut free_at: Vec<i64> = Vec::new();
+    for (i, &(start, end)) in items.iter().enumerate() {
+        if start >= group_end {
+            for slot in &mut out[group..i] {
+                slot.1 = free_at.len();
+            }
+            group = i;
+            free_at.clear();
+        }
+        let lane = free_at.iter().position(|e| *e <= start).unwrap_or_else(|| {
+            free_at.push(end);
+            free_at.len() - 1
+        });
+        free_at[lane] = end;
+        out[i].0 = lane;
+        group_end = group_end.max(end);
+    }
+    for slot in &mut out[group..] {
+        slot.1 = free_at.len().max(1);
+    }
+    out
+}
+
 fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
     let first = if days > 1 { week_start(app.calendar.focus) } else { app.calendar.focus };
     let today = today();
     let selected = app.engine.session.selected_appointment.clone();
     let gutter = 48.0;
     let mut open: Option<(String, i64)> = None;
-    let mut new_at: Option<(NaiveDate, u32)> = None;
+    let mut new_at: Option<(NaiveDate, u32, Option<String>)> = None;
     let mut drop: Option<(String, NaiveDate, Option<NaiveTime>)> = None;
     let mut task_drop: Option<(String, NaiveDate, Option<NaiveTime>)> = None;
     let mut resize: Option<Resizing> = None;
     let mut resized: Option<String> = None;
+    let mut tab_action = None;
     let resizing = app.calendar.resizing.clone();
-    let col_w = ((ui.available_width() - gutter) / days as f32).max(40.0);
+    let calendars = shown_calendars(app);
+    let panes = panes(app);
+    let split = panes.len() > 1;
+    let pane_w = ((ui.available_width() - gutter) / panes.len() as f32).floor();
+    let col_w = (pane_w / days as f32).max(if split { 20.0 } else { 40.0 });
+    let pane_w = col_w * days as f32;
+    let in_pane = |a: &Appointment, pane: &Option<String>| pane.as_ref().is_none_or(|id| *id == a.calendar_id);
+    // With more than one calendar ticked, a tab for each: over its own days when side by side,
+    // in a row over the merged grid otherwise.
+    if calendars.len() > 1 {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let (row, _) = ui.allocate_exact_size(vec2(gutter + pane_w * panes.len() as f32, TAB_HEIGHT), Sense::hover());
+            if split {
+                for (i, (id, name, color)) in calendars.iter().enumerate() {
+                    let left = row.left() + gutter + i as f32 * pane_w;
+                    let rect = Rect::from_min_size(pos2(left, row.top()), vec2(pane_w.min(220.0), TAB_HEIGHT));
+                    if let Some(a) = calendar_tab(ui, t, rect, id, name, *color, true) {
+                        tab_action = Some(a);
+                    }
+                }
+            } else {
+                let width = ((pane_w) / calendars.len() as f32).min(200.0);
+                for (i, (id, name, color)) in calendars.iter().enumerate() {
+                    let rect = Rect::from_min_size(pos2(row.left() + gutter + i as f32 * width, row.top()), vec2(width, TAB_HEIGHT));
+                    if let Some(a) = calendar_tab(ui, t, rect, id, name, *color, false) {
+                        tab_action = Some(a);
+                    }
+                }
+            }
+        });
+    }
     // Day headers, with the week number in the time gutter when asked for.
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -1007,18 +1144,20 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
         } else {
             ui.allocate_exact_size(vec2(gutter, DAY_HEADER), Sense::hover());
         }
-        for i in 0..days {
-            let d = add_days(first, i);
-            let (rect, _) = ui.allocate_exact_size(vec2(col_w, DAY_HEADER), Sense::hover());
-            let p = ui.painter();
-            // The weekday small and grey over the day's number, today tinted in the app colour.
-            if d == today {
-                p.rect_filled(rect.shrink(2.0), CornerRadius::same(helder::CONTROL_RADIUS), t.checked);
+        for _ in &panes {
+            for i in 0..days {
+                let d = add_days(first, i);
+                let (rect, _) = ui.allocate_exact_size(vec2(col_w, DAY_HEADER), Sense::hover());
+                let p = ui.painter();
+                // The weekday small and grey over the day's number, today tinted in the app colour.
+                if d == today {
+                    p.rect_filled(rect.shrink(2.0), CornerRadius::same(helder::CONTROL_RADIUS), t.checked);
+                }
+                let (name_color, day_color) = if d == today { (t.accent_text, t.accent_text) } else { (t.text_dim, t.text) };
+                let left = rect.left() + if split && days > 1 { 4.0 } else { 10.0 };
+                p.text(pos2(left, rect.top() + 6.0), Align2::LEFT_TOP, weekday_name(d), FontId::proportional(12.0), name_color);
+                p.text(pos2(left, rect.top() + 21.0), Align2::LEFT_TOP, d.day().to_string(), FontId::proportional(20.0), day_color);
             }
-            let (name_color, day_color) = if d == today { (t.accent_text, t.accent_text) } else { (t.text_dim, t.text) };
-            let left = rect.left() + 10.0;
-            p.text(pos2(left, rect.top() + 6.0), Align2::LEFT_TOP, weekday_name(d), FontId::proportional(12.0), name_color);
-            p.text(pos2(left, rect.top() + 21.0), Align2::LEFT_TOP, d.day().to_string(), FontId::proportional(20.0), day_color);
         }
     });
     // All-day strip.
@@ -1027,35 +1166,37 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
         let strip_h = 26.0;
         let (g, _) = ui.allocate_exact_size(vec2(gutter, strip_h), Sense::hover());
         ui.painter().text(g.right_center() - vec2(4.0, 0.0), Align2::RIGHT_CENTER, "hele dag", FontId::proportional(10.5), t.text_dim);
-        for i in 0..days {
-            let d = add_days(first, i);
-            let (rect, r) = ui.allocate_exact_size(vec2(col_w, strip_h), Sense::hover());
-            if drop_hover(&r) {
-                ui.painter().rect_filled(rect, CornerRadius::ZERO, t.hover);
-            }
-            match dropped(&r) {
-                Some(Dropped::Appointment(id)) => drop = Some((id, d, None)),
-                Some(Dropped::Task(id)) => task_drop = Some((id, d, None)),
-                None => {}
-            }
-            ui.painter().rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
-            if let (Some(from), Some(to)) = (midnight(d), midnight(add_days(d, 1))) {
-                let items: Vec<Appointment> =
-                    shown(app, app.engine.session.appointments_between(from, to)).into_iter().filter(|a| a.all_day).collect();
-                if let Some(a) = items.first() {
-                    let label = if items.len() > 1 { format!("{} (+{})", chip_title(a), items.len() - 1) } else { chip_title(a) };
-                    let chip_rect = rect.shrink2(vec2(2.0, 3.0));
-                    if chip(
-                        ui,
-                        chip_rect,
-                        &label,
-                        appointment_color(app, a, t),
-                        a.show_as,
-                        selected.as_deref() == Some(a.id.as_str()),
-                        draggable(a),
-                        t,
-                    ) {
-                        open = Some((a.id.clone(), a.start));
+        for pane in &panes {
+            for i in 0..days {
+                let d = add_days(first, i);
+                let (rect, r) = ui.allocate_exact_size(vec2(col_w, strip_h), Sense::hover());
+                if drop_hover(&r) {
+                    ui.painter().rect_filled(rect, CornerRadius::ZERO, t.hover);
+                }
+                match dropped(&r) {
+                    Some(Dropped::Appointment(id)) => drop = Some((id, d, None)),
+                    Some(Dropped::Task(id)) => task_drop = Some((id, d, None)),
+                    None => {}
+                }
+                ui.painter().rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
+                if let (Some(from), Some(to)) = (midnight(d), midnight(add_days(d, 1))) {
+                    let items: Vec<Appointment> =
+                        shown(app, app.engine.session.appointments_between(from, to)).into_iter().filter(|a| a.all_day && in_pane(a, pane)).collect();
+                    if let Some(a) = items.first() {
+                        let label = if items.len() > 1 { format!("{} (+{})", chip_title(a), items.len() - 1) } else { chip_title(a) };
+                        let chip_rect = rect.shrink2(vec2(2.0, 3.0));
+                        if chip(
+                            ui,
+                            chip_rect,
+                            &label,
+                            appointment_color(app, a, t),
+                            a.show_as,
+                            selected.as_deref() == Some(a.id.as_str()),
+                            draggable(a),
+                            t,
+                        ) {
+                            open = Some((a.id.clone(), a.start));
+                        }
                     }
                 }
             }
@@ -1067,14 +1208,15 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
         hours = hours.vertical_scroll_offset(FIRST_HOUR * HOUR_HEIGHT);
     }
     hours.show(ui, |ui| {
-        let (grid, _) = ui.allocate_exact_size(vec2(gutter + col_w * days as f32, HOUR_HEIGHT * 24.0), Sense::hover());
+        let (grid, _) = ui.allocate_exact_size(vec2(gutter + pane_w * panes.len() as f32, HOUR_HEIGHT * 24.0), Sense::hover());
         let p = ui.painter();
+        let columns: Vec<(usize, i64, f32)> =
+            (0..panes.len()).flat_map(|n| (0..days).map(move |i| (n, i, grid.left() + gutter + n as f32 * pane_w + i as f32 * col_w))).collect();
         if app.view.work_hours {
             // The hours outside the working day in a quieter shade, as Outlook draws them.
             let shade = if t.dark { Color32::from_white_alpha(7) } else { Color32::from_black_alpha(11) };
-            for i in 0..days {
+            for &(_, i, x) in &columns {
                 let d = add_days(first, i);
-                let x = grid.left() + gutter + i as f32 * col_w;
                 for hour in (0..24).filter(|h| outside_work(d, *h)) {
                     let y = grid.top() + hour as f32 * HOUR_HEIGHT;
                     p.rect_filled(Rect::from_min_size(pos2(x, y), vec2(col_w, HOUR_HEIGHT)), CornerRadius::ZERO, shade);
@@ -1086,20 +1228,24 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
             p.line_segment([pos2(grid.left() + gutter, y), pos2(grid.right(), y)], Stroke::new(1.0, t.card_border));
             p.text(pos2(grid.left() + gutter - 6.0, y + 2.0), Align2::RIGHT_TOP, format!("{hour:02}:00"), FontId::proportional(11.0), t.text_dim);
         }
-        for i in 0..days {
+        for &(n, i, x) in &columns {
+            let pane = &panes[n];
             let d = add_days(first, i);
-            let x = grid.left() + gutter + i as f32 * col_w;
             let column = Rect::from_min_size(pos2(x, grid.top()), vec2(col_w, grid.height()));
-            ui.painter().line_segment([column.left_top(), column.left_bottom()], Stroke::new(1.0, t.card_border));
-            let r = ui.interact(column, ui.make_persistent_id(("column", i)), Sense::click());
+            // A heavier line where one calendar's days end and the next one's begin.
+            let edge = if split && i == 0 && n > 0 { Stroke::new(2.0, t.control_border) } else { Stroke::new(1.0, t.card_border) };
+            ui.painter().line_segment([column.left_top(), column.left_bottom()], edge);
+            let r = ui.interact(column, ui.make_persistent_id(("column", n, i)), Sense::click());
             r.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{} {} {}", weekday_name(d), d.day(), month_name(d.month())))
+                let day = format!("{} {} {}", weekday_name(d), d.day(), month_name(d.month()));
+                let name = pane.as_ref().and_then(|id| calendars.iter().find(|(c, _, _)| c == id)).map(|(_, name, _)| name.as_str());
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name.map_or(day.clone(), |name| format!("{day}, {name}")))
             });
             if r.clicked()
                 && let Some(pos) = r.interact_pointer_pos()
             {
                 let hour = ((pos.y - grid.top()) / HOUR_HEIGHT).floor().clamp(0.0, 23.0) as u32;
-                new_at = Some((d, hour));
+                new_at = Some((d, hour, pane.clone()));
             }
             let pointer = ui.input(|i| i.pointer.latest_pos());
             if drop_hover(&r)
@@ -1118,14 +1264,21 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                 }
             }
             let (Some(from), Some(to)) = (midnight(d), midnight(add_days(d, 1))) else { continue };
-            let items: Vec<Appointment> = shown(app, app.engine.session.appointments_between(from, to)).into_iter().filter(|a| !a.all_day).collect();
-            for a in &items {
+            let items: Vec<Appointment> =
+                shown(app, app.engine.session.appointments_between(from, to)).into_iter().filter(|a| !a.all_day && in_pane(a, pane)).collect();
+            let ends: Vec<i64> = items.iter().map(|a| resizing.as_ref().filter(|r| r.id == a.id).map_or(a.end, |r| r.end)).collect();
+            let spans: Vec<(i64, i64)> = items.iter().zip(&ends).map(|(a, end)| (a.start, (*end).max(a.start + 1))).collect();
+            let lanes = lanes(&spans);
+            for ((a, &end), &(lane, count)) in items.iter().zip(&ends).zip(&lanes) {
                 // While its bottom edge is dragged, the block shows the end it would get.
-                let end = resizing.as_ref().filter(|r| r.id == a.id).map_or(a.end, |r| r.end);
                 let top = ((a.start.max(from) - from) as f32 / 3600.0) * HOUR_HEIGHT;
                 let bottom = ((end.min(to) - from) as f32 / 3600.0) * HOUR_HEIGHT;
-                let block =
-                    Rect::from_min_max(pos2(x + 2.0, grid.top() + top + 1.0), pos2(x + col_w - 2.0, grid.top() + bottom.max(top + 18.0) - 1.0));
+                let lane_w = (col_w - 4.0) / count as f32;
+                let left = x + 2.0 + lane as f32 * lane_w;
+                let block = Rect::from_min_max(
+                    pos2(left, grid.top() + top + 1.0),
+                    pos2(left + lane_w - if lane + 1 < count { 2.0 } else { 0.0 }, grid.top() + bottom.max(top + 18.0) - 1.0),
+                );
                 // A short block keeps the title on one line with the start, a longer one puts the
                 // times under the title.
                 let label = if block.height() < 34.0 {
@@ -1163,6 +1316,19 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
             }
         }
     });
+    match tab_action {
+        Some(TabAction::Toggle) => {
+            app.view.calendars_side_by_side = !app.view.calendars_side_by_side;
+            let ctx = ui.ctx().clone();
+            app.save_view(&ctx);
+        }
+        Some(TabAction::Close(id)) => {
+            app.view.set_calendar_shown(&id, false);
+            let ctx = ui.ctx().clone();
+            app.save_view(&ctx);
+        }
+        None => {}
+    }
     if let Some(r) = resize {
         app.calendar.resizing = Some(r);
     }
@@ -1174,9 +1340,13 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
         app.drop_appointment(&id, day, time);
     } else if let Some((id, start)) = open {
         app.open_appointment(&id, start);
-    } else if let Some((d, hour)) = new_at {
+    } else if let Some((d, hour, pane)) = new_at {
         app.calendar.focus = d;
         app.new_appointment(d, hour);
+        // A click in a calendar's own days makes the appointment in that calendar.
+        if let (Some(id), Some(editor)) = (pane, app.calendar.editor.as_mut()) {
+            editor.calendar_id = Some(id);
+        }
     }
 }
 
@@ -1975,6 +2145,16 @@ mod tests {
     }
 
     #[test]
+    fn appointments_at_the_same_time_stand_side_by_side() {
+        assert!(lanes(&[]).is_empty());
+        assert_eq!(lanes(&[(0, 10)]), vec![(0, 1)]);
+        // 9-11 and 10-12 overlap, 11-12 fits under the first; 13-14 stands alone.
+        assert_eq!(lanes(&[(9, 11), (10, 12), (11, 12), (13, 14)]), vec![(0, 2), (1, 2), (0, 2), (0, 1)]);
+        assert_eq!(lanes(&[(0, 5), (0, 5), (0, 5)]), vec![(0, 3), (1, 3), (2, 3)], "three at once take a third each");
+        assert_eq!(lanes(&[(0, 5), (5, 6)]), vec![(0, 1), (0, 1)], "one that starts as the other ends does not share");
+    }
+
+    #[test]
     fn appointment_text_meets_wcag_aa_on_every_block() {
         // Calendar colours as servers and Mailcraft hand them out, from pale to deep.
         let colors = [
@@ -1992,6 +2172,11 @@ mod tests {
         let categories = mailcraft_model::CategoryColor::ALL.map(crate::categories::color_of);
         for t in [Tokens::light(), Tokens::dark()] {
             for c in colors.into_iter().chain(picked).chain(categories) {
+                // The calendar's tab: its name on a tint, its buttons' icons on a deeper one.
+                let tab = crate::theme::contrast(t.text, crate::theme::over(c, t.card, 0.25));
+                assert!(tab >= 4.5, "tab {c:?} dark {}: {tab}", t.dark);
+                let icon = crate::theme::contrast(t.text, crate::theme::over(c, t.card, 0.45));
+                assert!(icon >= 3.0, "tab button {c:?} dark {}: {icon}", t.dark);
                 for show_as in [ShowAs::Free, ShowAs::Tentative, ShowAs::Busy, ShowAs::Oof] {
                     for hovered in [false, true] {
                         let look = chip_paint(c, show_as, hovered, &t);
