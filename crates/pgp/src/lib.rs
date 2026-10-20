@@ -16,6 +16,9 @@ use pgp::ser::Serialize as _;
 use pgp::types::{KeyDetails, Password};
 use zeroize::Zeroizing;
 
+mod send;
+pub use send::{encrypt_message, sign_message, with_header};
+
 /// Most bytes a key file or an `Autocrypt` key may have.
 pub const MAX_KEY: usize = 256 * 1024;
 /// Most bytes an encrypted message may hold once opened.
@@ -35,6 +38,10 @@ pub enum PgpError {
     NotForMe,
     #[error("Dit bericht is versleuteld, maar het kan niet worden geopend.")]
     Decrypt,
+    #[error("Het bericht kan niet met je OpenPGP-sleutel worden ondertekend.")]
+    Sign,
+    #[error("Het bericht kan niet met OpenPGP worden versleuteld.")]
+    Encrypt,
 }
 
 /// What a key says about its holder.
@@ -432,5 +439,37 @@ mod tests {
         assert!(autocrypt(raw.replace("addr=Jij@", "addr=bank@").as_bytes()).is_none());
         assert!(autocrypt(raw.replace("prefer-encrypt", "critical").as_bytes()).is_none());
         assert!(autocrypt(b"From: a@b.nl\r\n\r\nHoi").is_none());
+    }
+
+    #[test]
+    fn signs_and_encrypts_mail_that_reads_back() {
+        const NOW: i64 = 1_798_761_600;
+        let raw = b"From: Alain Tester <alain@voorbeeld.nl>\r\nTo: jij@example.org\r\nSubject: Contract\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHet contract staat klaar.\r\n";
+        let me = alain();
+        let signed = sign_message(&me, raw, NOW).unwrap();
+        let text = String::from_utf8_lossy(&signed);
+        assert!(text.starts_with("From: Alain Tester"), "{text}");
+        assert!(text.contains("multipart/signed; protocol=\"application/pgp-signature\"; micalg=pgp-sha256"));
+        assert!(matches!(check_message(&signed, &[me.public()]), Some(Verdict::Valid { signer }) if signer.covers("alain@voorbeeld.nl")));
+        let changed = text.replace("staat klaar", "staat niet klaar");
+        assert_eq!(check_message(changed.as_bytes(), &[me.public()]), Some(Verdict::Broken));
+
+        assert!(jij().can_encrypt(NOW));
+        let encrypted = encrypt_message(&me, raw, &[jij()], true, NOW).unwrap();
+        assert!(is_encrypted(&encrypted));
+        assert!(!String::from_utf8_lossy(&encrypted).contains("contract staat"));
+        // The sender's own copy opens, and so does the recipient's.
+        let (plain, verdict) = decrypt_message(&me, &encrypted, &[me.public()]).unwrap();
+        assert!(String::from_utf8_lossy(&plain).contains("Het contract staat klaar."));
+        assert!(matches!(verdict, Some(Verdict::Valid { .. })));
+        let jij_secret = SecretKey::import(include_bytes!("../testdata/jij-secret.asc"), "geheim").unwrap();
+        assert!(decrypt_message(&jij_secret, &encrypted, &[]).is_ok());
+        let unsigned = encrypt_message(&me, raw, &[jij()], false, NOW).unwrap();
+        assert!(decrypt_message(&me, &unsigned, &[]).unwrap().1.is_none());
+
+        let header = me.autocrypt_header("Alain@voorbeeld.nl");
+        let with = with_header(raw, &header);
+        let (addr, key) = autocrypt(&with).unwrap();
+        assert_eq!((addr.as_str(), key), ("alain@voorbeeld.nl", me.public()));
     }
 }

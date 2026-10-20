@@ -50,6 +50,7 @@ ureq = { version = "3", default-features = false, features = ["rustls-no-provide
 rustls-native-certs = "0.8"
 # OpenPGP (rPGP, pure Rust); bzip2 left out, as no mail program compresses with it.
 pgp = { version = "0.21", default-features = false }
+rand = "0.8"
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
 # The offline cache is sealed with ChaCha20-Poly1305 from the same crypto library rustls uses.
 aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys"] }

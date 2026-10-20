@@ -96,19 +96,33 @@ pub fn sign_if_asked(identities: &Identities, account: &Account, sign: Option<bo
     }
 }
 
-/// `raw` as it goes out for `draft` from `account`: signed when asked (see [`sign_if_asked`]),
-/// then encrypted when the draft asks for it. A message that should be encrypted and cannot
-/// be is not sent in the clear.
+/// `raw` as it goes out for `draft` from `account`: signed when asked, then encrypted when the
+/// draft asks for it, with S/MIME when the account has a certificate and with OpenPGP when it
+/// has an OpenPGP key instead, or when only OpenPGP reaches every recipient. Mail from an
+/// account with an OpenPGP key carries it in an `Autocrypt` header. A message that should be
+/// signed or encrypted and cannot be is not sent without.
 pub fn outgoing(keys: &Keys, account: &Account, draft: &Draft, raw: Vec<u8>) -> Result<Vec<u8>, String> {
+    let pgp = keys.openpgp.own_key(&account.id);
+    let raw = match &pgp {
+        Some(key) => mailcraft_pgp::with_header(&raw, &key.autocrypt_header(account.address.email())),
+        None => raw,
+    };
+    let own = keys.identities.read().ok().and_then(|map| map.get(&account.id).map(|i| i.certificate_der().to_vec()));
+    let recipients: Vec<&Address> = draft.to.iter().chain(&draft.cc).collect();
+    if let Some(key) = &pgp {
+        let by_certificate = own.is_some() && (!draft.encrypt || missing(&keys.people, recipients.iter().copied()).is_empty());
+        let by_key = !draft.encrypt || keys.openpgp.missing(recipients.iter().copied(), now()).is_empty();
+        if own.is_none() || (!by_certificate && by_key) {
+            return pgp_outgoing(keys, key, draft, &recipients, raw);
+        }
+    }
     let signed = sign_if_asked(&keys.identities, account, draft.sign, raw)?;
     if !draft.encrypt {
         return Ok(signed);
     }
-    let own = keys.identities.read().ok().and_then(|map| map.get(&account.id).map(|i| i.certificate_der().to_vec()));
     let Some(own) = own else {
-        return Err("Dit account heeft geen certificaat. Importeer er een onder Bestand om versleuteld te mailen, of zet Versleutelen uit.".into());
+        return Err("Dit account heeft geen certificaat of OpenPGP-sleutel. Importeer er een onder Bestand om versleuteld te mailen, of zet Versleutelen uit.".into());
     };
-    let recipients: Vec<&Address> = draft.to.iter().chain(&draft.cc).collect();
     let missing = missing(&keys.people, recipients.iter().copied());
     if !missing.is_empty() {
         return Err(format!("{} Zet Versleutelen uit om toch te verzenden.", missing_text(&missing)));
@@ -118,6 +132,21 @@ pub fn outgoing(keys: &Keys, account: &Account, draft: &Draft, raw: Vec<u8>) -> 
     let mut certificates = vec![own];
     certificates.extend(recipients.iter().filter_map(|a| people.get(&a.email().to_lowercase()).cloned()));
     mailcraft_smime::encrypt_message(&signed, &certificates).map_err(|e| e.to_string())
+}
+
+/// [`outgoing`] with the OpenPGP key `key`: signed unless the draft says not to, encrypted
+/// (and signed inside) when it asks for it.
+fn pgp_outgoing(keys: &Keys, key: &mailcraft_pgp::SecretKey, draft: &Draft, recipients: &[&Address], raw: Vec<u8>) -> Result<Vec<u8>, String> {
+    let sign = draft.sign != Some(false);
+    if draft.encrypt {
+        let missing = keys.openpgp.missing(recipients.iter().copied(), now());
+        if !missing.is_empty() {
+            return Err(format!("{} Zet Versleutelen uit om toch te verzenden.", missing_text(&missing)));
+        }
+        let people = keys.openpgp.keys_of(recipients.iter().copied());
+        return mailcraft_pgp::encrypt_message(key, &raw, &people, sign, now()).map_err(|e| e.to_string());
+    }
+    if sign { mailcraft_pgp::sign_message(key, &raw, now()).map_err(|e| e.to_string()) } else { Ok(raw) }
 }
 
 /// The addresses among `addresses` without a known certificate, lowercase, each once.
@@ -135,7 +164,7 @@ fn missing<'a>(people: &People, addresses: impl Iterator<Item = &'a Address>) ->
 /// Says which recipients cannot get encrypted mail yet.
 pub fn missing_text(missing: &[String]) -> String {
     format!(
-        "Van {} is nog geen certificaat bekend, dus het bericht kan niet versleuteld naar {} worden gestuurd. Vraag om eerst een ondertekend bericht te sturen.",
+        "Van {} is nog geen certificaat of sleutel bekend, dus het bericht kan niet versleuteld naar {} worden gestuurd. Vraag om eerst een ondertekend bericht te sturen.",
         missing.join(", "),
         if missing.len() == 1 { "die ontvanger" } else { "deze ontvangers" }
     )
@@ -178,10 +207,17 @@ fn open_body(identities: &Identities, account_id: &str, raw: &[u8]) -> Body {
 }
 
 impl Engine {
-    /// The addresses among `addresses` mail cannot be encrypted to yet, for want of a
-    /// certificate.
-    pub fn missing_certificates(&self, addresses: &[Address]) -> Vec<String> {
-        missing(&self.keys.people, addresses.iter())
+    /// The addresses among `addresses` mail from `account_id` cannot be encrypted to yet, for
+    /// want of a certificate or an OpenPGP key: none when one of the two reaches them all.
+    pub fn missing_certificates(&self, account_id: &str, addresses: &[Address]) -> Vec<String> {
+        let smime = self.certificate(account_id).is_some();
+        let pgp = self.keys.openpgp.own_key(account_id).is_some();
+        let by_certificate = missing(&self.keys.people, addresses.iter());
+        if !pgp || (smime && by_certificate.is_empty()) {
+            return by_certificate;
+        }
+        let by_key = self.keys.openpgp.missing(addresses.iter(), now());
+        if smime && by_key.len() > by_certificate.len() { by_certificate } else { by_key }
     }
 
     /// Keeps the certificate of a trusted, valid signature on `message_id` that belongs to its
@@ -410,15 +446,15 @@ mod tests {
         let draft = Draft { to: vec![jij()], subject: "Contract".into(), body: "Hallo".into(), encrypt: true, ..Draft::default() };
         let raw = b"From: alain@voorbeeld.nl\r\nTo: jij@example.org\r\nSubject: Contract\r\nContent-Type: text/plain\r\n\r\nHallo\r\n".to_vec();
         let refused = outgoing(&e.keys, &a, &draft, raw.clone()).unwrap_err();
-        assert!(refused.contains("Van jij@example.org is nog geen certificaat bekend"), "{refused}");
-        assert_eq!(e.missing_certificates(&[jij()]), vec!["jij@example.org".to_string()]);
+        assert!(refused.contains("Van jij@example.org is nog geen certificaat of sleutel bekend"), "{refused}");
+        assert_eq!(e.missing_certificates("a1", &[jij()]), vec!["jij@example.org".to_string()]);
 
         // A valid signature teaches the certificate, but only for the address it was issued to.
         let body = signed(&e, SIGNED);
         e.learn_certificate("x", Some(&Address::new(None, "bank@example.org").unwrap()), &body);
-        assert!(!e.missing_certificates(&[jij()]).is_empty());
+        assert!(!e.missing_certificates("a1", &[jij()]).is_empty());
         e.learn_certificate("x", Some(&jij()), &body);
-        assert!(e.missing_certificates(&[jij()]).is_empty());
+        assert!(e.missing_certificates("a1", &[jij()]).is_empty());
 
         let sent = outgoing(&e.keys, &a, &draft, raw.clone()).unwrap();
         assert!(mailcraft_smime::is_encrypted(&sent) && !sent.windows(5).any(|w| w == b"Hallo"));
@@ -443,7 +479,7 @@ mod tests {
         let forged = signed(&e, FORGED);
         assert!(matches!(&forged.signature, Some(Signature::Valid { trusted: false, .. })), "valid signature, untrusted issuer");
         e.learn_certificate("x", Some(&jij()), &forged);
-        assert!(!e.missing_certificates(&[jij()]).is_empty(), "never learned by itself");
+        assert!(!e.missing_certificates("a1", &[jij()]).is_empty(), "never learned by itself");
 
         // The person says it is theirs, on an open message from that address.
         let id = e.session.messages.iter().find(|m| !e.in_junk(&m.id)).map(|m| m.id.clone()).unwrap();
@@ -454,7 +490,7 @@ mod tests {
         assert_eq!(e.trust_certificate("weg"), Err("Dit bericht is er niet meer.".to_string()));
         e.trust_certificate(&id).unwrap();
         assert!(matches!(e.session.bodies[&id].signature, Some(Signature::Valid { trusted: true, .. })));
-        assert!(e.missing_certificates(&[jij()]).is_empty());
+        assert!(e.missing_certificates("a1", &[jij()]).is_empty());
         // From then on the same certificate counts as trusted.
         assert!(matches!(signed(&e, FORGED).signature, Some(Signature::Valid { trusted: true, .. })));
     }
@@ -477,7 +513,7 @@ mod tests {
         drop(e);
         let mut again = Engine::load(Arc::clone(&secrets), Some(path.clone()));
         assert_eq!(again.certificate("a1").map(|c| c.name), Some("Alain Tester".into()));
-        assert!(again.missing_certificates(&[jij()]).is_empty(), "the correspondents' certificates are kept too");
+        assert!(again.missing_certificates("a1", &[jij()]).is_empty(), "the correspondents' certificates are kept too");
         again.remove_account("a1").unwrap();
         assert!(again.certificate("a1").is_none());
         assert!(!dir.join("cache").join("a1.identity").exists(), "removing the account removes the certificate");
