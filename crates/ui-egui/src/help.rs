@@ -96,6 +96,10 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     if ribbon_action_hint(ui, t, "ℹ", "Over Mailcraft", true, Some("Versie en uitgangspunten")) {
         app.help = Some(HelpWindow::About);
     }
+    let checking = app.updates.running();
+    if ribbon_action_hint(ui, t, "⟳", crate::updates::CHECK, !checking, Some("Bij GitHub nagaan of er een nieuwere versie van Mailcraft is")) {
+        app.check_for_updates(ui.ctx(), true);
+    }
     ui.separator();
     ui.label(RichText::new(version_line()).size(12.0).color(t.text_dim));
 }
@@ -133,6 +137,16 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 ui.label(RichText::new("Mail, agenda, contacten en taken voor de desktop, met de werkwijze van Outlook en de stijl van de ArtCraft-familie. Geschreven in Rust met egui; één programma voor macOS, Windows en Linux.").color(t.text));
                 ui.add_space(8.0);
                 ui.label(RichText::new("Veiligheid en privacy voorop: mail kan geen scripts uitvoeren, afbeeldingen van internet worden pas geladen als je erom vraagt, verbindingen lopen altijd over TLS, wachtwoorden staan in de sleutelhanger van het systeem en de offline cache is versleuteld.").color(t.text));
+                ui.add_space(8.0);
+                let mut auto = app.view.update_check == Some(true);
+                if ui
+                    .checkbox(&mut auto, crate::updates::AUTO)
+                    .on_hover_text("Mailcraft vraagt dan eens per dag bij GitHub naar de nieuwste versie; er gaat niets anders mee dan die vraag")
+                    .changed()
+                {
+                    app.view.update_check = Some(auto);
+                    app.save_view(ctx);
+                }
                 if let Some(f) = settings_folder(app) {
                     ui.add_space(8.0);
                     ui.label(RichText::new(format!("Instellingen en cache: {}", f.display())).size(12.0).color(t.text_dim));
