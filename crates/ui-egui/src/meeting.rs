@@ -145,6 +145,7 @@ mod tests {
             all_day: false,
             location: "Kamer 2".into(),
             notes: "Schetsen meenemen.".into(),
+            notes_rich: None,
             recurrence: None,
             reminder: Some(15),
             private: false,

@@ -374,6 +374,7 @@ mod tests {
             all_day,
             location: location.into(),
             notes: String::new(),
+            notes_rich: None,
             recurrence: None,
             reminder: None,
             private: false,

@@ -93,6 +93,10 @@ pub struct Appointment {
     /// Exchange and Microsoft 365 categories, and a private extended property on Google.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub categories: Vec<String>,
+    /// The formatting over `notes` (bold, lists, colours…), kept on this computer; servers get
+    /// the notes as text. `None` for plain notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes_rich: Option<crate::rich::Rich>,
 }
 
 /// How an appointment shows in your availability, Outlook's "Weergeven als". Travels as the
@@ -310,6 +314,14 @@ impl Appointment {
         self.title = clean_text(self.title.trim());
         self.location = clean_text(self.location.trim());
         self.notes = self.notes.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).take(MAX_NOTES).collect();
+        self.notes_rich = self
+            .notes_rich
+            .take()
+            .map(|mut r| {
+                r.fit(&self.notes);
+                r
+            })
+            .filter(|r| !r.is_plain());
         if self.title.is_empty() {
             return Err(AppointmentError::NoTitle);
         }
@@ -420,6 +432,7 @@ mod tests {
             all_day: false,
             location: String::new(),
             notes: "x\u{7}y".into(),
+            notes_rich: None,
             recurrence: None,
             reminder: None,
             private: false,

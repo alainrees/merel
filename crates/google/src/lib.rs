@@ -198,6 +198,7 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         all_day,
         location: str_of(e, "location").to_string(),
         notes: str_of(e, "description").to_string(),
+        notes_rich: None,
         recurrence: None,
         reminder: reminder_of(e),
         private: matches!(str_of(e, "visibility"), "private" | "confidential"),

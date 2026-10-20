@@ -235,6 +235,8 @@ pub struct Editor {
     pub end_date: String,
     pub end_time: String,
     pub notes: String,
+    /// The formatting over `notes`, with the editor's undo and selection.
+    pub notes_editor: crate::rich_edit::Editor,
     /// `None` for a single appointment.
     pub repeat: Option<Frequency>,
     pub interval: String,
@@ -303,6 +305,7 @@ impl Editor {
             end_date: end.format(DATE_FORMAT).to_string(),
             end_time: end.format(TIME_FORMAT).to_string(),
             notes: String::new(),
+            notes_editor: crate::rich_edit::Editor::new("appointment-notes", "", None),
             repeat: None,
             interval: "1".into(),
             weekdays: [false; 7],
@@ -338,6 +341,7 @@ impl Editor {
         e.end_date = end.format(DATE_FORMAT).to_string();
         e.end_time = end.format(TIME_FORMAT).to_string();
         e.notes = a.notes.clone();
+        e.notes_editor = crate::rich_edit::Editor::new("appointment-notes", &a.notes, a.notes_rich.clone());
         if let Some(r) = &a.recurrence {
             e.repeat = Some(r.frequency);
             e.interval = r.interval.to_string();
@@ -431,6 +435,7 @@ impl Editor {
             "all_day": self.all_day,
             "location": self.location,
             "notes": self.notes,
+            "notes_rich": self.notes_editor.stored(&self.notes),
             "recurrence": recurrence,
             "reminder": self.reminder,
             "private": self.private,
@@ -2002,22 +2007,22 @@ fn form(
     }
     helder::icon_row(ui, t, Icon::MapPin, |ui| helder::underline_field(ui, t, &mut editor.location, "Locatie toevoegen", wide, false));
     ui.add_space(4.0);
+    // The notes with Outlook's formatting bar over them, as in the message window.
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        helder::indent(ui);
+        ui.vertical(|ui| {
+            ui.set_width(wide);
+            crate::rich_edit::bar(ui, t, &mut editor.notes_editor, &mut editor.notes);
+        });
+    });
     ui.horizontal_top(|ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(helder::ROW_ICON, helder::BUTTON_HEIGHT), Sense::hover());
         Icon::Notes.image(helder::ICON, t.text_dim).paint_at(ui, Rect::from_center_size(rect.center(), vec2(helder::ICON, helder::ICON)));
-        egui::Frame::new().fill(t.window).stroke(Stroke::new(1.0, t.card_border)).corner_radius(helder::CONTROL_RADIUS).inner_margin(8).show(
-            ui,
-            |ui| {
-                ui.add(
-                    egui::TextEdit::multiline(&mut editor.notes)
-                        .frame(egui::Frame::NONE)
-                        .hint_text(RichText::new("Notities toevoegen").color(t.text_dim))
-                        .font(FontId::proportional(helder::FIELD_TEXT))
-                        .desired_width(wide - 16.0)
-                        .desired_rows(5),
-                );
-            },
-        );
+        ui.vertical(|ui| {
+            ui.set_width(wide);
+            crate::rich_edit::edit(ui, t, &mut editor.notes_editor, &mut editor.notes, "Notities", "Notities toevoegen", 140.0);
+        });
     });
     if let Some(e) = &editor.error {
         ui.add_space(4.0);
@@ -2111,6 +2116,7 @@ mod tests {
             all_day: false,
             location: String::new(),
             notes: String::new(),
+            notes_rich: None,
             recurrence: None,
             reminder: None,
             private: false,
@@ -2180,6 +2186,7 @@ mod tests {
             all_day: false,
             location: String::new(),
             notes: String::new(),
+            notes_rich: None,
             recurrence: None,
             reminder: None,
             private: true,
@@ -2291,6 +2298,7 @@ mod tests {
             all_day: true,
             location: String::new(),
             notes: String::new(),
+            notes_rich: None,
             recurrence: None,
             reminder: None,
             private: false,
@@ -2351,6 +2359,7 @@ mod tests {
             all_day: false,
             location: String::new(),
             notes: String::new(),
+            notes_rich: None,
             recurrence: Some(Recurrence { interval: 2, count: Some(8), ..Recurrence::every(Frequency::Monthly) }),
             reminder: None,
             private: false,

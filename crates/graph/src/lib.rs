@@ -199,6 +199,7 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         all_day: e.get("isAllDay").and_then(Value::as_bool).unwrap_or(false),
         location: e.get("location").map(|l| str_of(l, "displayName")).unwrap_or("").to_string(),
         notes: body_text(e),
+        notes_rich: None,
         recurrence: None,
         reminder: (e.get("isReminderOn").and_then(Value::as_bool) == Some(true))
             .then(|| e.get("reminderMinutesBeforeStart").and_then(Value::as_u64).and_then(|m| u32::try_from(m).ok()))

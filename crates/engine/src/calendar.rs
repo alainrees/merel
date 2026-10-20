@@ -177,6 +177,8 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         all_day: params.get("all_day").and_then(Value::as_bool).unwrap_or(false),
         location: str_param(params, "location").unwrap_or("").to_string(),
         notes: str_param(params, "notes").unwrap_or("").to_string(),
+        // Formatting that does not parse is dropped: the notes stay, as text.
+        notes_rich: params.get("notes_rich").and_then(|v| serde_json::from_value(v.clone()).ok()),
         recurrence,
         reminder,
         private: params.get("private").and_then(Value::as_bool).unwrap_or(false),
@@ -617,7 +619,7 @@ mod tests {
         .expect("a new appointment in an account calendar may start a series");
         let jobs = s.take_jobs();
         assert!(
-            matches!(&jobs[..], [crate::Job::SaveItem { item: mailcraft_mailbox::Item::Appointment(a), .. }] if a.recurrence.is_some()),
+            matches!(&jobs[..], [crate::Job::SaveItem { item, .. }] if matches!(&**item, mailcraft_mailbox::Item::Appointment(a) if a.recurrence.is_some())),
             "the server gets the rule: {jobs:?}"
         );
         let id = s.selected_appointment.clone().expect("selected");
