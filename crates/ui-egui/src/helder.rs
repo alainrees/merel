@@ -104,11 +104,13 @@ pub enum Icon {
     Moon,
     ArrowDownUp,
     Printer,
+    ArrowLeft,
+    ArrowRight,
 }
 
 impl Icon {
     /// Every icon, for the test that each one loads.
-    pub const ALL: [Icon; 75] = [
+    pub const ALL: [Icon; 77] = [
         Icon::Archive,
         Icon::Bell,
         Icon::Calendar,
@@ -184,6 +186,8 @@ impl Icon {
         Icon::Moon,
         Icon::ArrowDownUp,
         Icon::Printer,
+        Icon::ArrowLeft,
+        Icon::ArrowRight,
     ];
 
     /// The image's uri and its SVG source.
@@ -269,6 +273,8 @@ impl Icon {
             Icon::Moon => svg!("moon"),
             Icon::ArrowDownUp => svg!("arrow-down-up"),
             Icon::Printer => svg!("printer"),
+            Icon::ArrowLeft => svg!("arrow-left"),
+            Icon::ArrowRight => svg!("arrow-right"),
         }
     }
 

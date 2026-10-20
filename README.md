@@ -131,7 +131,11 @@ clicking the row hides it: an unticked calendar keeps its appointments out of th
 printed page until it is ticked again (reminders still come), as in Outlook (kept in `view.json`). The "⋯" after a
 calendar (or a right click) gives it one of twelve colours, each at least 3:1 against the window in both themes, and
 renames or deletes a calendar on this computer; "Agenda toevoegen" makes a new local calendar with a name and colour.
-A colour picked for an account's calendar stays on this computer (`calendar.json`). In the week and day views
+A colour picked for an account's calendar stays on this computer (`calendar.json`). With more than one calendar ticked, the day and
+week views show a tab per calendar in its colour, as Outlook does: merged, the calendars share one grid and
+appointments at the same time stand side by side (each in its own colour); the arrow on a tab puts the calendars
+side by side, each with its own days under its tab (a click in a calendar's hours makes the appointment there), and
+back; the cross on a tab unticks that calendar. The choice is kept in `view.json`. In the week and day views
 the bottom edge of an appointment can be dragged too, to make it longer or shorter by the half hour. The calendar's
 side pane lists the open tasks; drag one onto a day or an hour and the appointment window opens for it, with the
 task's title and notes filled in, so planning a task is one drag and "Opslaan". The appointment window also has
