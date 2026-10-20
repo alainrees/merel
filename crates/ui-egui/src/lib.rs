@@ -27,6 +27,7 @@ pub mod invitation;
 pub mod junk;
 pub mod meeting;
 pub mod message_menu;
+pub mod notice;
 pub mod print;
 pub mod quicksteps;
 pub mod receipt;
@@ -51,6 +52,7 @@ use mailcraft_model::{FolderKind, Warning};
 
 pub use backstage::AccountForm;
 pub use compose::{Compose, Kind as ComposeKind};
+pub use notice::Notice;
 
 pub use theme::{APP_COLOR, Tokens};
 
@@ -119,8 +121,8 @@ pub struct MailApp {
     pub calendar: calendar::State,
     pub contacts: contacts::State,
     pub tasks: tasks::State,
-    /// The last command error or note, shown in the status bar until the next action.
-    notice: Option<String>,
+    /// What the last action has to say, shown at the top of the window (see [`notice`]).
+    notice: Option<notice::Notice>,
     /// The message whose body is on screen; when it changes, its pictures leave the cache.
     shown_message: Option<String>,
     /// The message waiting to be marked read, and since when, for "Gelezen markeren: Na 5 seconden".
@@ -281,17 +283,23 @@ impl MailApp {
             self.delete_forever();
             return;
         }
-        self.notice = match self.engine.run(id, &params) {
-            Ok(()) => None,
+        match self.engine.run(id, &params) {
+            // A warning or error about an earlier step is over once the next one works; good
+            // news stays for its few seconds.
+            Ok(()) => {
+                if self.notice.as_ref().is_some_and(|n| matches!(n.tone, notice::Tone::Warning | notice::Tone::Error)) {
+                    self.notice = None;
+                }
+            }
             Err(e) => {
                 log::warn!("{id}: {e}");
-                Some(match e {
-                    mailcraft_engine::CommandError::NoSelection => "Selecteer eerst een bericht.".to_string(),
-                    mailcraft_engine::CommandError::NoFolder(_) => "Dit account heeft die map niet.".to_string(),
-                    e => e.to_string(),
-                })
+                self.notice = Some(match e {
+                    mailcraft_engine::CommandError::NoSelection => Notice::warning("Selecteer eerst een bericht."),
+                    mailcraft_engine::CommandError::NoFolder(_) => Notice::warning("Dit account heeft die map niet."),
+                    e => Notice::error(e.to_string()),
+                });
             }
-        };
+        }
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
@@ -309,16 +317,19 @@ impl MailApp {
         self.tick_read_timer(ui.ctx());
         let arrivals = self.engine.session.take_arrivals();
         if arrivals > 0 {
-            self.notice =
-                Some(if arrivals == 1 { "1 nieuw bericht ontvangen.".to_string() } else { format!("{arrivals} nieuwe berichten ontvangen.") });
+            self.notice = Some(Notice::info(if arrivals == 1 {
+                "1 nieuw bericht ontvangen.".to_string()
+            } else {
+                format!("{arrivals} nieuwe berichten ontvangen.")
+            }));
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
         }
         let hits = self.engine.session.take_rule_hits();
         if hits > 0 {
-            self.notice = Some(rules::rule_notice(hits));
+            self.notice = Some(Notice::info(rules::rule_notice(hits)));
         }
         if let Some(failure) = self.engine.session.take_scheduled_failures().pop() {
-            self.notice = Some(failure);
+            self.notice = Some(Notice::error(failure));
         }
         let title = window_title(self.engine.session.inbox_unread());
         if self.title.as_deref() != Some(title.as_str()) {
@@ -358,6 +369,8 @@ impl MailApp {
         } else if self.tab == Tab::Home {
             module_shortcuts(self, &ctx);
         }
+        // What an action has to say floats just under the commands, where the person looks.
+        notice::toast(self, &ctx, &t, ui.available_rect_before_wrap().top());
         if self.tab == Tab::File {
             backstage::show(self, ui, &t);
             return;
@@ -1587,10 +1600,10 @@ impl MailApp {
             return;
         }
         self.run("message.wake_snoozed", Value::Null);
-        self.notice = Some(match due.as_slice() {
+        self.notice = Some(Notice::info(match due.as_slice() {
             [m] => format!("Gesluimerd bericht is terug: {}", m.subject),
             list => format!("{} gesluimerde berichten zijn terug.", list.len()),
-        });
+        }));
     }
 
     pub fn open_message(&mut self, id: &str) {
@@ -1875,8 +1888,8 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         && signature::strip(ui, t, sig, m.from.email(), !in_junk)
     {
         match app.engine.trust_certificate(&message_id) {
-            Ok(()) => app.notice = Some("Het certificaat wordt vertrouwd; je kunt deze afzender nu ook versleuteld mailen.".into()),
-            Err(e) => app.notice = Some(e),
+            Ok(()) => app.notice = Some(Notice::success("Het certificaat wordt vertrouwd; je kunt deze afzender nu ook versleuteld mailen.")),
+            Err(e) => app.notice = Some(Notice::error(e)),
         }
     }
     // A list's mail offers the way off it, as Outlook does; not in the Junk folder, where the
@@ -2144,19 +2157,6 @@ fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let list = app.engine.session.visible_messages();
                 let unread = list.iter().filter(|m| !m.flags.seen).count();
                 ui.label(RichText::new(format!("Items: {}   Ongelezen: {}", list.len(), unread)).size(12.0).color(t.text_dim));
-                if let Some(n) = &app.notice {
-                    let col = if n.ends_with("verzonden.")
-                        || n.ends_with("ontvangen.")
-                        || n.starts_with("Bijlage opgeslagen")
-                        || n.starts_with("Concept bewaard")
-                        || n.starts_with("Regels toegepast")
-                    {
-                        t.accent_text
-                    } else {
-                        t.flag
-                    };
-                    ui.label(RichText::new(n).size(12.0).color(col));
-                }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let (txt, col) = if app.engine.session.is_sample() {
                         ("Voorbeeldmail · offline".to_string(), t.text_dim)
@@ -2203,6 +2203,43 @@ mod tests {
         egui_kittest::Harness::builder()
             .with_size(vec2(1280.0, 800.0))
             .build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(Engine::sample()))
+    }
+
+    #[test]
+    fn a_notice_shows_at_the_top_with_its_kind_and_goes_by_itself_unless_it_is_an_error() {
+        let mut h = harness();
+        h.run();
+        h.state_mut().notice = Some(Notice::success("Contact opgeslagen in Downloads: Ravi Kumar.vcf").revealing("/tmp/Ravi Kumar.vcf"));
+        h.run();
+        assert!(h.get_by_label(notice::CLOSE).rect().top() < 220.0, "just under the ribbon, where the person looks");
+        h.get_by_label(notice::REVEAL);
+        for _ in 0..30 {
+            h.step();
+        }
+        assert!(h.state().notice.is_none(), "good news goes by itself");
+
+        h.state_mut().notice = Some(Notice::error("Opslaan is mislukt."));
+        for _ in 0..60 {
+            h.step();
+        }
+        assert!(h.state().notice.is_some(), "an error waits to be read");
+        assert!(h.query_by_label(notice::REVEAL).is_none(), "nothing to show in a folder");
+        h.get_by_label(notice::CLOSE).click();
+        h.run();
+        assert!(h.state().notice.is_none());
+    }
+
+    #[test]
+    fn a_command_that_works_clears_an_earlier_error_but_not_good_news() {
+        let mut h = harness();
+        h.run();
+        h.state_mut().select_message("m1");
+        h.state_mut().notice = Some(Notice::error("Dit ging mis."));
+        h.state_mut().run("message.mark_read", Value::Null);
+        assert!(h.state().notice.is_none());
+        h.state_mut().notice = Some(Notice::success("Bericht verzonden."));
+        h.state_mut().run("message.mark_read", Value::Null);
+        assert_eq!(h.state().notice.as_deref(), Some("Bericht verzonden."));
     }
 
     #[test]

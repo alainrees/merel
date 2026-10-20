@@ -31,7 +31,7 @@ pub struct AccountForm {
     pub client_secret: String,
     pub error: Option<String>,
     /// How a sign-in started from the account list ended.
-    pub notice: Option<String>,
+    pub notice: Option<crate::Notice>,
     /// The account whose Remove button was clicked once; the second click removes it.
     pub confirm_remove: Option<String>,
     /// The account whose signature is being edited, with the text so far.
@@ -231,7 +231,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 } else if app.can_print() {
                     app.print_selected();
                 } else {
-                    app.notice = Some("Open eerst een bericht om af te drukken.".into());
+                    app.notice = Some(crate::Notice::warning("Open eerst een bericht om af te drukken."));
                 }
                 app.tab = Tab::Home;
             }
@@ -261,8 +261,8 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let oauth_form = matches!(app.form.kind, Protocol::Gmail | Protocol::Microsoft365);
             if !oauth_form {
                 match app.engine.session.sign_in.take() {
-                    Some(Some(Ok(()))) => app.form.notice = Some("Opnieuw aangemeld; het account verbindt opnieuw.".into()),
-                    Some(Some(Err(e))) => app.form.notice = Some(e),
+                    Some(Some(Ok(()))) => app.form.notice = Some(crate::Notice::success("Opnieuw aangemeld; het account verbindt opnieuw.")),
+                    Some(Some(Err(e))) => app.form.notice = Some(crate::Notice::error(e)),
                     Some(None) => app.engine.session.sign_in = Some(None),
                     None => {}
                 }
@@ -288,7 +288,7 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 ui.label(RichText::new("Er is nog geen account. Je ziet voorbeeldmail.").color(t.text_dim));
             }
             if let Some(n) = &app.form.notice {
-                ui.label(RichText::new(n).color(t.text_dim));
+                crate::notice::inline(ui, t, n);
                 ui.add_space(8.0);
             }
             let mut again = None;
@@ -413,8 +413,8 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
             if let Some((id, text)) = save_signature {
                 app.form.notice = match app.engine.set_signature(&id, &text) {
-                    Ok(()) => Some("De handtekening is opgeslagen.".into()),
-                    Err(e) => Some(e),
+                    Ok(()) => Some(crate::Notice::success("De handtekening is opgeslagen.")),
+                    Err(e) => Some(crate::Notice::error(e)),
                 };
             }
             if let Some(id) = remove {
@@ -423,8 +423,8 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 }
                 app.form.confirm_remove = None;
                 app.form.notice = Some(match app.engine.remove_account(&id) {
-                    Ok(()) => "Het account is verwijderd.".into(),
-                    Err(e) => e,
+                    Ok(()) => crate::Notice::success("Het account is verwijderd."),
+                    Err(e) => crate::Notice::error(e),
                 });
             }
             ui.add_space(16.0);
@@ -604,7 +604,7 @@ fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 match app.engine.update_account(account, password) {
                     Ok(()) => {
                         app.form = AccountForm::default();
-                        app.form.notice = Some("Het account is opgeslagen en verbindt opnieuw.".into());
+                        app.form.notice = Some(crate::Notice::success("Het account is opgeslagen en verbindt opnieuw."));
                     }
                     Err(e) => app.form.error = Some(e),
                 }

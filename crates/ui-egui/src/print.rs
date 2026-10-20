@@ -307,10 +307,10 @@ impl MailApp {
         let html = calendar_page(&calendar::period_title(self.calendar.view, self.calendar.focus), first, last, &list);
         let path = page_path();
         self.notice = Some(match write_and_open(&path, &html) {
-            Ok(()) => "Afdrukpagina geopend in de browser; druk daar af met Ctrl+P (Cmd+P op een Mac).".to_string(),
+            Ok(()) => crate::Notice::info("Afdrukpagina geopend in de browser; druk daar af met Ctrl+P (Cmd+P op een Mac)."),
             Err(e) => {
                 log::warn!("print page {}: {e}", path.display());
-                format!("Afdrukken is niet gelukt: {e}")
+                crate::Notice::error(format!("Afdrukken is niet gelukt: {e}"))
             }
         });
     }
@@ -319,16 +319,16 @@ impl MailApp {
     pub fn print_selected(&mut self) {
         let Some(h) = self.engine.session.selected().cloned() else { return };
         let Some(body) = self.engine.session.selected_body().cloned() else {
-            self.notice = Some("De inhoud van dit bericht is nog niet opgehaald; probeer het zo opnieuw.".into());
+            self.notice = Some(crate::Notice::warning("De inhoud van dit bericht is nog niet opgehaald; probeer het zo opnieuw."));
             return;
         };
         let html = page(&h, Some(&body));
         let path = page_path();
         self.notice = Some(match write_and_open(&path, &html) {
-            Ok(()) => "Afdrukpagina geopend in de browser; druk daar af met Ctrl+P (Cmd+P op een Mac).".to_string(),
+            Ok(()) => crate::Notice::info("Afdrukpagina geopend in de browser; druk daar af met Ctrl+P (Cmd+P op een Mac)."),
             Err(e) => {
                 log::warn!("print page {}: {e}", path.display());
-                format!("Afdrukken is niet gelukt: {e}")
+                crate::Notice::error(format!("Afdrukken is niet gelukt: {e}"))
             }
         });
     }

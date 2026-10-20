@@ -108,7 +108,8 @@ impl MailApp {
     pub fn run_quick_step_id(&mut self, id: &str) {
         self.notice = match self.engine.run("quickstep.run", &json!({ "id": id })) {
             Ok(()) => None,
-            Err(e) => Some(run_error(&e)),
+            Err(e @ (CommandError::NoSelection | CommandError::Param(_))) => Some(crate::Notice::warning(run_error(&e))),
+            Err(e) => Some(crate::Notice::error(run_error(&e))),
         };
     }
 }

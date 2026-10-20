@@ -334,7 +334,11 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         Some(Action::Run) => {
             app.run("rule.run", serde_json::Value::Null);
             let n = app.engine.session.take_rule_hits();
-            app.notice = Some(if n == 0 { "Geen berichten in deze map waar een regel op past.".to_string() } else { rule_notice(n) });
+            app.notice = Some(if n == 0 {
+                crate::Notice::info("Geen berichten in deze map waar een regel op past.")
+            } else {
+                crate::Notice::success(rule_notice(n))
+            });
         }
         None => {}
     }
