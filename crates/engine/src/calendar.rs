@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use chrono::Local;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use mailcraft_mailbox::Item;
 use mailcraft_model::{Appointment, AppointmentError, CALENDAR_COLORS, Calendar, MAX_CALENDAR_NAME, Recurrence, clean_text};
@@ -121,7 +121,8 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 /// object names its own `skipped` list. `reminder` is minutes before the start, null for none;
 /// left out, an existing appointment keeps its reminder. `private` marks the appointment as
 /// Outlook's "Privé"; false when left out. `show_as` is `free`, `tentative`, `busy` or `oof`;
-/// left out, an existing appointment keeps its status and a new one is busy.
+/// left out, an existing appointment keeps its status and a new one is busy. `categories` is
+/// a list of category names; left out, an existing appointment keeps its categories.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
         Some(id) => Some(s.appointment(id).ok_or(CommandError::NotFound)?.clone()),
@@ -158,6 +159,10 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         None => existing.as_ref().map(|a| a.show_as).unwrap_or_default(),
         Some(v) => serde_json::from_value::<mailcraft_model::ShowAs>(v.clone()).map_err(|_| CommandError::Param("show_as"))?,
     };
+    let categories = match params.get("categories") {
+        None => existing.as_ref().map(|a| a.categories.clone()).unwrap_or_default(),
+        Some(v) => serde_json::from_value::<Vec<String>>(v.clone()).map_err(|_| CommandError::Param("categories"))?,
+    };
     let id = match (&existing, &account) {
         (Some(a), _) => a.id.clone(),
         (None, Some(account)) => s.pending_id(account),
@@ -176,6 +181,7 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         reminder,
         private: params.get("private").and_then(Value::as_bool).unwrap_or(false),
         show_as,
+        categories,
     }
     .validated()
     .map_err(|e| match e {
@@ -268,6 +274,45 @@ pub fn delete(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         None => s.calendar_dirty = true,
     }
     Ok(())
+}
+
+/// Gives the appointment `id` (else the selected one) other categories, on this computer or
+/// through its account's store.
+fn set_categories(s: &mut Session, params: &Value, change: impl FnOnce(&mut Vec<String>)) -> Result<(), CommandError> {
+    let id = str_param(params, "id").map(str::to_string).or_else(|| s.selected_appointment.clone()).ok_or(CommandError::NoSelection)?;
+    let mut a = s.appointment(&id).ok_or(CommandError::NotFound)?.clone();
+    change(&mut a.categories);
+    a.categories = mailcraft_model::clean_categories(a.categories);
+    match s.appointment_account(&a.calendar_id) {
+        Some(account) => s.save_remote(&account, false, Item::Appointment(a.clone()))?,
+        None => s.calendar_dirty = true,
+    }
+    if let Some(slot) = s.appointments.iter_mut().find(|x| x.id == id) {
+        *slot = a;
+    }
+    Ok(())
+}
+
+/// `appointment.categorize { name, id? }`: puts the category on the appointment, or takes it
+/// off when it is there, as `message.categorize` does for mail. The name must be a known
+/// category, or one the appointment carries already.
+pub fn categorize(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let name = clean_text(str_param(params, "name").unwrap_or("")).trim().to_string();
+    let known = s.categories.iter().find(|c| c.name.eq_ignore_ascii_case(&name)).map(|c| c.name.clone());
+    let id = str_param(params, "id").map(str::to_string).or_else(|| s.selected_appointment.clone()).ok_or(CommandError::NoSelection)?;
+    let carried = s.appointment(&id).ok_or(CommandError::NotFound)?.categories.iter().find(|c| c.eq_ignore_ascii_case(&name)).cloned();
+    if carried.is_none() && known.is_none() {
+        return Err(CommandError::Param("name"));
+    }
+    set_categories(s, &json!({ "id": id }), |list| match carried {
+        Some(c) => list.retain(|x| *x != c),
+        None => list.extend(known),
+    })
+}
+
+/// `appointment.clear_categories { id? }`: takes every category off the appointment.
+pub fn clear_categories(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    set_categories(s, params, Vec::clear)
 }
 
 fn name_param(params: &Value) -> Result<String, CommandError> {
@@ -410,6 +455,31 @@ mod tests {
         let series = s.selected_appointment().unwrap().id.clone();
         assert!(matches!(s.run("appointment.resize", &json!({ "id": series, "end": 20_000 })), Err(CommandError::Param("id"))));
         assert!(matches!(s.run("appointment.resize", &json!({ "id": "nope", "end": 1 })), Err(CommandError::NotFound)));
+    }
+
+    #[test]
+    fn categories_go_on_and_off_an_appointment() {
+        let mut s = Session { categories: mailcraft_model::Category::defaults(), ..Session::default() };
+        s.set_calendar_data(CalendarFile::default());
+        s.run("appointment.save", &json!({ "title": "Lunch", "start": 1000, "end": 4600, "categories": ["Rode categorie", " ", "rode categorie"] }))
+            .unwrap();
+        let id = s.selected_appointment().unwrap().id.clone();
+        assert_eq!(s.appointment(&id).unwrap().categories, vec!["Rode categorie"], "cleaned, without doubles");
+        s.run("appointment.save", &json!({ "id": id, "title": "Lunch", "start": 1000, "end": 4600 })).unwrap();
+        assert_eq!(s.appointment(&id).unwrap().categories, vec!["Rode categorie"], "left out keeps them");
+        s.take_calendar_dirty();
+        s.run("appointment.categorize", &json!({ "name": "groene categorie" })).unwrap();
+        assert_eq!(s.appointment(&id).unwrap().categories, vec!["Rode categorie", "Groene categorie"], "a known name, as the list spells it");
+        assert!(s.take_calendar_dirty());
+        s.run("appointment.categorize", &json!({ "id": id, "name": "Rode categorie" })).unwrap();
+        assert_eq!(s.appointment(&id).unwrap().categories, vec!["Groene categorie"], "a second time takes it off");
+        assert_eq!(s.run("appointment.categorize", &json!({ "name": "Onbekend" })), Err(CommandError::Param("name")));
+        s.run("appointment.clear_categories", &json!({ "id": id })).unwrap();
+        assert!(s.appointment(&id).unwrap().categories.is_empty());
+        assert_eq!(
+            s.run("appointment.save", &json!({ "title": "x", "start": 1, "end": 2, "categories": "Rood" })),
+            Err(CommandError::Param("categories"))
+        );
     }
 
     #[test]

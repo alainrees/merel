@@ -210,6 +210,11 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
             Some("oof") => ShowAs::Oof,
             _ => ShowAs::Busy,
         },
+        categories: e
+            .get("categories")
+            .and_then(Value::as_array)
+            .map(|l| l.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .unwrap_or_default(),
     }
     .validated()
     .ok()
@@ -284,6 +289,7 @@ impl GraphClient {
                 ShowAs::Busy => "busy",
                 ShowAs::Oof => "oof",
             },
+            "categories": a.categories,
         });
         if let Some(m) = a.reminder {
             event["reminderMinutesBeforeStart"] = json!(m);
@@ -627,7 +633,7 @@ impl Mailbox for GraphClient {
 impl ItemStore for GraphClient {
     fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>> {
         let path = format!(
-            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity,showAs",
+            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity,showAs,categories",
             encode(&utc(from)),
             encode(&utc(to.max(from)))
         );
@@ -747,6 +753,11 @@ mod tests {
         let m = appointment_of(&maybe).unwrap();
         assert_eq!(m.show_as, ShowAs::Tentative);
         assert_eq!(GraphClient::event_json(&m, "UTC")["showAs"], "tentative");
+        assert_eq!(body["categories"], json!([]), "no categories clears them on the server");
+        maybe["categories"] = json!(["Werk", "", "Klant"]);
+        let tagged = appointment_of(&maybe).unwrap();
+        assert_eq!(tagged.categories, vec!["Werk", "Klant"]);
+        assert_eq!(GraphClient::event_json(&tagged, "UTC")["categories"], json!(["Werk", "Klant"]));
         maybe["showAs"] = json!("workingElsewhere");
         assert_eq!(appointment_of(&maybe).unwrap().show_as, ShowAs::Free, "working elsewhere leaves the time free");
         let silent = Appointment { reminder: None, ..a.clone() };

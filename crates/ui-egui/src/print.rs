@@ -378,6 +378,7 @@ mod tests {
             reminder: None,
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
+            categories: Vec::new(),
         };
         let mon = d(2026, 10, 19);
         let tue = d(2026, 10, 20);

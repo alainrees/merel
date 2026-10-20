@@ -320,9 +320,33 @@ pub fn appointment_of(event: &Component, id: String) -> Option<Appointment> {
         reminder: reminder_of(event),
         private: private_class(&event.text("CLASS")),
         show_as: show_as_of(event),
+        categories: categories_of(event),
     }
     .validated()
     .ok()
+}
+
+/// The names in every `CATEGORIES` property, which lists them split by unescaped commas.
+fn categories_of(event: &Component) -> Vec<String> {
+    let mut names = Vec::new();
+    for p in event.props.iter().filter(|p| p.name.eq_ignore_ascii_case("CATEGORIES")) {
+        let mut part = String::new();
+        let mut chars = p.raw.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' => {
+                    part.push(c);
+                    if let Some(next) = chars.next() {
+                        part.push(next);
+                    }
+                }
+                ',' => names.push(unescape(&std::mem::take(&mut part))),
+                c => part.push(c),
+            }
+        }
+        names.push(unescape(&part));
+    }
+    names
 }
 
 /// Outlook's free/busy status from its own `X-MICROSOFT-CDO-BUSYSTATUS`, else from `TRANSP`:
@@ -453,6 +477,12 @@ pub fn write_appointment(event: &mut Component, a: &Appointment) {
         ShowAs::Oof => "OOF",
     };
     event.set_text("X-MICROSOFT-CDO-BUSYSTATUS", busy);
+    let categories = (!a.categories.is_empty()).then(|| Prop {
+        name: "CATEGORIES".into(),
+        params: Vec::new(),
+        raw: a.categories.iter().map(|c| escape(c)).collect::<Vec<_>>().join(","),
+    });
+    event.set("CATEGORIES", categories);
     write_reminder(event, &a.title, a.reminder);
     stamp(event);
 }
@@ -623,6 +653,26 @@ mod tests {
         assert!(appointment_of(again[0].find("VEVENT").unwrap(), "e:1".into()).unwrap().private);
         write_appointment(hidden.find_mut("VEVENT").unwrap(), &changed);
         assert!(!hidden.serialize().contains("CLASS:"), "unticked, the class goes away");
+    }
+
+    #[test]
+    fn categories_travel_as_one_categories_property() {
+        let roots = parse(EVENT);
+        let a = appointment_of(roots[0].find("VEVENT").unwrap(), "e:1".into()).unwrap();
+        assert!(a.categories.is_empty());
+        let mut root = roots[0].clone();
+        let tagged = Appointment { categories: vec!["Werk".into(), "Klant, groot".into()], ..a.clone() };
+        write_appointment(root.find_mut("VEVENT").unwrap(), &tagged);
+        let text = root.serialize();
+        assert!(text.contains("CATEGORIES:Werk,Klant\\, groot\r\n"), "{text}");
+        let b = appointment_of(parse(&text)[0].find("VEVENT").unwrap(), "e:1".into()).unwrap();
+        assert_eq!(b.categories, tagged.categories, "a comma inside a name stays inside it");
+        let mut two = Component::new("VEVENT");
+        two.props.push(Prop { name: "CATEGORIES".into(), params: Vec::new(), raw: "A,B".into() });
+        two.props.push(Prop { name: "CATEGORIES".into(), params: Vec::new(), raw: "C".into() });
+        assert_eq!(categories_of(&two), vec!["A", "B", "C"], "every CATEGORIES line counts");
+        write_appointment(root.find_mut("VEVENT").unwrap(), &a);
+        assert!(!root.serialize().contains("CATEGORIES"), "no categories, no property");
     }
 
     #[test]

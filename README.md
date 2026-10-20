@@ -98,7 +98,11 @@ reminds again. Reminders travel with Exchange, Microsoft
 365, Google and CalDAV appointments as the server's own reminder or alarm. An appointment can be marked
 "Privé", as in Outlook: it shows a lock in the calendar, and the mark travels to Exchange and Microsoft 365 as
 sensitivity Private, to Google as visibility private and to CalDAV as `CLASS:PRIVATE`, so anyone the calendar is
-shared with there sees only that the time is taken. "Weergeven als" in the same window sets how the time counts for
+shared with there sees only that the time is taken. Categories, the same coloured labels as on mail, go on an appointment
+in its window ("Categorie toevoegen", a chip with ✕ takes one off, "Alle categorieën wissen" empties the list); a
+categorised appointment is painted in its first category's colour, as Outlook does. They travel to CalDAV as
+`CATEGORIES`, to Exchange and Microsoft 365 as the item's categories, and to Google (which has none) as a private
+extended property. "Weergeven als" in the same window sets how the time counts for
 your availability, Outlook's Vrij, Voorlopig, Bezet or Afwezig: a free appointment is drawn as a pale block with the
 calendar's colour as its border, a tentative one half-transparent, a busy one solid and an out-of-office one purple.
 The status travels as Exchange's LegacyFreeBusyStatus, Microsoft 365's showAs, Google's transparency (free or busy,
