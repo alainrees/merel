@@ -149,6 +149,7 @@ mod tests {
             reminder: Some(15),
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
+            categories: Vec::new(),
         }
     }
 

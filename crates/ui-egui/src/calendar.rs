@@ -251,6 +251,8 @@ pub struct Editor {
     pub private: bool,
     /// Outlook's "Weergeven als".
     pub show_as: ShowAs,
+    /// The category names on the appointment.
+    pub categories: Vec<String>,
     pub error: Option<String>,
 }
 
@@ -312,6 +314,7 @@ impl Editor {
             reminder: Some(15),
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
+            categories: Vec::new(),
             error: None,
         }
     }
@@ -331,6 +334,7 @@ impl Editor {
         e.reminder = a.reminder;
         e.private = a.private;
         e.show_as = a.show_as;
+        e.categories = a.categories.clone();
         e.end_date = end.format(DATE_FORMAT).to_string();
         e.end_time = end.format(TIME_FORMAT).to_string();
         e.notes = a.notes.clone();
@@ -431,6 +435,7 @@ impl Editor {
             "reminder": self.reminder,
             "private": self.private,
             "show_as": self.show_as,
+            "categories": self.categories,
         });
         if recurrence.is_some() {
             // The engine keeps the occurrences that were skipped; the window never lists them.
@@ -684,7 +689,17 @@ fn planned(task: &Task, day: NaiveDate, time: Option<NaiveTime>) -> Editor {
     Editor { title: task.title.clone(), notes: task.notes.clone(), all_day: time.is_none(), ..Editor::new_at(start) }
 }
 
+/// The colour of an appointment's block: its first category's, as Outlook paints a categorised
+/// appointment, else its calendar's.
+#[cfg(test)]
+pub(crate) fn block_color(app: &MailApp, a: &Appointment, t: &Tokens) -> Color32 {
+    appointment_color(app, a, t)
+}
+
 fn appointment_color(app: &MailApp, a: &Appointment, t: &Tokens) -> Color32 {
+    if let Some(name) = a.categories.first() {
+        return crate::categories::color_of(app.engine.session.category_color(name));
+    }
     app.engine.session.calendar(&a.calendar_id).map(|c| Color32::from_rgb(c.color[0], c.color[1], c.color[2])).unwrap_or(t.accent)
 }
 
@@ -1696,6 +1711,26 @@ fn form(
         });
     }
     helder::icon_row(ui, t, Icon::Type, |ui| helder::underline_field(ui, t, &mut editor.title, "Titel toevoegen", wide, true));
+    // The categories as chips that take one off, then the menu that puts them on.
+    let mut off = None;
+    helder::icon_row(ui, t, Icon::Tag, |ui| {
+        helder::quiet(ui, t, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for name in &editor.categories {
+                    let color = crate::categories::color_of(session.category_color(name));
+                    let r = ui.add(egui::Button::new(helder::dotted(&format!("{name}  ✕"), color, t)).frame_when_inactive(false));
+                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, remove_category_label(name)));
+                    if r.on_hover_text("Klik om deze categorie weg te halen").clicked() {
+                        off = Some(name.clone());
+                    }
+                }
+                category_menu(ui, t, editor, session);
+            });
+        });
+    });
+    if let Some(name) = off {
+        editor.categories.retain(|c| *c != name);
+    }
     helder::icon_row(ui, t, Icon::Users, |ui| helder::underline_field(ui, t, &mut editor.attendees, "Genodigden toevoegen", wide, false))
         .on_hover_text(crate::meeting::FIELD);
     if !editor.attendees.trim().is_empty() {
@@ -1770,6 +1805,47 @@ fn form(
     }
 }
 
+/// The form's "Categoriseren" menu: every known category with its colour, ticked when the
+/// appointment has it, the ones it carries that this computer does not know, and
+/// "Alle categorieën wissen".
+fn category_menu(ui: &mut Ui, t: &Tokens, editor: &mut Editor, session: &mailcraft_engine::Session) {
+    let mut names: Vec<String> = session.categories.iter().map(|c| c.name.clone()).collect();
+    names.extend(editor.categories.iter().filter(|c| !names.iter().any(|n| n.eq_ignore_ascii_case(c))).cloned().collect::<Vec<_>>());
+    let label = if editor.categories.is_empty() { CATEGORIZE } else { "Nog een categorie" };
+    let r = helder::menu_button(ui, t, None, RichText::new(label).size(14.0).color(t.text_dim), |ui| {
+        for name in &names {
+            let on = editor.categories.iter().any(|c| c.eq_ignore_ascii_case(name));
+            let color = crate::categories::color_of(session.category_color(name));
+            if ui.add(egui::Button::new(helder::dotted(name, color, t)).selected(on)).clicked() {
+                if on {
+                    editor.categories.retain(|c| !c.eq_ignore_ascii_case(name));
+                } else {
+                    editor.categories.push(name.clone());
+                }
+            }
+        }
+        if names.is_empty() {
+            ui.label(RichText::new("Nog geen categorieën; maak ze bij E-mail via Categoriseren.").size(12.0).color(t.text_dim));
+        }
+        ui.separator();
+        if ui.add_enabled(!editor.categories.is_empty(), egui::Button::new(CLEAR_CATEGORIES)).clicked() {
+            editor.categories.clear();
+            ui.close();
+        }
+    });
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, CATEGORIZE));
+}
+
+/// The appointment window's category menu, as screen readers name it.
+pub const CATEGORIZE: &str = "Categorie toevoegen";
+/// Its last item.
+pub const CLEAR_CATEGORIES: &str = "Alle categorieën wissen";
+
+/// The label of the button that takes `name` off the appointment in its window.
+pub fn remove_category_label(name: &str) -> String {
+    format!("Categorie {name} weghalen")
+}
+
 fn describe(e: &CommandError) -> String {
     match e {
         CommandError::Param("title") => "Vul een titel in.".into(),
@@ -1808,6 +1884,7 @@ mod tests {
             reminder: None,
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
+            categories: Vec::new(),
         };
         let moved = to_local(dropped_start(&a, d(2026, 10, 23), None).unwrap());
         assert_eq!((moved.date(), moved.time()), (d(2026, 10, 23), NaiveTime::from_hms_opt(14, 0, 0).unwrap()), "a month drop keeps the time");
@@ -1876,6 +1953,7 @@ mod tests {
             reminder: None,
             private: true,
             show_as: mailcraft_model::ShowAs::Busy,
+            categories: Vec::new(),
         };
         assert!(Editor::from_appointment(&a, None).private);
         assert_eq!(chip_title(&a), "🔒 Dokter");
@@ -1911,8 +1989,9 @@ mod tests {
             Color32::BLACK,
         ];
         let picked = mailcraft_model::CALENDAR_COLORS.map(|(_, c)| Color32::from_rgb(c[0], c[1], c[2]));
+        let categories = mailcraft_model::CategoryColor::ALL.map(crate::categories::color_of);
         for t in [Tokens::light(), Tokens::dark()] {
-            for c in colors.into_iter().chain(picked) {
+            for c in colors.into_iter().chain(picked).chain(categories) {
                 for show_as in [ShowAs::Free, ShowAs::Tentative, ShowAs::Busy, ShowAs::Oof] {
                     for hovered in [false, true] {
                         let look = chip_paint(c, show_as, hovered, &t);
@@ -1970,6 +2049,7 @@ mod tests {
             reminder: None,
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
+            categories: Vec::new(),
         };
         let back = Editor::from_appointment(&a, None);
         assert_eq!((back.start_date.as_str(), back.end_date.as_str()), ("21-10-2026", "21-10-2026"));
@@ -2029,6 +2109,7 @@ mod tests {
             reminder: None,
             private: false,
             show_as: mailcraft_model::ShowAs::Busy,
+            categories: Vec::new(),
         };
         let back = Editor::from_appointment(&a, Some(a.start + 86_400 * 61));
         assert_eq!((back.repeat, back.interval.as_str(), back.ends, back.count.as_str()), (Some(Frequency::Monthly), "2", Ends::AfterCount, "8"));

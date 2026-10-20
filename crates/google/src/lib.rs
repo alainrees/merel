@@ -203,9 +203,19 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         private: matches!(str_of(e, "visibility"), "private" | "confidential"),
         // Google knows only free or busy; a tentative or out-of-office appointment reads as busy.
         show_as: if str_of(e, "transparency") == "transparent" { ShowAs::Free } else { ShowAs::Busy },
+        categories: categories_of(e),
     }
     .validated()
     .ok()
+}
+
+/// Google has no categories; Mailcraft keeps their names in a private extended property, one
+/// per line, which only this account's own apps see.
+const CATEGORIES: &str = "mailcraftCategories";
+
+fn categories_of(e: &Value) -> Vec<String> {
+    let text = e.get("extendedProperties").and_then(|p| p.get("private")).map(|p| str_of(p, CATEGORIES)).unwrap_or("");
+    text.lines().map(str::to_string).collect()
 }
 
 /// The event's own pop-up reminder, in minutes before the start. An event that uses the
@@ -249,6 +259,7 @@ fn event_json(a: &Appointment, zone: &str) -> Value {
         "reminders": reminders,
         "visibility": visibility,
         "transparency": transparency,
+        "extendedProperties": { "private": { CATEGORIES: a.categories.join("\n") } },
     });
     if let Some(r) = &a.recurrence {
         event["recurrence"] = json!([format!("RRULE:{}", r.rrule(a.all_day))]);
@@ -564,6 +575,13 @@ mod tests {
         let f = appointment_of(&free).unwrap();
         assert_eq!(f.show_as, ShowAs::Free);
         assert_eq!(event_json(&f, "Europe/Amsterdam")["transparency"], "transparent");
+        assert!(f.categories.is_empty());
+        let mut tagged = timed.clone();
+        tagged["extendedProperties"] = json!({ "private": { "mailcraftCategories": "Werk\nKlant" }, "shared": { "x": "y" } });
+        let t = appointment_of(&tagged).unwrap();
+        assert_eq!(t.categories, vec!["Werk", "Klant"]);
+        assert_eq!(event_json(&t, "Europe/Amsterdam")["extendedProperties"]["private"]["mailcraftCategories"], "Werk\nKlant");
+        assert_eq!(event_json(&f, "Europe/Amsterdam")["extendedProperties"]["private"]["mailcraftCategories"], "", "none clears them");
         assert_eq!(
             event_json(&Appointment { show_as: ShowAs::Tentative, ..f }, "Europe/Amsterdam")["transparency"],
             "opaque",

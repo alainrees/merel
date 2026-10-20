@@ -21,7 +21,7 @@ pub use calendar::{
     Appointment, AppointmentError, CALENDAR_COLORS, Calendar, Frequency, MAX_CALENDAR_NAME, MAX_INTERVAL, MAX_NOTES, MAX_OCCURRENCES, MAX_REMINDER,
     Recurrence, ShowAs, describe_recurrence,
 };
-pub use categories::{Category, CategoryColor, MAX_CATEGORY_NAME, category_keyword};
+pub use categories::{Category, CategoryColor, MAX_CATEGORY_NAME, MAX_ITEM_CATEGORIES, category_keyword, clean_categories};
 pub use contact::{Contact, ContactError};
 pub use groups::{ContactGroup, ContactGroupError, MAX_GROUP_MEMBERS, MAX_GROUP_NAME, mailbox};
 pub use junk::{JunkLevel, JunkLists, MAX_JUNK_ENTRY, entry_covers, junk_entry};

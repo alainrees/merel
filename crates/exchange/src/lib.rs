@@ -343,7 +343,7 @@ impl EwsClient {
 }
 
 /// The `Categories` strings of an item.
-fn categories_of(item: Node<'_, '_>) -> Vec<String> {
+pub(crate) fn categories_of(item: Node<'_, '_>) -> Vec<String> {
     child(item, "Categories")
         .map(|c| c.children().filter(|n| n.is_element()).filter_map(|n| n.text()).map(clean_text).filter(|s| !s.is_empty()).collect())
         .unwrap_or_default()
