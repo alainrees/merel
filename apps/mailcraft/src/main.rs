@@ -36,6 +36,9 @@ impl eframe::App for App {
     }
 }
 
+/// The width the close, minimise and zoom buttons take at the left of a macOS title bar.
+const MACOS_WINDOW_BUTTONS: f32 = 72.0;
+
 /// The app icon for the window, the Dock and the taskbar; the installers carry the same picture.
 const ICON: &[u8] = include_bytes!("../../../packaging/icon-256.png");
 
@@ -47,6 +50,12 @@ fn main() -> eframe::Result {
         .with_app_id("mailcraft")
         .with_inner_size([1280.0, 800.0])
         .with_min_inner_size([800.0, 500.0]);
+    // On macOS the window's content runs up under a see-through title bar, as Outlook's does:
+    // the search box sits in the title bar beside the window buttons.
+    #[cfg(target_os = "macos")]
+    {
+        viewport = viewport.with_fullsize_content_view(true).with_titlebar_shown(false).with_title_shown(false);
+    }
     match eframe::icon_data::from_png_bytes(ICON) {
         Ok(icon) => viewport = viewport.with_icon(icon),
         Err(e) => log::warn!("app icon unreadable: {e}"),
@@ -57,8 +66,12 @@ fn main() -> eframe::Result {
         options,
         Box::new(|#[cfg_attr(not(target_os = "macos"), allow(unused_variables))] cc| {
             let engine = Engine::load(Arc::new(Keychain), config::default_path());
+            let mut app = MailApp::new(engine);
+            if cfg!(target_os = "macos") {
+                app.title_bar_inset = MACOS_WINDOW_BUTTONS;
+            }
             Ok(Box::new(App {
-                app: MailApp::new(engine),
+                app,
                 #[cfg(target_os = "macos")]
                 menu: app_menu::AppMenu::install(&cc.egui_ctx),
             }))

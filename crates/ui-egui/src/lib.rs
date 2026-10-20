@@ -179,6 +179,9 @@ pub struct MailApp {
     theme_applied: bool,
     /// The window title last handed to egui, so it is only sent when it changes.
     title: Option<String>,
+    /// Room kept free at the left of the top bar for the system's window buttons, when the app
+    /// draws into the title bar itself (macOS); 0 when the system draws its own title bar.
+    pub title_bar_inset: f32,
 }
 
 /// The window title: the app's name, with the unread inbox mail of every account in brackets
@@ -285,6 +288,7 @@ impl MailApp {
             welcome: None,
             expanded: std::collections::HashSet::new(),
             theme_applied: false,
+            title_bar_inset: 0.0,
             title: None,
         };
         app.welcome = welcome::due(&app).then_some(welcome::Step::Hello);
@@ -636,6 +640,14 @@ const LIST_CHIPS: [mailcraft_engine::view::Filter; 4] = [
 
 /// The label of the small button that empties a search box.
 pub(crate) const SEARCH_CLEAR: &str = "Zoekopdracht wissen";
+/// The button in the search box that keeps the search as a search folder.
+pub(crate) const SEARCH_FOLDER: &str = "Zoekmap";
+/// Where the search box looks, in its menu.
+pub(crate) const SCOPE_FOLDER: &str = "Deze map";
+pub(crate) const SCOPE_ALL: &str = "Alle mappen";
+const SEARCH_HINT: &str = "Zoeken, bijvoorbeeld van:sanne heeft:bijlage";
+/// The height of the top bar's search box, and of the bar.
+const SEARCH_HEIGHT: f32 = 30.0;
 
 /// The filter menu's name over the message list.
 pub(crate) const LIST_FILTER: &str = "Filteren";
@@ -643,69 +655,140 @@ pub(crate) const LIST_FILTER: &str = "Filteren";
 /// The search bar at the top of the window, as the new Outlook has it: one field for the
 /// mail, with the recent searches, "Alle mappen" and, while searching, the way to keep the
 /// search as a search folder.
-fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+/// The bar at the top of the window: the search box, centred, as the Helder design and
+/// Outlook have it. Where the app draws into the title bar (macOS) it is the title bar: it
+/// keeps room for the window buttons and moves the window when dragged.
+fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
     let searching = app.engine.session.is_searching();
     let mut save_search = false;
     let mut remember: Option<String> = None;
     let mut recent_pick: Option<Option<String>> = None;
     let recents = app.view.recent_searches.clone();
+    let inset = app.title_bar_inset;
+    let title = app.title.clone().unwrap_or_else(|| "Mailcraft".to_string());
     egui::Panel::top("searchbar")
         .show_separator_line(false)
-        .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin { left: 12, right: 12, top: 8, bottom: 2 }))
+        .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin { left: 12, right: 12, top: if inset > 0.0 { 1 } else { 4 }, bottom: 4 }))
         .show(ui, |ui| {
-            let width = ui.available_width().min(560.0);
-            let extra = 300.0;
-            ui.horizontal(|ui| {
-                ui.add_space(((ui.available_width() - width - extra) / 2.0).max(0.0));
-                let session = &mut app.engine.session;
-                let hint = if session.search_all {
-                    "Zoeken in alle mappen, bijvoorbeeld van:sanne heeft:bijlage"
-                } else {
-                    "Zoeken in deze map, bijvoorbeeld van:sanne heeft:bijlage"
-                };
-                let box_r = helder::search_field(ui, t, &mut session.search, egui::Id::new(SEARCH_BOX), hint, width)
-                    .on_hover_text(mailcraft_engine::search::HINT);
-                // Leaving the box (Enter, a click elsewhere) is when the words count as a search.
-                if box_r.lost_focus() && !session.search.trim().is_empty() {
-                    remember = Some(session.search.clone());
+            // In a macOS title bar the box is centred on the window buttons, 28 points down.
+            let height = if inset > 0.0 { 26.0 } else { SEARCH_HEIGHT };
+            let bar = egui::Rect::from_min_size(ui.max_rect().min, vec2(ui.available_width(), height));
+            if inset > 0.0 {
+                // The bar is the title bar: dragging it moves the window, a double click zooms.
+                let r = ui.interact(bar.expand(4.0), egui::Id::new("title-bar"), Sense::click_and_drag());
+                if r.drag_started() {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
                 }
-                helder::quiet(ui, t, |ui| {
-                    if !recents.is_empty() {
-                        // Outlook's "Recente zoekopdrachten": the last words typed, to search again.
-                        let button = egui::Button::image(helder::Icon::Clock.image(helder::ICON, t.text))
-                            .frame_when_inactive(false)
-                            .corner_radius(helder::CONTROL_RADIUS)
-                            .min_size(vec2(helder::BUTTON_HEIGHT, helder::BUTTON_HEIGHT));
-                        let r = egui::containers::menu::MenuButton::from_button(button)
-                            .ui(ui, |ui| {
-                                for q in &recents {
-                                    if ui.button(q).clicked() {
-                                        recent_pick = Some(Some(q.clone()));
-                                        ui.close();
-                                    }
-                                }
-                                ui.separator();
-                                if ui.button(view::RECENT_CLEAR).clicked() {
-                                    recent_pick = Some(None);
+                if r.double_clicked() {
+                    let zoomed = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!zoomed));
+                }
+            }
+            let row = vec2(ui.available_width(), height);
+            ui.allocate_ui_with_layout(row, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                if !search {
+                    ui.painter().text(bar.center(), egui::Align2::CENTER_CENTER, &title, egui::FontId::proportional(13.0), t.text_dim);
+                    return;
+                }
+                // Centred in the window, clear of the window buttons.
+                let full = ui.available_width() + 24.0;
+                let width = (full - 2.0 * inset - 48.0).clamp(320.0, 640.0);
+                ui.add_space(((full - width) / 2.0 - 12.0).max(inset));
+                let session = &mut app.engine.session;
+                let field = egui::Frame::new().fill(t.card).corner_radius(helder::CONTROL_RADIUS).inner_margin(Margin {
+                    left: 10,
+                    right: 2,
+                    top: 0,
+                    bottom: 0,
+                });
+                field.show(ui, |ui| {
+                    ui.set_width(width - 12.0);
+                    ui.set_height(height);
+                    // What follows the words takes the room it took last frame.
+                    let tail_id = egui::Id::new("search-tail");
+                    let tail: f32 = ui.data(|d| d.get_temp(tail_id)).unwrap_or(120.0);
+                    ui.horizontal_centered(|ui| {
+                        ui.add(helder::Icon::Search.image(16.0, t.text_dim));
+                        let box_r = ui
+                            .add(
+                                egui::TextEdit::singleline(&mut session.search)
+                                    .id(egui::Id::new(SEARCH_BOX))
+                                    .frame(egui::Frame::NONE)
+                                    .hint_text(RichText::new(SEARCH_HINT).color(t.text_dim))
+                                    .text_color(t.text)
+                                    .desired_width((ui.available_width() - tail).max(80.0))
+                                    .margin(Margin::symmetric(4, 4)),
+                            )
+                            .on_hover_text(mailcraft_engine::search::HINT);
+                        // Leaving the box (Enter, a click elsewhere) is when the words count as a search.
+                        if box_r.lost_focus() && !session.search.trim().is_empty() {
+                            remember = Some(session.search.clone());
+                        }
+                        let start = ui.cursor().min.x;
+                        helder::quiet(ui, t, |ui| {
+                            ui.spacing_mut().button_padding = vec2(6.0, 3.0);
+                            if searching && box_button(ui, t, helder::Icon::X, SEARCH_CLEAR, height - 4.0).clicked() {
+                                session.search.clear();
+                            }
+                            if !recents.is_empty() {
+                                // Outlook's "Recente zoekopdrachten": the last words typed, to search again.
+                                let button = egui::Button::image(helder::Icon::Clock.image(helder::ICON, t.text))
+                                    .frame_when_inactive(false)
+                                    .corner_radius(helder::CONTROL_RADIUS)
+                                    .min_size(vec2(height - 4.0, height - 4.0));
+                                let r = egui::containers::menu::MenuButton::from_button(button)
+                                    .ui(ui, |ui| {
+                                        for q in &recents {
+                                            if ui.button(q).clicked() {
+                                                recent_pick = Some(Some(q.clone()));
+                                                ui.close();
+                                            }
+                                        }
+                                        ui.separator();
+                                        if ui.button(view::RECENT_CLEAR).clicked() {
+                                            recent_pick = Some(None);
+                                            ui.close();
+                                        }
+                                    })
+                                    .0;
+                                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, view::RECENT_MENU));
+                                r.on_hover_text(view::RECENT_MENU);
+                            }
+                            if searching
+                                && box_button(ui, t, helder::Icon::FolderPlus, SEARCH_FOLDER, height - 4.0)
+                                    .on_hover_text("Deze zoekopdracht bewaren als zoekmap in het mappenvenster")
+                                    .clicked()
+                            {
+                                save_search = true;
+                            }
+                            // Where to search, as Outlook's scope menu in its search box.
+                            let scope = if session.search_all { SCOPE_ALL } else { SCOPE_FOLDER };
+                            let button = egui::Button::new(RichText::new(scope).size(13.0).color(t.text))
+                                .right_text(helder::Icon::ChevronDown.image(14.0, t.text_dim))
+                                .frame_when_inactive(false)
+                                .corner_radius(helder::CONTROL_RADIUS)
+                                .min_size(vec2(0.0, height - 4.0));
+                            egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
+                                if ui.selectable_label(!session.search_all, SCOPE_FOLDER).clicked() {
+                                    session.search_all = false;
                                     ui.close();
                                 }
-                            })
-                            .0;
-                        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, view::RECENT_MENU));
-                        r.on_hover_text(view::RECENT_MENU);
-                    }
-                    if searching && helder::icon_button(ui, t, helder::Icon::X, SEARCH_CLEAR).clicked() {
-                        session.search.clear();
-                    }
-                    if searching
-                        && helder::tool_button(ui, t, helder::Icon::FolderPlus, "Zoekmap")
-                            .on_hover_text("Deze zoekopdracht bewaren als zoekmap in het mappenvenster")
-                            .clicked()
-                    {
-                        save_search = true;
-                    }
-                    helder::toggle(ui, t, &mut session.search_all, "Alle mappen")
-                        .on_hover_text("Zoek in alle mappen van alle accounts, in de berichten die Mailcraft al heeft opgehaald.");
+                                if ui
+                                    .selectable_label(session.search_all, SCOPE_ALL)
+                                    .on_hover_text("Zoek in alle mappen van alle accounts, in de berichten die Mailcraft al heeft opgehaald.")
+                                    .clicked()
+                                {
+                                    session.search_all = true;
+                                    ui.close();
+                                }
+                            });
+                        });
+                        let used = ui.cursor().min.x - start + 2.0;
+                        if (used - tail).abs() > 0.5 {
+                            ui.data_mut(|d| d.insert_temp(tail_id, used));
+                            ui.ctx().request_discard("the search box's buttons changed");
+                        }
+                    });
                 });
             });
         });
@@ -733,31 +816,40 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
 }
 
+/// A small button with only an icon, sized to sit inside the search box.
+fn box_button(ui: &mut Ui, t: &Tokens, icon: helder::Icon, label: &str, size: f32) -> egui::Response {
+    let r = ui.add(
+        egui::Button::image(icon.image(16.0, t.text)).frame_when_inactive(false).corner_radius(helder::CONTROL_RADIUS).min_size(vec2(size, size)),
+    );
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    r.on_hover_text(label)
+}
+
 fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     // The File tab is a page of its own, as Outlook's: no search bar and no command bar.
     let file = app.tab == Tab::File;
-    if app.module == Module::Mail && !file {
-        search_bar(app, ui, t);
+    let search = app.module == Module::Mail && !file;
+    if search || app.title_bar_inset > 0.0 {
+        search_bar(app, ui, t, search);
     }
-    egui::Panel::top("tabs").show_separator_line(false).frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin::symmetric(8, 4))).show(
-        ui,
-        |ui| {
-            ui.horizontal(|ui| {
-                for tab in Tab::ALL {
-                    let on = app.tab == tab;
-                    let text = RichText::new(tab.label()).color(if on { t.accent_text } else { t.text });
-                    let r = ui.add(egui::Button::new(text).frame(false).min_size(vec2(0.0, 26.0)));
-                    if on {
-                        let rect = r.rect;
-                        ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(2.0, t.accent));
-                    }
-                    if r.clicked() {
-                        app.tab = tab;
-                    }
+    // The tabs line up with the first button on the ribbon card under them.
+    let tabs_margin = Margin { left: 12, right: 12, top: 0, bottom: 2 };
+    egui::Panel::top("tabs").show_separator_line(false).frame(egui::Frame::NONE.fill(t.window).inner_margin(tabs_margin)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            for tab in Tab::ALL {
+                let on = app.tab == tab;
+                let text = RichText::new(tab.label()).color(if on { t.accent_text } else { t.text });
+                let r = ui.add(egui::Button::new(text).frame(false).min_size(vec2(0.0, 26.0)));
+                if on {
+                    let rect = r.rect;
+                    ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(2.0, t.accent));
                 }
-            });
-        },
-    );
+                if r.clicked() {
+                    app.tab = tab;
+                }
+            }
+        });
+    });
     if file {
         return;
     }
