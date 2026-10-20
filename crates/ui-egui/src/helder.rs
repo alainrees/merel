@@ -896,6 +896,68 @@ pub fn right<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     ui.with_layout(Layout::right_to_left(Align::Center), add).inner
 }
 
+/// The accessible name of a dialog's close button.
+pub const CLOSE: &str = "Sluiten";
+
+/// A dialog in the Helder style, inside the main window and centred on it: no grey title bar,
+/// but the title in large type with a quiet close button on its right, on the window's grey
+/// ground. Returns whether the close button was used.
+pub fn dialog(ctx: &egui::Context, t: &Tokens, title: &str, width: f32, add: impl FnOnce(&mut Ui)) -> bool {
+    let mut close = false;
+    egui::Window::new(title)
+        .title_bar(false)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .frame(window_frame(ctx, t).inner_margin(16))
+        .show(ctx, |ui| {
+            ui.set_width(width);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(title).size(TITLE_TEXT).strong().color(t.text));
+                right(ui, |ui| {
+                    close = icon_button(ui, t, Icon::X, CLOSE).clicked();
+                });
+            });
+            ui.add_space(8.0);
+            add(ui);
+        });
+    close
+}
+
+/// A round badge in the selection colour with `icon` in the app colour, for the head of a
+/// dialog's card.
+pub fn badge(ui: &mut Ui, t: &Tokens, icon: Icon) {
+    let (rect, _) = ui.allocate_exact_size(vec2(48.0, 48.0), Sense::hover());
+    ui.painter().circle_filled(rect.center(), 24.0, t.checked);
+    icon.image(24.0, t.accent_text).paint_at(ui, Rect::from_center_size(rect.center(), vec2(24.0, 24.0)));
+}
+
+/// A row of dots for the steps of a wizard: the steps done and the current one in the app
+/// colour, the current one wider. A screen reader hears "Stap n van m".
+pub fn step_dots(ui: &mut Ui, t: &Tokens, current: usize, count: usize) {
+    let text = format!("Stap {} van {}", current + 1, count);
+    let (rect, r) = ui.allocate_exact_size(vec2(count as f32 * 14.0 + 10.0, 12.0), Sense::hover());
+    r.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &text));
+    let mut x = rect.left();
+    for i in 0..count {
+        let w = if i == current { 18.0 } else { 8.0 };
+        let fill = if i <= current { t.accent } else { t.control_border };
+        ui.painter().rect_filled(Rect::from_min_size(pos2(x, rect.center().y - 4.0), vec2(w, 8.0)), CornerRadius::same(4), fill);
+        x += w + 6.0;
+    }
+}
+
+/// A quiet button with only text, no frame until the pointer is on it: the lesser choices of a
+/// dialog, such as "Overslaan".
+pub fn text_button(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
+    ui.add(egui::Button::new(label(text, t)).frame_when_inactive(false).corner_radius(CONTROL_RADIUS).min_size(vec2(0.0, BUTTON_HEIGHT)))
+}
+
+/// Text in a dialog's card: body size, wrapped to the card.
+pub fn paragraph(ui: &mut Ui, t: &Tokens, text: &str) {
+    ui.add(egui::Label::new(RichText::new(text).size(14.0).color(t.text)).wrap());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
