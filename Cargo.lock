@@ -3456,6 +3456,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "merel-sign"
+version = "0.1.1"
+dependencies = [
+ "aws-lc-rs",
+ "base64 0.23.1",
+ "thiserror 2.0.21",
+ "zeroize",
+]
+
+[[package]]
 name = "merel-smime"
 version = "0.1.1"
 dependencies = [
@@ -3524,6 +3534,7 @@ dependencies = [
  "merel-model",
  "merel-pgp",
  "merel-secrets",
+ "merel-sign",
  "merel-smime",
  "open",
  "rfd",

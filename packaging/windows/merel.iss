@@ -47,3 +47,5 @@ Name: "{autodesktop}\Merel"; Filename: "{app}\merel.exe"; IconFilename: "{app}\m
 
 [Run]
 Filename: "{app}\merel.exe"; Description: "{cm:LaunchProgram,Merel}"; Flags: nowait postinstall skipifsilent
+; An update from inside Merel runs this installer silently; then Merel starts again by itself.
+Filename: "{app}\merel.exe"; Flags: nowait skipifnotsilent

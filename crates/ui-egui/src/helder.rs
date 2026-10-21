@@ -1043,6 +1043,25 @@ pub fn step_dots(ui: &mut Ui, t: &Tokens, current: usize, count: usize) {
     }
 }
 
+/// A progress bar in the app colour on a quiet track; `None` when the total is unknown shows a
+/// band that moves. A screen reader hears the percentage.
+pub fn progress_bar(ui: &mut Ui, t: &Tokens, fraction: Option<f32>) {
+    let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 8.0), Sense::hover());
+    let text = fraction.map_or_else(|| "Bezig".to_owned(), |f| format!("{:.0}%", f.clamp(0.0, 1.0) * 100.0));
+    r.widget_info(|| WidgetInfo::labeled(WidgetType::ProgressIndicator, true, &text));
+    ui.painter().rect_filled(rect, CornerRadius::same(4), t.control_border);
+    let fill = match fraction {
+        Some(f) => Rect::from_min_size(rect.min, vec2(rect.width() * f.clamp(0.0, 1.0), rect.height())),
+        None => {
+            let phase = (ui.input(|i| i.time) as f32 * 0.6).fract();
+            ui.ctx().request_repaint();
+            let w = rect.width() * 0.3;
+            Rect::from_min_size(pos2(rect.left() + (rect.width() - w) * phase, rect.top()), vec2(w, rect.height()))
+        }
+    };
+    ui.painter().rect_filled(fill, CornerRadius::same(4), t.accent);
+}
+
 /// A quiet button with only text, no frame until the pointer is on it: the lesser choices of a
 /// dialog, such as "Overslaan".
 pub fn text_button(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
