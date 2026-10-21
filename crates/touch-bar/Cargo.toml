@@ -10,7 +10,8 @@ license.workspace = true
 objc2 = { version = "0.6", features = ["exception"] }
 log = { workspace = true }
 
-# The only crate that may use `unsafe`: replacing an AppKit method needs it. Every other crate
+# One of two crates that may use `unsafe` (with merel-window-buttons): replacing an AppKit
+# method needs it. Every other crate
 # keeps the workspace's `unsafe_code = "forbid"`.
 [lints.rust]
 unsafe_code = "allow"

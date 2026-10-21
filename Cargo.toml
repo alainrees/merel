@@ -28,6 +28,7 @@ merel-dav = { path = "crates/dav" }
 merel-smime = { path = "crates/smime" }
 merel-pgp = { path = "crates/pgp" }
 merel-touch-bar = { path = "crates/touch-bar" }
+merel-window-buttons = { path = "crates/window-buttons" }
 
 # foundation
 thiserror = "2"

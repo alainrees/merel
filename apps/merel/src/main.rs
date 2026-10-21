@@ -17,7 +17,10 @@ struct App {
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if self.app.title_bar_inset > 0.0 {
+            merel_window_buttons::place(frame, f64::from(merel_ui_egui::TITLE_BAR_HEIGHT));
+        }
         #[cfg(target_os = "macos")]
         if let Some(menu) = &self.menu {
             for action in menu.actions() {
@@ -35,9 +38,6 @@ impl eframe::App for App {
         self.app.engine.flush();
     }
 }
-
-/// The width the close, minimise and zoom buttons take at the left of a macOS title bar.
-const MACOS_WINDOW_BUTTONS: f32 = 72.0;
 
 /// The app icon for the window, the Dock and the taskbar; the installers carry the same picture.
 const ICON: &[u8] = include_bytes!("../../../packaging/icon-256.png");
@@ -71,7 +71,7 @@ fn main() -> eframe::Result {
         .with_inner_size([1280.0, 800.0])
         .with_min_inner_size([800.0, 500.0]);
     // On macOS the window's content runs up under a see-through title bar, as Outlook's does:
-    // the search box sits in the title bar beside the window buttons.
+    // the search box sits in the tall title bar, the window buttons in its middle beside it.
     #[cfg(target_os = "macos")]
     {
         viewport = viewport.with_fullsize_content_view(true).with_titlebar_shown(false).with_title_shown(false);
@@ -93,7 +93,7 @@ fn main() -> eframe::Result {
             }
             let mut app = MailApp::new(engine);
             if cfg!(target_os = "macos") {
-                app.title_bar_inset = MACOS_WINDOW_BUTTONS;
+                app.title_bar_inset = merel_window_buttons::WIDTH;
             }
             Ok(Box::new(App {
                 app,

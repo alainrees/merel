@@ -648,6 +648,11 @@ pub(crate) const SCOPE_ALL: &str = "Alle mappen";
 const SEARCH_HINT: &str = "Zoeken, bijvoorbeeld van:sanne heeft:bijlage";
 /// The height of the top bar's search box, and of the bar.
 const SEARCH_HEIGHT: f32 = 30.0;
+/// The height of the title bar the app draws itself on macOS, as tall as Outlook's; the window
+/// buttons sit in its middle.
+pub const TITLE_BAR_HEIGHT: f32 = 52.0;
+/// The search box's height in that title bar.
+const TITLE_SEARCH_HEIGHT: f32 = 32.0;
 
 /// The filter menu's name over the message list.
 pub(crate) const LIST_FILTER: &str = "Filteren";
@@ -666,17 +671,18 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
     let recents = app.view.recent_searches.clone();
     let inset = app.title_bar_inset;
     let title = app.title.clone().unwrap_or_else(|| "Merel".to_string());
+    // In the macOS title bar the box sits in the middle of the tall bar, level with the window
+    // buttons.
+    let height = if inset > 0.0 { TITLE_SEARCH_HEIGHT } else { SEARCH_HEIGHT };
+    let pad = ((TITLE_BAR_HEIGHT - TITLE_SEARCH_HEIGHT) / 2.0) as i8;
     egui::Panel::top("searchbar")
         .show_separator_line(false)
-        .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin { left: 12, right: 12, top: 4, bottom: if inset > 0.0 { 6 } else { 4 } }))
+        .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin::symmetric(12, if inset > 0.0 { pad } else { 4 })))
         .show(ui, |ui| {
-            // In a macOS title bar the box is centred on the window buttons, whose middle is
-            // about 17 points down (macOS 26).
-            let height = if inset > 0.0 { 26.0 } else { SEARCH_HEIGHT };
             let bar = egui::Rect::from_min_size(ui.max_rect().min, vec2(ui.available_width(), height));
             if inset > 0.0 {
                 // The bar is the title bar: dragging it moves the window, a double click zooms.
-                let r = ui.interact(bar.expand(4.0), egui::Id::new("title-bar"), Sense::click_and_drag());
+                let r = ui.interact(bar.expand2(vec2(12.0, f32::from(pad))), egui::Id::new("title-bar"), Sense::click_and_drag());
                 if r.drag_started() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
                 }
@@ -693,7 +699,12 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                 }
                 // Centred in the window, clear of the window buttons.
                 let full = ui.available_width() + 24.0;
-                let width = (full - 2.0 * inset - 48.0).clamp(320.0, 640.0);
+                // About two fifths of the window, as Outlook's.
+                let width = if inset > 0.0 {
+                    (full * 0.42).clamp(360.0, 760.0).min(full - 2.0 * inset - 48.0).max(280.0)
+                } else {
+                    (full - 2.0 * inset - 48.0).clamp(320.0, 640.0)
+                };
                 ui.add_space(((full - width) / 2.0 - 12.0).max(inset));
                 let session = &mut app.engine.session;
                 let field = egui::Frame::new().fill(t.card).corner_radius(helder::CONTROL_RADIUS).inner_margin(Margin {
