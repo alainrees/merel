@@ -15,7 +15,7 @@ use base64::Engine as _;
 use html5ever::tendril::TendrilSink;
 use html5ever::tree_builder::TreeBuilderOpts;
 use html5ever::{ParseOpts, parse_document};
-use mailcraft_model::clean_text;
+use merel_model::clean_text;
 
 use dom::{Data, Dom, Node};
 
@@ -608,7 +608,7 @@ fn is_html_space(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0C')
 }
 
-/// `href` when it is a web or mail address Mailcraft is willing to open.
+/// `href` when it is a web or mail address Merel is willing to open.
 fn link_target(href: &str) -> Option<String> {
     let href: String = href.chars().filter(|c| !c.is_control() && !c.is_whitespace()).collect();
     if href.chars().count() > MAX_HREF {

@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use mailcraft_model::{ContactGroup, ContactGroupError, parse_address_list};
+use merel_model::{ContactGroup, ContactGroupError, parse_address_list};
 
 use crate::Session;
 use crate::commands::{CommandError, str_param};

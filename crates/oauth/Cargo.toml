@@ -1,5 +1,5 @@
 [package]
-name = "mailcraft-oauth"
+name = "merel-oauth"
 description = "OAuth 2.0 with PKCE through the system browser, for Gmail and Microsoft 365."
 version.workspace = true
 edition.workspace = true
@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-mailcraft-secrets = { workspace = true }
+merel-secrets = { workspace = true }
 ureq = { workspace = true }
 rustls = { workspace = true }
 open = { workspace = true }

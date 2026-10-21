@@ -5,9 +5,9 @@
 //! meeting called off get a cancellation. Nothing goes out without the person pressing the
 //! button that says so.
 
-use mailcraft_dav::ical::{self, Prop};
-use mailcraft_engine::{SAMPLE_ACCOUNT, Session};
-use mailcraft_model::{Account, Address, Appointment, Attendee, Draft, DraftAttachment, Meeting, Response, parse_address_list};
+use merel_dav::ical::{self, Prop};
+use merel_engine::{SAMPLE_ACCOUNT, Session};
+use merel_model::{Account, Address, Appointment, Attendee, Draft, DraftAttachment, Meeting, Response, parse_address_list};
 
 use crate::compose::{Compose, Kind};
 use crate::invitation;
@@ -239,7 +239,7 @@ mod tests {
             recurrence: None,
             reminder: Some(15),
             private: false,
-            show_as: mailcraft_model::ShowAs::Busy,
+            show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
         }
@@ -341,7 +341,7 @@ mod tests {
 
     #[test]
     fn only_a_real_account_can_send_an_invitation() {
-        let session = mailcraft_engine::Engine::sample().session;
+        let session = merel_engine::Engine::sample().session;
         assert!(account_for(&session, Some("local")).is_none(), "the sample account sends nothing");
         assert!(account_for(&session, None).is_none());
     }

@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Mailcraft
+Name=Merel
 Comment=Mail, agenda, contacten en taken
-Exec=mailcraft
-Icon=mailcraft
+Exec=merel
+Icon=merel
 Terminal=false
 Categories=Office;Network;Email;Calendar;
-StartupWMClass=mailcraft
+StartupWMClass=merel

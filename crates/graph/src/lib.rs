@@ -16,13 +16,13 @@ use std::time::Duration;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Utc};
-use mailcraft_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result, kind_from_name};
-use mailcraft_mime::ParsedHeader;
-use mailcraft_model::{
+use merel_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result, kind_from_name};
+use merel_mime::ParsedHeader;
+use merel_model::{
     Address, Appointment, Attendee, Contact, FolderKind, Frequency, Importance, Meeting, Priority, Recurrence, Response, Server, ShowAs, Task,
     clean_text,
 };
-use mailcraft_secrets::Secret;
+use merel_secrets::Secret;
 use serde_json::{Value, json};
 
 /// The largest reply accepted: a whole message as MIME, with room.
@@ -392,7 +392,7 @@ impl GraphClient {
                 .tls_config(tls())
                 .timeout_global(Some(Duration::from_secs(60)))
                 .http_status_as_error(false)
-                .user_agent("Mailcraft")
+                .user_agent("Merel")
                 .build(),
         );
         let time_zone = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into());
@@ -727,7 +727,7 @@ impl ItemStore for GraphClient {
 }
 
 /// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
-/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// like the rest of Merel. ureq has no root certificates of its own in this build: an
 /// agent without this panics on its first request.
 fn tls() -> ureq::tls::TlsConfig {
     ureq::tls::TlsConfig::builder()

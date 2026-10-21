@@ -3,8 +3,8 @@
 //! before something goes for good (a folder, its contents, or a message in the Deleted folder).
 
 use egui::RichText;
-use mailcraft_engine::CommandError;
-use mailcraft_model::FolderKind;
+use merel_engine::CommandError;
+use merel_model::FolderKind;
 use serde_json::json;
 
 use crate::{MailApp, Tokens, ribbon_action_hint};

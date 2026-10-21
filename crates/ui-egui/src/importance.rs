@@ -2,7 +2,7 @@
 //! the mark in the message list and the strip over the message.
 
 use egui::{Color32, RichText, Ui};
-use mailcraft_model::Importance;
+use merel_model::Importance;
 
 use crate::Tokens;
 

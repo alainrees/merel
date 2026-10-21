@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use mailcraft_model::{Template, TemplateError};
+use merel_model::{Template, TemplateError};
 
 use crate::Session;
 use crate::commands::{CommandError, str_param};

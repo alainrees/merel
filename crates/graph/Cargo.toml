@@ -1,5 +1,5 @@
 [package]
-name = "mailcraft-graph"
+name = "merel-graph"
 description = "Microsoft 365 through Microsoft Graph: mail, calendar, contacts and To Do tasks with one sign-in."
 version.workspace = true
 edition.workspace = true
@@ -7,10 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-mailcraft-model = { workspace = true }
-mailcraft-mime = { workspace = true }
-mailcraft-mailbox = { workspace = true }
-mailcraft-secrets = { workspace = true }
+merel-model = { workspace = true }
+merel-mime = { workspace = true }
+merel-mailbox = { workspace = true }
+merel-secrets = { workspace = true }
 ureq = { workspace = true }
 rustls = { workspace = true }
 serde_json = { workspace = true }

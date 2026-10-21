@@ -16,8 +16,8 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use mailcraft_mailbox::Item;
-use mailcraft_model::{Appointment, AppointmentError, CALENDAR_COLORS, Calendar, MAX_CALENDAR_NAME, Recurrence, clean_text};
+use merel_mailbox::Item;
+use merel_model::{Appointment, AppointmentError, CALENDAR_COLORS, Calendar, MAX_CALENDAR_NAME, Recurrence, clean_text};
 
 use crate::{CommandError, Session};
 
@@ -123,7 +123,7 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 /// Outlook's "Privé"; false when left out. `show_as` is `free`, `tentative`, `busy` or `oof`;
 /// left out, an existing appointment keeps its status and a new one is busy. `categories` is
 /// a list of category names; left out, an existing appointment keeps its categories. `meeting`
-/// is a [`mailcraft_model::Meeting`] (organiser, attendees and their answers) or null for an
+/// is a [`merel_model::Meeting`] (organiser, attendees and their answers) or null for an
 /// appointment of your own; left out, an existing appointment keeps its meeting.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
@@ -159,7 +159,7 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     };
     let show_as = match params.get("show_as") {
         None => existing.as_ref().map(|a| a.show_as).unwrap_or_default(),
-        Some(v) => serde_json::from_value::<mailcraft_model::ShowAs>(v.clone()).map_err(|_| CommandError::Param("show_as"))?,
+        Some(v) => serde_json::from_value::<merel_model::ShowAs>(v.clone()).map_err(|_| CommandError::Param("show_as"))?,
     };
     let categories = match params.get("categories") {
         None => existing.as_ref().map(|a| a.categories.clone()).unwrap_or_default(),
@@ -168,7 +168,7 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let meeting = match params.get("meeting") {
         None => existing.as_ref().and_then(|a| a.meeting.clone()),
         Some(Value::Null) => None,
-        Some(v) => Some(serde_json::from_value::<mailcraft_model::Meeting>(v.clone()).map_err(|_| CommandError::Param("meeting"))?),
+        Some(v) => Some(serde_json::from_value::<merel_model::Meeting>(v.clone()).map_err(|_| CommandError::Param("meeting"))?),
     };
     let id = match (&existing, &account) {
         (Some(a), _) => a.id.clone(),
@@ -292,7 +292,7 @@ fn set_categories(s: &mut Session, params: &Value, change: impl FnOnce(&mut Vec<
     let id = str_param(params, "id").map(str::to_string).or_else(|| s.selected_appointment.clone()).ok_or(CommandError::NoSelection)?;
     let mut a = s.appointment(&id).ok_or(CommandError::NotFound)?.clone();
     change(&mut a.categories);
-    a.categories = mailcraft_model::clean_categories(a.categories);
+    a.categories = merel_model::clean_categories(a.categories);
     match s.appointment_account(&a.calendar_id) {
         Some(account) => s.save_remote(&account, false, Item::Appointment(a.clone()))?,
         None => s.calendar_dirty = true,
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn categories_go_on_and_off_an_appointment() {
-        let mut s = Session { categories: mailcraft_model::Category::defaults(), ..Session::default() };
+        let mut s = Session { categories: merel_model::Category::defaults(), ..Session::default() };
         s.set_calendar_data(CalendarFile::default());
         s.run("appointment.save", &json!({ "title": "Lunch", "start": 1000, "end": 4600, "categories": ["Rode categorie", " ", "rode categorie"] }))
             .unwrap();
@@ -555,11 +555,11 @@ mod tests {
         assert!(s.appointment(&a.id).unwrap().private, "Privé is kept");
         s.run("appointment.save", &json!({ "id": a.id, "title": "Dokter", "start": 1000, "end": 4600 })).unwrap();
         assert!(!s.appointment(&a.id).unwrap().private, "left out means not private");
-        assert_eq!(s.appointment(&a.id).unwrap().show_as, mailcraft_model::ShowAs::Busy, "busy unless said otherwise");
+        assert_eq!(s.appointment(&a.id).unwrap().show_as, merel_model::ShowAs::Busy, "busy unless said otherwise");
         s.run("appointment.save", &json!({ "id": a.id, "title": "Dokter", "start": 1000, "end": 4600, "show_as": "free" })).unwrap();
-        assert_eq!(s.appointment(&a.id).unwrap().show_as, mailcraft_model::ShowAs::Free);
+        assert_eq!(s.appointment(&a.id).unwrap().show_as, merel_model::ShowAs::Free);
         s.run("appointment.save", &json!({ "id": a.id, "title": "Dokter", "start": 1000, "end": 4600 })).unwrap();
-        assert_eq!(s.appointment(&a.id).unwrap().show_as, mailcraft_model::ShowAs::Free, "left out keeps the status");
+        assert_eq!(s.appointment(&a.id).unwrap().show_as, merel_model::ShowAs::Free, "left out keeps the status");
         assert_eq!(
             s.run("appointment.save", &json!({ "title": "x", "start": 1, "end": 2, "show_as": "maybe" })),
             Err(CommandError::Param("show_as"))
@@ -627,7 +627,7 @@ mod tests {
         .expect("a new appointment in an account calendar may start a series");
         let jobs = s.take_jobs();
         assert!(
-            matches!(&jobs[..], [crate::Job::SaveItem { item, .. }] if matches!(&**item, mailcraft_mailbox::Item::Appointment(a) if a.recurrence.is_some())),
+            matches!(&jobs[..], [crate::Job::SaveItem { item, .. }] if matches!(&**item, merel_mailbox::Item::Appointment(a) if a.recurrence.is_some())),
             "the server gets the rule: {jobs:?}"
         );
         let id = s.selected_appointment.clone().expect("selected");

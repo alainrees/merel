@@ -8,8 +8,8 @@ use chrono::{Local, NaiveDate, NaiveTime, TimeZone};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use mailcraft_mailbox::Item;
-use mailcraft_model::{Priority, Repeat, Task, TaskError};
+use merel_mailbox::Item;
+use merel_model::{Priority, Repeat, Task, TaskError};
 
 use crate::{CommandError, Session};
 
@@ -162,7 +162,7 @@ pub fn reminder_snooze(s: &mut Session, params: &Value) -> Result<(), CommandErr
     let minutes = params
         .get("minutes")
         .and_then(Value::as_u64)
-        .filter(|m| (1..=u64::from(mailcraft_model::MAX_REMINDER)).contains(m))
+        .filter(|m| (1..=u64::from(merel_model::MAX_REMINDER)).contains(m))
         .ok_or(CommandError::Param("minutes"))?;
     s.snoozed_task_reminders.insert(id, now() + minutes as i64 * 60);
     Ok(())

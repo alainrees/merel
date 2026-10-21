@@ -6,7 +6,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use mailcraft_model::{MessageHeader, conversation_key};
+use merel_model::{MessageHeader, conversation_key};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -185,16 +185,16 @@ mod tests {
     #[test]
     fn the_list_is_filtered_and_sorted_as_asked() {
         let mut s = Session::sample();
-        assert_eq!(subjects(&s)[0], "Welkom bij Mailcraft", "newest first by default");
+        assert_eq!(subjects(&s)[0], "Welkom bij Merel", "newest first by default");
         s.run("view.filter", &json!({ "filter": "attachments" })).expect("filter");
         assert_eq!(subjects(&s), vec!["Planning voor donderdag"]);
         s.run("view.filter", &json!({ "filter": "unread" })).expect("filter");
-        assert_eq!(subjects(&s), vec!["Welkom bij Mailcraft", "Planning voor donderdag"]);
+        assert_eq!(subjects(&s), vec!["Welkom bij Merel", "Planning voor donderdag"]);
         s.run("view.filter", &json!({ "filter": "all" })).expect("filter");
         s.run("view.sort", &json!({ "sort": "sender" })).expect("sort");
-        assert_eq!(subjects(&s), vec!["Wat er deze maand speelt", "Re: Offerte drukwerk", "Planning voor donderdag", "Welkom bij Mailcraft"]);
+        assert_eq!(subjects(&s), vec!["Wat er deze maand speelt", "Re: Offerte drukwerk", "Planning voor donderdag", "Welkom bij Merel"]);
         s.run("view.sort", &json!({ "sort": "oldest" })).expect("sort");
-        assert_eq!(subjects(&s).last().map(String::as_str), Some("Welkom bij Mailcraft"));
+        assert_eq!(subjects(&s).last().map(String::as_str), Some("Welkom bij Merel"));
         assert!(matches!(s.run("view.sort", &json!({ "sort": "sideways" })), Err(CommandError::Param("sort"))));
         s.run("view.category", &json!({ "name": "groene categorie" })).expect("category");
         assert_eq!(subjects(&s), vec!["Planning voor donderdag"]);

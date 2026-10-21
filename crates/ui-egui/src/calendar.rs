@@ -9,8 +9,8 @@ use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate, NaiveDateTime, 
 use egui::{Align2, Color32, CornerRadius, FontId, Margin, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
-use mailcraft_engine::{CommandError, tasks::TaskFilter};
-use mailcraft_model::{Appointment, Attendee, Frequency, Meeting, Recurrence, ShowAs, Task, describe_recurrence};
+use merel_engine::{CommandError, tasks::TaskFilter};
+use merel_model::{Appointment, Attendee, Frequency, Meeting, Recurrence, ShowAs, Task, describe_recurrence};
 
 use crate::helder::{self, Icon};
 use crate::{MailApp, Module, Tokens};
@@ -343,7 +343,7 @@ impl Editor {
             // Outlook's default: a quarter of an hour before.
             reminder: Some(15),
             private: false,
-            show_as: mailcraft_model::ShowAs::Busy,
+            show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             error: None,
         }
@@ -372,7 +372,7 @@ impl Editor {
         e.invited = a.meeting.as_ref().map(|m| m.attendees.clone()).unwrap_or_default();
         // An older version kept the people on a line in the notes; they come back as chips.
         if a.meeting.is_none()
-            && let Some((people, notes)) = mailcraft_engine::meetings::legacy_attendees(&a.notes)
+            && let Some((people, notes)) = merel_engine::meetings::legacy_attendees(&a.notes)
         {
             e.invited = people;
             e.notes = notes;
@@ -415,7 +415,7 @@ impl Editor {
             .trim()
             .parse()
             .ok()
-            .filter(|n| (1..=mailcraft_model::MAX_INTERVAL).contains(n))
+            .filter(|n| (1..=merel_model::MAX_INTERVAL).contains(n))
             .ok_or("Vul in om de hoeveel keer de afspraak terugkomt, van 1 tot 999.")?;
         let mut weekdays: Vec<u8> = self.weekdays.iter().enumerate().filter(|(_, on)| **on).map(|(i, _)| i as u8).collect();
         if frequency == Frequency::Weekly && weekdays.is_empty() {
@@ -1746,7 +1746,7 @@ impl Editor {
     /// title, the time, the place, the repetition or who is invited.
     pub fn changed_for_attendees(&self, stored: &Appointment) -> bool {
         let Ok(p) = self.params() else { return true };
-        let before: Vec<String> = match (&stored.meeting, mailcraft_engine::meetings::legacy_attendees(&stored.notes)) {
+        let before: Vec<String> = match (&stored.meeting, merel_engine::meetings::legacy_attendees(&stored.notes)) {
             (Some(m), _) => m.attendees.iter().map(|a| a.email.to_lowercase()).collect(),
             (None, Some((people, _))) => people.iter().map(|a| a.email.to_lowercase()).collect(),
             (None, None) => Vec::new(),
@@ -1805,8 +1805,8 @@ fn attendee_chip(ui: &mut Ui, t: &Tokens, a: &Attendee, removable: bool) -> bool
         let mark = crate::meeting::response_mark(a.response);
         if !mark.is_empty() {
             let color = match a.response {
-                mailcraft_model::Response::Accepted => t.success,
-                mailcraft_model::Response::Declined => t.flag,
+                merel_model::Response::Accepted => t.success,
+                merel_model::Response::Declined => t.flag,
                 _ => t.text_dim,
             };
             ui.label(RichText::new(mark).size(13.0).strong().color(color)).on_hover_text(crate::meeting::response_label(a.response));
@@ -2217,7 +2217,7 @@ fn save_meeting(
             m.attendees = people
                 .iter()
                 .cloned()
-                .map(|a| if moved { Attendee { response: mailcraft_model::Response::None, replied: None, proposed: None, ..a } } else { a })
+                .map(|a| if moved { Attendee { response: merel_model::Response::None, replied: None, proposed: None, ..a } } else { a })
                 .collect();
             Some(m)
         }
@@ -2251,7 +2251,7 @@ fn form(
     ui: &mut Ui,
     t: &Tokens,
     editor: &mut Editor,
-    session: &mailcraft_engine::Session,
+    session: &merel_engine::Session,
     calendars: &[(String, String, Color32)],
     local_calendars: &[String],
 ) {
@@ -2409,7 +2409,7 @@ fn form(
     if local || editor.id.is_none() {
         repeat_fields(ui, t, editor);
         if !local && editor.repeat.is_some() {
-            helder::note(ui, t, "De reeks wordt in het account aangemaakt; daarna toont Mailcraft elke keer apart en bewerk je ze los van elkaar.");
+            helder::note(ui, t, "De reeks wordt in het account aangemaakt; daarna toont Merel elke keer apart en bewerk je ze los van elkaar.");
         }
         if local && let Some(occurrence) = editor.occurrence {
             let when = to_local(occurrence);
@@ -2441,7 +2441,7 @@ fn form(
 /// The form's "Categoriseren" menu: every known category with its colour, ticked when the
 /// appointment has it, the ones it carries that this computer does not know, and
 /// "Alle categorieën wissen".
-fn category_menu(ui: &mut Ui, t: &Tokens, editor: &mut Editor, session: &mailcraft_engine::Session) {
+fn category_menu(ui: &mut Ui, t: &Tokens, editor: &mut Editor, session: &merel_engine::Session) {
     let mut names: Vec<String> = session.categories.iter().map(|c| c.name.clone()).collect();
     names.extend(editor.categories.iter().filter(|c| !names.iter().any(|n| n.eq_ignore_ascii_case(c))).cloned().collect::<Vec<_>>());
     let label = if editor.categories.is_empty() { CATEGORIZE } else { "Nog een categorie" };
@@ -2525,7 +2525,7 @@ mod tests {
             recurrence: None,
             reminder: None,
             private: false,
-            show_as: mailcraft_model::ShowAs::Busy,
+            show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
         };
@@ -2596,7 +2596,7 @@ mod tests {
             recurrence: None,
             reminder: None,
             private: true,
-            show_as: mailcraft_model::ShowAs::Busy,
+            show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
         };
@@ -2631,7 +2631,7 @@ mod tests {
 
     #[test]
     fn appointment_text_meets_wcag_aa_on_every_block() {
-        // Calendar colours as servers and Mailcraft hand them out, from pale to deep.
+        // Calendar colours as servers and Merel hand them out, from pale to deep.
         let colors = [
             Color32::from_rgb(31, 111, 201),
             Color32::from_rgb(46, 125, 91),
@@ -2643,8 +2643,8 @@ mod tests {
             Color32::WHITE,
             Color32::BLACK,
         ];
-        let picked = mailcraft_model::CALENDAR_COLORS.map(|(_, c)| Color32::from_rgb(c[0], c[1], c[2]));
-        let categories = mailcraft_model::CategoryColor::ALL.map(crate::categories::color_of);
+        let picked = merel_model::CALENDAR_COLORS.map(|(_, c)| Color32::from_rgb(c[0], c[1], c[2]));
+        let categories = merel_model::CategoryColor::ALL.map(crate::categories::color_of);
         for t in [Tokens::light(), Tokens::dark()] {
             for c in colors.into_iter().chain(picked).chain(categories) {
                 // The calendar's tab: its name on a tint, its buttons' icons on a deeper one.
@@ -2709,7 +2709,7 @@ mod tests {
             recurrence: None,
             reminder: None,
             private: false,
-            show_as: mailcraft_model::ShowAs::Busy,
+            show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
         };
@@ -2771,7 +2771,7 @@ mod tests {
             recurrence: Some(Recurrence { interval: 2, count: Some(8), ..Recurrence::every(Frequency::Monthly) }),
             reminder: None,
             private: false,
-            show_as: mailcraft_model::ShowAs::Busy,
+            show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
         };

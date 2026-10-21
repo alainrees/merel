@@ -8,8 +8,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use mailcraft_mailbox::Flag;
-use mailcraft_model::{Rule, RuleError, RuleField};
+use merel_mailbox::Flag;
+use merel_model::{Rule, RuleError, RuleField};
 
 use crate::{CommandError, Job, SAMPLE_ACCOUNT, Session};
 
@@ -53,7 +53,7 @@ impl Session {
     pub(crate) fn apply_rules(&mut self, message_id: &str, anywhere: bool) -> bool {
         let Some(m) = self.message(message_id).cloned() else { return false };
         let Some(folder) = self.folder(&m.folder_id).cloned() else { return false };
-        if !anywhere && folder.kind != mailcraft_model::FolderKind::Inbox {
+        if !anywhere && folder.kind != merel_model::FolderKind::Inbox {
             return false;
         }
         let rules: Vec<Rule> = self.rules.iter().filter(|r| r.enabled && r.account_id == folder.account_id && r.matches(&m)).cloned().collect();
@@ -235,8 +235,8 @@ pub fn run(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
-    use mailcraft_model::FolderKind;
+    use merel_mailbox::{RemoteFolder, RemoteHeader};
+    use merel_model::FolderKind;
     use serde_json::json;
 
     use super::*;
@@ -251,7 +251,7 @@ mod tests {
             size: 1,
             has_attachments: false,
             categories: Vec::new(),
-            header: mailcraft_mime::parse_header(format!("From: {from}\r\nSubject: {subject}\r\n\r\n").as_bytes()),
+            header: merel_mime::parse_header(format!("From: {from}\r\nSubject: {subject}\r\n\r\n").as_bytes()),
             date: i64::from(n),
         }
     }

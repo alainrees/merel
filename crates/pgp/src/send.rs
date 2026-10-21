@@ -4,7 +4,7 @@
 //! other side can answer encrypted.
 
 use base64::Engine as _;
-use mailcraft_smime::raw::split_message;
+use merel_smime::raw::split_message;
 use pgp::composed::{ArmorOptions, DetachedSignature, MessageBuilder, SignedPublicKey};
 use pgp::crypto::hash::HashAlgorithm;
 use pgp::crypto::sym::SymmetricKeyAlgorithm;
@@ -104,7 +104,7 @@ pub fn sign_message(key: &SecretKey, raw: &[u8], now: i64) -> Result<Vec<u8>, Pg
     out.extend_from_slice(b"Content-Type: application/pgp-signature; name=\"signature.asc\"\r\n");
     out.extend_from_slice(b"Content-Description: OpenPGP digital signature\r\n");
     out.extend_from_slice(b"Content-Disposition: attachment; filename=\"signature.asc\"\r\n\r\n");
-    out.extend_from_slice(&mailcraft_smime::raw::crlf(&armored));
+    out.extend_from_slice(&merel_smime::raw::crlf(&armored));
     if !out.ends_with(b"\r\n") {
         out.extend_from_slice(b"\r\n");
     }
@@ -150,7 +150,7 @@ pub fn encrypt_message(key: &SecretKey, raw: &[u8], recipients: &[PublicKey], si
     out.extend_from_slice(b"Content-Type: application/octet-stream; name=\"encrypted.asc\"\r\n");
     out.extend_from_slice(b"Content-Description: OpenPGP encrypted message\r\n");
     out.extend_from_slice(b"Content-Disposition: inline; filename=\"encrypted.asc\"\r\n\r\n");
-    out.extend_from_slice(&mailcraft_smime::raw::crlf(armored.as_bytes()));
+    out.extend_from_slice(&merel_smime::raw::crlf(armored.as_bytes()));
     if !out.ends_with(b"\r\n") {
         out.extend_from_slice(b"\r\n");
     }
@@ -160,7 +160,7 @@ pub fn encrypt_message(key: &SecretKey, raw: &[u8], recipients: &[PublicKey], si
 
 /// `raw` with `field` (a whole header field with its line break) added to its header.
 pub fn with_header(raw: &[u8], field: &str) -> Vec<u8> {
-    let raw = mailcraft_smime::raw::crlf(raw);
+    let raw = merel_smime::raw::crlf(raw);
     let mut out = field.as_bytes().to_vec();
     out.extend_from_slice(&raw);
     out

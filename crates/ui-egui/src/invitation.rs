@@ -1,17 +1,17 @@
 //! A meeting invitation in the mail, as Outlook shows one: a `text/calendar` part (an `.ics`)
 //! with a VEVENT becomes a strip over the message that names the appointment, when and where
 //! it is and who asks, with "Aan agenda toevoegen", which opens the appointment window filled in
-//! so the person looks before it is saved. Nothing is answered to the organiser: Mailcraft sends
+//! so the person looks before it is saved. Nothing is answered to the organiser: Merel sends
 //! no acceptance, it only files the appointment in the person's own calendar. An answer to a
 //! meeting the person organises shows as Outlook shows it, "Sanne heeft geaccepteerd", and the
 //! engine has already filed it in the appointment.
 
 use chrono::NaiveDateTime;
 use egui::RichText;
-use mailcraft_dav::ical;
-use mailcraft_engine::meetings::{self, Answer};
-use mailcraft_mime::Attachment;
-use mailcraft_model::{Appointment, Response};
+use merel_dav::ical;
+use merel_engine::meetings::{self, Answer};
+use merel_mime::Attachment;
+use merel_model::{Appointment, Response};
 
 use crate::{MailApp, Tokens, calendar, dates};
 

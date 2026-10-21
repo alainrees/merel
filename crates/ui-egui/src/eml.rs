@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use mailcraft_model::{Address, FolderKind, MessageHeader, clean_text};
+use merel_model::{Address, FolderKind, MessageHeader, clean_text};
 
 use crate::MailApp;
 use crate::compose::{Compose, Kind, prefixed};
@@ -118,8 +118,8 @@ mod tests {
 
     #[test]
     fn opslaan_als_writes_the_selected_message_as_an_eml_file_and_never_over_another() {
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
-        let dir = std::env::temp_dir().join(format!("mailcraft-save-as-{}", std::process::id()));
+        let mut app = MailApp::new(merel_engine::Engine::sample());
+        let dir = std::env::temp_dir().join(format!("merel-save-as-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp dir");
 
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn the_plain_copy_carries_the_envelope_and_the_text_with_crlf() {
-        let session = mailcraft_engine::Session::sample();
+        let session = merel_engine::Session::sample();
         let mut m = session.messages.first().cloned().expect("sample mail");
         m.from = Address::new(Some("Sanne \"de\" Vries"), "sanne@example.org").expect("address");
         m.to = vec![Address::new(None, "ik@example.org").expect("address")];

@@ -1,4 +1,4 @@
-//! Records which commit the app was built from, so "Over Mailcraft" can say exactly which build
+//! Records which commit the app was built from, so "Over Merel" can say exactly which build
 //! runs. Outside a git checkout (a source archive) the values stay empty and only the version shows.
 
 use std::path::Path;
@@ -29,6 +29,6 @@ fn main() {
         }
         println!("cargo:rerun-if-changed={}", dir.join("packed-refs").display());
     }
-    println!("cargo:rustc-env=MAILCRAFT_COMMIT={}", git(&["rev-parse", "--short=7", "HEAD"]));
-    println!("cargo:rustc-env=MAILCRAFT_COMMIT_DATE={}", git(&["log", "-1", "--format=%cs"]));
+    println!("cargo:rustc-env=MEREL_COMMIT={}", git(&["rev-parse", "--short=7", "HEAD"]));
+    println!("cargo:rustc-env=MEREL_COMMIT_DATE={}", git(&["log", "-1", "--format=%cs"]));
 }

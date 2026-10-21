@@ -7,9 +7,9 @@
 //! also holds a calendar, an address book and a to-do list (Exchange does, IMAP does not)
 //! offers them through [`Mailbox::items`] as an [`ItemStore`].
 
-use mailcraft_mime::ParsedHeader;
-use mailcraft_model::{Appointment, Contact, FolderKind, Task};
-use mailcraft_secrets::Secret;
+use merel_mime::ParsedHeader;
+use merel_model::{Appointment, Contact, FolderKind, Task};
+use merel_secrets::Secret;
 use serde::{Deserialize, Serialize};
 
 /// How to log in.
@@ -26,7 +26,7 @@ pub enum MailboxError {
     Connect { host: String, reason: String },
     #[error("the server refused the user name or password")]
     Login,
-    /// The server wants an authentication scheme Mailcraft does not speak (NTLM, Negotiate).
+    /// The server wants an authentication scheme Merel does not speak (NTLM, Negotiate).
     #[error("the server requires {0} authentication")]
     AuthScheme(String),
     #[error("the server reported an error: {0}")]

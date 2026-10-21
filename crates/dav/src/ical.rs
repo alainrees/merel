@@ -1,5 +1,5 @@
 //! iCalendar (RFC 5545) and vCard (RFC 6350) as text: unfolding, properties with parameters,
-//! escaping, and the handful of properties Mailcraft understands. Components keep every
+//! escaping, and the handful of properties Merel understands. Components keep every
 //! property they came with, so a change written back leaves alarms, attendees and whatever
 //! else the server stored in place.
 
@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz;
-use mailcraft_model::{Appointment, Attendee, Contact, Meeting, Priority, Response, ShowAs, Task, clean_text};
+use merel_model::{Appointment, Attendee, Contact, Meeting, Priority, Response, ShowAs, Task, clean_text};
 
 /// One `NAME;PARAM=value:value` line, with the value as written (escapes intact).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -589,7 +589,7 @@ pub fn attendee_of(p: &Prop) -> Attendee {
 }
 
 /// The meeting in a VEVENT that has an organiser and attendees; `None` for a plain appointment.
-/// The UID is Mailcraft's own `X-MAILCRAFT-UID` when the event has one (a meeting made from an
+/// The UID is Merel's own `X-MAILCRAFT-UID` when the event has one (a meeting made from an
 /// appointment that was already on the server keeps the UID its invitations carry there).
 fn meeting_of(event: &Component) -> Option<Meeting> {
     let organizer = event.prop("ORGANIZER")?;
@@ -625,7 +625,7 @@ pub fn attendee_prop(a: &Attendee) -> Prop {
 }
 
 /// Writes the organiser and attendees of `m` (or takes them out). On a server they carry
-/// `SCHEDULE-AGENT=CLIENT` (RFC 6638): Mailcraft mails the invitations itself, so a server that
+/// `SCHEDULE-AGENT=CLIENT` (RFC 6638): Merel mails the invitations itself, so a server that
 /// schedules does not send them a second time.
 fn write_meeting(event: &mut Component, m: Option<&Meeting>) {
     event.props.retain(|p| !p.name.eq_ignore_ascii_case("ATTENDEE"));
@@ -686,7 +686,7 @@ fn private_class(class: &str) -> bool {
 
 /// The first alarm that fires before the start, in minutes: a `VALARM` whose `TRIGGER` is a
 /// (negative) duration from the start. Alarms at an absolute time or relative to the end are
-/// not Mailcraft's reminder and are left alone.
+/// not Merel's reminder and are left alone.
 fn reminder_of(event: &Component) -> Option<u32> {
     event.children.iter().filter(|c| c.name.eq_ignore_ascii_case("VALARM")).find_map(|alarm| {
         let trigger = alarm.prop("TRIGGER")?;
@@ -867,7 +867,7 @@ pub fn contact_of(card: &Component, id: String) -> Option<Contact> {
     Contact {
         id,
         name,
-        emails: values("EMAIL").into_iter().filter(|e| mailcraft_model::Address::new(None, e).is_ok()).collect(),
+        emails: values("EMAIL").into_iter().filter(|e| merel_model::Address::new(None, e).is_ok()).collect(),
         phones: values("TEL").into_iter().map(|t| t.trim_start_matches("tel:").to_string()).collect(),
         company: card.text("ORG").split(';').next().unwrap_or("").trim().to_string(),
         notes: card.text("NOTE"),
@@ -902,7 +902,7 @@ pub fn write_contact(card: &mut Component, c: &Contact) {
 pub fn new_calendar(kind: &str, uid: &str) -> Component {
     let mut root = Component::new("VCALENDAR");
     root.props.push(Prop::new("VERSION", "2.0"));
-    root.props.push(Prop::new("PRODID", "-//ArtCraft//Mailcraft//NL"));
+    root.props.push(Prop::new("PRODID", "-//Merel//Merel//NL"));
     let mut inner = Component::new(kind);
     inner.props.push(Prop::new("UID", uid));
     inner.props.push(utc_prop("DTSTAMP", Utc::now().timestamp()));
@@ -1095,11 +1095,11 @@ mod tests {
         assert_eq!(appointment_of(plain[0].find("VEVENT").unwrap(), "e:2".into()).unwrap().show_as, ShowAs::Free);
 
         // A series carries its rule, with a start in a named zone when the computer has one.
-        let weekly = mailcraft_model::Recurrence {
+        let weekly = merel_model::Recurrence {
             interval: 2,
             weekdays: vec![0, 2],
             count: Some(10),
-            ..mailcraft_model::Recurrence::every(mailcraft_model::Frequency::Weekly)
+            ..merel_model::Recurrence::every(merel_model::Frequency::Weekly)
         };
         let series = Appointment { all_day: false, recurrence: Some(weekly), ..a.clone() };
         let mut root = parse(EVENT).remove(0);

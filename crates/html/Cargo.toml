@@ -1,5 +1,5 @@
 [package]
-name = "mailcraft-html"
+name = "merel-html"
 description = "HTML mail reduced to a small, safe layout tree the reading pane can draw."
 version.workspace = true
 edition.workspace = true
@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-mailcraft-model = { workspace = true }
+merel-model = { workspace = true }
 html5ever = { workspace = true }
 base64 = { workspace = true }
 

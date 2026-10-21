@@ -1,5 +1,5 @@
 [package]
-name = "mailcraft-engine"
+name = "merel-engine"
 description = "Session state and the command registry every action goes through."
 version.workspace = true
 edition.workspace = true
@@ -7,20 +7,20 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-mailcraft-model = { workspace = true }
-mailcraft-mime = { workspace = true }
-mailcraft-imap = { workspace = true }
-mailcraft-exchange = { workspace = true }
-mailcraft-google = { workspace = true }
-mailcraft-dav = { workspace = true }
-mailcraft-graph = { workspace = true }
-mailcraft-mailbox = { workspace = true }
-mailcraft-smtp = { workspace = true }
-mailcraft-oauth = { workspace = true }
-mailcraft-secrets = { workspace = true }
-mailcraft-store = { workspace = true }
-mailcraft-pgp = { workspace = true }
-mailcraft-smime = { workspace = true }
+merel-model = { workspace = true }
+merel-mime = { workspace = true }
+merel-imap = { workspace = true }
+merel-exchange = { workspace = true }
+merel-google = { workspace = true }
+merel-dav = { workspace = true }
+merel-graph = { workspace = true }
+merel-mailbox = { workspace = true }
+merel-smtp = { workspace = true }
+merel-oauth = { workspace = true }
+merel-secrets = { workspace = true }
+merel-store = { workspace = true }
+merel-pgp = { workspace = true }
+merel-smime = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
 base64 = { workspace = true }

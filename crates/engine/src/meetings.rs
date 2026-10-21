@@ -7,10 +7,10 @@
 //! already filed. Inbox mail whose subject reads like an answer is fetched on arrival so the
 //! appointment is up to date without the message being opened; nothing is ever sent back.
 
-use mailcraft_dav::ical::{self, Component};
-use mailcraft_mailbox::Item;
-use mailcraft_mime::Attachment;
-use mailcraft_model::{Address, Appointment, Attendee, FolderKind, Meeting, Response, parse_address_list};
+use merel_dav::ical::{self, Component};
+use merel_mailbox::Item;
+use merel_mime::Attachment;
+use merel_model::{Address, Appointment, Attendee, FolderKind, Meeting, Response, parse_address_list};
 
 use crate::Session;
 
@@ -19,7 +19,7 @@ const MAX_ICS: usize = 512 * 1024;
 /// The most answers fetched ahead per listing.
 const MAX_FETCH: usize = 20;
 
-/// The line that older versions of Mailcraft added to the notes of a meeting, before the
+/// The line that older versions of Merel added to the notes of a meeting, before the
 /// attendees were kept in the appointment itself.
 pub const NOTES_LINE: &str = "Genodigden: ";
 
@@ -105,7 +105,7 @@ pub fn answer_in(attachments: &[Attachment]) -> Option<Answer> {
     attachments.iter().filter(|a| is_calendar(a)).find_map(|a| std::str::from_utf8(&a.bytes).ok().and_then(parse_answer))
 }
 
-/// The UID older versions of Mailcraft gave the invitation of `a`, made from its id and start.
+/// The UID older versions of Merel gave the invitation of `a`, made from its id and start.
 fn legacy_uid(a: &Appointment, uid: &str) -> bool {
     let id: String = a.id.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
     uid.starts_with(&format!("{id}-{}@mailcraft.", a.start))

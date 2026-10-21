@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use mailcraft_mime::Attachment;
+use merel_mime::Attachment;
 
 use crate::notice::{Notice, file_name, folder_name};
 use crate::{MailApp, Tokens};
@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn saving_never_overwrites() {
-        let dir = std::env::temp_dir().join(format!("mailcraft-att-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("merel-att-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let a = save_to(&dir, "verslag.pdf", b"one").unwrap();
@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn saving_all_writes_each_file_and_keeps_going_after_a_problem() {
-        let dir = std::env::temp_dir().join(format!("mailcraft-att-all-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("merel-att-all-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let file = |name: &str, bytes: &[u8]| Attachment {
@@ -141,10 +141,10 @@ mod tests {
     }
 }
 
-/// Largest picture Mailcraft decodes for a preview, in bytes; bigger ones are only saved.
+/// Largest picture Merel decodes for a preview, in bytes; bigger ones are only saved.
 pub const MAX_PREVIEW: usize = 8 * 1024 * 1024;
 
-/// Whether an attachment is a picture Mailcraft shows a preview of, as Outlook does: one of
+/// Whether an attachment is a picture Merel shows a preview of, as Outlook does: one of
 /// the formats the decoder knows, not empty and not too big. Anything else is only saved.
 pub fn previewable(a: &Attachment) -> bool {
     matches!(a.mime.as_str(), "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/bmp")

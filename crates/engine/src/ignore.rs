@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use mailcraft_model::{FolderKind, IgnoredConversation, conversation_key};
+use merel_model::{FolderKind, IgnoredConversation, conversation_key};
 
 use crate::{CommandError, Session, commands::move_message};
 
@@ -117,7 +117,7 @@ pub fn unignore(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
+    use merel_mailbox::{RemoteFolder, RemoteHeader};
     use serde_json::json;
 
     use super::*;
@@ -132,7 +132,7 @@ mod tests {
             size: 1,
             has_attachments: false,
             categories: Vec::new(),
-            header: mailcraft_mime::parse_header(format!("From: x@example.org\r\nSubject: {subject}\r\n\r\n").as_bytes()),
+            header: merel_mime::parse_header(format!("From: x@example.org\r\nSubject: {subject}\r\n\r\n").as_bytes()),
             date: i64::from(n),
         }
     }

@@ -8,7 +8,7 @@
 
 use serde_json::Value;
 
-use mailcraft_model::StoredDraft;
+use merel_model::StoredDraft;
 
 use crate::{CommandError, SAMPLE_ACCOUNT, SendState, Session};
 

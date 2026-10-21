@@ -1,10 +1,10 @@
 //! "Zoekmappen", Outlook's search folders: a search the person saved under a name, listed in
 //! the folder pane like a folder. One holds the words, whether it looks in every folder and the
-//! list filter; choosing it runs that search again over the mail Mailcraft has fetched. The list
+//! list filter; choosing it runs that search again over the mail Merel has fetched. The list
 //! lives in `view.json` with the other choices of the Beeld tab.
 
 use egui::RichText;
-use mailcraft_engine::view::Filter;
+use merel_engine::view::Filter;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 

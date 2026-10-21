@@ -3,8 +3,8 @@
 use egui::{Align2, Color32, CornerRadius, FontId, Margin, RichText, Sense, Ui, vec2};
 use serde_json::json;
 
-use mailcraft_engine::CommandError;
-use mailcraft_model::Contact;
+use merel_engine::CommandError;
+use merel_model::Contact;
 
 use crate::helder::{self, Icon};
 use crate::{ComposeKind, MailApp, Module, Tokens};
@@ -121,7 +121,7 @@ impl Editor {
 }
 
 /// A row to pick where a new item goes, when there is a choice: this computer or an account.
-pub(crate) fn store_picker(ui: &mut Ui, t: &Tokens, session: &mailcraft_engine::Session, account_id: &mut String) {
+pub(crate) fn store_picker(ui: &mut Ui, t: &Tokens, session: &merel_engine::Session, account_id: &mut String) {
     let accounts: Vec<(String, String)> = session.item_accounts().iter().map(|a| (a.id.clone(), a.name.clone())).collect();
     if accounts.is_empty() {
         return;
@@ -145,14 +145,14 @@ pub(crate) fn store_picker(ui: &mut Ui, t: &Tokens, session: &mailcraft_engine::
 }
 
 /// The name of the account an item lives in, for a card.
-pub(crate) fn store_name(session: &mailcraft_engine::Session, account_id: Option<&str>) -> String {
+pub(crate) fn store_name(session: &merel_engine::Session, account_id: Option<&str>) -> String {
     account_id.and_then(|id| session.accounts.iter().find(|a| a.id == id)).map(|a| a.name.clone()).unwrap_or_else(|| "Op deze computer".into())
 }
 
 impl MailApp {
     /// Opens the contacts module on the contact that has `from`'s address, or on the form for
     /// a new contact named after the sender, so an address from the mail is kept in one click.
-    pub fn open_or_add_sender(&mut self, from: &mailcraft_model::Address) {
+    pub fn open_or_add_sender(&mut self, from: &merel_model::Address) {
         self.module = Module::People;
         if let Some(c) = self.engine.session.contact_with_email(from.email()) {
             let id = c.id.clone();
@@ -206,7 +206,7 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.add_space(8.0);
             let selected = app.engine.session.selected_contact.clone();
             let list: Vec<Contact> = app.engine.session.contacts_matching(&app.contacts.query).into_iter().cloned().collect();
-            let groups: Vec<mailcraft_model::ContactGroup> = app.engine.session.groups_sorted().into_iter().cloned().collect();
+            let groups: Vec<merel_model::ContactGroup> = app.engine.session.groups_sorted().into_iter().cloned().collect();
             let selected_group = app.contacts.group.clone();
             let mut group_pick = None;
             if list.is_empty() {
@@ -488,7 +488,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 
 /// Buttons under an address field with the addresses that complete what is being typed;
 /// clicking one replaces the part after the last separator.
-pub fn complete_addresses(ui: &mut Ui, t: &Tokens, session: &mailcraft_engine::Session, value: &mut String) {
+pub fn complete_addresses(ui: &mut Ui, t: &Tokens, session: &merel_engine::Session, value: &mut String) {
     let (head, tail) = match value.rfind([';', ',']) {
         Some(i) => (&value[..=i], value[i + 1..].trim_start()),
         None => ("", value.trim_start()),

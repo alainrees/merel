@@ -10,7 +10,7 @@ wachtwoord gaat in de sleutelhanger van je computer, niet in een bestand.
 
 De meeste aanbieders die IMAP spreken, bewaren je agenda en adresboek op een CalDAV- en
 CardDAV-server. Vul onder "Agenda en adresboek (CalDAV/CardDAV), optioneel" het https-adres
-van die server in; Mailcraft zoekt daar zelf de agenda's, takenlijsten en adresboeken op, met
+van die server in; Merel zoekt daar zelf de agenda's, takenlijsten en adresboeken op, met
 dezelfde gebruikersnaam en hetzelfde wachtwoord als voor de mail. Laat het veld Adresboek leeg
 als het op dezelfde server staat als de agenda. Laat beide leeg voor een account met alleen mail.
 
@@ -25,7 +25,7 @@ als het op dezelfde server staat als de agenda. Laat beide leeg voor een account
 De knop "Servers invullen op basis van het adres" vult Fastmail, iCloud, Posteo en mailbox.org
 zelf in. iCloud en Fastmail met tweestapsverificatie willen een app-specifiek wachtwoord; dat
 geldt dan voor mail en agenda samen. Herhalende afspraken worden getoond zoals de server ze
-uitwerkt, maar kun je in Mailcraft nog niet bewerken.
+uitwerkt, maar kun je in Merel nog niet bewerken.
 
 ## Gmail
 
@@ -33,56 +33,56 @@ Google staat geen gewoon wachtwoord toe; je logt in via de browser (OAuth 2.0). 
 de app één keer bij Google geregistreerd zijn. Dat is gratis en duurt een paar minuten:
 
 1. Ga naar <https://console.cloud.google.com/> en maak een project aan (bijvoorbeeld
-   "Mailcraft"). Zet onder **APIs & Services › Library** de *Google Calendar API*, de
+   "Merel"). Zet onder **APIs & Services › Library** de *Google Calendar API*, de
    *People API* en de *Tasks API* aan; zonder die drie komt alleen de mail mee.
 2. **APIs & Services › OAuth consent screen**: kies *External*, vul een appnaam en je
    e-mailadres in, en voeg jezelf toe bij *Test users*. Publiceren is niet nodig.
 3. **APIs & Services › Credentials › Create credentials › OAuth client ID**: type
    *Desktop app*. Je krijgt een **Client ID** (eindigt op `.apps.googleusercontent.com`) en een
    **Client secret**.
-4. In Mailcraft: Bestand › Accounts › soort **Gmail**, vul naam, e-mailadres, client-ID en
+4. In Merel: Bestand › Accounts › soort **Gmail**, vul naam, e-mailadres, client-ID en
    client-secret in en klik op **Inloggen bij Google**. Je browser opent; na het inloggen zegt
-   de pagina "Gelukt" en verschijnt het account in Mailcraft.
+   de pagina "Gelukt" en verschijnt het account in Merel.
 
-Mailcraft vraagt de machtigingen `https://mail.google.com/` (IMAP en SMTP) en die voor
+Merel vraagt de machtigingen `https://mail.google.com/` (IMAP en SMTP) en die voor
 Google Agenda, Contacten en Taken. Het vernieuwingstoken en het client-secret gaan in de
 sleutelhanger.
 
 Met die machtigingen komen de agenda, de contacten en de taken van het Google-account mee, net
 als bij Exchange: de agenda verschijnt naast "Mijn agenda", contacten en taken staan tussen de
 lokale, en wijzigingen gaan meteen naar Google. Google Taken kent geen prioriteit; die blijft
-alleen in Mailcraft staan. Een Gmail-account dat is toegevoegd toen Mailcraft alleen om mail
+alleen in Merel staan. Een Gmail-account dat is toegevoegd toen Merel alleen om mail
 vroeg, laat alleen mail zien: klik bij dat account op **Opnieuw aanmelden** (Bestand ›
 Accounts) om de extra toestemming te geven.
 
 ## Microsoft 365 / Outlook.com
 
-Ook Microsoft werkt via de browser. Mailcraft praat met Microsoft Graph: mail, verzenden,
+Ook Microsoft werkt via de browser. Merel praat met Microsoft Graph: mail, verzenden,
 agenda, contacten en taken komen alle via één aanmelding mee, zonder IMAP of SMTP.
 
 Bestand › Accounts › soort **Microsoft 365**: vul naam en e-mailadres in en klik op **Inloggen
-bij Microsoft**. Mailcraft heeft een eigen registratie bij Microsoft (`MICROSOFT_CLIENT_ID` in
-`crates/model`); je hoeft zelf niets te registreren. Wie Mailcraft zelf bouwt, kan een andere
-registratie meegeven met de omgevingsvariabele `MAILCRAFT_MICROSOFT_CLIENT_ID`.
+bij Microsoft**. Merel heeft een eigen registratie bij Microsoft (`MICROSOFT_CLIENT_ID` in
+`crates/model`); je hoeft zelf niets te registreren. Wie Merel zelf bouwt, kan een andere
+registratie meegeven met de omgevingsvariabele `MEREL_MICROSOFT_CLIENT_ID`.
 
 Wil je liever je eigen registratie gebruiken (bijvoorbeeld omdat je bedrijf apps zelf beheert),
 of heeft deze build er geen, registreer de app dan één keer in Entra en vul de client-ID in
 onder **Eigen client-ID (optioneel)**:
 
 1. Ga naar <https://entra.microsoft.com/> › **App registrations › New registration**.
-2. Naam bijvoorbeeld "Mailcraft"; bij *Supported account types* kies "Accounts in any
+2. Naam bijvoorbeeld "Merel"; bij *Supported account types* kies "Accounts in any
    organizational directory and personal Microsoft accounts"; bij *Redirect URI* kies
    **Public client/native (mobile & desktop)** met waarde `http://localhost`.
 3. Onder **Authentication** voeg je bij *Mobile and desktop applications* ook
-   `http://127.0.0.1` toe (Mailcraft luistert daar op een willekeurige poort). *Allow public
+   `http://127.0.0.1` toe (Merel luistert daar op een willekeurige poort). *Allow public
    client flows* blijft op No; een client-secret is niet nodig.
 4. Onder **API permissions** voeg je toe: *Microsoft Graph* › Delegated › `Mail.ReadWrite`,
    `Mail.Send`, `Calendars.ReadWrite`, `Contacts.ReadWrite`, `Tasks.ReadWrite` en
    `offline_access`.
-5. Neem de **Application (client) ID** over in Mailcraft.
+5. Neem de **Application (client) ID** over in Merel.
 
 Let op: waar een zakelijke tenant dat eist, moet een beheerder de app goedkeuren. Een
-Microsoft 365-account dat is toegevoegd toen Mailcraft nog IMAP gebruikte, blijft mail doen
+Microsoft 365-account dat is toegevoegd toen Merel nog IMAP gebruikte, blijft mail doen
 via IMAP; voeg in Entra de Graph-machtigingen toe en klik bij het account op **Opnieuw
 aanmelden** (Bestand › Accounts) om over te gaan op Graph, met agenda, contacten en taken.
 Exchange Online stopt in oktober 2026 met EWS; daarom gaat Microsoft 365 niet via de
@@ -90,23 +90,23 @@ Exchange-soort maar via Graph.
 
 ## Exchange Server (on-premises)
 
-Voor een eigen Exchange Server (2013 of nieuwer) gebruikt Mailcraft Exchange Web Services (EWS)
+Voor een eigen Exchange Server (2013 of nieuwer) gebruikt Merel Exchange Web Services (EWS)
 over HTTPS; lezen, verplaatsen én verzenden gaan via dezelfde server, er is geen SMTP nodig.
 
 Bestand › Accounts › soort **Exchange**: vul naam, e-mailadres, gebruikersnaam (`DOMEIN\naam` of
-je e-mailadres), wachtwoord en de servernaam in (bijvoorbeeld `mail.bedrijf.nl`; Mailcraft
+je e-mailadres), wachtwoord en de servernaam in (bijvoorbeeld `mail.bedrijf.nl`; Merel
 praat met `https://mail.bedrijf.nl/EWS/Exchange.asmx`). Het certificaat van de server moet
 geldig zijn; een zelfondertekend certificaat wordt geweigerd.
 
 Bij een Exchange-account komen ook de agenda, de contacten en de taken mee: de agenda van het
 account verschijnt naast "Mijn agenda" (afspraken van 90 dagen terug tot 400 dagen vooruit),
-contacten en taken staan tussen de lokale met de accountnaam erbij. Wat je in Mailcraft
+contacten en taken staan tussen de lokale met de accountnaam erbij. Wat je in Merel
 wijzigt, gaat meteen naar de server; bij een nieuwe afspraak, contactpersoon of taak kies je
 of die op deze computer of in het account komt. **Vernieuwen** in het lint haalt alles opnieuw
 op. Zonder verbinding zie je alleen de lokale items.
 
-Let op: Mailcraft meldt zich aan met *Basic authentication* over TLS. Veel servers staan voor
-EWS alleen NTLM of Kerberos toe; Mailcraft zegt dat dan en de beheerder kan Basic voor EWS
+Let op: Merel meldt zich aan met *Basic authentication* over TLS. Veel servers staan voor
+EWS alleen NTLM of Kerberos toe; Merel zegt dat dan en de beheerder kan Basic voor EWS
 inschakelen. Voor Exchange Online (Microsoft 365) gebruik je de soort **Microsoft 365**.
 
 ## Handtekening
@@ -137,7 +137,7 @@ voorbeeldmail.
 
 ## Hoe het aanmelden werkt
 
-Mailcraft opent je eigen browser en luistert ondertussen op een willekeurige poort op
+Merel opent je eigen browser en luistert ondertussen op een willekeurige poort op
 `127.0.0.1`, alleen voor deze ene aanmelding. De app ziet je wachtwoord nooit. Het verzoek
 gebruikt PKCE en een state-waarde, zodat een andere app op je computer de code niet kan
 onderscheppen of onderschuiven. Alleen het vernieuwingstoken wordt bewaard, in de

@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use mailcraft_engine::view::Sort;
+use merel_engine::view::Sort;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -124,7 +124,7 @@ pub struct ViewPrefs {
     /// out of the views, the search list and the printed page, as in Outlook when a calendar is
     /// unticked. Reminders still come.
     pub hidden_calendars: Vec<String>,
-    /// Whether Mailcraft asks GitHub once a day for a newer release: `None` until the person
+    /// Whether Merel asks GitHub once a day for a newer release: `None` until the person
     /// has chosen, which counts as no (see [`crate::updates`]).
     pub update_check: Option<bool>,
     /// The release the person chose to skip ("Deze versie overslaan"); a newer one is offered.
@@ -191,12 +191,12 @@ impl ViewPrefs {
 
     /// The saved choices, or the defaults when there is no file or it does not parse.
     pub fn load(path: Option<&Path>) -> Self {
-        path.map(|p| mailcraft_engine::config::load_json(&mailcraft_engine::config::view_path(p))).unwrap_or_default()
+        path.map(|p| merel_engine::config::load_json(&merel_engine::config::view_path(p))).unwrap_or_default()
     }
 
     fn save(&self, path: Option<&Path>) {
         if let Some(p) = path
-            && let Err(e) = mailcraft_engine::config::save_json(&mailcraft_engine::config::view_path(p), self)
+            && let Err(e) = merel_engine::config::save_json(&merel_engine::config::view_path(p), self)
         {
             log::warn!("view preferences not saved: {e}");
         }

@@ -2,7 +2,7 @@
 //! message row, the chips above a message, and the window that manages the list.
 
 use egui::{Color32, CornerRadius, RichText, Sense, Stroke, Ui, vec2};
-use mailcraft_model::{Category, CategoryColor};
+use merel_model::{Category, CategoryColor};
 use serde_json::json;
 
 use crate::{MailApp, Tokens};

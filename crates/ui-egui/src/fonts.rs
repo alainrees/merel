@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use egui::{FontData, FontDefinitions, FontFamily};
-use mailcraft_model::rich::Face;
+use merel_model::rich::Face;
 
 const INTER: &[u8] = include_bytes!("../assets/fonts/Inter-Regular.otf");
 const DEJAVU_SANS: &[u8] = include_bytes!("../assets/fonts/DejaVuSans.ttf");

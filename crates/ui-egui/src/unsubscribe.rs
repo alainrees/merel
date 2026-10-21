@@ -1,16 +1,16 @@
 //! "Afmelden", as Outlook offers it over a newsletter: the `List-Unsubscribe` header of a
-//! message names a mail address or a web page that takes you off the list. Mailcraft shows a
+//! message names a mail address or a web page that takes you off the list. Merel shows a
 //! line over such a message and, after asking, either sends the mail from the account the
 //! message came in on or opens the page in the browser. Nothing happens without the click:
 //! the header is the sender's word, and a visit to the page tells the sender the mail was read.
 
 use egui::RichText;
-use mailcraft_engine::SendState;
-use mailcraft_model::{Address, Draft};
+use merel_engine::SendState;
+use merel_model::{Address, Draft};
 
 use crate::{MailApp, Tokens};
 
-/// A way off the list, in the order Mailcraft prefers: mail first, as it tells the sender no
+/// A way off the list, in the order Merel prefers: mail first, as it tells the sender no
 /// more than the address it already has.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Way {
@@ -119,9 +119,9 @@ impl MailApp {
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(c) = app.unsubscribe.clone() else { return };
     let text = match &c.way {
-        Way::Mail { to, .. } => format!("Mailcraft stuurt een e-mail aan {} met het verzoek je af te melden bij {}.", to.email(), c.sender),
+        Way::Mail { to, .. } => format!("Merel stuurt een e-mail aan {} met het verzoek je af te melden bij {}.", to.email(), c.sender),
         Way::Web(url) => format!(
-            "Mailcraft opent {} in je browser; daar meld je je af bij {}. De afzender kan zo zien dat je het bericht hebt gelezen.",
+            "Merel opent {} in je browser; daar meld je je af bij {}. De afzender kan zo zien dat je het bericht hebt gelezen.",
             host(url),
             c.sender
         ),

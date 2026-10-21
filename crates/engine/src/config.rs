@@ -4,13 +4,30 @@
 
 use std::path::{Path, PathBuf};
 
-use mailcraft_model::Account;
+use merel_model::Account;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 /// Where the accounts file lives for this user, if the platform has a config directory.
 pub fn default_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("nl", "ArtCraft", "Mailcraft").map(|d| d.config_dir().join("accounts.json"))
+    let dir = directories::ProjectDirs::from("nl", "", "Merel")?.config_dir().to_path_buf();
+    let old = directories::ProjectDirs::from("nl", "ArtCraft", "Mailcraft").map(|d| d.config_dir().to_path_buf());
+    Some(settle(&dir, old.as_deref()).join("accounts.json"))
+}
+
+/// The config directory to use: `dir`, after moving the folder from the time the app was
+/// called Mailcraft (`old`) there on the first start; `old` itself when that move fails, so
+/// no account, calendar or cached mail goes missing.
+fn settle(dir: &Path, old: Option<&Path>) -> PathBuf {
+    match old {
+        Some(old) if !dir.exists() && old.is_dir() => {
+            if let Some(parent) = dir.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if std::fs::rename(old, dir).is_ok() { dir.to_path_buf() } else { old.to_path_buf() }
+        }
+        _ => dir.to_path_buf(),
+    }
 }
 
 /// The calendar file that goes with an accounts file.
@@ -127,11 +144,11 @@ pub fn save_json<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mailcraft_model::{Address, Protocol, Server, Tls};
+    use merel_model::{Address, Protocol, Server, Tls};
 
     #[test]
     fn round_trips_without_secrets() {
-        let dir = std::env::temp_dir().join(format!("mailcraft-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("merel-test-{}", std::process::id()));
         let path = dir.join("accounts.json");
         let a = Account {
             id: "a1".into(),
@@ -139,7 +156,7 @@ mod tests {
             address: Address::new(None, "a@b.nl").unwrap(),
             username: "a@b.nl".into(),
             protocol: Protocol::ImapSmtp,
-            auth: mailcraft_model::Auth::Password,
+            auth: merel_model::Auth::Password,
             incoming: Some(Server { host: "imap.b.nl".into(), port: 993, tls: Tls::Implicit }),
             outgoing: None,
             dav: None,
@@ -150,5 +167,19 @@ mod tests {
         assert!(!text.contains("password"));
         assert_eq!(load(&path), vec![a]);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_mailcraft_folder_moves_to_the_new_name_once() {
+        let root = std::env::temp_dir().join(format!("merel-settle-{}", std::process::id()));
+        let (old, dir) = (root.join("mailcraft"), root.join("config").join("merel"));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("accounts.json"), "[]").unwrap();
+        assert_eq!(settle(&dir, Some(&old)), dir);
+        assert!(dir.join("accounts.json").exists() && !old.exists(), "moved, not copied");
+        std::fs::create_dir_all(&old).unwrap();
+        assert_eq!(settle(&dir, Some(&old)), dir, "an existing new folder wins");
+        assert_eq!(settle(&root.join("fresh"), Some(&root.join("absent"))), root.join("fresh"), "nothing to move");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

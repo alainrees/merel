@@ -1,8 +1,8 @@
-//! Mailcraft's front end: an Outlook-style window drawn with egui in the ArtCraft look.
+//! Merel's front end: an Outlook-style window drawn with egui in the ArtCraft look.
 //!
 //! Layout, top to bottom: the tab strip and ribbon, then the module rail (Mail, Calendar,
 //! People, Tasks), the folder pane, the message list and the reading pane, then the status bar.
-//! Every button runs a command id through [`mailcraft_engine::Session::run`]; nothing here
+//! Every button runs a command id through [`merel_engine::Session::run`]; nothing here
 //! changes the session directly.
 
 mod attachments;
@@ -51,8 +51,8 @@ pub mod welcome;
 use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
 use serde_json::{Value, json};
 
-use mailcraft_engine::{AccountStatus, Engine};
-use mailcraft_model::{FolderKind, Warning};
+use merel_engine::{AccountStatus, Engine};
+use merel_model::{FolderKind, Warning};
 
 pub use backstage::AccountForm;
 pub use compose::{Compose, Kind as ComposeKind};
@@ -187,7 +187,7 @@ pub struct MailApp {
 /// The window title: the app's name, with the unread inbox mail of every account in brackets
 /// when there is any, as Outlook shows it.
 pub fn window_title(inbox_unread: u32) -> String {
-    if inbox_unread == 0 { "Mailcraft".to_string() } else { format!("Mailcraft ({inbox_unread})") }
+    if inbox_unread == 0 { "Merel".to_string() } else { format!("Merel ({inbox_unread})") }
 }
 
 /// A message being dragged from the list, to drop on a folder.
@@ -199,7 +199,7 @@ pub(crate) const MULTI_HINT: &str = "Verwijderen, Archiveren, Ongewenst, Verplaa
 /// One row of the message list: a message, indented when it sits inside an unfolded
 /// conversation, with the fold control when it heads a conversation of several messages.
 struct Row<'a> {
-    m: &'a mailcraft_model::MessageHeader,
+    m: &'a merel_model::MessageHeader,
     indent: bool,
     fold: Option<Fold>,
 }
@@ -225,7 +225,7 @@ fn group_heading(ui: &mut Ui, t: &Tokens, group: &str) {
 /// holds the selected message is shown unfolded for as long as it does, so a message reached
 /// with the arrow keys is seen.
 fn list_rows<'a>(
-    list: Vec<&'a mailcraft_model::MessageHeader>,
+    list: Vec<&'a merel_model::MessageHeader>,
     conversations: bool,
     expanded: &std::collections::HashSet<String>,
     selected: Option<&str>,
@@ -234,7 +234,7 @@ fn list_rows<'a>(
         return list.into_iter().map(|m| Row { m, indent: false, fold: None }).collect();
     }
     let mut rows = Vec::new();
-    for c in mailcraft_engine::view::conversations(list) {
+    for c in merel_engine::view::conversations(list) {
         let (Some(head), rest) = (c.messages.first().copied(), &c.messages[1..]) else { continue };
         if rest.is_empty() {
             rows.push(Row { m: head, indent: false, fold: None });
@@ -313,8 +313,8 @@ impl MailApp {
             Err(e) => {
                 log::warn!("{id}: {e}");
                 self.notice = Some(match e {
-                    mailcraft_engine::CommandError::NoSelection => Notice::warning("Selecteer eerst een bericht."),
-                    mailcraft_engine::CommandError::NoFolder(_) => Notice::warning("Dit account heeft die map niet."),
+                    merel_engine::CommandError::NoSelection => Notice::warning("Selecteer eerst een bericht."),
+                    merel_engine::CommandError::NoFolder(_) => Notice::warning("Dit account heeft die map niet."),
                     e => Notice::error(e.to_string()),
                 });
             }
@@ -631,11 +631,11 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
 }
 
 /// The quick filters over the message list; the rest are in the list's filter menu.
-const LIST_CHIPS: [mailcraft_engine::view::Filter; 4] = [
-    mailcraft_engine::view::Filter::All,
-    mailcraft_engine::view::Filter::Unread,
-    mailcraft_engine::view::Filter::Flagged,
-    mailcraft_engine::view::Filter::Attachments,
+const LIST_CHIPS: [merel_engine::view::Filter; 4] = [
+    merel_engine::view::Filter::All,
+    merel_engine::view::Filter::Unread,
+    merel_engine::view::Filter::Flagged,
+    merel_engine::view::Filter::Attachments,
 ];
 
 /// The label of the small button that empties a search box.
@@ -665,7 +665,7 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
     let mut recent_pick: Option<Option<String>> = None;
     let recents = app.view.recent_searches.clone();
     let inset = app.title_bar_inset;
-    let title = app.title.clone().unwrap_or_else(|| "Mailcraft".to_string());
+    let title = app.title.clone().unwrap_or_else(|| "Merel".to_string());
     egui::Panel::top("searchbar")
         .show_separator_line(false)
         .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin { left: 12, right: 12, top: 4, bottom: if inset > 0.0 { 6 } else { 4 } }))
@@ -720,7 +720,7 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                                     .desired_width((ui.available_width() - tail).max(80.0))
                                     .margin(Margin::symmetric(4, 4)),
                             )
-                            .on_hover_text(mailcraft_engine::search::HINT);
+                            .on_hover_text(merel_engine::search::HINT);
                         // Leaving the box (Enter, a click elsewhere) is when the words count as a search.
                         if box_r.lost_focus() && !session.search.trim().is_empty() {
                             remember = Some(session.search.clone());
@@ -776,7 +776,7 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                                 }
                                 if ui
                                     .selectable_label(session.search_all, SCOPE_ALL)
-                                    .on_hover_text("Zoek in alle mappen van alle accounts, in de berichten die Mailcraft al heeft opgehaald.")
+                                    .on_hover_text("Zoek in alle mappen van alle accounts, in de berichten die Merel al heeft opgehaald.")
                                     .clicked()
                                 {
                                     session.search_all = true;
@@ -1146,7 +1146,7 @@ fn folder_icon(kind: FolderKind) -> &'static str {
 
 /// One row of the folder pane: icon, name and the unread count, highlighted when it is the
 /// open folder. `hint` is shown on hover, when there is one.
-fn folder_row(ui: &mut Ui, t: &Tokens, f: &mailcraft_model::Folder, on: bool, hint: Option<String>) -> egui::Response {
+fn folder_row(ui: &mut Ui, t: &Tokens, f: &merel_model::Folder, on: bool, hint: Option<String>) -> egui::Response {
     let r = ui.add_sized(
         [ui.available_width(), 28.0],
         egui::Button::new("")
@@ -1189,7 +1189,7 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let mut menu_on: Option<(egui::Response, String, FolderKind)> = None;
             let mut open_accounts = false;
             // Outlook's "Favorieten": the pinned folders of every account, above the accounts.
-            let favorites: Vec<mailcraft_model::Folder> = app.view.favorites.iter().filter_map(|id| app.engine.session.folder(id).cloned()).collect();
+            let favorites: Vec<merel_model::Folder> = app.view.favorites.iter().filter_map(|id| app.engine.session.folder(id).cloned()).collect();
             if !favorites.is_empty() {
                 ui.label(RichText::new("★ Favorieten").size(12.0).strong().color(t.text_dim));
                 ui.add_space(4.0);
@@ -1342,7 +1342,7 @@ fn drag_preview(app: &MailApp, ctx: &egui::Context, t: &Tokens) {
 
 /// The drafts of one account in place of the message list: open one to go on writing, or drop it.
 fn drafts_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens, account_id: &str) {
-    let drafts: Vec<mailcraft_model::StoredDraft> = app.engine.session.drafts_of(account_id).into_iter().cloned().collect();
+    let drafts: Vec<merel_model::StoredDraft> = app.engine.session.drafts_of(account_id).into_iter().cloned().collect();
     egui::Frame::NONE.inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
         ui.label(RichText::new(format!("Concepten ({})", drafts.len())).size(18.0).strong().color(t.text));
         ui.label(
@@ -1369,7 +1369,7 @@ fn drafts_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens, account_id: &str) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match d.send_at {
                         Some(ts) => {
                             ui.label(RichText::new(format!("⏰ Verzenden {}", compose::when_text(ts))).size(12.0).color(t.accent_text))
-                                .on_hover_text("Gaat op dat moment vanzelf weg, als Mailcraft dan draait. Open het concept om dat te veranderen.");
+                                .on_hover_text("Gaat op dat moment vanzelf weg, als Merel dan draait. Open het concept om dat te veranderen.");
                         }
                         None => {
                             ui.label(RichText::new(dates::short(d.updated)).size(12.0).color(t.text_dim));
@@ -1421,7 +1421,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let searching = app.engine.session.is_searching();
             let count = if searching { Some(app.engine.session.visible_messages().len()) } else { None };
             let mut server_search = false;
-            let mut filter_pick: Option<mailcraft_engine::view::Filter> = None;
+            let mut filter_pick: Option<merel_engine::view::Filter> = None;
             egui::Frame::NONE.inner_margin(Margin { left: 12, right: 8, top: 12, bottom: 6 }).show(ui, |ui| {
                 let title = match count {
                     Some(n) => format!("Zoekresultaten ({n})"),
@@ -1438,7 +1438,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                                 .corner_radius(helder::CONTROL_RADIUS)
                                 .min_size(vec2(32.0, 32.0));
                             let (r, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
-                                for f in mailcraft_engine::view::Filter::ALL {
+                                for f in merel_engine::view::Filter::ALL {
                                     if ui.selectable_label(current == f, f.dutch_name()).clicked() {
                                         filter_pick = Some(f);
                                         ui.close();
@@ -1461,7 +1461,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         }
                     });
                 });
-                // The server can look where Mailcraft has not: older mail, and the text itself.
+                // The server can look where Merel has not: older mail, and the text itself.
                 let session = &app.engine.session;
                 if session.can_search_server() {
                     ui.add_space(4.0);
@@ -1477,7 +1477,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                                 let label = if busy { "Zoeken op de server…" } else { "Zoek op de server" };
                                 if ui
                                     .add_enabled(!busy, egui::Button::new(label))
-                                    .on_hover_text("Laat de mailserver in deze map zoeken: ook in berichten die Mailcraft nog niet heeft opgehaald en in de tekst van de berichten.")
+                                    .on_hover_text("Laat de mailserver in deze map zoeken: ook in berichten die Merel nog niet heeft opgehaald en in de tekst van de berichten.")
                                     .clicked()
                                 {
                                     server_search = true;
@@ -1506,7 +1506,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     let msg = if searching && app.engine.session.current_hits().is_some() {
                         "Geen berichten gevonden, ook niet op de server."
                     } else if searching {
-                        "Geen berichten gevonden. Mailcraft zoekt in de berichten die het al heeft opgehaald."
+                        "Geen berichten gevonden. Merel zoekt in de berichten die het al heeft opgehaald."
                     } else if loading {
                         "Berichten ophalen…"
                     } else {
@@ -1521,11 +1521,11 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let rows = list_rows(list, app.view.conversations, &app.expanded, selected.as_deref());
                 let row_ids: Vec<String> = rows.iter().map(|r| r.m.id.clone()).collect();
                 let mut toggle: Option<String> = None;
-                let mut menu_pick: Option<(mailcraft_model::MessageHeader, message_menu::Pick)> = None;
+                let mut menu_pick: Option<(merel_model::MessageHeader, message_menu::Pick)> = None;
                 let mut open_window: Option<String> = None;
                 // Date groups, as Outlook heads the list, while the list is in date order.
                 let grouped =
-                    app.view.groups && matches!(app.engine.session.sort, mailcraft_engine::view::Sort::Newest | mailcraft_engine::view::Sort::Oldest);
+                    app.view.groups && matches!(app.engine.session.sort, merel_engine::view::Sort::Newest | merel_engine::view::Sort::Oldest);
                 let today = chrono::Local::now().date_naive();
                 let now_ts = chrono::Local::now().timestamp();
                 let mut last_group: Option<&str> = None;
@@ -1541,7 +1541,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     let on = selected.as_deref() == Some(m.id.as_str()) || app.engine.session.marked.contains(&m.id);
                     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click_and_drag());
                     r.dnd_set_drag_payload(DraggedMessage(m.id.clone()));
-                    let hover = match app.engine.session.follow_up(&m.id).and_then(mailcraft_engine::followup::due_day) {
+                    let hover = match app.engine.session.follow_up(&m.id).and_then(merel_engine::followup::due_day) {
                         Some(d) => format!("{}\nOpvolgen vóór {}", m.subject, dates::day_name(d)),
                         None => m.subject.clone(),
                     };
@@ -1841,7 +1841,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         // The follow-up strip, as Outlook puts it over a flagged message: the due day, red once
         // it has passed, and the way to mark it done.
         let today = chrono::Local::now().date_naive();
-        let due = app.engine.session.follow_up(&m.id).and_then(mailcraft_engine::followup::due_day);
+        let due = app.engine.session.follow_up(&m.id).and_then(merel_engine::followup::due_day);
         let (text, late) = match due {
             Some(d) if d < today => (format!("⚑ Opvolgen: verlopen op {}", dates::day_name(d)), true),
             Some(d) if d == today => ("⚑ Opvolgen: vandaag".to_string(), false),
@@ -2102,7 +2102,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     // The calendar part of an invitation or an answer is the strip above, not a file of its own,
     // as Outlook shows it; only a named .ics stays a tile.
-    let files: Vec<&mailcraft_mime::Attachment> = body
+    let files: Vec<&merel_mime::Attachment> = body
         .as_ref()
         .map(|b| b.attachments.iter().filter(|a| !(invitation::is_calendar(a) && !a.name.to_ascii_lowercase().ends_with(".ics"))).collect())
         .unwrap_or_default();
@@ -2117,7 +2117,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let r = helder::file_tile(ui, t, &a.name, &size, &label, !in_junk);
                 if in_junk {
                     r.on_hover_text("Uitgeschakeld in Ongewenste e-mail. Klik op Geen ongewenst als je deze afzender vertrouwt.");
-                } else if r.on_hover_text("Opslaan in je map Downloads. Mailcraft opent bijlagen niet zelf.").clicked() {
+                } else if r.on_hover_text("Opslaan in je map Downloads. Merel opent bijlagen niet zelf.").clicked() {
                     save = Some(a.clone());
                 }
             }
@@ -2251,14 +2251,14 @@ pub(crate) const JUNK_NOTICE: &str = "⚠ Dit bericht staat in Ongewenste e-mail
 /// What points to phishing in `m`, from its sender (against the contacts and the person's own
 /// addresses) and, once fetched, its body: the server's authentication results, the links and
 /// the attachments.
-fn message_warnings(app: &MailApp, m: &mailcraft_model::MessageHeader, body: Option<&mailcraft_engine::Body>) -> Vec<Warning> {
+fn message_warnings(app: &MailApp, m: &merel_model::MessageHeader, body: Option<&merel_engine::Body>) -> Vec<Warning> {
     let s = &app.engine.session;
     let own: Vec<&str> = s.accounts.iter().map(|a| a.address.email()).collect();
-    let mut out = mailcraft_model::sender_warnings(&m.from, &s.contacts, &own);
+    let mut out = merel_model::sender_warnings(&m.from, &s.contacts, &own);
     if let Some(b) = body {
-        out.extend(mailcraft_model::authentication_warning(&b.authentication));
-        out.extend(mailcraft_model::link_warnings(&b.rich.as_ref().map(|d| d.links()).unwrap_or_default()));
-        out.extend(mailcraft_model::attachment_warnings(b.attachments.iter().map(|a| a.name.as_str())));
+        out.extend(merel_model::authentication_warning(&b.authentication));
+        out.extend(merel_model::link_warnings(&b.rich.as_ref().map(|d| d.links()).unwrap_or_default()));
+        out.extend(merel_model::attachment_warnings(b.attachments.iter().map(|a| a.name.as_str())));
     }
     out
 }
@@ -2390,7 +2390,7 @@ mod tests {
         h.state_mut().finish_update_check(Outcome::Newer(release.clone()));
         h.run();
         assert!(h.query_all_by_label(updates::WINDOW).count() >= 1);
-        h.get_by_label("Mailcraft 9.0.0 is beschikbaar.");
+        h.get_by_label("Merel 9.0.0 is beschikbaar.");
         h.get_by_label("Nieuw: van alles.");
         h.get_by_label(updates::DOWNLOAD);
         h.get_by_label(updates::SKIP).click();
@@ -2414,14 +2414,14 @@ mod tests {
     }
 
     #[test]
-    fn the_daily_update_check_is_off_until_chosen_and_switched_in_over_mailcraft() {
+    fn the_daily_update_check_is_off_until_chosen_and_switched_in_over_merel() {
         let mut h = harness();
         h.run();
         assert_eq!(h.state().view.update_check, None);
         assert!(!h.state().updates.running(), "nothing goes out before the person chose");
         h.get_by_label("Help").click();
         h.run();
-        h.get_by_label("Over Mailcraft").click();
+        h.get_by_label("Over Merel").click();
         h.run();
         h.get_by_label(updates::AUTO).click();
         h.run();
@@ -2468,7 +2468,7 @@ mod tests {
 
     #[test]
     fn the_server_can_be_asked_to_search_a_connected_folder() {
-        use mailcraft_engine::{Event, RemoteFolder, RemoteHeader};
+        use merel_engine::{Event, RemoteFolder, RemoteHeader};
         let mut engine = Engine::sample();
         let account = {
             let mut f = crate::backstage::AccountForm::default();
@@ -2478,10 +2478,10 @@ mod tests {
             f.account().expect("account")
         };
         let id = account.id.clone();
-        engine.add_account(account, mailcraft_secrets::Secret::new("x")).expect("add");
+        engine.add_account(account, merel_secrets::Secret::new("x")).expect("add");
         engine.session.apply(Event::Connected {
             account_id: id.clone(),
-            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: mailcraft_model::FolderKind::Inbox, selectable: true }],
+            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: merel_model::FolderKind::Inbox, selectable: true }],
             syncs_items: false,
         });
         // Connecting queued a fetch of the inbox; pretend it came back empty.
@@ -2506,7 +2506,7 @@ mod tests {
             size: 1,
             has_attachments: false,
             categories: Vec::new(),
-            header: mailcraft_mime::parse_header(b"From: boekhouding@voorbeeld.nl\r\nSubject: Jaaroverzicht\r\n\r\n"),
+            header: merel_mime::parse_header(b"From: boekhouding@voorbeeld.nl\r\nSubject: Jaaroverzicht\r\n\r\n"),
             date: 1_700_000_000,
         };
         h.state_mut().engine.session.apply(Event::Found { folder_id: folder, query: "factuur".into(), result: Ok(vec![hit]) });
@@ -3029,14 +3029,14 @@ mod tests {
         let s = &mut h.state_mut().engine.session;
         s.accounts.insert(
             0,
-            mailcraft_model::Account {
+            merel_model::Account {
                 id: "acc".into(),
                 name: "MXroute".into(),
-                address: mailcraft_model::Address::new(Some("Alain Tester"), "alain@voorbeeld.nl").unwrap(),
+                address: merel_model::Address::new(Some("Alain Tester"), "alain@voorbeeld.nl").unwrap(),
                 username: "alain@voorbeeld.nl".into(),
-                protocol: mailcraft_model::Protocol::ImapSmtp,
-                auth: mailcraft_model::Auth::Password,
-                incoming: Some(mailcraft_model::Server { host: "127.0.0.1".into(), port: 1, tls: mailcraft_model::Tls::Implicit }),
+                protocol: merel_model::Protocol::ImapSmtp,
+                auth: merel_model::Auth::Password,
+                incoming: Some(merel_model::Server { host: "127.0.0.1".into(), port: 1, tls: merel_model::Tls::Implicit }),
                 outgoing: None,
                 dav: None,
                 signature: String::new(),
@@ -3075,7 +3075,7 @@ mod tests {
             "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:{}\r\nDTSTAMP:20261020T210000Z\r\nDTSTART:20261027T110000Z\r\nDTEND:20261027T120000Z\r\nSUMMARY:Lunch\r\nATTENDEE;CN=Alain Tester;PARTSTAT=ACCEPTED:mailto:alain@werk.example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
             m.uid
         );
-        let answer = mailcraft_engine::meetings::parse_answer(&reply).expect("an answer");
+        let answer = merel_engine::meetings::parse_answer(&reply).expect("an answer");
         assert!(h.state_mut().engine.session.apply_answer(&answer, "alain@werk.example.org").is_some());
         h.state_mut().open_appointment(&a.id, a.start);
         h.run_steps(3);
@@ -3122,13 +3122,13 @@ mod tests {
         {
             let s = &mut h.state_mut().engine.session;
             let ics = "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:x1@mailcraft.example.org\r\nDTSTART:20261027T110000Z\r\nDTEND:20261027T120000Z\r\nSUMMARY:Lunch\r\nATTENDEE;CN=Sanne;PARTSTAT=ACCEPTED:mailto:sanne@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
-            let part = mailcraft_mime::Attachment {
+            let part = merel_mime::Attachment {
                 name: "invite.ics".into(),
                 mime: "text/calendar".into(),
                 size: ics.len(),
                 bytes: std::sync::Arc::from(ics.as_bytes()),
             };
-            s.bodies.insert("m3".into(), mailcraft_engine::Body { text: "Geaccepteerd".into(), attachments: vec![part], ..Default::default() });
+            s.bodies.insert("m3".into(), merel_engine::Body { text: "Geaccepteerd".into(), attachments: vec![part], ..Default::default() });
             s.selected_message = Some("m3".into());
         }
         h.run();
@@ -3217,7 +3217,7 @@ mod tests {
 
     #[test]
     fn a_message_with_signs_of_phishing_gets_a_warning_strip_that_can_block_the_sender() {
-        use mailcraft_model::{Address, Flags, MessageHeader};
+        use merel_model::{Address, Flags, MessageHeader};
         let mut h = harness();
         let from = Address::new(Some("Sanne de Vries"), "sanne@examp1e.org").unwrap();
         let m = MessageHeader {
@@ -3235,9 +3235,9 @@ mod tests {
             categories: Vec::new(),
             importance: Default::default(),
         };
-        let body = mailcraft_engine::Body {
-            rich: Some(mailcraft_html::parse(r#"<p><a href="https://evil.example/login">https://www.bank.nl/inloggen</a></p>"#)),
-            attachments: vec![mailcraft_mime::Attachment {
+        let body = merel_engine::Body {
+            rich: Some(merel_html::parse(r#"<p><a href="https://evil.example/login">https://www.bank.nl/inloggen</a></p>"#)),
+            attachments: vec![merel_mime::Attachment {
                 name: "factuur.pdf.exe".into(),
                 mime: "application/octet-stream".into(),
                 size: 3,
@@ -3282,12 +3282,11 @@ mod tests {
             0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf,
             0xc0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92, 0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
         ];
-        let picture =
-            mailcraft_mime::Attachment { name: "foto.png".into(), mime: "image/png".into(), size: png.len(), bytes: std::sync::Arc::from(png) };
+        let picture = merel_mime::Attachment { name: "foto.png".into(), mime: "image/png".into(), size: png.len(), bytes: std::sync::Arc::from(png) };
         let paper =
-            mailcraft_mime::Attachment { name: "bon.pdf".into(), mime: "application/pdf".into(), size: 3, bytes: std::sync::Arc::from(&b"abc"[..]) };
+            merel_mime::Attachment { name: "bon.pdf".into(), mime: "application/pdf".into(), size: 3, bytes: std::sync::Arc::from(&b"abc"[..]) };
         assert!(attachments::previewable(&picture) && !attachments::previewable(&paper));
-        let body = mailcraft_engine::Body { text: "Zie bijlage".into(), attachments: vec![paper, picture], ..Default::default() };
+        let body = merel_engine::Body { text: "Zie bijlage".into(), attachments: vec![paper, picture], ..Default::default() };
         h.state_mut().engine.session.bodies.insert("m3".into(), body);
         h.state_mut().engine.session.selected_message = Some("m3".into());
         h.run();
@@ -3306,10 +3305,8 @@ mod tests {
     #[test]
     fn pictures_from_a_safe_sender_load_without_asking_once_the_person_says_always() {
         let mut h = harness();
-        let body = mailcraft_engine::Body {
-            rich: Some(mailcraft_html::parse(r#"<p><img src="https://t.example/p.gif" alt="pixel"></p>"#)),
-            ..Default::default()
-        };
+        let body =
+            merel_engine::Body { rich: Some(merel_html::parse(r#"<p><img src="https://t.example/p.gif" alt="pixel"></p>"#)), ..Default::default() };
         h.state_mut().engine.session.bodies.insert("m1".into(), body);
         h.state_mut().engine.session.selected_message = Some("m1".into());
         h.run();
@@ -3334,11 +3331,11 @@ mod tests {
     fn links_attachments_and_pictures_are_switched_off_in_the_junk_folder() {
         use egui_kittest::kittest::NodeT;
         let mut h = harness();
-        let body = mailcraft_engine::Body {
-            rich: Some(mailcraft_html::parse(
+        let body = merel_engine::Body {
+            rich: Some(merel_html::parse(
                 r#"<p><a href="https://example.nl/actie">Klik hier</a> <img src="https://t.example/p.gif" alt="pixel"></p>"#,
             )),
-            attachments: vec![mailcraft_mime::Attachment {
+            attachments: vec![merel_mime::Attachment {
                 name: "bon.pdf".into(),
                 mime: "application/pdf".into(),
                 size: 3,
@@ -3448,9 +3445,9 @@ mod tests {
     fn an_invitation_in_the_mail_opens_the_appointment_window_filled_in() {
         let mut h = harness();
         let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:k1@x\r\nDTSTART:20261021T080000Z\r\nDTEND:20261021T093000Z\r\nSUMMARY:Kickoff\r\nLOCATION:Kantoor\r\nORGANIZER;CN=Sanne:mailto:sanne@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
-        let body = mailcraft_engine::Body {
+        let body = merel_engine::Body {
             text: "Kom je ook?".into(),
-            attachments: vec![mailcraft_mime::Attachment {
+            attachments: vec![merel_mime::Attachment {
                 name: "invite.ics".into(),
                 mime: "text/calendar".into(),
                 size: ics.len(),
@@ -3482,7 +3479,7 @@ mod tests {
         let mut h = harness();
         {
             let s = &mut h.state_mut().engine.session;
-            let body = mailcraft_engine::Body {
+            let body = merel_engine::Body {
                 text: "Nieuws".into(),
                 unsubscribe: vec!["https://example.org/u".into(), "mailto:leave@example.org?subject=stop".into()],
                 ..Default::default()
@@ -3513,9 +3510,9 @@ mod tests {
         let mut h = harness();
         {
             let s = &mut h.state_mut().engine.session;
-            let body = mailcraft_engine::Body {
+            let body = merel_engine::Body {
                 text: "Gelezen?".into(),
-                receipt_to: Some(mailcraft_model::Address::new(Some("Sanne"), "sanne@example.org").unwrap()),
+                receipt_to: Some(merel_model::Address::new(Some("Sanne"), "sanne@example.org").unwrap()),
                 ..Default::default()
             };
             s.bodies.insert("m3".into(), body);
@@ -3536,11 +3533,8 @@ mod tests {
         let mut h = harness();
         {
             let s = &mut h.state_mut().engine.session;
-            let body = mailcraft_engine::Body {
-                text: "Betaal deze factuur".into(),
-                signature: Some(mailcraft_smime::Signature::Broken),
-                ..Default::default()
-            };
+            let body =
+                merel_engine::Body { text: "Betaal deze factuur".into(), signature: Some(merel_smime::Signature::Broken), ..Default::default() };
             s.bodies.insert("m3".into(), body);
             s.selected_message = Some("m3".into());
         }
@@ -3554,10 +3548,9 @@ mod tests {
         {
             let s = &mut h.state_mut().engine.session;
             let from = s.message("m3").unwrap().from.email().to_lowercase();
-            let signer =
-                mailcraft_smime::CertInfo { name: "Iemand".into(), emails: vec![from], issuer: "Eigen CA".into(), not_before: 0, not_after: 0 };
-            let signature = mailcraft_smime::Signature::Valid { signer, certificate: vec![1, 2, 3], issuers: Vec::new(), trusted: false };
-            s.bodies.insert("m3".into(), mailcraft_engine::Body { text: "Hoi".into(), signature: Some(signature), ..Default::default() });
+            let signer = merel_smime::CertInfo { name: "Iemand".into(), emails: vec![from], issuer: "Eigen CA".into(), not_before: 0, not_after: 0 };
+            let signature = merel_smime::Signature::Valid { signer, certificate: vec![1, 2, 3], issuers: Vec::new(), trusted: false };
+            s.bodies.insert("m3".into(), merel_engine::Body { text: "Hoi".into(), signature: Some(signature), ..Default::default() });
             s.selected_message = Some("m3".into());
         }
         h.run();
@@ -3573,8 +3566,7 @@ mod tests {
         let mut h = harness();
         {
             let s = &mut h.state_mut().engine.session;
-            let body =
-                mailcraft_engine::Body { text: "Het contract".into(), encrypted: Some(mailcraft_mime::Encryption::Opened), ..Default::default() };
+            let body = merel_engine::Body { text: "Het contract".into(), encrypted: Some(merel_mime::Encryption::Opened), ..Default::default() };
             s.bodies.insert("m3".into(), body);
             s.selected_message = Some("m3".into());
         }
@@ -3620,7 +3612,7 @@ mod tests {
         let s = &h.state().engine.session;
         assert!(s.message("m1").unwrap().flags.flagged);
         let tomorrow = chrono::Local::now().date_naive().succ_opt().unwrap();
-        assert_eq!(s.follow_up("m1").and_then(mailcraft_engine::followup::due_day), Some(tomorrow));
+        assert_eq!(s.follow_up("m1").and_then(merel_engine::followup::due_day), Some(tomorrow));
         h.get_by_label(format!("⚑ Opvolgen vóór {}", dates::day_name(tomorrow)).as_str());
         h.get_by_label("Voltooid").click();
         h.run();
@@ -3756,7 +3748,7 @@ mod tests {
     #[test]
     fn a_conversation_is_cleaned_up_from_the_menu_after_the_question_says_how_many_go() {
         let mut h = harness();
-        use mailcraft_model::{Flags, MessageHeader};
+        use merel_model::{Flags, MessageHeader};
         {
             let s = &mut h.state_mut().engine.session;
             let newest = s.message("m2").expect("sample mail").clone();
@@ -3846,7 +3838,7 @@ mod tests {
         assert_eq!(h.state().junk.as_ref().map(|o| o.entry.as_str()), Some(""), "the field is cleared");
         h.get_by_label("Hoog").click();
         h.run();
-        assert_eq!(h.state().engine.session.junk.level, mailcraft_model::JunkLevel::High);
+        assert_eq!(h.state().engine.session.junk.level, merel_model::JunkLevel::High);
         h.get_by_label("Sluiten").click();
         h.run();
         assert!(h.state().junk.is_none());
@@ -4097,7 +4089,7 @@ mod tests {
         h.run();
         assert_eq!(h.state().engine.session.appointment(&id).unwrap().categories, vec!["Groene categorie"]);
         let a = h.state().engine.session.appointment(&id).unwrap().clone();
-        let green = crate::categories::color_of(mailcraft_model::CategoryColor::Green);
+        let green = crate::categories::color_of(merel_model::CategoryColor::Green);
         assert_eq!(calendar::block_color(h.state(), &a, &Tokens::light()), green, "a categorised block takes its category's colour");
         let start = h.state().engine.session.appointment(&id).unwrap().start;
         h.state_mut().open_appointment(&id, start);
@@ -4237,7 +4229,7 @@ mod tests {
             let e = h.state_mut().calendar.editor.as_mut().expect("the series opens");
             e.attendees = "sanne@example.org".into();
             e.reminder = Some(0);
-            e.show_as = mailcraft_model::ShowAs::Tentative;
+            e.show_as = merel_model::ShowAs::Tentative;
             e.private = true;
         }
         h.run();
@@ -4274,7 +4266,7 @@ mod tests {
         h.get_by_label_contains("Weekstart").click();
         h.run();
         let editor = h.state().calendar.editor.as_ref().expect("the series opens");
-        assert_eq!(editor.repeat, Some(mailcraft_model::Frequency::Weekly));
+        assert_eq!(editor.repeat, Some(merel_model::Frequency::Weekly));
         let clicked = editor.occurrence.expect("the clicked occurrence is remembered");
         assert!(clicked > series_start && clicked - series_start <= 8 * 86_400, "it is next week's, not the first");
         h.get_by_label(calendar::DELETE_MENU).click();
@@ -4293,7 +4285,7 @@ mod tests {
         {
             let e = h.state_mut().calendar.editor.as_mut().expect("editor");
             e.title = "Yoga".into();
-            e.repeat = Some(mailcraft_model::Frequency::Daily);
+            e.repeat = Some(merel_model::Frequency::Daily);
             e.ends = calendar::Ends::AfterCount;
             e.count = "3".into();
         }
@@ -4388,7 +4380,7 @@ mod tests {
     fn a_message_is_moved_to_a_chosen_folder_from_the_ribbon() {
         let mut h = harness();
         h.run();
-        h.get_by_label("Welkom bij Mailcraft").click();
+        h.get_by_label("Welkom bij Merel").click();
         h.run();
         let id = h.state().engine.session.selected_message.clone().expect("selected");
         h.get_by_label("Verplaatsen").click();
@@ -4400,10 +4392,10 @@ mod tests {
         let s = &h.state().engine.session;
         assert_eq!(s.message(&id).unwrap().folder_id, "archive");
         assert!(s.selected_message.is_none() && !h.state().move_to);
-        assert!(h.query_by_label("Welkom bij Mailcraft").is_none(), "gone from the inbox list");
+        assert!(h.query_by_label("Welkom bij Merel").is_none(), "gone from the inbox list");
         h.get_by_label("Archief").click();
         h.run();
-        h.get_by_label("Welkom bij Mailcraft");
+        h.get_by_label("Welkom bij Merel");
     }
 
     #[test]
@@ -4570,18 +4562,18 @@ mod tests {
 
     #[test]
     fn the_window_title_counts_the_unread_inbox_mail_and_follows_it() {
-        assert_eq!(window_title(0), "Mailcraft");
-        assert_eq!(window_title(3), "Mailcraft (3)");
+        assert_eq!(window_title(0), "Merel");
+        assert_eq!(window_title(3), "Merel (3)");
         let mut h = harness();
         h.run();
         let unread = h.state().engine.session.inbox_unread();
         assert!(unread > 0);
-        assert_eq!(h.state().title.as_deref(), Some(format!("Mailcraft ({unread})").as_str()));
+        assert_eq!(h.state().title.as_deref(), Some(format!("Merel ({unread})").as_str()));
         h.get_by_label("Map").click();
         h.run();
         h.get_by_label("Alles gelezen").click();
         h.run();
-        assert_eq!(h.state().title.as_deref(), Some("Mailcraft"));
+        assert_eq!(h.state().title.as_deref(), Some("Merel"));
     }
 
     #[test]
@@ -4598,14 +4590,14 @@ mod tests {
         // Shortcuts belong to the Start tab.
         h.get_by_label("Start").click();
         h.run();
-        h.get_by_label("Welkom bij Mailcraft").click();
+        h.get_by_label("Welkom bij Merel").click();
         h.run();
         h.key_press(egui::Key::Delete);
         h.run();
         assert_eq!(h.state().engine.session.message("m0").map(|m| m.folder_id.as_str()), Some("deleted"), "first to the deleted folder");
         h.get_by_label("Verwijderde items").click();
         h.run();
-        h.get_by_label("Welkom bij Mailcraft").click();
+        h.get_by_label("Welkom bij Merel").click();
         h.run();
         h.key_press(egui::Key::Delete);
         h.run();
@@ -4644,7 +4636,7 @@ mod tests {
         h.get_by_label("Groene categorie").click();
         h.run();
         assert_eq!(h.state().engine.session.category_filter.as_deref(), Some("Groene categorie"));
-        assert!(h.query_all_by_label("Welkom bij Mailcraft").next().is_none(), "only mail with the category is listed");
+        assert!(h.query_all_by_label("Welkom bij Merel").next().is_none(), "only mail with the category is listed");
         h.get_by_label("Planning voor donderdag");
         h.get_by_label("Groene categorie").click();
         h.run();
@@ -4654,10 +4646,10 @@ mod tests {
         h.get_by_label("Ongelezen").click();
         h.run();
         assert!(h.query_all_by_label("Re: Offerte drukwerk").next().is_none(), "read mail is hidden");
-        h.get_by_label("Welkom bij Mailcraft");
+        h.get_by_label("Welkom bij Merel");
         h.get_by_label("Met bijlage").click();
         h.run();
-        assert!(h.query_all_by_label("Welkom bij Mailcraft").next().is_none());
+        assert!(h.query_all_by_label("Welkom bij Merel").next().is_none());
         h.get_by_label("Planning voor donderdag").click();
         h.run();
         h.get_by_label("Alles").click();
@@ -4667,7 +4659,7 @@ mod tests {
         h.get_by_label("Onder").click();
         h.run();
         assert_eq!(h.state().view.reading_pane, view::ReadingPane::Bottom);
-        h.get_by_label("Welkom bij Mailcraft").click();
+        h.get_by_label("Welkom bij Merel").click();
         h.run();
         assert_eq!(h.state().engine.session.selected_message.as_deref(), Some("m0"), "the list still works under the reading pane");
         h.get_by_label("Uit").click();
@@ -4738,7 +4730,7 @@ mod tests {
         h.run();
         assert!(h.state().quick_steps.is_none());
 
-        h.get_by_label("Welkom bij Mailcraft").click();
+        h.get_by_label("Welkom bij Merel").click();
         h.run();
         h.get_by_label("Klaar").click();
         h.run();
@@ -4772,7 +4764,7 @@ mod tests {
         assert!(h.state().help.is_none());
         // The Help tab itself shows the version too, next to the button.
         h.get_by_label(help::version_line().as_str());
-        h.get_by_label("Over Mailcraft").click();
+        h.get_by_label("Over Merel").click();
         h.run();
         assert_eq!(h.query_all_by_label(help::version_line().as_str()).count(), 2);
         h.get_by_label("Kopiëren");
@@ -4785,7 +4777,7 @@ mod tests {
     fn a_category_is_put_on_a_message_from_the_menu_and_the_list_is_managed() {
         let mut h = harness();
         h.run();
-        h.get_by_label("Welkom bij Mailcraft").click();
+        h.get_by_label("Welkom bij Merel").click();
         h.run();
         h.get_by_label_contains("Categoriseren").click();
         h.run();

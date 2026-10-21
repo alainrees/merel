@@ -4,8 +4,8 @@
 //! shows is always what the server has. Only ordinary folders can be renamed or removed: the
 //! inbox and the other special folders belong to the account.
 
-use mailcraft_mailbox::Flag;
-use mailcraft_model::{Folder, FolderKind, clean_text};
+use merel_mailbox::Flag;
+use merel_model::{Folder, FolderKind, clean_text};
 use serde_json::Value;
 
 use crate::commands::{CommandError, str_param};
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn a_real_account_queues_a_delete_for_good_and_an_empty_folder() {
-        use mailcraft_mailbox::RemoteFolder;
+        use merel_mailbox::RemoteFolder;
 
         let mut s = Session::with_accounts(vec![crate::tests::account("acc")]);
         let folders = vec![
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn a_real_account_hands_the_server_the_job_and_takes_its_folder_list() {
-        use mailcraft_mailbox::RemoteFolder;
+        use merel_mailbox::RemoteFolder;
 
         let mut s = Session::with_accounts(vec![crate::tests::account("acc")]);
         let listed = |names: &[&str]| -> Vec<RemoteFolder> {

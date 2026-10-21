@@ -1,6 +1,6 @@
 //! Built-in sample mail so the app has something to show before an account is added.
 
-use mailcraft_model::{
+use merel_model::{
     Account, Address, Appointment, Calendar, Category, Contact, Flags, Folder, FolderKind, Frequency, MessageHeader, Priority, Protocol, Recurrence,
     Server, Task, Tls,
 };
@@ -24,7 +24,7 @@ fn build() -> Option<Session> {
         address: me.clone(),
         username: "jij@example.org".into(),
         protocol: Protocol::ImapSmtp,
-        auth: mailcraft_model::Auth::Password,
+        auth: merel_model::Auth::Password,
         incoming: Some(Server { host: "imap.example.org".into(), port: 993, tls: Tls::Implicit }),
         outgoing: Some(Server { host: "smtp.example.org".into(), port: 465, tls: Tls::Implicit }),
         dav: None,
@@ -54,7 +54,7 @@ fn build() -> Option<Session> {
         (
             "Studio ArtCraft",
             "studio@example.org",
-            "Welkom bij Mailcraft",
+            "Welkom bij Merel",
             "Fijn dat je er bent. Dit is voorbeeldmail; voeg een account toe om je eigen mail te zien.",
             false,
             false,
@@ -87,7 +87,7 @@ fn build() -> Option<Session> {
                 has_attachments: att,
                 message_id: Some(format!("<sample-{i}@example.org>")),
                 categories: if i == 1 { vec!["Groene categorie".into()] } else { Vec::new() },
-                importance: if i == 1 { mailcraft_model::Importance::High } else { mailcraft_model::Importance::Normal },
+                importance: if i == 1 { merel_model::Importance::High } else { merel_model::Importance::Normal },
             })
         })
         .collect();
@@ -195,7 +195,7 @@ fn appointments() -> Vec<Appointment> {
                 recurrence: None,
                 reminder: None,
                 private: false,
-                show_as: mailcraft_model::ShowAs::Busy,
+                show_as: merel_model::ShowAs::Busy,
                 categories: if i == 0 { vec!["Blauwe categorie".into()] } else { Vec::new() },
                 meeting: None,
             })
@@ -218,7 +218,7 @@ fn appointments() -> Vec<Appointment> {
             recurrence: Some(Recurrence::every(Frequency::Weekly)),
             reminder: None,
             private: false,
-            show_as: mailcraft_model::ShowAs::Busy,
+            show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
         });

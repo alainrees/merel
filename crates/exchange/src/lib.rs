@@ -18,12 +18,12 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use mailcraft_mailbox::{Credential, Flag, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result, kind_from_name};
-use mailcraft_model::{Address, FolderKind, Importance, Server, clean_text};
-use mailcraft_secrets::Secret;
+use merel_mailbox::{Credential, Flag, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result, kind_from_name};
+use merel_model::{Address, FolderKind, Importance, Server, clean_text};
+use merel_secrets::Secret;
 use roxmltree::{Document, Node};
 
-/// The largest response accepted: a body of `mailcraft_mime::MAX_BODY` in base64, with room.
+/// The largest response accepted: a body of `merel_mime::MAX_BODY` in base64, with room.
 const MAX_RESPONSE: u64 = 32 * 1024 * 1024;
 /// Folders returned per `FindFolder` page; a mailbox with more just shows the first ones.
 const MAX_FOLDERS: u32 = 1000;
@@ -204,7 +204,7 @@ impl EwsClient {
                 .tls_config(tls())
                 .timeout_global(Some(Duration::from_secs(60)))
                 .http_status_as_error(false)
-                .user_agent("Mailcraft")
+                .user_agent("Merel")
                 .build(),
         );
         let time_zone = iana_time_zone::get_timezone().ok().as_deref().and_then(windows_zone);
@@ -377,7 +377,7 @@ fn header_of(item: Node<'_, '_>) -> RemoteHeader {
         size: text(item, "Size").and_then(|s| s.parse().ok()).unwrap_or(0),
         has_attachments: text(item, "HasAttachments") == Some("true"),
         categories: categories_of(item),
-        header: mailcraft_mime::ParsedHeader { from, to: Vec::new(), subject, date: Some(date), message_id, importance: importance_of(item) },
+        header: merel_mime::ParsedHeader { from, to: Vec::new(), subject, date: Some(date), message_id, importance: importance_of(item) },
         date,
     }
 }
@@ -590,7 +590,7 @@ impl Mailbox for EwsClient {
         Ok(true)
     }
 
-    fn items(&mut self) -> Option<&mut dyn mailcraft_mailbox::ItemStore> {
+    fn items(&mut self) -> Option<&mut dyn merel_mailbox::ItemStore> {
         Some(self)
     }
 
@@ -598,7 +598,7 @@ impl Mailbox for EwsClient {
 }
 
 /// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
-/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// like the rest of Merel. ureq has no root certificates of its own in this build: an
 /// agent without this panics on its first request.
 fn tls() -> ureq::tls::TlsConfig {
     ureq::tls::TlsConfig::builder()
@@ -687,7 +687,7 @@ mod tests {
 
     #[test]
     fn connect_refuses_a_bad_host_before_touching_the_network() {
-        let server = Server { host: "evil host/..".into(), port: 443, tls: mailcraft_model::Tls::Implicit };
+        let server = Server { host: "evil host/..".into(), port: 443, tls: merel_model::Tls::Implicit };
         assert!(matches!(EwsClient::connect(&server, "u", &Credential::Password(Secret::new("p"))), Err(MailboxError::BadName(_))));
     }
 }

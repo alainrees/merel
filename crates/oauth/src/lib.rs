@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
-use mailcraft_secrets::Secret;
+use merel_secrets::Secret;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -233,8 +233,8 @@ fn wait_for_code(listener: &TcpListener, state: &str, timeout: Duration) -> Resu
     }
 }
 
-const PAGE_OK: &str = "<!doctype html><html lang=\"nl\"><meta charset=\"utf-8\"><title>Mailcraft</title><body style=\"font-family:sans-serif;padding:3em\"><h1>Gelukt</h1><p>Je bent aangemeld. Je kunt dit venster sluiten en teruggaan naar Mailcraft.</p></body></html>";
-const PAGE_ERR: &str = "<!doctype html><html lang=\"nl\"><meta charset=\"utf-8\"><title>Mailcraft</title><body style=\"font-family:sans-serif;padding:3em\"><h1>Niet gelukt</h1><p>Het aanmelden is niet gelukt. Ga terug naar Mailcraft en probeer het opnieuw.</p></body></html>";
+const PAGE_OK: &str = "<!doctype html><html lang=\"nl\"><meta charset=\"utf-8\"><title>Merel</title><body style=\"font-family:sans-serif;padding:3em\"><h1>Gelukt</h1><p>Je bent aangemeld. Je kunt dit venster sluiten en teruggaan naar Merel.</p></body></html>";
+const PAGE_ERR: &str = "<!doctype html><html lang=\"nl\"><meta charset=\"utf-8\"><title>Merel</title><body style=\"font-family:sans-serif;padding:3em\"><h1>Niet gelukt</h1><p>Het aanmelden is niet gelukt. Ga terug naar Merel en probeer het opnieuw.</p></body></html>";
 
 /// One HTTP request on the loopback listener. `None` means it was not the redirect (a favicon
 /// request, a stray connection) and the wait goes on.
@@ -275,7 +275,7 @@ pub fn xoauth2(user: &str, access_token: &Secret) -> String {
 }
 
 /// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
-/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// like the rest of Merel. ureq has no root certificates of its own in this build: an
 /// agent without this panics on its first request.
 fn tls() -> ureq::tls::TlsConfig {
     ureq::tls::TlsConfig::builder()

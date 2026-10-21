@@ -1,4 +1,4 @@
-//! Printing a message: Mailcraft draws mail itself and has no printer of its own, so "Afdrukken"
+//! Printing a message: Merel draws mail itself and has no printer of its own, so "Afdrukken"
 //! writes the open message as a page the system browser can print and opens it there. The page
 //! is built from the message's layout tree, never from the mail's own HTML: every text is
 //! escaped, links keep only the addresses the tree allowed, pictures that travel inside the
@@ -10,16 +10,16 @@ use std::path::PathBuf;
 
 use base64::Engine;
 use chrono::{Datelike, Days, Local, NaiveDate, TimeZone};
-use mailcraft_html::{Block, Document, Image, ImageSource, Inline, Style};
-use mailcraft_mime::{Body, InlineImage};
-use mailcraft_model::{Address, Appointment, MessageHeader};
+use merel_html::{Block, Document, Image, ImageSource, Inline, Style};
+use merel_mime::{Body, InlineImage};
+use merel_model::{Address, Appointment, MessageHeader};
 
 use crate::{MailApp, calendar};
 
 /// The one file the print page is written to, in the system's temporary folder; each print
 /// overwrites it, so no trail of messages is left behind.
 pub fn page_path() -> PathBuf {
-    std::env::temp_dir().join("mailcraft-afdruk.html")
+    std::env::temp_dir().join("merel-afdruk.html")
 }
 
 /// Escapes text for HTML.
@@ -182,7 +182,7 @@ pub fn calendar_page(title: &str, first: NaiveDate, last: NaiveDate, list: &[App
     out.push_str("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\">\n");
     let _ = writeln!(out, "<title>Agenda {}</title>", esc(title));
     let _ = writeln!(out, "<style>{STYLE}</style></head><body>");
-    out.push_str("<p class=\"hint\">Afdrukpagina van Mailcraft. Druk af met Ctrl+P (Cmd+P op een Mac); deze regel komt niet mee.</p>\n");
+    out.push_str("<p class=\"hint\">Afdrukpagina van Merel. Druk af met Ctrl+P (Cmd+P op een Mac); deze regel komt niet mee.</p>\n");
     let _ = writeln!(out, "<h1 class=\"subject\">Agenda: {}</h1>", esc(title));
     let mut day = first;
     let mut any = false;
@@ -238,7 +238,7 @@ pub fn page(h: &MessageHeader, body: Option<&Body>) -> String {
     out.push_str("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'\">\n");
     let _ = writeln!(out, "<title>{}</title>", esc(&h.subject));
     let _ = writeln!(out, "<style>{STYLE}</style></head><body>");
-    out.push_str("<p class=\"hint\">Afdrukpagina van Mailcraft. Druk af met Ctrl+P (Cmd+P op een Mac); deze regel komt niet mee.</p>\n");
+    out.push_str("<p class=\"hint\">Afdrukpagina van Merel. Druk af met Ctrl+P (Cmd+P op een Mac); deze regel komt niet mee.</p>\n");
     let _ = writeln!(out, "<h1 class=\"subject\">{}</h1>", esc(if h.subject.trim().is_empty() { "(Zonder onderwerp)" } else { &h.subject }));
     out.push_str("<table class=\"head\">\n");
     let _ = writeln!(out, "<tr><th>Van</th><td>{}</td></tr>", address(&h.from));
@@ -338,8 +338,8 @@ impl MailApp {
 mod tests {
     use std::sync::Arc;
 
-    use mailcraft_html::Cell;
-    use mailcraft_model::Flags;
+    use merel_html::Cell;
+    use merel_model::Flags;
 
     use super::*;
 
@@ -378,7 +378,7 @@ mod tests {
             recurrence: None,
             reminder: None,
             private: false,
-            show_as: mailcraft_model::ShowAs::Busy,
+            show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
         };
@@ -437,7 +437,7 @@ mod tests {
             from_html: true,
             rich: Some(doc),
             images: vec![InlineImage { cid: "logo".into(), mime: "image/png".into(), bytes: Arc::from(&b"\x89PNG"[..]) }],
-            attachments: vec![mailcraft_mime::Attachment {
+            attachments: vec![merel_mime::Attachment {
                 name: "offerte<1>.pdf".into(),
                 mime: "application/pdf".into(),
                 size: 3,

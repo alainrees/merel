@@ -1,16 +1,16 @@
 [package]
-name = "mailcraft-mime"
+name = "merel-mime"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-mailcraft-model = { workspace = true }
-mailcraft-html = { workspace = true }
+merel-model = { workspace = true }
+merel-html = { workspace = true }
 mail-parser = { workspace = true }
-mailcraft-smime = { workspace = true }
-mailcraft-pgp = { workspace = true }
+merel-smime = { workspace = true }
+merel-pgp = { workspace = true }
 html2text = { workspace = true }
 
 [lints]

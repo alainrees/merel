@@ -6,10 +6,10 @@
 
 use serde_json::Value;
 
-use mailcraft_model::{FolderKind, JunkLists, junk_entry};
+use merel_model::{FolderKind, JunkLists, junk_entry};
 
 use crate::{CommandError, Job, SAMPLE_ACCOUNT, Session, commands::move_message};
-use mailcraft_model::JunkLevel;
+use merel_model::JunkLevel;
 
 impl Session {
     pub fn set_junk(&mut self, lists: JunkLists) {
@@ -38,7 +38,7 @@ impl Session {
 
     /// Whether a message with this sender is filed as junk on arrival: a blocked sender, and
     /// beyond that what the level says. Safe senders, contacts and your own addresses never are.
-    pub fn files_as_junk(&self, from: &mailcraft_model::Address) -> bool {
+    pub fn files_as_junk(&self, from: &merel_model::Address) -> bool {
         let email = from.email();
         let own: Vec<&str> = self.accounts.iter().map(|a| a.address.email()).collect();
         if self.sender_safe(email) || own.iter().any(|o| o.eq_ignore_ascii_case(email)) {
@@ -49,7 +49,7 @@ impl Session {
         }
         match self.junk.level {
             JunkLevel::Standard => false,
-            JunkLevel::High => !mailcraft_model::sender_warnings(from, &self.contacts, &own).is_empty(),
+            JunkLevel::High => !merel_model::sender_warnings(from, &self.contacts, &own).is_empty(),
             JunkLevel::SafeOnly => true,
         }
     }
@@ -167,7 +167,7 @@ pub fn forget(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
+    use merel_mailbox::{RemoteFolder, RemoteHeader};
     use serde_json::json;
 
     use super::*;
@@ -218,7 +218,7 @@ mod tests {
             size: 1,
             has_attachments: false,
             categories: Vec::new(),
-            header: mailcraft_mime::parse_header(format!("From: {from}\r\nSubject: Hallo\r\n\r\n").as_bytes()),
+            header: merel_mime::parse_header(format!("From: {from}\r\nSubject: Hallo\r\n\r\n").as_bytes()),
             date: i64::from(n),
         }
     }
@@ -281,7 +281,7 @@ mod tests {
             ],
             syncs_items: false,
         });
-        s.contacts.push(mailcraft_model::Contact {
+        s.contacts.push(merel_model::Contact {
             id: "c1".into(),
             name: "Sanne de Vries".into(),
             emails: vec!["sanne@example.org".into()],

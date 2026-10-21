@@ -11,8 +11,8 @@
 //! saved here is the same day in Outlook; the engine snaps what comes back to local midnight.
 
 use chrono::{DateTime, Datelike, Local, TimeZone, Utc};
-use mailcraft_mailbox::{Item, ItemStore, MailboxError, Result};
-use mailcraft_model::{Address, Appointment, Attendee, Contact, Frequency, Meeting, Priority, Recurrence, Response, ShowAs, Task, clean_text};
+use merel_mailbox::{Item, ItemStore, MailboxError, Result};
+use merel_model::{Address, Appointment, Attendee, Contact, Frequency, Meeting, Priority, Recurrence, Response, ShowAs, Task, clean_text};
 use roxmltree::Node;
 
 use crate::{EwsClient, categories_of, child, esc, find, parse, parse_datetime, response_messages, text};
@@ -696,7 +696,7 @@ mod tests {
             recurrence: None,
             reminder: Some(15),
             private: false,
-            show_as: mailcraft_model::ShowAs::Busy,
+            show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
         };

@@ -8,8 +8,8 @@
 
 use egui::{Color32, CornerRadius, Margin, RichText, Sense, Stroke, Ui, vec2};
 
-use mailcraft_html::{Block, Cell, Document, Image, ImageSource, Inline, Style};
-use mailcraft_mime::InlineImage;
+use merel_html::{Block, Cell, Document, Image, ImageSource, Inline, Style};
+use merel_mime::InlineImage;
 
 use crate::Tokens;
 use crate::remote::{Load, Loads};
@@ -184,12 +184,12 @@ impl Painter<'_> {
     fn image(&mut self, ui: &mut Ui, image: &Image) {
         let (uri, bytes) = match &image.source {
             ImageSource::Inline(cid) => match self.images.iter().find(|i| i.cid == *cid) {
-                Some(i) => (format!("bytes://mailcraft/{}/cid/{cid}", self.key), i.bytes.clone()),
+                Some(i) => (format!("bytes://merel/{}/cid/{cid}", self.key), i.bytes.clone()),
                 None => return self.placeholder(ui, "🖼 Afbeelding ontbreekt", &image.alt),
             },
             ImageSource::Data { bytes, .. } => {
                 self.data_images += 1;
-                (format!("bytes://mailcraft/{}/data/{}", self.key, self.data_images), bytes.clone())
+                (format!("bytes://merel/{}/data/{}", self.key, self.data_images), bytes.clone())
             }
             ImageSource::Remote(url) => match self.remote.and_then(|r| r.get(url)) {
                 None => return self.placeholder(ui, "🖼 Afbeelding van internet geblokkeerd", &image.alt),
@@ -197,7 +197,7 @@ impl Painter<'_> {
                 Some(Load::Failed) => return self.placeholder(ui, "🖼 Afbeelding kon niet worden geladen", &image.alt),
                 Some(Load::Ready(bytes)) => {
                     self.remote_images += 1;
-                    (format!("bytes://mailcraft/{}/remote/{}", self.key, self.remote_images), bytes.clone())
+                    (format!("bytes://merel/{}/remote/{}", self.key, self.remote_images), bytes.clone())
                 }
             },
         };
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn links_are_drawn_and_a_mail_link_asks_for_the_compose_window() {
-        let doc = mailcraft_html::parse(
+        let doc = merel_html::parse(
             r#"<h1>Kop</h1><p>Zie <a href="https://example.nl">de site</a> of <a href="mailto:sanne@example.org?subject=x">mail Sanne</a>.</p>
             <ul><li>een</li><li>twee</li></ul><table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>
             <blockquote>citaat</blockquote><pre>code</pre><img src="https://t.example/p.gif" alt="pixel">"#,
@@ -259,8 +259,7 @@ mod tests {
 
     #[test]
     fn remote_pictures_follow_what_the_loader_knows() {
-        let doc =
-            mailcraft_html::parse(r#"<p><img src="https://t.example/a.png" alt="eerste"> <img src="https://t.example/b.png" alt="tweede"></p>"#);
+        let doc = merel_html::parse(r#"<p><img src="https://t.example/a.png" alt="eerste"> <img src="https://t.example/b.png" alt="tweede"></p>"#);
         let mut loads = Loads::new();
         loads.insert("https://t.example/a.png".into(), Load::Pending);
         loads.insert("https://t.example/b.png".into(), Load::Failed);
@@ -276,7 +275,7 @@ mod tests {
 
     #[test]
     fn switched_off_links_are_drawn_but_a_click_does_nothing() {
-        let doc = mailcraft_html::parse(r#"<p><a href="mailto:sanne@example.org">mail Sanne</a></p>"#);
+        let doc = merel_html::parse(r#"<p><a href="mailto:sanne@example.org">mail Sanne</a></p>"#);
         let clicked = Rc::new(RefCell::new(None));
         let seen = clicked.clone();
         let t = Tokens::light();

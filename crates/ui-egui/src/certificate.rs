@@ -3,7 +3,7 @@
 //! exported .asc file with its passphrase).
 
 use egui::{RichText, Ui};
-use mailcraft_smime::CertInfo;
+use merel_smime::CertInfo;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{MailApp, Tokens};
@@ -67,7 +67,7 @@ pub fn section(ui: &mut Ui, t: &Tokens, import: &mut Option<Import>, account_id:
 }
 
 /// The OpenPGP part of the card of `account_id`.
-pub fn pgp_section(ui: &mut Ui, t: &Tokens, import: &mut Option<Import>, account_id: &str, info: Option<&mailcraft_pgp::KeyInfo>) -> Option<Action> {
+pub fn pgp_section(ui: &mut Ui, t: &Tokens, import: &mut Option<Import>, account_id: &str, info: Option<&merel_pgp::KeyInfo>) -> Option<Action> {
     let line = match info {
         Some(info) => format!("Sleutel van {} <{}>, vingerafdruk {}. Mail die met OpenPGP aan je versleuteld is, gaat ermee open.", info.name, info.emails.join(", "), info.grouped()),
         None => "Gebruik je OpenPGP (GnuPG, Thunderbird, Proton)? Importeer je sleutel om versleutelde mail te lezen. Exporteer hem eerst als .asc-bestand.".into(),
@@ -195,10 +195,8 @@ impl MailApp {
     /// Reads the key file at `path` for `account_id`; the password is asked next.
     pub fn pick_key(&mut self, kind: Kind, account_id: &str, path: &std::path::Path) {
         let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let read = std::fs::metadata(path)
-            .ok()
-            .filter(|m| m.len() <= mailcraft_engine::certificates::MAX_PKCS12 as u64)
-            .and_then(|_| std::fs::read(path).ok());
+        let read =
+            std::fs::metadata(path).ok().filter(|m| m.len() <= merel_engine::certificates::MAX_PKCS12 as u64).and_then(|_| std::fs::read(path).ok());
         let (bytes, error) = match read {
             Some(bytes) => (bytes, None),
             None => (Vec::new(), Some("Dit bestand kan niet worden gelezen, of is te groot voor een sleutel.".to_string())),
@@ -213,7 +211,7 @@ mod tests {
     use egui::vec2;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
-    use mailcraft_secrets::Secret;
+    use merel_secrets::Secret;
 
     use super::*;
     use crate::Tab;
@@ -222,7 +220,7 @@ mod tests {
     const P12: &[u8] = include_bytes!("../../smime/testdata/alain.p12");
 
     fn app() -> MailApp {
-        let mut engine = mailcraft_engine::Engine::sample();
+        let mut engine = merel_engine::Engine::sample();
         let mut f = AccountForm::default();
         f.email = "alain@voorbeeld.nl".into();
         f.password = "x".into();
@@ -240,12 +238,12 @@ mod tests {
         harness.get_by_label(IMPORT);
         assert!(harness.query_by_label(REMOVE).is_none());
         let id = harness.state().engine.session.accounts[0].id.clone();
-        let file = std::env::temp_dir().join(format!("mailcraft-cert-{}.p12", std::process::id()));
+        let file = std::env::temp_dir().join(format!("merel-cert-{}.p12", std::process::id()));
         std::fs::write(&file, P12).unwrap();
         harness.state_mut().pick_certificate(&id, &file);
         let _ = std::fs::remove_file(&file);
         harness.run();
-        harness.get_by_label(&format!("Bestand: mailcraft-cert-{}.p12", std::process::id()));
+        harness.get_by_label(&format!("Bestand: merel-cert-{}.p12", std::process::id()));
         // A wrong password says so and is wiped; the file stays picked.
         if let Some(i) = harness.state_mut().form.certificate.as_mut() {
             i.password = "fout".into();
@@ -303,7 +301,7 @@ mod tests {
         harness.run();
         harness.get_by_label(PGP_IMPORT);
         let id = harness.state().engine.session.accounts[0].id.clone();
-        let file = std::env::temp_dir().join(format!("mailcraft-key-{}.asc", std::process::id()));
+        let file = std::env::temp_dir().join(format!("merel-key-{}.asc", std::process::id()));
         std::fs::write(&file, include_bytes!("../../pgp/testdata/alain-secret.asc")).unwrap();
         harness.state_mut().pick_key(Kind::OpenPgp, &id, &file);
         let _ = std::fs::remove_file(&file);

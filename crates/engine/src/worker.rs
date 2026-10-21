@@ -12,14 +12,14 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread;
 use std::time::Duration;
 
-use mailcraft_dav::DavMailbox;
-use mailcraft_exchange::EwsClient;
-use mailcraft_google::GoogleMailbox;
-use mailcraft_graph::GraphClient;
-use mailcraft_imap::ImapClient;
-use mailcraft_mailbox::{Mailbox, MailboxError};
-use mailcraft_model::{Account, Protocol, Server};
-use mailcraft_smtp::SmtpError;
+use merel_dav::DavMailbox;
+use merel_exchange::EwsClient;
+use merel_google::GoogleMailbox;
+use merel_graph::GraphClient;
+use merel_imap::ImapClient;
+use merel_mailbox::{Mailbox, MailboxError};
+use merel_model::{Account, Protocol, Server};
+use merel_smtp::SmtpError;
 
 use crate::certificates::{Keys, outgoing};
 use crate::signin::Credentials;
@@ -64,8 +64,7 @@ impl Worker {
                 let detail =
                     panic.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| panic.downcast_ref::<String>().cloned()).unwrap_or_default();
                 log::error!("{id}: the connection thread stopped: {detail}");
-                let what =
-                    format!("Mailcraft liep vast bij het verbinden ({}). Herstart Mailcraft; meld het als het blijft gebeuren.", clip(&detail));
+                let what = format!("Merel liep vast bij het verbinden ({}). Herstart Merel; meld het als het blijft gebeuren.", clip(&detail));
                 let _ = reporter.send(Event::Failed { account_id: id, what });
             }
         };
@@ -99,7 +98,7 @@ fn describe(e: &MailboxError) -> String {
         MailboxError::Connect { host, reason } => format!("Kan geen verbinding maken met {host}: {}.", clip(reason)),
         MailboxError::Login => "De server accepteert de gebruikersnaam of het wachtwoord niet.".into(),
         MailboxError::AuthScheme(scheme) => format!(
-            "De server eist een aanmeldmethode die Mailcraft nog niet ondersteunt ({scheme}). Vraag de beheerder om Basic-verificatie voor EWS, of gebruik een Microsoft 365-account."
+            "De server eist een aanmeldmethode die Merel nog niet ondersteunt ({scheme}). Vraag de beheerder om Basic-verificatie voor EWS, of gebruik een Microsoft 365-account."
         ),
         MailboxError::Protocol(m) => format!("De server gaf een fout: {}", clip(m)),
         MailboxError::BadName(_) => "Een naam is niet toegestaan.".into(),
@@ -116,7 +115,7 @@ fn describe_smtp(e: &SmtpError) -> String {
 }
 
 fn clip(s: &str) -> String {
-    mailcraft_model::clean_text(s).chars().take(160).collect()
+    merel_model::clean_text(s).chars().take(160).collect()
 }
 
 /// A failure of `job`, reported where the person is looking: on the draft for a send, on the
@@ -258,12 +257,12 @@ fn serve(account: Account, mut credentials: Credentials, keys: Keys, jobs: Recei
 
 /// Builds, signs when asked, and sends `draft` over SMTP; returns the bytes that went out, for
 /// the Sent folder.
-fn send_smtp(account: &Account, credentials: &mut Credentials, keys: &Keys, draft: &mailcraft_model::Draft) -> Result<Vec<u8>, String> {
+fn send_smtp(account: &Account, credentials: &mut Credentials, keys: &Keys, draft: &merel_model::Draft) -> Result<Vec<u8>, String> {
     let server = account.outgoing.as_ref().ok_or_else(|| "Dit account heeft geen uitgaande server.".to_string())?;
-    let message = mailcraft_smtp::build(&account.address, draft).map_err(|e| describe_smtp(&e))?;
+    let message = merel_smtp::build(&account.address, draft).map_err(|e| describe_smtp(&e))?;
     let raw = outgoing(keys, account, draft, message.formatted())?;
     let credential = credentials.smtp()?;
-    mailcraft_smtp::send_raw(server, &account.username, &credential, &message, &raw).map_err(|e| describe_smtp(&e))?;
+    merel_smtp::send_raw(server, &account.username, &credential, &message, &raw).map_err(|e| describe_smtp(&e))?;
     Ok(raw)
 }
 
@@ -287,14 +286,14 @@ fn connect(account: &Account, server: &Server, credentials: &mut Credentials) ->
 
 /// The item store of `c`; an error for a store that keeps only mail, which the engine never
 /// asks.
-fn items_of(c: &mut dyn Mailbox) -> Result<&mut dyn mailcraft_mailbox::ItemStore, MailboxError> {
+fn items_of(c: &mut dyn Mailbox) -> Result<&mut dyn merel_mailbox::ItemStore, MailboxError> {
     c.items().ok_or_else(|| MailboxError::Protocol("this account keeps no appointments, contacts or tasks".into()))
 }
 
 /// Whether the account's sign-in covers Microsoft Graph (an account signed in before Graph
 /// came along has IMAP scopes, and keeps working as mail only until it signs in again).
 fn uses_graph(account: &Account) -> bool {
-    matches!(&account.auth, mailcraft_model::Auth::OAuth2 { scope, .. } if scope.contains("graph.microsoft.com"))
+    matches!(&account.auth, merel_model::Auth::OAuth2 { scope, .. } if scope.contains("graph.microsoft.com"))
 }
 
 fn run(c: &mut dyn Mailbox, account: &Account, keys: &Keys, job: &Job) -> Result<Option<Event>, MailboxError> {
@@ -327,7 +326,7 @@ fn run(c: &mut dyn Mailbox, account: &Account, keys: &Keys, job: &Job) -> Result
         }
         Job::Body { account_id, message_id, path, id } => {
             let raw = c.body(path, id)?;
-            let (body, header) = (Box::new(crate::certificates::parse_body(keys, account_id, &raw)), mailcraft_mime::parse_header(&raw));
+            let (body, header) = (Box::new(crate::certificates::parse_body(keys, account_id, &raw)), merel_mime::parse_header(&raw));
             Some(Event::Body { message_id: message_id.clone(), body, header, raw })
         }
         Job::Flag { path, id, flag, on, .. } => {
@@ -371,7 +370,7 @@ fn run(c: &mut dyn Mailbox, account: &Account, keys: &Keys, job: &Job) -> Result
         }
         // Only reached for a store that sends itself; SMTP accounts are served in `serve`.
         Job::Send { draft_id, draft, .. } => {
-            let signed = mailcraft_smtp::build_for_store(&account.address, draft)
+            let signed = merel_smtp::build_for_store(&account.address, draft)
                 .map_err(|e| describe_smtp(&e))
                 .and_then(|message| outgoing(keys, account, draft, message.formatted()));
             let result = match signed {
@@ -388,9 +387,9 @@ fn run(c: &mut dyn Mailbox, account: &Account, keys: &Keys, job: &Job) -> Result
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_mailbox::Flag;
-    use mailcraft_model::{Address, Auth, Server, Tls};
-    use mailcraft_secrets::Secret;
+    use merel_mailbox::Flag;
+    use merel_model::{Address, Auth, Server, Tls};
+    use merel_secrets::Secret;
 
     use super::*;
 

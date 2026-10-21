@@ -1,22 +1,22 @@
 [package]
-name = "mailcraft"
-description = "Mailcraft desktop app."
+name = "merel"
+description = "Merel desktop app."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-mailcraft-engine = { workspace = true }
-mailcraft-secrets = { workspace = true }
-mailcraft-oauth = { workspace = true }
-mailcraft-ui-egui = { workspace = true }
-mailcraft-touch-bar = { workspace = true }
+merel-engine = { workspace = true }
+merel-secrets = { workspace = true }
+merel-oauth = { workspace = true }
+merel-ui-egui = { workspace = true }
+merel-touch-bar = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
 log = { workspace = true }
 
-# The macOS app menu with "Over Mailcraft" and "Zoek naar updates…" (see src/app_menu.rs).
+# The macOS app menu with "Over Merel" and "Zoek naar updates…" (see src/app_menu.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.17", default-features = false }
 
@@ -25,14 +25,14 @@ workspace = true
 
 # The .deb package for Debian and Ubuntu, made by cargo-deb in the release workflow.
 [package.metadata.deb]
-name = "mailcraft"
+name = "merel"
 maintainer = "Alain Rees"
-copyright = "2026, the Mailcraft authors"
+copyright = "2026, the Merel authors"
 section = "mail"
 extended-description = "Mail, calendar, contacts and tasks for the desktop, with the way of working of Outlook."
 depends = "$auto"
 assets = [
-    ["target/release/mailcraft", "usr/bin/", "755"],
-    ["../../packaging/linux/mailcraft.desktop", "usr/share/applications/", "644"],
-    ["../../packaging/icon-256.png", "usr/share/icons/hicolor/256x256/apps/mailcraft.png", "644"],
+    ["target/release/merel", "usr/bin/", "755"],
+    ["../../packaging/linux/merel.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/icon-256.png", "usr/share/icons/hicolor/256x256/apps/merel.png", "644"],
 ]

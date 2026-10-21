@@ -2,7 +2,7 @@
 //! starting as Outlook's six) and the commands that put them on messages. The names travel to
 //! the server with `Job::Categories`; the colours stay on this computer.
 
-use mailcraft_model::{Category, CategoryColor, MAX_CATEGORY_NAME, clean_text};
+use merel_model::{Category, CategoryColor, MAX_CATEGORY_NAME, clean_text};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -162,8 +162,8 @@ mod tests {
 
     #[test]
     fn a_real_account_gets_the_whole_new_set_and_what_came_off() {
-        use mailcraft_mailbox::RemoteFolder;
-        use mailcraft_model::FolderKind;
+        use merel_mailbox::RemoteFolder;
+        use merel_model::FolderKind;
 
         let mut s = Session::with_accounts(vec![crate::tests::account("acc")]);
         let folders = vec![RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true }];

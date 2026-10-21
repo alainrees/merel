@@ -1,7 +1,7 @@
-//! The app menu on macOS (the menu named Mailcraft next to the Apple menu). The one the window
-//! library makes on its own names the program file ("About mailcraft", "Quit mailcraft") and
-//! its About shows an empty panel. This one is in Dutch, like the rest of Mailcraft: "Over
-//! Mailcraft" opens Mailcraft's own window with the version and build, "Zoek naar updates…"
+//! The app menu on macOS (the menu named Merel next to the Apple menu). The one the window
+//! library makes on its own names the program file ("About merel", "Quit merel") and
+//! its About shows an empty panel. This one is in Dutch, like the rest of Merel: "Over
+//! Merel" opens Merel's own window with the version and build, "Zoek naar updates…"
 //! asks GitHub at once, and hiding and quitting work as in every Mac app. No Edit menu: its
 //! copy and paste items would take Cmd+C and Cmd+V away from the text fields.
 
@@ -26,10 +26,10 @@ pub struct AppMenu {
 impl AppMenu {
     /// Puts the menu in place of the default one; `None` (and the default stays) if that fails.
     pub fn install(ctx: &egui::Context) -> Option<AppMenu> {
-        let about = MenuItem::new("Over Mailcraft", true, None);
+        let about = MenuItem::new("Over Merel", true, None);
         let updates = MenuItem::new("Zoek naar updates…", true, None);
         let app = Submenu::with_items(
-            "Mailcraft",
+            "Merel",
             true,
             &[
                 &about,
@@ -37,11 +37,11 @@ impl AppMenu {
                 &PredefinedMenuItem::separator(),
                 &PredefinedMenuItem::services(Some("Voorzieningen")),
                 &PredefinedMenuItem::separator(),
-                &PredefinedMenuItem::hide(Some("Verberg Mailcraft")),
+                &PredefinedMenuItem::hide(Some("Verberg Merel")),
                 &PredefinedMenuItem::hide_others(Some("Verberg andere")),
                 &PredefinedMenuItem::show_all(Some("Toon alles")),
                 &PredefinedMenuItem::separator(),
-                &PredefinedMenuItem::quit(Some("Stop Mailcraft")),
+                &PredefinedMenuItem::quit(Some("Stop Merel")),
             ],
         )
         .map_err(|e| log::warn!("app menu not built: {e}"))
