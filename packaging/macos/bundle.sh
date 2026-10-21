@@ -48,7 +48,14 @@ if [ -n "${MACOS_CERT_P12:-}" ]; then
   security find-identity -p codesigning "$keychain"
   identity="$(security find-identity -p codesigning "$keychain" | awk '/"Merel"/ { print $2; exit }')"
   [ -n "$identity" ] || { echo "No Merel signing identity in MACOS_CERT_P12" >&2; exit 1; }
+  # codesign only finds the key through the search list, so add the keychain there for now.
+  searchlist="$(security list-keychains -d user | tr -d '"')"
+  # shellcheck disable=SC2086 # one path per word
+  security list-keychains -d user -s "$keychain" $searchlist
+  echo "Signing with $identity"
   codesign --force --deep --keychain "$keychain" --sign "$identity" "$app"
+  # shellcheck disable=SC2086
+  security list-keychains -d user -s $searchlist
   security delete-keychain "$keychain"
 else
   codesign --force --deep --sign - "$app"
