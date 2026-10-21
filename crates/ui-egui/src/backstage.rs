@@ -211,6 +211,14 @@ impl AccountForm {
 /// The text of the side menu's way back to the mail.
 pub const BACK: &str = "Terug";
 
+/// The pages of Bestand that take the right-hand side.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Page {
+    #[default]
+    Accounts,
+    Notifications,
+}
+
 pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.painter().rect_filled(ui.available_rect_before_wrap(), 0.0, t.window);
     egui::Panel::left("backstage_nav")
@@ -223,7 +231,12 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 app.tab = Tab::Home;
             }
             ui.add_space(8.0);
-            helder::nav_item(ui, t, Icon::User, "Accounts", true);
+            if helder::nav_item(ui, t, Icon::User, "Accounts", app.file_page == Page::Accounts).clicked() {
+                app.file_page = Page::Accounts;
+            }
+            if helder::nav_item(ui, t, Icon::Bell, crate::notifications::PAGE, app.file_page == Page::Notifications).clicked() {
+                app.file_page = Page::Notifications;
+            }
             // Printing lives here, as in Outlook's File menu; Ctrl+P on the Start tab does the same.
             if helder::nav_item(ui, t, Icon::Printer, "Afdrukken", false).clicked() {
                 if app.module == crate::Module::Calendar {
@@ -247,7 +260,12 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         });
     let frame = helder::card_frame(t).inner_margin(Margin::same(28)).outer_margin(Margin { left: 0, right: 12, top: 0, bottom: 12 });
     egui::CentralPanel::default().frame(frame).show(ui, |ui| {
-        helder::secondary(ui, t, |ui| page(app, ui, t));
+        helder::secondary(ui, t, |ui| match app.file_page {
+            Page::Accounts => page(app, ui, t),
+            Page::Notifications => {
+                egui::ScrollArea::vertical().show(ui, |ui| crate::notifications::page(app, ui, t));
+            }
+        });
     });
 }
 

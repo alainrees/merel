@@ -30,6 +30,7 @@ pub mod junk;
 pub mod meeting;
 pub mod message_menu;
 pub mod notice;
+pub mod notifications;
 pub mod print;
 pub mod quicksteps;
 pub mod receipt;
@@ -93,7 +94,7 @@ impl Module {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Tab {
+pub(crate) enum Tab {
     File,
     Home,
     Folder,
@@ -183,6 +184,13 @@ pub struct MailApp {
     /// Room kept free at the left of the top bar for the system's window buttons, when the app
     /// draws into the title bar itself (macOS); 0 when the system draws its own title bar.
     pub title_bar_inset: f32,
+    /// The computer's notifications and the count on the app icon; `None` leaves them out
+    /// (tests, and until the app sets one up).
+    pub notifier: Option<merel_notify::Notifier>,
+    /// The last notifications handed to the computer, newest last (see [`notifications`]).
+    pub alerts: Vec<merel_notify::Alert>,
+    /// Which page Bestand shows.
+    pub(crate) file_page: backstage::Page,
 }
 
 /// The window title: the app's name, with the unread inbox mail of every account in brackets
@@ -291,6 +299,9 @@ impl MailApp {
             theme_applied: false,
             title_bar_inset: 0.0,
             title: None,
+            notifier: None,
+            alerts: Vec::new(),
+            file_page: backstage::Page::default(),
         };
         app.welcome = welcome::due(&app).then_some(welcome::Step::Hello);
         app
@@ -337,14 +348,16 @@ impl MailApp {
         self.tick_read_timer(ui.ctx());
         self.tick_updates(ui.ctx());
         let arrivals = self.engine.session.take_arrivals();
-        if arrivals > 0 {
-            self.notice = Some(Notice::info(if arrivals == 1 {
+        if !arrivals.is_empty() {
+            self.notice = Some(Notice::info(if arrivals.len() == 1 {
                 "1 nieuw bericht ontvangen.".to_string()
             } else {
-                format!("{arrivals} nieuwe berichten ontvangen.")
+                format!("{} nieuwe berichten ontvangen.", arrivals.len())
             }));
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
+            self.alert_new_mail(&ui.ctx().clone(), &arrivals);
         }
+        self.tick_notifications(&ui.ctx().clone());
         let hits = self.engine.session.take_rule_hits();
         if hits > 0 {
             self.notice = Some(Notice::info(rules::rule_notice(hits)));
@@ -3508,6 +3521,9 @@ mod tests {
         h.get_by_label("Opvolgen: Wat er deze maand speelt");
         h.get_by_label("Vandaag");
         assert!(h.state().announced_reminders.iter().any(|(k, _)| k == "followup:m3"), "the window asked for attention once");
+        let alerts: Vec<_> = h.state().alerts.iter().filter(|a| a.id == "mail:m3").collect();
+        assert_eq!(alerts.len(), 1, "one notification for the computer, not one per frame");
+        assert_eq!(alerts[0].title, "Herinnering", "no subject in the notification unless asked");
         h.get_by_label("Sluiten").click();
         h.run();
         assert!(h.query_by_label("Opvolgen: Wat er deze maand speelt").is_none(), "closed; the flag stays");
@@ -4972,6 +4988,40 @@ mod tests {
         h.get_by_label("Sluiten").click();
         h.run();
         assert!(h.state().categories.is_none());
+    }
+
+    #[test]
+    fn bestand_meldingen_switches_notifications_and_sends_a_trial_one() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Bestand").click();
+        h.run();
+        h.get_by_label(notifications::PAGE).click();
+        h.run();
+        assert!(h.query_by_label("Toevoegen en verbinden").is_none(), "the accounts page made way");
+        assert!(!h.state().view.notifications.details, "private unless asked");
+        h.get_by_label(notifications::DETAILS).click();
+        h.get_by_label(notifications::BADGE).click();
+        h.run();
+        assert!(h.state().view.notifications.details);
+        assert!(!h.state().view.notifications.badge);
+        h.get_by_label(notifications::TRY).click();
+        h.run();
+        assert_eq!(h.state().alerts.len(), 1);
+        assert_eq!(h.state().alerts[0].title, "Merel");
+    }
+
+    #[test]
+    fn a_clicked_notification_opens_its_message() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.run();
+        notifications::open(h.state_mut(), "mail:m1");
+        h.run();
+        assert_eq!(h.state().module, Module::Mail);
+        assert_eq!(h.state().engine.session.selected_message.as_deref(), Some("m1"));
+        notifications::open(h.state_mut(), "task:nothing");
+        assert_eq!(h.state().module, Module::Tasks);
     }
 
     #[test]

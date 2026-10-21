@@ -30,6 +30,7 @@ rfd = { workspace = true }
 open = { workspace = true }
 base64 = { workspace = true }
 merel-sign = { workspace = true }
+merel-notify = { workspace = true }
 
 [dev-dependencies]
 egui_kittest = { workspace = true }

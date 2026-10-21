@@ -358,7 +358,7 @@ pub struct Session {
     /// Folders whose oldest message has been reached, so there is nothing older to load.
     pub complete_folders: HashSet<String>,
     /// Unread messages a refresh found that were not listed before; the UI takes and shows it.
-    arrivals: usize,
+    arrivals: Vec<String>,
     pub selected_folder: Option<String>,
     pub selected_message: Option<String>,
     /// Messages selected alongside `selected_message` (Ctrl- or Shift-click in the list); the
@@ -846,7 +846,7 @@ impl Session {
                     }
                     if offset == 0 && is_inbox && !known.is_empty() && !known.contains(&id) {
                         if !h.seen {
-                            self.arrivals += 1;
+                            self.arrivals.push(id.clone());
                         }
                         fresh.push(id);
                     }
@@ -997,8 +997,8 @@ impl Session {
         }
     }
 
-    /// New unread messages found by refreshes since the last call.
-    pub fn take_arrivals(&mut self) -> usize {
+    /// New unread messages found by refreshes since the last call, by id.
+    pub fn take_arrivals(&mut self) -> Vec<String> {
         std::mem::take(&mut self.arrivals)
     }
 
@@ -1592,7 +1592,7 @@ mod tests {
         let mut first: Vec<RemoteHeader> = (1..=HEADER_LIMIT).map(header).collect();
         first[0].seen = false;
         s.apply(Event::Headers { folder_id: folder.into(), headers: first, offset: 0, limit: HEADER_LIMIT });
-        assert_eq!(s.take_arrivals(), 0);
+        assert!(s.take_arrivals().is_empty());
         s.run("folder.older", &serde_json::Value::Null).unwrap();
         s.take_jobs();
         s.apply(Event::Headers { folder_id: folder.into(), headers: (201..=400).map(header).collect(), offset: HEADER_LIMIT, limit: HEADER_LIMIT });
@@ -1607,8 +1607,8 @@ mod tests {
         again.insert(0, fresh);
         s.apply(Event::Headers { folder_id: folder.into(), headers: again, offset: 0, limit: 400 });
         assert_eq!(s.messages.len(), 401);
-        assert_eq!(s.take_arrivals(), 1, "one unread message that was not listed before");
-        assert_eq!(s.take_arrivals(), 0);
+        assert_eq!(s.take_arrivals().len(), 1, "one unread message that was not listed before");
+        assert!(s.take_arrivals().is_empty());
         // Only connected accounts are refreshed.
         s.status.insert("a".into(), AccountStatus::Offline);
         s.refresh_open_folders();
