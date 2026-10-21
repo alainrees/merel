@@ -28,6 +28,7 @@ pub mod install;
 pub mod invitation;
 pub mod junk;
 pub mod meeting;
+pub mod menubar;
 pub mod message_menu;
 pub mod notice;
 pub mod print;
@@ -183,6 +184,13 @@ pub struct MailApp {
     /// Room kept free at the left of the top bar for the system's window buttons, when the app
     /// draws into the title bar itself (macOS); 0 when the system draws its own title bar.
     pub title_bar_inset: f32,
+    /// Whether the ribbon's tabs live in the system's menu bar (macOS) instead of the window;
+    /// the window then keeps one command bar, the module's Start tab, as Outlook for Mac.
+    pub native_menu: bool,
+    /// The menus for the menu bar, noted each frame while [`MailApp::native_menu`] is on.
+    pub menu_bar: Vec<menubar::Menu>,
+    /// A click in the menu bar, to run in the next frame: the menu's place and the item's path.
+    menu_click: Option<(usize, menubar::Path)>,
 }
 
 /// The window title: the app's name, with the unread inbox mail of every account in brackets
@@ -290,6 +298,9 @@ impl MailApp {
             expanded: std::collections::HashSet::new(),
             theme_applied: false,
             title_bar_inset: 0.0,
+            native_menu: false,
+            menu_bar: Vec::new(),
+            menu_click: None,
             title: None,
         };
         app.welcome = welcome::due(&app).then_some(welcome::Step::Hello);
@@ -362,6 +373,9 @@ impl MailApp {
         let wake = if self.engine.session.has_pending() { std::time::Duration::from_millis(250) } else { std::time::Duration::from_secs(5) };
         ui.ctx().request_repaint_after(wake);
         ribbon(self, ui, &t);
+        if self.native_menu {
+            menu_bar(self, ui, &t);
+        }
         status_bar(self, ui, &t);
         let ctx = ui.ctx().clone();
         compose::follow_sending(self);
@@ -840,6 +854,10 @@ fn box_button(ui: &mut Ui, t: &Tokens, icon: helder::Icon, label: &str, size: f3
 
 fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     // The File tab is a page of its own, as Outlook's: no search bar and no command bar.
+    // With the tabs in the menu bar, the window keeps only the Start tab, as Outlook for Mac.
+    if app.native_menu && app.tab != Tab::File {
+        app.tab = Tab::Home;
+    }
     let file = app.tab == Tab::File;
     let search = app.module == Module::Mail && !file;
     if search || app.title_bar_inset > 0.0 {
@@ -847,22 +865,24 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     // The tabs line up with the first button on the ribbon card under them.
     let tabs_margin = Margin { left: 12, right: 12, top: 0, bottom: 2 };
-    egui::Panel::top("tabs").show_separator_line(false).frame(egui::Frame::NONE.fill(t.window).inner_margin(tabs_margin)).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            for tab in Tab::ALL {
-                let on = app.tab == tab;
-                let text = RichText::new(tab.label()).color(if on { t.accent_text } else { t.text });
-                let r = ui.add(egui::Button::new(text).frame(false).min_size(vec2(0.0, 26.0)));
-                if on {
-                    let rect = r.rect;
-                    ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(2.0, t.accent));
+    if !app.native_menu {
+        egui::Panel::top("tabs").show_separator_line(false).frame(egui::Frame::NONE.fill(t.window).inner_margin(tabs_margin)).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                for tab in Tab::ALL {
+                    let on = app.tab == tab;
+                    let text = RichText::new(tab.label()).color(if on { t.accent_text } else { t.text });
+                    let r = ui.add(egui::Button::new(text).frame(false).min_size(vec2(0.0, 26.0)));
+                    if on {
+                        let rect = r.rect;
+                        ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(2.0, t.accent));
+                    }
+                    if r.clicked() {
+                        app.tab = tab;
+                    }
                 }
-                if r.clicked() {
-                    app.tab = tab;
-                }
-            }
+            });
         });
-    });
+    }
     if file {
         return;
     }
@@ -883,69 +903,11 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                             Tab::Home if app.module == Module::Calendar => calendar_ribbon(app, ui, t),
                             Tab::Home if app.module == Module::People => contacts::ribbon(app, ui, t),
                             Tab::Home if app.module == Module::Tasks => tasks::ribbon(app, ui, t),
-                            Tab::Home => {
-                                let has = app.engine.session.selected_message.is_some();
-                                let mut open: Option<ComposeKind> = None;
-                                view::group(ui, t, "Nieuw", |ui| {
-                                    if ribbon_action_hint(ui, t, "✉", "Nieuwe e-mail", true, Some(&key_hint("N"))) {
-                                        open = Some(ComposeKind::New);
-                                    }
-                                });
-                                ui.separator();
-                                view::group(ui, t, "Reageren", |ui| {
-                                    if ribbon_action_hint(ui, t, "↩", "Beantwoorden", has, Some(&key_hint("R"))) {
-                                        open = Some(ComposeKind::Reply);
-                                    }
-                                    if ribbon_action_hint(ui, t, "↞", "Allen beantwoorden", has, Some(&key_hint("Shift+R"))) {
-                                        open = Some(ComposeKind::ReplyAll);
-                                    }
-                                    if ribbon_action_hint(ui, t, "↪", "Doorsturen", has, Some(&key_hint("F"))) {
-                                        open = Some(ComposeKind::Forward);
-                                    }
-                                });
-                                if let Some(kind) = open {
-                                    app.open_compose(kind);
-                                }
-                                ui.separator();
-                                view::group(ui, t, "Opschonen", |ui| {
-                                    ribbon_button(app, ui, t, "🗑", "Verwijderen", ("message.delete", Some("Delete")), has);
-                                    ribbon_button(
-                                        app,
-                                        ui,
-                                        t,
-                                        "🗄",
-                                        "Archiveren",
-                                        ("message.archive", Some(if cfg!(target_os = "macos") { "Ctrl+E" } else { "Backspace" })),
-                                        has,
-                                    );
-                                    ribbon_button(app, ui, t, "⚠", "Ongewenst", ("message.junk", None), has);
-                                });
-                                ui.separator();
-                                view::group(ui, t, "Ordenen", |ui| {
-                                    if ribbon_action_hint(ui, t, "📂", "Verplaatsen", has, Some(&key_hint("Shift+V"))) {
-                                        app.move_to = true;
-                                    }
-                                    if ribbon_action_hint(ui, t, "⚙", "Regels", true, Some("Mail automatisch verplaatsen of markeren")) {
-                                        app.open_rules(false);
-                                    }
-                                });
-                                ui.separator();
-                                view::group(ui, t, "Labels", |ui| {
-                                    ribbon_button(app, ui, t, "◉", "Gelezen", ("message.mark_read", Some(&key_hint("Q"))), has);
-                                    ribbon_button(app, ui, t, "○", "Ongelezen", ("message.mark_unread", Some(&key_hint("U"))), has);
-                                    ribbon_button(app, ui, t, "⚑", "Vlag", ("message.flag", None), has);
-                                });
-                                categories::menu(app, ui, t);
-                                ui.separator();
-                                quicksteps::ribbon(app, ui, t);
-                            }
+                            Tab::Home => mail_ribbon(app, ui, t),
                             Tab::Folder if app.module == Module::Mail => folders::ribbon(app, ui, t),
                             Tab::View => view::ribbon(app, ui, t),
                             Tab::Help => help::ribbon(app, ui, t),
-                            Tab::SendReceive => {
-                                let can = !app.engine.session.is_sample() && app.engine.session.selected_folder.is_some();
-                                ribbon_button(app, ui, t, "⟳", "Vernieuwen", ("folder.refresh", Some("F5")), can);
-                            }
+                            Tab::SendReceive => send_receive_ribbon(app, ui, t),
                             _ => {
                                 ui.label(RichText::new("Nog niet beschikbaar").color(t.text_dim));
                             }
@@ -956,27 +918,172 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         });
 }
 
+impl MailApp {
+    /// Hands a click in the menu bar to the next frame: `menu` is the menu's place in
+    /// [`MailApp::menu_bar`], `path` the labels down to the item.
+    pub fn click_menu(&mut self, menu: usize, path: menubar::Path) {
+        self.menu_click = Some((menu, path));
+    }
+}
+
+/// Notes the menus of the menu bar from the ribbon's tabs, and runs a click made in it.
+fn menu_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let click = app.menu_click.take();
+    if click.is_some() {
+        // What the click changed shows in the menus of the next frame.
+        ui.ctx().request_repaint();
+    }
+    let mut child = ui.new_child(egui::UiBuilder::new().id_salt("menu-bar").invisible());
+    let ui = &mut child;
+    let mut menus: Vec<menubar::Menu> = Vec::new();
+    let mut add = |app: &mut MailApp, ui: &mut Ui, title: &'static str, f: &dyn Fn(&mut MailApp, &mut Ui)| {
+        let index = menus.len();
+        let click = click.as_ref().filter(|(i, _)| *i == index).map(|(_, p)| p.clone());
+        let entries = menubar::capture(click, || f(app, ui));
+        menus.push(menubar::Menu { title, entries });
+    };
+    add(app, ui, "Bestand", &|app, _| file_menu(app));
+    let module_menu = match app.module {
+        Module::Mail => "Bericht",
+        Module::Calendar => "Agenda",
+        Module::People => "Contactpersonen",
+        Module::Tasks => "Taken",
+    };
+    add(app, ui, module_menu, &|app, ui| match app.module {
+        Module::Mail => mail_ribbon(app, ui, t),
+        Module::Calendar => calendar_ribbon(app, ui, t),
+        Module::People => contacts::ribbon(app, ui, t),
+        Module::Tasks => tasks::ribbon(app, ui, t),
+    });
+    if app.module == Module::Mail {
+        add(app, ui, "Map", &|app, ui| {
+            folders::ribbon(app, ui, t);
+            ribbon_separator(ui);
+            send_receive_ribbon(app, ui, t);
+        });
+    }
+    add(app, ui, "Weergeven", &|app, ui| {
+        for m in Module::ALL {
+            if menubar::item(m.label(), true, Some(app.module == m)) {
+                app.module = m;
+            }
+        }
+        ribbon_separator(ui);
+        view::ribbon(app, ui, t);
+    });
+    add(app, ui, "Help", &|app, ui| help::ribbon(app, ui, t));
+    app.menu_bar = menus;
+}
+
+/// The Bestand menu: something new in each module, then what the Bestand page holds.
+fn file_menu(app: &mut MailApp) {
+    if menubar::item("Nieuwe e-mail", true, None) {
+        app.open_compose(ComposeKind::New);
+    }
+    if menubar::item("Nieuwe afspraak", true, None) {
+        app.module = Module::Calendar;
+        let date = app.calendar.focus;
+        app.new_appointment(date, 9);
+    }
+    if menubar::item("Nieuw contact", true, None) {
+        app.module = Module::People;
+        app.new_contact();
+    }
+    if menubar::item("Nieuwe taak", true, None) {
+        app.module = Module::Tasks;
+        app.new_task();
+    }
+    menubar::separator();
+    if menubar::item("Accounts…", true, None) {
+        app.tab = Tab::File;
+    }
+    menubar::separator();
+    for action in backstage::FileAction::ALL {
+        if menubar::item(action.label(), true, None) {
+            backstage::run(app, action);
+        }
+    }
+}
+
+/// The mail module's Start tab: new, respond, clean up, file, mark, categorise, quick steps.
+fn mail_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let has = app.engine.session.selected_message.is_some();
+    let mut open: Option<ComposeKind> = None;
+    view::group(ui, t, "Nieuw", |ui| {
+        if ribbon_action_hint(ui, t, "✉", "Nieuwe e-mail", true, Some(&key_hint("N"))) {
+            open = Some(ComposeKind::New);
+        }
+    });
+    ribbon_separator(ui);
+    view::group(ui, t, "Reageren", |ui| {
+        if ribbon_action_hint(ui, t, "↩", "Beantwoorden", has, Some(&key_hint("R"))) {
+            open = Some(ComposeKind::Reply);
+        }
+        if ribbon_action_hint(ui, t, "↞", "Allen beantwoorden", has, Some(&key_hint("Shift+R"))) {
+            open = Some(ComposeKind::ReplyAll);
+        }
+        if ribbon_action_hint(ui, t, "↪", "Doorsturen", has, Some(&key_hint("F"))) {
+            open = Some(ComposeKind::Forward);
+        }
+    });
+    if let Some(kind) = open {
+        app.open_compose(kind);
+    }
+    ribbon_separator(ui);
+    view::group(ui, t, "Opschonen", |ui| {
+        ribbon_button(app, ui, t, "🗑", "Verwijderen", ("message.delete", Some("Delete")), has);
+        ribbon_button(app, ui, t, "🗄", "Archiveren", ("message.archive", Some(if cfg!(target_os = "macos") { "Ctrl+E" } else { "Backspace" })), has);
+        ribbon_button(app, ui, t, "⚠", "Ongewenst", ("message.junk", None), has);
+    });
+    ribbon_separator(ui);
+    view::group(ui, t, "Ordenen", |ui| {
+        if ribbon_action_hint(ui, t, "📂", "Verplaatsen", has, Some(&key_hint("Shift+V"))) {
+            app.move_to = true;
+        }
+        if ribbon_action_hint(ui, t, "⚙", "Regels", true, Some("Mail automatisch verplaatsen of markeren")) {
+            app.open_rules(false);
+        }
+    });
+    ribbon_separator(ui);
+    view::group(ui, t, "Labels", |ui| {
+        ribbon_button(app, ui, t, "◉", "Gelezen", ("message.mark_read", Some(&key_hint("Q"))), has);
+        ribbon_button(app, ui, t, "○", "Ongelezen", ("message.mark_unread", Some(&key_hint("U"))), has);
+        ribbon_button(app, ui, t, "⚑", "Vlag", ("message.flag", None), has);
+    });
+    if !menubar::capturing() {
+        categories::menu(app, ui, t);
+    }
+    ribbon_separator(ui);
+    quicksteps::ribbon(app, ui, t);
+}
+
+/// The Verzenden/ontvangen tab.
+fn send_receive_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let can = !app.engine.session.is_sample() && app.engine.session.selected_folder.is_some();
+    ribbon_button(app, ui, t, "⟳", "Vernieuwen", ("folder.refresh", Some("F5")), can);
+}
+
 fn calendar_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     use calendar::View;
     if ribbon_action_hint(ui, t, "📅", "Nieuwe afspraak", true, Some(&key_hint("Shift+A"))) {
         let date = app.calendar.focus;
         app.new_appointment(date, 9);
     }
-    ui.separator();
+    ribbon_separator(ui);
     if ribbon_action(ui, t, "◎", "Vandaag", true) {
         app.calendar.focus = calendar::today();
     }
     if ribbon_action_hint(ui, t, "↪", calendar::GOTO, true, Some(&key_hint("G"))) {
         app.open_goto();
     }
-    ui.separator();
+    ribbon_separator(ui);
     for (glyph, label, view) in [("▯", "Dag", View::Day), ("▤", "Werkweek", View::WorkWeek), ("▥", "Week", View::Week), ("▦", "Maand", View::Month)]
     {
         if ribbon_toggle(ui, t, glyph, label, app.calendar.view == view) {
             app.calendar.view = view;
         }
     }
-    ui.separator();
+    ribbon_separator(ui);
     let has = app.engine.session.selected_appointment.is_some();
     if ribbon_action(ui, t, "🗑", "Verwijderen", has) {
         app.run("appointment.delete", Value::Null);
@@ -1026,12 +1133,18 @@ fn ribbon_toggle(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, on: bool) ->
 
 /// [`ribbon_toggle`] with `hint` shown on hover.
 fn ribbon_toggle_hint(ui: &mut Ui, t: &Tokens, label: &str, on: bool, hint: &str) -> bool {
+    if menubar::capturing() {
+        return menubar::item(label, true, Some(on));
+    }
     ribbon_paint(ui, t, "", label, true, None, Some(on)).on_hover_text(hint).clicked()
 }
 
 /// Draws a ribbon button; `on` is set for a button that can stay lit. "Nieuwe e-mail" and the
 /// other "new" buttons are the blue main button of their ribbon.
 fn ribbon_draw(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool, shortcut: Option<&str>, on: Option<bool>) -> bool {
+    if menubar::capturing() {
+        return menubar::item(label, enabled, on);
+    }
     let r = ribbon_paint(ui, t, glyph, label, enabled, shortcut, on);
     enabled && r.clicked()
 }
@@ -1093,6 +1206,15 @@ fn ribbon_paint(ui: &mut Ui, t: &Tokens, glyph: &str, label: &str, enabled: bool
         ui.painter().text(egui::pos2(left + lead + gap, rect.center().y), egui::Align2::LEFT_CENTER, label, ribbon_label_font(), color);
     }
     r
+}
+
+/// The upright line between groups of ribbon buttons; a line in a menu of the menu bar.
+pub(crate) fn ribbon_separator(ui: &mut Ui) {
+    if menubar::capturing() {
+        menubar::separator();
+    } else {
+        ui.separator();
+    }
 }
 
 /// A ribbon button that runs a command; `action` is the command id with the shortcut shown
@@ -2340,6 +2462,34 @@ mod tests {
         egui_kittest::Harness::builder()
             .with_size(vec2(1280.0, 800.0))
             .build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(Engine::sample()))
+    }
+
+    #[test]
+    fn with_a_native_menu_the_tabs_live_in_the_menu_bar_and_its_clicks_run_them() {
+        let mut h = harness();
+        h.state_mut().native_menu = true;
+        h.run();
+        assert!(h.query_by_label("Verzenden/ontvangen").is_none(), "no tabs in the window");
+        h.get_by_label("Nieuwe e-mail");
+        let titles: Vec<&str> = h.state().menu_bar.iter().map(|m| m.title).collect();
+        assert_eq!(titles, ["Bestand", "Bericht", "Map", "Weergeven", "Help"]);
+        let bericht = &h.state().menu_bar[1];
+        assert!(bericht.entries.iter().any(|e| matches!(e, menubar::Entry::Item { label, enabled: false, .. } if label == "Beantwoorden")));
+        // A choice in a submenu, the way the menu bar hands it over.
+        let view = h.state().menu_bar.iter().position(|m| m.title == "Weergeven").unwrap();
+        h.state_mut().click_menu(view, vec!["Thema".into(), "Donker".into()]);
+        h.run();
+        assert_eq!(h.state().view.theme, view::ThemeChoice::Dark);
+        h.state_mut().click_menu(view, vec!["Agenda".into()]);
+        h.run();
+        assert_eq!(h.state().module, Module::Calendar);
+        assert_eq!(h.state().menu_bar[1].title, "Agenda");
+        h.state_mut().click_menu(0, vec!["Nieuwe e-mail".into()]);
+        h.run();
+        assert!(h.state().compose.is_some(), "Bestand > Nieuwe e-mail opens a new message");
+        h.state_mut().click_menu(0, vec!["Accounts…".into()]);
+        h.run();
+        assert_eq!(h.state().tab, Tab::File);
     }
 
     #[test]

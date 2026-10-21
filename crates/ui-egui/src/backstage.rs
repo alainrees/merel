@@ -211,6 +211,55 @@ impl AccountForm {
 /// The text of the side menu's way back to the mail.
 pub const BACK: &str = "Terug";
 
+/// What the side menu of the Bestand page does besides Accounts; the Bestand menu of the macOS
+/// menu bar holds the same.
+#[derive(Clone, Copy)]
+pub(crate) enum FileAction {
+    Print,
+    SaveAs,
+    Junk,
+}
+
+impl FileAction {
+    pub(crate) const ALL: [FileAction; 3] = [FileAction::Print, FileAction::SaveAs, FileAction::Junk];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            FileAction::Print => "Afdrukken",
+            FileAction::SaveAs => crate::eml::SAVE_AS,
+            FileAction::Junk => "Ongewenste e-mail",
+        }
+    }
+
+    fn icon(self) -> Icon {
+        match self {
+            FileAction::Print => Icon::Printer,
+            FileAction::SaveAs => Icon::Save,
+            FileAction::Junk => Icon::ShieldAlert,
+        }
+    }
+}
+
+/// Does `action`, then goes back to the module.
+pub(crate) fn run(app: &mut MailApp, action: FileAction) {
+    match action {
+        // Printing lives here, as in Outlook's File menu; Ctrl+P on the Start tab does the same.
+        FileAction::Print => {
+            if app.module == crate::Module::Calendar {
+                app.print_calendar();
+            } else if app.can_print() {
+                app.print_selected();
+            } else {
+                app.notice = Some(crate::Notice::warning("Open eerst een bericht om af te drukken."));
+            }
+        }
+        // Outlook's "Opslaan als": the open message as an .eml file in Downloads; Ctrl+S too.
+        FileAction::SaveAs => app.save_as_file(),
+        FileAction::Junk => app.junk = Some(crate::junk::Options::default()),
+    }
+    app.tab = Tab::Home;
+}
+
 pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.painter().rect_filled(ui.available_rect_before_wrap(), 0.0, t.window);
     egui::Panel::left("backstage_nav")
@@ -224,25 +273,10 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
             ui.add_space(8.0);
             helder::nav_item(ui, t, Icon::User, "Accounts", true);
-            // Printing lives here, as in Outlook's File menu; Ctrl+P on the Start tab does the same.
-            if helder::nav_item(ui, t, Icon::Printer, "Afdrukken", false).clicked() {
-                if app.module == crate::Module::Calendar {
-                    app.print_calendar();
-                } else if app.can_print() {
-                    app.print_selected();
-                } else {
-                    app.notice = Some(crate::Notice::warning("Open eerst een bericht om af te drukken."));
+            for action in FileAction::ALL {
+                if helder::nav_item(ui, t, action.icon(), action.label(), false).clicked() {
+                    run(app, action);
                 }
-                app.tab = Tab::Home;
-            }
-            // Outlook's "Opslaan als": the open message as an .eml file in Downloads; Ctrl+S too.
-            if helder::nav_item(ui, t, Icon::Save, crate::eml::SAVE_AS, false).clicked() {
-                app.save_as_file();
-                app.tab = Tab::Home;
-            }
-            if helder::nav_item(ui, t, Icon::ShieldAlert, "Ongewenste e-mail", false).clicked() {
-                app.junk = Some(crate::junk::Options::default());
-                app.tab = Tab::Home;
             }
         });
     let frame = helder::card_frame(t).inner_margin(Margin::same(28)).outer_margin(Margin { left: 0, right: 12, top: 0, bottom: 12 });

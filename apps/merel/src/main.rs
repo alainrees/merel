@@ -27,10 +27,15 @@ impl eframe::App for App {
                 match action {
                     app_menu::Action::About => self.app.help = Some(merel_ui_egui::help::HelpWindow::About),
                     app_menu::Action::Updates => self.app.check_for_updates(ui.ctx(), true),
+                    app_menu::Action::Menu(index, path) => self.app.click_menu(index, path),
                 }
             }
         }
         self.app.ui(ui);
+        #[cfg(target_os = "macos")]
+        if let Some(menu) = &mut self.menu {
+            menu.sync(&self.app.menu_bar);
+        }
     }
 
     fn on_exit(&mut self) {
@@ -95,10 +100,17 @@ fn main() -> eframe::Result {
             if cfg!(target_os = "macos") {
                 app.title_bar_inset = merel_window_buttons::WIDTH;
             }
+            #[cfg(target_os = "macos")]
+            let menu = app_menu::AppMenu::install(&cc.egui_ctx);
+            // The ribbon's tabs go to the menu bar, as Outlook for Mac has them.
+            #[cfg(target_os = "macos")]
+            {
+                app.native_menu = menu.is_some();
+            }
             Ok(Box::new(App {
                 app,
                 #[cfg(target_os = "macos")]
-                menu: app_menu::AppMenu::install(&cc.egui_ctx),
+                menu,
             }))
         }),
     )

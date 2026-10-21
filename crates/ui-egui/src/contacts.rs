@@ -462,14 +462,14 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if crate::ribbon_action(ui, t, "👥", crate::groups::NEW, true) {
         app.new_group();
     }
-    ui.separator();
+    crate::ribbon_separator(ui);
     if crate::ribbon_action(ui, t, "✎", "Bewerken", has) {
         app.edit_selected_contact();
     }
     if crate::ribbon_action(ui, t, "✉", "E-mail sturen", has_mail) {
         app.mail_selected_contact();
     }
-    ui.separator();
+    crate::ribbon_separator(ui);
     if crate::ribbon_action(ui, t, "🗑", "Verwijderen", has) {
         app.run("contact.delete", serde_json::Value::Null);
         app.contacts.editor = None;
@@ -477,7 +477,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if crate::ribbon_action(ui, t, "⟳", "Vernieuwen", !app.engine.session.item_accounts.is_empty()) {
         app.run("sync.refresh", serde_json::Value::Null);
     }
-    ui.separator();
+    crate::ribbon_separator(ui);
     if crate::ribbon_action(ui, t, "📂", crate::vcard::IMPORT, true) {
         // The computer's own dialog; it blocks until the person has chosen or cancelled.
         if let Some(paths) = rfd::FileDialog::new().set_title("vCard-bestanden kiezen").add_filter("vCard", &["vcf", "vcard"]).pick_files() {

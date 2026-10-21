@@ -566,6 +566,10 @@ pub fn dotted(text: &str, dot: Color32, t: &Tokens) -> WidgetText {
 
 /// A thin upright line between groups of a command bar.
 pub fn bar_separator(ui: &mut Ui, t: &Tokens) {
+    if crate::menubar::capturing() {
+        crate::menubar::separator();
+        return;
+    }
     let (rect, _) = ui.allocate_exact_size(vec2(9.0, 24.0), Sense::hover());
     ui.painter().vline(rect.center().x, rect.y_range(), Stroke::new(1.0, t.control_border));
 }

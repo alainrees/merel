@@ -146,7 +146,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let has = app.engine.session.selected_message.is_some();
     let mut run: Option<String> = None;
     let mut manage = false;
-    crate::view::group(ui, t, "Snelle stappen", |ui| {
+    crate::view::section(ui, t, "Snelle stappen", |ui| {
         for (n, (id, name)) in steps.iter().enumerate() {
             let hint = (n < 9).then(|| key_hint(&format!("Shift+{}", n + 1)));
             if crate::ribbon_action_hint(ui, t, "⚡", name, has, hint.as_deref()) {
