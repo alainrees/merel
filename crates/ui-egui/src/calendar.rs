@@ -1089,7 +1089,7 @@ pub(crate) fn shown_calendars(app: &MailApp) -> Vec<(String, String, Color32)> {
         .calendars
         .iter()
         .filter(|c| app.view.calendar_shown(&c.id))
-        .map(|c| (c.id.clone(), c.name.clone(), crate::calendars::rgb(c.color)))
+        .map(|c| (c.id.clone(), app.engine.session.calendar_label(c), crate::calendars::rgb(c.color)))
         .collect()
 }
 
@@ -1984,8 +1984,13 @@ pub const DELETE_SERIES: &str = "Hele reeks verwijderen";
 /// The appointment window, when one is open: a command bar on top, the form in a card, and
 /// the day it falls on beside it.
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
-    let calendars: Vec<(String, String, Color32)> =
-        app.engine.session.calendars.iter().map(|c| (c.id.clone(), c.name.clone(), Color32::from_rgb(c.color[0], c.color[1], c.color[2]))).collect();
+    let calendars: Vec<(String, String, Color32)> = app
+        .engine
+        .session
+        .calendars
+        .iter()
+        .map(|c| (c.id.clone(), app.engine.session.calendar_label(c), Color32::from_rgb(c.color[0], c.color[1], c.color[2])))
+        .collect();
     let local_calendars: Vec<String> = app.engine.session.calendars.iter().filter(|c| c.account_id.is_none()).map(|c| c.id.clone()).collect();
     let preview = app.calendar.editor.as_ref().and_then(|e| day_of(app, e, t));
     let stored = app.calendar.editor.as_ref().and_then(|e| e.id.as_ref()).and_then(|id| app.engine.session.appointment(id)).cloned();

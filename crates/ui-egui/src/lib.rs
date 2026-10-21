@@ -4490,6 +4490,37 @@ mod tests {
     }
 
     #[test]
+    fn calendars_stand_under_the_address_of_their_account_and_local_ones_under_their_own_heading() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        // Two accounts with the same display name, as with one person's private and work mail.
+        let first = h.state().engine.session.accounts[0].clone();
+        let mut second = first.clone();
+        second.id = "werk".into();
+        second.address = merel_model::Address::new(None, "alain@werk.example").unwrap();
+        h.state_mut().engine.session.accounts.push(second);
+        for a in ["sample", "werk"] {
+            h.state_mut().engine.session.calendars.push(merel_model::Calendar {
+                id: format!("{a}/calendar"),
+                name: merel_engine::sync::ACCOUNT_CALENDAR.into(),
+                account_id: Some(a.into()),
+                color: [0x2E, 0x8B, 0x57],
+            });
+        }
+        h.run();
+        let local = h.get_by_label(calendars::LOCAL).rect();
+        let mine = h.get_by_label("Mijn agenda").rect();
+        let own = h.get_by_label(first.address.email()).rect();
+        let work = h.get_by_label("alain@werk.example").rect();
+        let agendas: Vec<egui::Rect> =
+            h.query_all_by_label("Agenda").map(|n| n.rect()).filter(|r| r.left() < local.right() && r.top() > local.top()).collect();
+        assert_eq!(agendas.len(), 2, "each account's calendar is listed once in the side pane");
+        assert!(local.top() < mine.top() && mine.top() < own.top(), "the local calendar under its heading, before the accounts");
+        assert!(own.top() < agendas[0].top() && agendas[0].top() < work.top() && work.top() < agendas[1].top(), "each calendar under its account");
+        assert!(h.query_by_label("Mijn agenda's").is_none());
+    }
+
+    #[test]
     fn unticking_a_calendar_hides_its_appointments_until_it_is_ticked_again() {
         let mut h = harness();
         h.state_mut().module = Module::Calendar;

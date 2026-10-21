@@ -120,9 +120,10 @@ impl Editor {
     }
 }
 
-/// A row to pick where a new item goes, when there is a choice: this computer or an account.
+/// A row to pick where a new item goes, when there is a choice: this computer or an account,
+/// by its address, since two accounts often carry the same name.
 pub(crate) fn store_picker(ui: &mut Ui, t: &Tokens, session: &merel_engine::Session, account_id: &mut String) {
-    let accounts: Vec<(String, String)> = session.item_accounts().iter().map(|a| (a.id.clone(), a.name.clone())).collect();
+    let accounts: Vec<(String, String)> = session.item_accounts().iter().map(|a| (a.id.clone(), a.address.email().to_string())).collect();
     if accounts.is_empty() {
         return;
     }
@@ -146,7 +147,10 @@ pub(crate) fn store_picker(ui: &mut Ui, t: &Tokens, session: &merel_engine::Sess
 
 /// The name of the account an item lives in, for a card.
 pub(crate) fn store_name(session: &merel_engine::Session, account_id: Option<&str>) -> String {
-    account_id.and_then(|id| session.accounts.iter().find(|a| a.id == id)).map(|a| a.name.clone()).unwrap_or_else(|| "Op deze computer".into())
+    account_id
+        .and_then(|id| session.accounts.iter().find(|a| a.id == id))
+        .map(|a| a.address.email().to_string())
+        .unwrap_or_else(|| "Op deze computer".into())
 }
 
 impl MailApp {

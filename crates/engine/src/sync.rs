@@ -54,6 +54,10 @@ fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
+/// The name of an account's own calendar, as Outlook calls it; the side pane shows it under
+/// the account's address.
+pub const ACCOUNT_CALENDAR: &str = "Agenda";
+
 impl Session {
     /// The accounts whose store keeps appointments, contacts and tasks, in account order.
     pub fn item_accounts(&self) -> Vec<&Account> {
@@ -113,6 +117,15 @@ impl Session {
         }
     }
 
+    /// How a calendar is named where it stands without its account above it, as in the
+    /// appointment window's calendar list: "Agenda (alain@example.org)" for an account's.
+    pub fn calendar_label(&self, c: &Calendar) -> String {
+        match c.account_id.as_deref().and_then(|id| self.accounts.iter().find(|a| a.id == id)) {
+            Some(a) => format!("{} ({})", c.name, a.address.email()),
+            None => c.name.clone(),
+        }
+    }
+
     /// The account an appointment's calendar belongs to, if any.
     pub fn appointment_account(&self, calendar_id: &str) -> Option<String> {
         self.calendar(calendar_id).and_then(|c| c.account_id.clone())
@@ -120,11 +133,14 @@ impl Session {
 
     fn ensure_calendar(&mut self, account_id: &str) -> String {
         let id = Self::account_calendar_id(account_id);
-        if self.calendar(&id).is_none() {
-            let index = self.accounts.iter().position(|a| a.id == account_id).unwrap_or(0);
-            let name = self.accounts.iter().find(|a| a.id == account_id).map(|a| a.name.clone()).unwrap_or_else(|| account_id.to_string());
-            let color = self.calendar_colors.get(&id).copied().unwrap_or(PALETTE[index % PALETTE.len()]);
-            self.calendars.push(Calendar { id: id.clone(), name, account_id: Some(account_id.to_string()), color });
+        match self.calendars.iter_mut().find(|c| c.id == id) {
+            // Earlier versions named it after the account, which reads as a person.
+            Some(c) => c.name = ACCOUNT_CALENDAR.into(),
+            None => {
+                let index = self.accounts.iter().position(|a| a.id == account_id).unwrap_or(0);
+                let color = self.calendar_colors.get(&id).copied().unwrap_or(PALETTE[index % PALETTE.len()]);
+                self.calendars.push(Calendar { id: id.clone(), name: ACCOUNT_CALENDAR.into(), account_id: Some(account_id.to_string()), color });
+            }
         }
         id
     }
@@ -290,6 +306,17 @@ mod tests {
     }
 
     #[test]
+    fn an_account_calendar_named_after_the_account_is_renamed_agenda() {
+        let mut s = Session::with_accounts(vec![account("acc", "Alain Rees")]);
+        s.calendars.push(Calendar { id: "acc/calendar".into(), name: "Alain Rees".into(), account_id: Some("acc".into()), color: [1, 2, 3] });
+        connected(&mut s);
+        s.apply(Event::Synced { account_id: "acc".into(), appointments: Vec::new(), contacts: Vec::new(), tasks: Vec::new() });
+        let cal = s.calendar("acc/calendar").unwrap();
+        assert_eq!((cal.name.as_str(), cal.color), (ACCOUNT_CALENDAR, [1, 2, 3]), "renamed, colour kept");
+        assert_eq!(s.calendar_label(&Calendar::local()), "Mijn agenda", "a local calendar keeps its own name");
+    }
+
+    #[test]
     fn a_connected_store_is_asked_for_its_items_and_mirrored() {
         let mut s = Session::with_accounts(vec![account("acc", "Werk")]);
         s.take_jobs();
@@ -312,7 +339,8 @@ mod tests {
             tasks: vec![task],
         });
         let cal = s.calendar("acc/calendar").unwrap();
-        assert_eq!((cal.name.as_str(), cal.account_id.as_deref()), ("Werk", Some("acc")));
+        assert_eq!((cal.name.as_str(), cal.account_id.as_deref()), (ACCOUNT_CALENDAR, Some("acc")));
+        assert_eq!(s.calendar_label(cal), "Agenda (a@example.org)", "away from the side pane the address says whose it is");
         let a2 = s.appointment("acc/A2").unwrap();
         assert_eq!((a2.start, a2.end, a2.calendar_id.as_str()), (midnight, midnight + 86_400, "acc/calendar"));
         assert!(s.appointment("acc/A1").is_some());
