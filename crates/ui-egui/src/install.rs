@@ -22,9 +22,9 @@ use std::time::Duration;
 
 use crate::help::REPOSITORY;
 
-/// The public half of the release key (base64); `None` until a key is made, and then every
-/// update goes through the release page.
-pub const SIGNING_KEY: Option<&str> = None;
+/// The public half of the release key (base64); with `None` every update goes through the
+/// release page.
+pub const SIGNING_KEY: Option<&str> = Some("xB4YYlhBVyeCC57QWyg+M/0o8jiAfle01CDt9myAr/8=");
 
 /// The largest installer Merel downloads.
 const MAX_INSTALLER_BYTES: u64 = 400 * 1024 * 1024;
