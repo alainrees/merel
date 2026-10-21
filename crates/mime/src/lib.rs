@@ -123,7 +123,14 @@ fn chat_of(m: &mail_parser::Message<'_>) -> Option<ChatTag> {
         let wrapped = format!("Subject: {v}\r\n\r\n");
         MessageParser::default().parse(wrapped.as_bytes()).and_then(|w| w.subject().map(str::to_string))
     });
-    ChatTag::from_headers(raw("Chat-Version").as_deref(), raw("Chat-Group-ID").as_deref(), name.as_deref())
+    let mut tag = ChatTag::from_headers(raw("Chat-Version").as_deref(), raw("Chat-Group-ID").as_deref(), name.as_deref())?;
+    tag.handshake = merel_model::Handshake::from_headers(
+        raw("Secure-Join").as_deref(),
+        raw("Secure-Join-Invitenumber").as_deref(),
+        raw("Secure-Join-Auth").as_deref(),
+        raw("Secure-Join-Fingerprint").as_deref(),
+    );
+    Some(tag)
 }
 
 /// `Importance: High|Low` wins; else `X-Priority` 1–2 is high and 4–5 is low, as mail programs

@@ -32,6 +32,7 @@ base64 = { workspace = true }
 merel-sign = { workspace = true }
 merel-notify = { workspace = true }
 merel-i18n = { workspace = true }
+qrcode = { workspace = true }
 
 [dev-dependencies]
 egui_kittest = { workspace = true }

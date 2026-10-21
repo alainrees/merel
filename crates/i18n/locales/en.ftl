@@ -768,8 +768,27 @@ chat-to-hint = To: e-mail addresses, separated by commas
 chat-name-hint = Group name (optional)
 chat-first-hint = Type your first message…
 chat-check-addresses = Check the addresses.
-chat-ready-note = The chat is end-to-end encrypted. Anyone who has no encrypted chat with you yet will get an invitation soon; until then nothing is sent.
+chat-ready-note = The chat is end-to-end encrypted. Anyone who has no encrypted chat with you yet first needs your invitation link; until then nothing is sent.
 chat-enable-first = Turn on chat for this account first; you can do that on the Chat start page.
+chat-invite = Invitation link
+chat-invite-for = Invitation for { $email }
+chat-invite-intro = Anyone who opens this link in Merel or Delta Chat, or scans the QR code, gets an encrypted chat with you. Your keys are checked along the way, so nobody can sit in between.
+chat-invite-copy = Copy link
+chat-invite-copied = Copied
+chat-invite-mail = Send by e-mail
+chat-invite-renew = Make a new link
+chat-invite-renew-hint = The old link and QR code stop working.
+chat-invite-close = Close
+chat-invite-qr = QR code of the invitation link
+chat-invite-mail-subject = Will you chat with me?
+chat-invite-mail-text = I'd like to chat with you, end-to-end encrypted. Open this link in Merel or in Delta Chat (free, for phone and computer, see delta.chat):
+chat-accept = Accept an invitation
+chat-accept-hint = Paste an invitation link (https://i.delta.chat/#…)
+chat-accept-button = Accept
+chat-accept-sent = Invitation accepted. As soon as { $name } answers, the chat is ready.
+chat-pending = Waiting for { $name } to answer
+chat-verified = verified
+chat-show-invite = Show invitation link
 
 ## Months and days of the week (1 = January, 1 = Monday)
 month-1 = January
@@ -1696,3 +1715,13 @@ folder-kind-junk = Junk Email
 folder-kind-deleted = Deleted Items
 calendar-mine = My calendar
 junk-intro = Mail from a blocked sender or a blocked domain goes straight to Junk Email when it arrives. Safe senders and your contacts never end up there. Your mail provider filters too; what it sees as junk is in that folder as well.
+
+## Chat invitations
+
+invite-not-a-link = This is not an invitation. An invitation starts with https://i.delta.chat/#.
+invite-group = This is an invitation to a group or channel. Merel cannot accept those yet; ask for an invitation to a chat with you.
+invite-own-account = This is an invitation from one of your own accounts.
+
+## Chat
+
+chat-enable-short = Turn on chat for this account first.

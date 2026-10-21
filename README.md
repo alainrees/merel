@@ -339,6 +339,16 @@ that only checks out with a key the message brought along counts for nothing whe
 address. Going out, every encrypted message carries its header inside too, and a group chat message tells everyone
 everyone's key; `Secure-Join` fields and gossip travel inside only.
 
+To start a chat with someone whose key Merel does not have, there is an invitation link, Delta Chat's own
+(`https://i.delta.chat/#…`, with the key's fingerprint, the address and two random tokens), shown with its QR code on
+the Chat start page: copy it, mail it, or make a new one, which makes the old one useless. Someone with Delta Chat
+scans the code or opens the link; in Merel one pastes a link or `OPENPGP4FPR:` code under "Uitnodiging aannemen".
+Then the two sides run Delta Chat's Secure-Join handshake by mail: the first step goes out unencrypted with only the
+invitation number, every next one encrypted and signed, and each side checks that the key it gets matches the
+fingerprint in the link and that the secret token came back. At the end both sides keep the other's key as verified
+and the chat header says "geverifieerd". The tokens and verified keys stay on this computer (`invites.json`); a
+handshake message that does not fit gets no answer. Group invitations are not taken yet.
+
 A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
 hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the
 list until then and comes back unread, with a notice; the "Gesluimerd" filter on the Beeld tab shows

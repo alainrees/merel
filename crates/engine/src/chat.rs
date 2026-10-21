@@ -60,7 +60,8 @@ impl Session {
     pub fn chats(&self) -> Vec<Chat> {
         let mut chats: BTreeMap<String, Chat> = BTreeMap::new();
         let mut seen: HashSet<(String, String)> = HashSet::new();
-        let mut messages: Vec<&MessageHeader> = self.messages.iter().filter(|m| m.chat.is_some()).collect();
+        // The steps of an invitation's handshake are no messages to show.
+        let mut messages: Vec<&MessageHeader> = self.messages.iter().filter(|m| m.chat.as_ref().is_some_and(|c| c.handshake.is_none())).collect();
         messages.sort_by_key(|m| m.date);
         for m in messages {
             let Some(folder) = self.folder(&m.folder_id) else { continue };
@@ -192,7 +193,7 @@ pub fn new_chat(people: &[Address], name: &str, text: &str) -> Result<Draft, Str
         let mut random = [0u8; 16];
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut random);
         let group_name = if name.is_empty() { unique.iter().map(Address::display).collect::<Vec<_>>().join(", ") } else { name };
-        ChatTag { group_id: Some(ChatTag::new_group_id(random)), group_name: Some(group_name) }
+        ChatTag { group_id: Some(ChatTag::new_group_id(random)), group_name: Some(group_name), handshake: None }
     } else {
         ChatTag::default()
     };
@@ -230,8 +231,16 @@ impl Engine {
         if matches!(folder.kind, FolderKind::Junk | FolderKind::Deleted | FolderKind::Drafts) || !self.chat_ready(&folder.account_id) {
             return;
         }
-        let mut sealed: Vec<(i64, String)> =
-            self.session.messages.iter().filter(|m| m.folder_id == folder_id && m.sealed == Sealed::Closed).map(|m| (m.date, m.id.clone())).collect();
+        // The first step of an invitation comes unencrypted; it is opened to be answered.
+        let recent = crate::drafts::now() - 7 * 24 * 3600;
+        let handshake = |m: &MessageHeader| m.chat.as_ref().is_some_and(|c| c.handshake.is_some()) && m.date > recent;
+        let mut sealed: Vec<(i64, String)> = self
+            .session
+            .messages
+            .iter()
+            .filter(|m| m.folder_id == folder_id && (m.sealed == Sealed::Closed || handshake(m)))
+            .map(|m| (m.date, m.id.clone()))
+            .collect();
         sealed.sort_by_key(|m| std::cmp::Reverse(m.0));
         for (_, id) in sealed.into_iter().take(OPEN_SEALED) {
             self.session.request_body(&id);
@@ -363,7 +372,7 @@ mod tests {
         let mut s = Session { accounts: vec![account()], ..Session::default() };
         s.folders = vec![folder("in", FolderKind::Inbox), folder("sent", FolderKind::Sent), folder("junk", FolderKind::Junk)];
         let chat = Some(ChatTag::default());
-        let group = |name: Option<&str>| Some(ChatTag { group_id: Some("G1".into()), group_name: name.map(str::to_string) });
+        let group = |name: Option<&str>| Some(ChatTag { group_id: Some("G1".into()), group_name: name.map(str::to_string), handshake: None });
         s.messages = vec![
             message("m1", "in", "sanne@example.org", &["alain@voorbeeld.nl"], 100, chat.clone()),
             message("m2", "sent", "alain@voorbeeld.nl", &["sanne@example.org"], 200, chat.clone()),
@@ -444,7 +453,7 @@ mod tests {
     fn a_chat_message_from_the_server_is_recognised() {
         let raw = b"From: Sanne <sanne@example.org>\r\nTo: alain@voorbeeld.nl\r\nSubject: [...]\r\nChat-Version: 1.0\r\nChat-Group-ID: Ab-9_x\r\nChat-Group-Name: =?utf-8?q?Caf=C3=A9_Rees?=\r\n\r\n";
         let header = merel_mime::parse_header(raw);
-        assert_eq!(header.chat, Some(ChatTag { group_id: Some("Ab-9_x".into()), group_name: Some("Café Rees".into()) }));
+        assert_eq!(header.chat, Some(ChatTag { group_id: Some("Ab-9_x".into()), group_name: Some("Café Rees".into()), handshake: None }));
         assert_eq!(merel_mime::parse_header(b"From: a@b.nl\r\nSubject: x\r\n\r\n").chat, None);
     }
 
@@ -550,8 +559,8 @@ mod tests {
         // What the worker hands back once the message is fetched.
         let (body, header, carried) = crate::certificates::read(&e.keys, "a1", &raw);
         assert!(matches!(&body.pgp_signature, Some(merel_pgp::Verdict::Valid { signer }) if signer.covers("jij@example.org")));
-        e.learn_carried(id, header.from.as_ref(), &body, carried.unwrap());
-        e.session.apply(crate::Event::Body { message_id: id.into(), body: Box::new(body), header, raw: Vec::new(), carried: None });
+        e.learn_carried(id, header.from.as_ref(), &body, &carried.unwrap());
+        e.session.apply(crate::Event::Body { message_id: id.into(), body: Box::new(body), header: Box::new(header), raw: Vec::new(), carried: None });
         assert!(e.pgp_key_of("jij@example.org").is_some(), "the sender's key from inside");
         assert!(e.pgp_key_of("ravi@example.org").is_some(), "the others' keys from a signed message");
         let m = e.session.message(id).unwrap();

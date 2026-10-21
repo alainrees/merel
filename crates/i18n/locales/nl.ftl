@@ -765,8 +765,27 @@ chat-to-hint = Aan: e-mailadressen, gescheiden door komma's
 chat-name-hint = Groepsnaam (optioneel)
 chat-first-hint = Typ je eerste bericht…
 chat-check-addresses = Controleer de adressen.
-chat-ready-note = De chat is end-to-end versleuteld. Wie nog geen versleutelde chat met je heeft, krijgt straks een uitnodiging; tot dan gaat er niets weg.
+chat-ready-note = De chat is end-to-end versleuteld. Wie nog geen versleutelde chat met je heeft, heeft eerst je uitnodigingslink nodig; tot dan gaat er niets weg.
 chat-enable-first = Zet eerst chat aan voor dit account; dat kan op de beginpagina van Chat.
+chat-invite = Uitnodigingslink
+chat-invite-for = Uitnodiging voor { $email }
+chat-invite-intro = Wie deze link opent in Merel of in Delta Chat, of de QR-code scant, krijgt een versleutelde chat met je. Jullie sleutels worden daarbij gecontroleerd, zodat niemand ertussen kan zitten.
+chat-invite-copy = Link kopiëren
+chat-invite-copied = Gekopieerd
+chat-invite-mail = Per e-mail sturen
+chat-invite-renew = Nieuwe link maken
+chat-invite-renew-hint = De oude link en QR-code werken daarna niet meer.
+chat-invite-close = Sluiten
+chat-invite-qr = QR-code van de uitnodigingslink
+chat-invite-mail-subject = Chat je met me?
+chat-invite-mail-text = Ik wil graag end-to-end versleuteld met je chatten. Open deze link in Merel of in Delta Chat (gratis, voor telefoon en computer, zie delta.chat):
+chat-accept = Uitnodiging aannemen
+chat-accept-hint = Plak een uitnodigingslink (https://i.delta.chat/#…)
+chat-accept-button = Aannemen
+chat-accept-sent = Uitnodiging aangenomen. Zodra { $name } antwoordt, staat de chat klaar.
+chat-pending = Wacht op antwoord van { $name }
+chat-verified = geverifieerd
+chat-show-invite = Uitnodigingslink tonen
 
 ## Months and days of the week (1 = January, 1 = Monday)
 month-1 = januari
@@ -1681,3 +1700,13 @@ folder-kind-junk = Ongewenste e-mail
 folder-kind-deleted = Verwijderde items
 calendar-mine = Mijn agenda
 junk-intro = Mail van een geblokkeerde afzender of een geblokkeerd domein gaat bij aankomst meteen naar Ongewenste e-mail. Veilige afzenders en je contacten komen daar nooit in. Je mailprovider filtert daarnaast zelf; wat die als ongewenst ziet, staat ook in die map.
+
+## Chat invitations
+
+invite-not-a-link = Dit is geen uitnodiging. Een uitnodiging begint met https://i.delta.chat/#.
+invite-group = Dit is een uitnodiging voor een groep of kanaal. Die kan Merel nog niet aannemen; vraag om een uitnodiging voor een chat met jou.
+invite-own-account = Dit is een uitnodiging van een van je eigen accounts.
+
+## Chat
+
+chat-enable-short = Zet eerst chat aan voor dit account.

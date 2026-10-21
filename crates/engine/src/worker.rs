@@ -351,7 +351,7 @@ fn run(c: &mut dyn Mailbox, account: &Account, keys: &Keys, job: &Job) -> Result
         Job::Body { account_id, message_id, path, id } => {
             let raw = c.body(path, id)?;
             let (body, header, carried) = crate::certificates::read(keys, account_id, &raw);
-            Some(Event::Body { message_id: message_id.clone(), body: Box::new(body), header, raw, carried: carried.map(Box::new) })
+            Some(Event::Body { message_id: message_id.clone(), body: Box::new(body), header: Box::new(header), raw, carried: carried.map(Box::new) })
         }
         Job::Flag { path, id, flag, on, .. } => {
             c.set_flag(path, id, *flag, *on)?;

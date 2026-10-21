@@ -91,6 +91,7 @@ fluent-bundle = "0.16"
 fluent-syntax = "0.12"
 unic-langid = "0.9"
 sys-locale = "0.3"
+qrcode = { version = "0.14", default-features = false }
 eframe = { version = "0.36", default-features = false }
 egui_kittest = "0.36"
 # Image decoding for pictures embedded in mail (no SVG: no text rendering engine, no scripts).
