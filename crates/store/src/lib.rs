@@ -299,6 +299,7 @@ mod tests {
             path: "INBOX".into(),
             kind: FolderKind::Inbox,
             unread: 1,
+            parent: None,
         };
         let message = MessageHeader {
             id: "a1/INBOX#7".into(),

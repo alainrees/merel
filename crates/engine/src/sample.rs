@@ -46,6 +46,7 @@ fn build() -> Option<Session> {
         path: id.to_ascii_uppercase(),
         kind,
         unread: 0,
+        parent: None,
     })
     .collect();
 

@@ -143,8 +143,8 @@ mod tests {
         s.apply(Event::Connected {
             account_id: "a".into(),
             folders: vec![
-                RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true },
-                RemoteFolder { path: "Trash".into(), name: "Trash".into(), kind: FolderKind::Deleted, selectable: true },
+                RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true, parent: None },
+                RemoteFolder { path: "Trash".into(), name: "Trash".into(), kind: FolderKind::Deleted, selectable: true, parent: None },
             ],
             syncs_items: false,
         });

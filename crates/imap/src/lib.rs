@@ -309,6 +309,15 @@ fn one_per_kind(listed: Vec<(RemoteFolder, bool)>) -> Vec<RemoteFolder> {
         .collect()
 }
 
+/// The parent path and the own name of mailbox `path`, split at the server's hierarchy
+/// delimiter; without one (a flat server) the whole path is the name.
+fn split_path<'a>(path: &'a str, delimiter: Option<&str>) -> (Option<&'a str>, &'a str) {
+    match delimiter.filter(|d| !d.is_empty()).and_then(|d| path.rsplit_once(d)) {
+        Some((parent, name)) if !parent.is_empty() && !name.is_empty() => (Some(parent), name),
+        _ => (None, path),
+    }
+}
+
 /// Whether a BODYSTRUCTURE holds anything a person would call an attachment.
 fn has_attachment(b: &BodyStructure<'_>) -> bool {
     let disposition_attachment =
@@ -341,18 +350,20 @@ impl ImapClient {
         let listed: Vec<(RemoteFolder, bool)> = names
             .iter()
             .map(|n| {
+                let (parent, name) = split_path(n.name(), n.delimiter());
                 let folder = RemoteFolder {
                     path: n.name().to_string(),
-                    name: n.name().rsplit(['/', '.']).next().unwrap_or(n.name()).to_string(),
+                    name: name.to_string(),
                     kind: kind_of(n.name(), n.attributes()),
                     selectable: !n.attributes().iter().any(|a| matches!(a, NameAttribute::NoSelect)),
+                    parent: parent.map(str::to_string),
                 };
                 (folder, n.attributes().iter().any(is_special_use))
             })
             .collect();
         let mut out = one_per_kind(listed);
         if !out.iter().any(|f| f.kind == FolderKind::Inbox) {
-            out.insert(0, RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true });
+            out.insert(0, RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true, parent: None });
         }
         Ok(out)
     }
@@ -840,8 +851,22 @@ mod tests {
     }
 
     #[test]
+    fn a_mailbox_path_splits_into_its_parent_and_its_own_name() {
+        assert_eq!(split_path("INBOX.HUIS", Some(".")), (Some("INBOX"), "HUIS"));
+        assert_eq!(split_path("Prive/Florence/2026", Some("/")), (Some("Prive/Florence"), "2026"));
+        assert_eq!(split_path("Gem. Ass", Some("/")), (None, "Gem. Ass"), "a dot is no delimiter here");
+        assert_eq!(split_path("INBOX", None), (None, "INBOX"));
+    }
+
+    #[test]
     fn two_junk_folders_become_one_junk_folder_and_one_named_folder() {
-        let f = |path: &str, kind| RemoteFolder { path: path.into(), name: path.rsplit('.').next().unwrap().into(), kind, selectable: true };
+        let f = |path: &str, kind| RemoteFolder {
+            path: path.into(),
+            name: path.rsplit('.').next().unwrap().into(),
+            kind,
+            selectable: true,
+            parent: None,
+        };
         let listed = vec![
             (f("INBOX", FolderKind::Inbox), false),
             (f("INBOX.spam", FolderKind::Junk), false),

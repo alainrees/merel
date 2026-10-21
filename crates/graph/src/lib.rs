@@ -609,6 +609,9 @@ impl GraphClient {
     }
 }
 
+/// How many levels of subfolders the folder list goes down.
+const MAX_FOLDER_DEPTH: usize = 4;
+
 /// The fields a listing asks for per message.
 const MESSAGE_FIELDS: &str = "id,subject,from,toRecipients,receivedDateTime,isRead,flag,hasAttachments,internetMessageId,categories,importance";
 
@@ -629,18 +632,22 @@ impl Mailbox for GraphClient {
         let select = "$select=id,displayName,childFolderCount";
         let top: Vec<Value> = self.list(&format!("/me/mailFolders?$top=250&{select}"))?;
         let mut out = Vec::new();
-        for f in &top {
-            let Some(id) = id_of(f) else { continue };
-            let name = clean_text(str_of(f, "displayName"));
-            // One level of subfolders, named after their parent like IMAP paths.
-            if f.get("childFolderCount").and_then(Value::as_u64).unwrap_or(0) > 0 {
-                for c in self.list(&format!("/me/mailFolders/{}/childFolders?$top=250&{select}", encode(&id)))? {
-                    let Some(cid) = id_of(&c) else { continue };
-                    let cname = clean_text(str_of(&c, "displayName"));
-                    out.push(RemoteFolder { path: cid.clone(), kind: self.kind_of(&cid, &cname), name: format!("{name}/{cname}"), selectable: true });
+        // Each folder with the ones inside it, a few levels deep, so the folder pane can nest
+        // them as Outlook does.
+        let mut level: Vec<(Value, Option<String>)> = top.into_iter().map(|f| (f, None)).collect();
+        for depth in 0..=MAX_FOLDER_DEPTH {
+            let mut next = Vec::new();
+            for (f, parent) in level {
+                let Some(id) = id_of(&f) else { continue };
+                let name = clean_text(str_of(&f, "displayName"));
+                if depth < MAX_FOLDER_DEPTH && f.get("childFolderCount").and_then(Value::as_u64).unwrap_or(0) > 0 {
+                    for c in self.list(&format!("/me/mailFolders/{}/childFolders?$top=250&{select}", encode(&id)))? {
+                        next.push((c, Some(id.clone())));
+                    }
                 }
+                out.push(RemoteFolder { path: id.clone(), kind: self.kind_of(&id, &name), name, selectable: true, parent });
             }
-            out.push(RemoteFolder { path: id.clone(), kind: self.kind_of(&id, &name), name, selectable: true });
+            level = next;
         }
         if !out.iter().any(|f| f.kind == FolderKind::Inbox) {
             return Err(MailboxError::Protocol("the mailbox has no inbox".into()));

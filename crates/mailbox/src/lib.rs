@@ -46,6 +46,8 @@ pub struct RemoteFolder {
     pub name: String,
     pub kind: FolderKind,
     pub selectable: bool,
+    /// The `path` of the folder this one sits in; `None` at the top of the mailbox.
+    pub parent: Option<String>,
 }
 
 /// A message's envelope as the server lists it.

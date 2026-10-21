@@ -941,13 +941,16 @@ impl Session {
     /// messages of folders that are gone go with them.
     fn set_folders(&mut self, account_id: &str, folders: Vec<RemoteFolder>) {
         self.folders.retain(|f| f.account_id != account_id);
+        let folders: Vec<RemoteFolder> = folders.into_iter().filter(|f| f.selectable).collect();
+        // A folder nests under its parent when that is listed too; else it stands at the top.
+        let listed: HashSet<String> = folders.iter().map(|f| f.path.clone()).collect();
         let mut new: Vec<Folder> = folders
             .into_iter()
-            .filter(|f| f.selectable)
             .map(|f| Folder {
                 id: format!("{account_id}/{}", f.path),
                 account_id: account_id.to_string(),
                 name: f.kind.dutch_name().map(str::to_string).unwrap_or_else(|| clean_text(&f.name)),
+                parent: f.parent.filter(|p| listed.contains(p) && *p != f.path).map(|p| format!("{account_id}/{p}")),
                 path: f.path,
                 kind: f.kind,
                 unread: 0,
@@ -1482,6 +1485,28 @@ mod tests {
     }
 
     #[test]
+    fn a_subfolder_nests_under_its_parent_when_the_server_lists_that_too() {
+        let mut s = Session::with_accounts(vec![account("a")]);
+        let f = |path: &str, kind, parent: Option<&str>, selectable| RemoteFolder {
+            path: path.into(),
+            name: path.rsplit('/').next().unwrap_or(path).into(),
+            kind,
+            selectable,
+            parent: parent.map(str::to_string),
+        };
+        let folders = vec![
+            f("INBOX", FolderKind::Inbox, None, true),
+            f("INBOX/HUIS", FolderKind::Other, Some("INBOX"), true),
+            f("[Gmail]", FolderKind::Other, None, false),
+            f("[Gmail]/Belangrijk", FolderKind::Other, Some("[Gmail]"), true),
+        ];
+        s.apply(Event::Connected { account_id: "a".into(), folders, syncs_items: false });
+        assert_eq!(s.folder("a/INBOX/HUIS").and_then(|f| f.parent.as_deref()), Some("a/INBOX"));
+        assert_eq!(s.folder("a/INBOX/HUIS").map(|f| f.name.as_str()), Some("HUIS"));
+        assert_eq!(s.folder("a/[Gmail]/Belangrijk").and_then(|f| f.parent.as_deref()), None, "its parent cannot be opened: it stands at the top");
+    }
+
+    #[test]
     fn the_inbox_unread_count_sums_every_account_and_follows_the_flags() {
         let mut s = Session::sample();
         let before = s.inbox_unread();
@@ -1501,7 +1526,7 @@ mod tests {
         let mut s = Session::with_accounts(vec![account("a")]);
         s.apply(Event::Connected {
             account_id: "a".into(),
-            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true }],
+            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true, parent: None }],
             syncs_items: false,
         });
         s.apply(Event::Headers { folder_id: "a/INBOX".into(), headers: vec![header(1), header(2)], offset: 0, limit: HEADER_LIMIT });
@@ -1550,7 +1575,7 @@ mod tests {
         let mut s = Session::with_accounts(vec![account("a")]);
         s.apply(Event::Connected {
             account_id: "a".into(),
-            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true }],
+            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true, parent: None }],
             syncs_items: false,
         });
         s.take_jobs();
@@ -1583,7 +1608,7 @@ mod tests {
         let mut s = Session::with_accounts(vec![account("a")]);
         s.apply(Event::Connected {
             account_id: "a".into(),
-            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true }],
+            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true, parent: None }],
             syncs_items: false,
         });
         s.take_jobs();
@@ -1667,7 +1692,7 @@ mod tests {
         let s = &mut engine.session;
         s.apply(Event::Connected {
             account_id: "a".into(),
-            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true }],
+            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true, parent: None }],
             syncs_items: true,
         });
         s.apply(Event::Synced {
@@ -1723,7 +1748,7 @@ mod tests {
         let s = &mut engine.session;
         s.apply(Event::Connected {
             account_id: "a".into(),
-            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true }],
+            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true, parent: None }],
             syncs_items: false,
         });
         s.apply(Event::Headers { folder_id: "a/INBOX".into(), headers: vec![header(1)], offset: 0, limit: HEADER_LIMIT });

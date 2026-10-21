@@ -284,8 +284,8 @@ mod tests {
         let mut s = Session::with_accounts(vec![account()]);
         s.take_jobs();
         let folders = vec![
-            RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true },
-            RemoteFolder { path: "Archief".into(), name: "Archief".into(), kind: FolderKind::Archive, selectable: true },
+            RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true, parent: None },
+            RemoteFolder { path: "Archief".into(), name: "Archief".into(), kind: FolderKind::Archive, selectable: true, parent: None },
         ];
         s.apply(Event::Connected { account_id: "a1".into(), folders, syncs_items: true });
         let header = RemoteHeader {
@@ -364,7 +364,7 @@ mod tests {
         assert!(!s.loading.contains("a1/INBOX#7"));
 
         // The server's answer replaces the cached folders and refreshes the selected one.
-        let folders = vec![RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true }];
+        let folders = vec![RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true, parent: None }];
         s.apply(Event::Connected { account_id: "a1".into(), folders, syncs_items: true });
         assert_eq!(s.folders.len(), 1);
         assert!(s.queued.is_empty());

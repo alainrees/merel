@@ -182,7 +182,10 @@ in `view.json`. With more than one account, "Alle accounts" above the accounts l
 Concepten, Verzonden items, Archief, Ongewenste e-mail and Verwijderde items once, each showing the
 mail of every account together with the unread counts added up, as in Outlook; it is a view, so a
 reply goes out from the account the message came to and a delete, move or drop stays in that
-account. The group folds shut with its chevron. Deleting a message that is already in "Verwijderde
+account. The group folds shut with its chevron, and so does each account. Subfolders sit a step in
+under their folder, by their own name, as the server nests them (IMAP's hierarchy delimiter, Exchange's
+parent folder, Microsoft Graph's child folders); a folder with subfolders starts folded shut, and what
+is folded open is kept in `view.json`. Deleting a message that is already in "Verwijderde
 items" removes it for good, after a question; Exchange and Microsoft 365 keep such mail
 recoverable on the server for a while, as they do for Outlook.
 

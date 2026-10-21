@@ -71,6 +71,7 @@ impl Session {
             path: String::new(),
             kind,
             unread: members.iter().map(|f| f.unread).fold(0, u32::saturating_add),
+            parent: None,
         })
     }
 
@@ -122,7 +123,7 @@ mod tests {
     use crate::{Event, RemoteFolder, RemoteHeader};
 
     fn remote(path: &str, kind: FolderKind) -> RemoteFolder {
-        RemoteFolder { path: path.into(), name: path.into(), kind, selectable: true }
+        RemoteFolder { path: path.into(), name: path.into(), kind, selectable: true, parent: None }
     }
 
     fn unread(n: u32) -> RemoteHeader {
