@@ -229,8 +229,8 @@ mod tests {
         s.apply(Event::Connected {
             account_id: "a".into(),
             folders: vec![
-                RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true },
-                RemoteFolder { path: "Junk".into(), name: "Junk".into(), kind: FolderKind::Junk, selectable: true },
+                RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true, parent: None },
+                RemoteFolder { path: "Junk".into(), name: "Junk".into(), kind: FolderKind::Junk, selectable: true, parent: None },
             ],
             syncs_items: false,
         });
@@ -276,8 +276,8 @@ mod tests {
         s.apply(Event::Connected {
             account_id: "a".into(),
             folders: vec![
-                RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true },
-                RemoteFolder { path: "Junk".into(), name: "Junk".into(), kind: FolderKind::Junk, selectable: true },
+                RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true, parent: None },
+                RemoteFolder { path: "Junk".into(), name: "Junk".into(), kind: FolderKind::Junk, selectable: true, parent: None },
             ],
             syncs_items: false,
         });

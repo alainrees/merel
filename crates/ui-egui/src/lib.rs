@@ -1296,10 +1296,27 @@ fn folder_icon(kind: FolderKind) -> &'static str {
     }
 }
 
-/// One row of the folder pane: icon, name and the unread count, highlighted when it is the
-/// open folder. `hint` is shown on hover, when there is one; `label` is what a screen reader
-/// says instead of the name, when the name alone would not tell the row apart.
-fn folder_row(ui: &mut Ui, t: &Tokens, f: &merel_model::Folder, on: bool, hint: Option<String>, label: Option<&str>) -> egui::Response {
+/// How a folder row sits in the folder pane, beyond the folder itself.
+#[derive(Default)]
+struct RowPlace<'a> {
+    /// Shown on hover, when there is one.
+    hint: Option<String>,
+    /// What a screen reader says instead of the name, when the name alone would not tell the
+    /// row apart.
+    label: Option<&'a str>,
+    /// How many folders it sits in: each level moves it a step to the right.
+    depth: usize,
+    /// For a folder with subfolders, whether they are shown; it then gets a chevron.
+    open: Option<bool>,
+}
+
+/// The step a subfolder moves to the right of its parent.
+const FOLDER_INDENT: f32 = 16.0;
+
+/// One row of the folder pane: chevron, icon, name and the unread count, highlighted when it
+/// is the open folder. Also says whether the chevron was clicked.
+fn folder_row(ui: &mut Ui, t: &Tokens, f: &merel_model::Folder, on: bool, place: RowPlace) -> (egui::Response, bool) {
+    let RowPlace { hint, label, depth, open } = place;
     let r = ui.add_sized(
         [ui.available_width(), 28.0],
         egui::Button::new("")
@@ -1314,11 +1331,24 @@ fn folder_row(ui: &mut Ui, t: &Tokens, f: &merel_model::Folder, on: bool, hint: 
         None => r,
     };
     let rect = r.rect.shrink2(vec2(8.0, 0.0));
+    let left = rect.left() + FOLDER_INDENT * depth.min(6) as f32;
     let font = egui::FontId::proportional(13.5);
-    let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + 8.0, rect.center().y), vec2(16.0, 16.0));
+    // The chevron in front folds the subfolders open and shut, apart from opening the folder.
+    let mut toggled = false;
+    if let Some(open) = open {
+        let zone = egui::Rect::from_center_size(egui::pos2(left + 4.0, rect.center().y), vec2(18.0, 24.0));
+        let c = ui.interact(zone, ui.id().with(("fold", &f.id)), Sense::click());
+        let what = if open { "Inklappen" } else { "Uitklappen" };
+        c.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{what}: {}", f.name)));
+        toggled = c.on_hover_text(what).clicked();
+        let chevron = egui::Rect::from_center_size(zone.center(), vec2(12.0, 12.0));
+        let icon = if open { helder::Icon::ChevronDown } else { helder::Icon::ChevronRight };
+        icon.image(12.0, t.text_dim).paint_at(ui, chevron);
+    }
+    let icon = egui::Rect::from_center_size(egui::pos2(left + 22.0, rect.center().y), vec2(16.0, 16.0));
     folder_line_icon(f.kind).image(16.0, if on { t.accent_text } else { t.text_dim }).paint_at(ui, icon);
     let p = ui.painter();
-    p.text(egui::pos2(rect.left() + 26.0, rect.center().y), egui::Align2::LEFT_CENTER, &f.name, font.clone(), t.text);
+    p.text(egui::pos2(left + 40.0, rect.center().y), egui::Align2::LEFT_CENTER, &f.name, font.clone(), t.text);
     if f.unread > 0 {
         p.text(rect.right_center(), egui::Align2::RIGHT_CENTER, f.unread.to_string(), font, t.accent_text);
     }
@@ -1326,7 +1356,32 @@ fn folder_row(ui: &mut Ui, t: &Tokens, f: &merel_model::Folder, on: bool, hint: 
     if r.dnd_hover_payload::<DraggedMessage>().is_some() {
         p.rect_stroke(r.rect, CornerRadius::same(4), Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
     }
-    r
+    (r, toggled)
+}
+
+/// The folders of one account as the folder pane shows them: each folder followed by its
+/// subfolders, a step further in, while it is folded open (`open`). A folder whose parent is
+/// not listed stands at the top. Each comes with its depth and, when it has subfolders,
+/// whether they are shown.
+fn folder_tree(folders: &[merel_model::Folder], open: &[String]) -> Vec<(merel_model::Folder, usize, Option<bool>)> {
+    let ids: std::collections::HashSet<&str> = folders.iter().map(|f| f.id.as_str()).collect();
+    let top = |f: &merel_model::Folder| f.parent.as_deref().is_none_or(|p| !ids.contains(p));
+    let mut out = Vec::new();
+    // Depth first, with the list's own order (special folders first, then by name) kept.
+    let mut stack: Vec<(&merel_model::Folder, usize)> = folders.iter().filter(|f| top(f)).rev().map(|f| (f, 0)).collect();
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    while let Some((f, depth)) = stack.pop() {
+        if !seen.insert(f.id.as_str()) {
+            continue;
+        }
+        let children: Vec<&merel_model::Folder> = folders.iter().filter(|c| c.parent.as_deref() == Some(f.id.as_str())).collect();
+        let shown = open.contains(&f.id);
+        out.push((f.clone(), depth, (!children.is_empty()).then_some(shown)));
+        if shown {
+            stack.extend(children.into_iter().rev().map(|c| (c, depth + 1)));
+        }
+    }
+    out
 }
 
 fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
@@ -1356,7 +1411,7 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         for f in &favorites {
             let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
             let account = app.engine.session.accounts.iter().find(|a| a.id == f.account_id).map(|a| a.address.email().to_string());
-            let r = folder_row(ui, t, f, on, account.map(|a| format!("{} van {a}", f.name)), None);
+            let (r, _) = folder_row(ui, t, f, on, RowPlace { hint: account.map(|a| format!("{} van {a}", f.name)), ..RowPlace::default() });
             if let Some(dragged) = r.dnd_release_payload::<DraggedMessage>() {
                 drop_on = Some((dragged.0.clone(), f.id.clone()));
             }
@@ -1373,7 +1428,7 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     // account in it, as long as there is more than one account.
     let unified = app.engine.session.unified_folders();
     if !unified.is_empty() {
-        if folding_heading(ui, t, merel_engine::unified::HEADING, !app.view.all_accounts_closed).clicked() {
+        if folding_heading(ui, t, merel_engine::unified::HEADING, !app.view.all_accounts_closed, None).clicked() {
             app.view.all_accounts_closed = !app.view.all_accounts_closed;
             app.save_view(ui.ctx());
         }
@@ -1382,7 +1437,8 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             for f in &unified {
                 let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
                 let label = format!("{} (alle accounts)", f.name);
-                let r = folder_row(ui, t, f, on, Some(format!("{} van alle accounts samen", f.name)), Some(&label));
+                let hint = Some(format!("{} van alle accounts samen", f.name));
+                let (r, _) = folder_row(ui, t, f, on, RowPlace { hint, label: Some(&label), ..RowPlace::default() });
                 if let Some(dragged) = r.dnd_release_payload::<DraggedMessage>()
                     && let Some(target) = app.engine.session.drop_target(&f.id, &dragged.0)
                 {
@@ -1401,26 +1457,34 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         }
         ui.add_space(12.0);
     }
+    let mut fold_account = None;
+    let mut fold_folder = None;
     for account in &app.engine.session.accounts {
-        // Each account under a small heading: its name and address, as the design has it.
-        ui.horizontal(|ui| {
-            let (name, email) = (account.address.display(), account.address.email());
-            let heading = if name == email { email.to_string() } else { format!("{name} · {email}") };
-            ui.label(RichText::new(heading).size(12.0).strong().color(t.text_dim));
-            let (dot, tip) = match app.engine.session.status.get(&account.id) {
-                Some(AccountStatus::Online) => (t.accent, "Verbonden"),
-                Some(AccountStatus::Connecting) => (t.text_dim, "Verbinden…"),
-                Some(AccountStatus::Error(_)) => (t.flag, "Fout, zie de statusbalk"),
-                _ => (t.border, "Niet verbonden"),
-            };
-            let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
-            ui.painter().circle_filled(r.center(), 4.0, dot);
-            ui.allocate_rect(r, Sense::hover()).on_hover_text(tip);
-        });
-        ui.add_space(4.0);
-        for f in app.engine.session.folders.iter().filter(|f| f.account_id == account.id) {
+        // Each account under a heading that folds its folders shut: its name and address, as
+        // the design has it, and a dot for the connection.
+        let (name, email) = (account.address.display(), account.address.email());
+        let heading = if name == email { email.to_string() } else { format!("{name} · {email}") };
+        let status = match app.engine.session.status.get(&account.id) {
+            Some(AccountStatus::Online) => (t.accent, "Verbonden"),
+            Some(AccountStatus::Connecting) => (t.text_dim, "Verbinden…"),
+            Some(AccountStatus::Error(_)) => (t.flag, "Fout, zie de statusbalk"),
+            _ => (t.border, "Niet verbonden"),
+        };
+        let open = !app.view.closed_accounts.contains(&account.id);
+        if folding_heading(ui, t, &heading, open, Some(status)).clicked() {
+            fold_account = Some(account.id.clone());
+        }
+        if !open {
+            ui.add_space(4.0);
+            continue;
+        }
+        let folders: Vec<merel_model::Folder> = app.engine.session.folders.iter().filter(|f| f.account_id == account.id).cloned().collect();
+        for (f, depth, shown) in &folder_tree(&folders, &app.view.open_folders) {
             let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
-            let r = folder_row(ui, t, f, on, None, None);
+            let (r, toggled) = folder_row(ui, t, f, on, RowPlace { depth: *depth, open: *shown, ..RowPlace::default() });
+            if toggled {
+                fold_folder = Some(f.id.clone());
+            }
             if let Some(dragged) = r.dnd_release_payload::<DraggedMessage>() {
                 drop_on = Some((dragged.0.clone(), f.id.clone()));
             }
@@ -1476,21 +1540,41 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if let Some(id) = unified_read {
         app.run("folder.mark_all_read", json!({ "id": id }));
     }
+    if let Some(id) = fold_account {
+        view::ViewPrefs::toggle(&mut app.view.closed_accounts, &id);
+        app.save_view(ui.ctx());
+    }
+    if let Some(id) = fold_folder {
+        view::ViewPrefs::toggle(&mut app.view.open_folders, &id);
+        app.save_view(ui.ctx());
+    }
 }
 
 /// The heading of a group in the folder pane that folds open and shut, with a chevron that
-/// says which it is.
-fn folding_heading(ui: &mut Ui, t: &Tokens, text: &str, open: bool) -> egui::Response {
+/// says which it is; `status` adds a coloured dot after the text, with what it means.
+fn folding_heading(ui: &mut Ui, t: &Tokens, text: &str, open: bool, status: Option<(Color32, &str)>) -> egui::Response {
     let r = ui.add_sized([ui.available_width(), 26.0], egui::Button::new("").frame(false));
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, true, text));
-    let r = r.on_hover_text(if open { "Inklappen" } else { "Uitklappen" });
+    let what = if open { "Inklappen" } else { "Uitklappen" };
+    let r = match status {
+        Some((_, tip)) => r.on_hover_text(format!("{tip}. {what}.")),
+        None => r.on_hover_text(what),
+    };
     let rect = r.rect.shrink2(vec2(8.0, 0.0));
     let chevron = egui::Rect::from_center_size(egui::pos2(rect.left() + 6.0, rect.center().y), vec2(14.0, 14.0));
     let icon = if open { helder::Icon::ChevronDown } else { helder::Icon::ChevronRight };
     icon.image(14.0, t.text_dim).paint_at(ui, chevron);
-    // As quiet as the account headings below it.
-    let font = egui::FontId::proportional(12.0);
-    ui.painter().text(egui::pos2(rect.left() + 20.0, rect.center().y), egui::Align2::LEFT_CENTER, text, font, t.text_dim);
+    // Small and quiet, as the design has the account headings.
+    // A long name and address end in "…" so the dot after them stays in sight.
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_string(), egui::FontId::proportional(12.0), t.text_dim);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 20.0 - if status.is_some() { 18.0 } else { 0.0 });
+    let galley = ui.painter().layout_job(job);
+    let pos = egui::pos2(rect.left() + 20.0, rect.center().y - galley.size().y / 2.0);
+    let right = pos.x + galley.size().x;
+    ui.painter().galley(pos, galley, t.text_dim);
+    if let Some((dot, _)) = status {
+        ui.painter().circle_filled(egui::pos2(right + 10.0, rect.center().y), 4.0, dot);
+    }
     r
 }
 
@@ -2758,7 +2842,13 @@ mod tests {
         engine.add_account(account, merel_secrets::Secret::new("x")).expect("add");
         engine.session.apply(Event::Connected {
             account_id: id.clone(),
-            folders: vec![RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: merel_model::FolderKind::Inbox, selectable: true }],
+            folders: vec![RemoteFolder {
+                path: "INBOX".into(),
+                name: "Inbox".into(),
+                kind: merel_model::FolderKind::Inbox,
+                selectable: true,
+                parent: None,
+            }],
             syncs_items: false,
         });
         // Connecting queued a fetch of the inbox; pretend it came back empty.
@@ -4012,7 +4102,8 @@ mod tests {
             let account = f.account().expect("account");
             let id = account.id.clone();
             engine.add_account(account, merel_secrets::Secret::new("x")).expect("add");
-            let inbox = RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: merel_model::FolderKind::Inbox, selectable: true };
+            let inbox =
+                RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: merel_model::FolderKind::Inbox, selectable: true, parent: None };
             engine.session.apply(Event::Connected { account_id: id.clone(), folders: vec![inbox], syncs_items: false });
             let header = RemoteHeader {
                 id: "1".into(),
@@ -4051,6 +4142,74 @@ mod tests {
         h.run_steps(2);
         assert!(h.query_by_label("Postvak IN (alle accounts)").is_none());
         assert!(h.state().view.all_accounts_closed);
+    }
+
+    #[test]
+    fn subfolders_nest_under_their_parent_and_start_folded_shut() {
+        let folder = |id: &str, parent: Option<&str>| merel_model::Folder {
+            id: id.into(),
+            account_id: "a".into(),
+            name: id.rsplit('/').next().unwrap_or(id).into(),
+            path: id.into(),
+            kind: FolderKind::Other,
+            unread: 0,
+            parent: parent.map(str::to_string),
+        };
+        let folders = [
+            folder("Inbox", None),
+            folder("Prive", None),
+            folder("Prive/HUIS", Some("Prive")),
+            folder("Prive/HUIS/2026", Some("Prive/HUIS")),
+            folder("Weg/Los", Some("Weg")),
+        ];
+        let rows = |open: &[&str]| -> Vec<(String, usize, Option<bool>)> {
+            let open: Vec<String> = open.iter().map(|s| s.to_string()).collect();
+            folder_tree(&folders, &open).into_iter().map(|(f, d, o)| (f.id, d, o)).collect()
+        };
+        assert_eq!(
+            rows(&[]),
+            [("Inbox".into(), 0, None), ("Prive".into(), 0, Some(false)), ("Weg/Los".into(), 0, None)],
+            "shut by default; a folder whose parent is not listed stands at the top"
+        );
+        assert_eq!(
+            rows(&["Prive", "Prive/HUIS"]),
+            [
+                ("Inbox".into(), 0, None),
+                ("Prive".into(), 0, Some(true)),
+                ("Prive/HUIS".into(), 1, Some(true)),
+                ("Prive/HUIS/2026".into(), 2, None),
+                ("Weg/Los".into(), 0, None)
+            ]
+        );
+    }
+
+    #[test]
+    fn an_account_folds_shut_and_a_new_subfolder_shows_under_its_parent() {
+        let mut h = two_accounts();
+        h.run();
+        let inboxes = h.query_all_by_label("Postvak IN").count();
+        h.get_by_label("alain@voorbeeld.nl").click();
+        h.run();
+        assert_eq!(h.query_all_by_label("Postvak IN").count(), inboxes - 1, "the first account is folded shut");
+        assert_eq!(h.state().view.closed_accounts.len(), 1);
+        h.get_by_label("alain@voorbeeld.nl").click();
+        h.run();
+        assert_eq!(h.query_all_by_label("Postvak IN").count(), inboxes);
+
+        let mut h = harness();
+        h.run();
+        h.state_mut().new_folder(Some("inbox".into()));
+        h.state_mut().folder_edit.as_mut().expect("edit").name = "Projecten".into();
+        h.run();
+        h.get_by_label("Map aanmaken").click();
+        h.run();
+        h.get_by_label("Projecten");
+        h.get_by_label("Inklappen: Postvak IN").click();
+        h.run();
+        assert!(h.query_by_label("Projecten").is_none(), "folded shut");
+        h.get_by_label("Uitklappen: Postvak IN").click();
+        h.run();
+        h.get_by_label("Projecten");
     }
 
     #[test]

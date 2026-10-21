@@ -221,8 +221,8 @@ mod tests {
 
         let mut s = Session::with_accounts(vec![crate::tests::account("acc")]);
         let folders = vec![
-            RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true },
-            RemoteFolder { path: "Klaar".into(), name: "Klaar".into(), kind: FolderKind::Other, selectable: true },
+            RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true, parent: None },
+            RemoteFolder { path: "Klaar".into(), name: "Klaar".into(), kind: FolderKind::Other, selectable: true, parent: None },
         ];
         s.apply(crate::Event::Connected { account_id: "acc".into(), folders, syncs_items: false });
         let mut h = crate::tests::header(7);

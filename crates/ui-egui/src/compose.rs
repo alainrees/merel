@@ -1597,6 +1597,7 @@ mod tests {
             path: "Junk".into(),
             kind: FolderKind::Junk,
             unread: 0,
+            parent: None,
         };
         app.engine.session.folders.push(junk);
         if let Some(m) = app.engine.session.messages.iter_mut().find(|m| m.id == "m2") {

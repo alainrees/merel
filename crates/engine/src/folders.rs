@@ -49,7 +49,8 @@ pub fn create(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     if s.folder(&id).is_some() || s.folders.iter().any(|f| f.account_id == account_id && f.name.eq_ignore_ascii_case(&name)) {
         return Err(CommandError::Param("name"));
     }
-    s.folders.push(Folder { id, account_id, name, path, kind: FolderKind::Other, unread: 0 });
+    let parent = parent.map(|p| p.id);
+    s.folders.push(Folder { id, account_id, name, path, kind: FolderKind::Other, unread: 0, parent });
     sort(s);
     Ok(())
 }
@@ -75,6 +76,9 @@ pub fn rename(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     }
     if s.selected_folder.as_deref() == Some(&folder.id) {
         s.selected_folder = Some(id.clone());
+    }
+    for f in s.folders.iter_mut().filter(|f| f.parent.as_deref() == Some(folder.id.as_str())) {
+        f.parent = Some(id.clone());
     }
     if let Some(f) = s.folders.iter_mut().find(|f| f.id == folder.id) {
         f.id = id;
@@ -226,8 +230,8 @@ mod tests {
 
         let mut s = Session::with_accounts(vec![crate::tests::account("acc")]);
         let folders = vec![
-            RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true },
-            RemoteFolder { path: "Trash".into(), name: "Trash".into(), kind: FolderKind::Deleted, selectable: true },
+            RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true, parent: None },
+            RemoteFolder { path: "Trash".into(), name: "Trash".into(), kind: FolderKind::Deleted, selectable: true, parent: None },
         ];
         s.apply(crate::Event::Connected { account_id: "acc".into(), folders, syncs_items: false });
         s.apply(crate::Event::Headers {
@@ -256,12 +260,13 @@ mod tests {
 
         let mut s = Session::with_accounts(vec![crate::tests::account("acc")]);
         let listed = |names: &[&str]| -> Vec<RemoteFolder> {
-            let mut out = vec![RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true }];
+            let mut out = vec![RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true, parent: None }];
             out.extend(names.iter().map(|n| RemoteFolder {
                 path: format!("INBOX/{n}"),
                 name: (*n).into(),
                 kind: FolderKind::Other,
                 selectable: true,
+                parent: Some("INBOX".into()),
             }));
             out
         };

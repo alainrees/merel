@@ -166,7 +166,7 @@ mod tests {
         use merel_model::FolderKind;
 
         let mut s = Session::with_accounts(vec![crate::tests::account("acc")]);
-        let folders = vec![RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true }];
+        let folders = vec![RemoteFolder { path: "INBOX".into(), name: "INBOX".into(), kind: FolderKind::Inbox, selectable: true, parent: None }];
         s.apply(crate::Event::Connected { account_id: "acc".into(), folders, syncs_items: false });
         let mut h = crate::tests::header(7);
         h.categories = vec!["Werk".into()];

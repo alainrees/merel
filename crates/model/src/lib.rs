@@ -227,6 +227,9 @@ pub struct Folder {
     pub path: String,
     pub kind: FolderKind,
     pub unread: u32,
+    /// The id of the folder this one sits in, as the folder pane nests it; `None` at the top.
+    #[serde(default)]
+    pub parent: Option<String>,
 }
 
 impl FolderKind {

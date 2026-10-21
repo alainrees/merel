@@ -318,7 +318,16 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             Action::DeleteForever { .. } => "message.delete",
         };
         match app.engine.run(command, &params) {
-            Ok(()) => close = true,
+            Ok(()) => {
+                close = true;
+                // A new subfolder shows: its parent folds open, as in Outlook.
+                if let Action::Create { parent: Some(parent), .. } = &edit.action
+                    && !app.view.open_folders.contains(parent)
+                {
+                    app.view.open_folders.push(parent.clone());
+                    app.save_view(ctx);
+                }
+            }
             Err(e) => edit.error = Some(describe(&e)),
         }
     }

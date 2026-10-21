@@ -135,6 +135,11 @@ pub struct ViewPrefs {
     pub notifications: crate::notifications::Prefs,
     /// Whether the "Alle accounts" group at the top of the folder pane is folded shut.
     pub all_accounts_closed: bool,
+    /// The accounts whose folders are folded shut in the folder pane, by id.
+    pub closed_accounts: Vec<String>,
+    /// The folders whose subfolders are shown, by id; a folder with subfolders starts folded
+    /// shut, as in Outlook.
+    pub open_folders: Vec<String>,
 }
 
 /// How many recent searches the menu next to the search box keeps.
@@ -165,11 +170,23 @@ impl Default for ViewPrefs {
             welcomed: false,
             notifications: Default::default(),
             all_accounts_closed: false,
+            closed_accounts: Vec::new(),
+            open_folders: Vec::new(),
         }
     }
 }
 
 impl ViewPrefs {
+    /// Folds `id` open when it is in `list` of the shut ones, or shut when it is not; or the
+    /// other way round for a list of open ones.
+    pub fn toggle(list: &mut Vec<String>, id: &str) {
+        if list.iter().any(|x| x == id) {
+            list.retain(|x| x != id);
+        } else {
+            list.push(id.to_string());
+        }
+    }
+
     /// Whether the calendar's tick box is on, so its appointments show.
     pub fn calendar_shown(&self, calendar_id: &str) -> bool {
         !self.hidden_calendars.iter().any(|c| c == calendar_id)

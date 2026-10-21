@@ -427,6 +427,7 @@ impl Mailbox for EwsClient {
             concat!(
                 "<m:FindFolder Traversal=\"Deep\"><m:FolderShape><t:BaseShape>IdOnly</t:BaseShape><t:AdditionalProperties>",
                 "<t:FieldURI FieldURI=\"folder:DisplayName\"/><t:FieldURI FieldURI=\"folder:FolderClass\"/>",
+                "<t:FieldURI FieldURI=\"folder:ParentFolderId\"/>",
                 "</t:AdditionalProperties></m:FolderShape>",
                 "<m:IndexedPageFolderView MaxEntriesReturned=\"{max}\" Offset=\"0\" BasePoint=\"Beginning\"/>",
                 "<m:ParentFolderIds><t:DistinguishedFolderId Id=\"msgfolderroot\"/></m:ParentFolderIds></m:FindFolder>"
@@ -444,7 +445,9 @@ impl Mailbox for EwsClient {
                 continue;
             }
             let name = clean_text(text(f, "DisplayName").unwrap_or("Map"));
-            out.push(RemoteFolder { path: id.to_string(), kind: self.kind_of(id, &name), name, selectable: true });
+            // The root's id stands for the top: the engine nests a folder only under one it lists.
+            let parent = child(f, "ParentFolderId").and_then(|n| n.attribute("Id")).map(str::to_string);
+            out.push(RemoteFolder { path: id.to_string(), kind: self.kind_of(id, &name), name, selectable: true, parent });
         }
         if !out.iter().any(|f| f.kind == FolderKind::Inbox) {
             return Err(MailboxError::Protocol("the mailbox has no inbox".into()));
