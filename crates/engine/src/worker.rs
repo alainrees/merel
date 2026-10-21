@@ -167,8 +167,8 @@ fn serve(account: Account, mut credentials: Credentials, keys: Keys, jobs: Recei
                     // reports the folders, and the engine replays the offline queue.
                     match connect(&account, &server, &mut credentials) {
                         Ok(mut c) => match run(c.as_mut(), &account, &keys, &Job::Connect { account_id: account.id.clone() }) {
-                            Ok(ev) => {
-                                if let Some(ev) = ev {
+                            Ok(evs) => {
+                                for ev in evs {
                                     let _ = events.send(ev);
                                 }
                                 report_items_error(c.as_ref(), &account.id, &events);
@@ -223,16 +223,14 @@ fn serve(account: Account, mut credentials: Credentials, keys: Keys, jobs: Recei
             }
             let Some(c) = client.as_mut() else { break };
             match run(c.as_mut(), &account, &keys, &job) {
-                Ok(Some(ev)) => {
+                Ok(evs) => {
                     retry = None;
-                    let _ = events.send(ev);
+                    for ev in evs {
+                        let _ = events.send(ev);
+                    }
                     if matches!(job, Job::Connect { .. }) {
                         report_items_error(c.as_ref(), &account.id, &events);
                     }
-                    break;
-                }
-                Ok(None) => {
-                    retry = None;
                     break;
                 }
                 Err(e) => {
@@ -296,19 +294,45 @@ fn uses_graph(account: &Account) -> bool {
     matches!(&account.auth, merel_model::Auth::OAuth2 { scope, .. } if scope.contains("graph.microsoft.com"))
 }
 
-fn run(c: &mut dyn Mailbox, account: &Account, keys: &Keys, job: &Job) -> Result<Option<Event>, MailboxError> {
+/// Fetches an account's calendar, contacts and tasks. The calendar must come; contacts or tasks
+/// the server refuses leave the rest standing, with a note on the account saying which part.
+fn sync(store: &mut dyn merel_mailbox::ItemStore, account_id: &str, from: i64, to: i64) -> Result<Vec<Event>, MailboxError> {
+    let appointments = store.appointments(from, to).map_err(|e| match e {
+        MailboxError::Protocol(m) => MailboxError::Protocol(format!("{m} (agenda)")),
+        e => e,
+    })?;
+    let mut refused = Vec::new();
+    let contacts = part(store.contacts(), "Contactpersonen", &mut refused)?;
+    let tasks = part(store.tasks(), "Taken", &mut refused)?;
+    let mut events = vec![Event::Synced { account_id: account_id.to_string(), appointments, contacts, tasks }];
+    if !refused.is_empty() {
+        events.push(Event::ItemsFailed { account_id: account_id.to_string(), what: refused.join(" ") });
+    }
+    Ok(events)
+}
+
+/// One part of a sync: what the server refused becomes an empty list and a line in `refused`.
+fn part<T>(result: Result<Vec<T>, MailboxError>, what: &str, refused: &mut Vec<String>) -> Result<Vec<T>, MailboxError> {
+    match result {
+        Err(e @ MailboxError::Protocol(_)) => {
+            refused.push(format!("{what}: {}", describe(&e)));
+            Ok(Vec::new())
+        }
+        other => other,
+    }
+}
+
+fn run(c: &mut dyn Mailbox, account: &Account, keys: &Keys, job: &Job) -> Result<Vec<Event>, MailboxError> {
+    if let Job::Sync { account_id, from, to } = job {
+        return sync(items_of(c)?, account_id, *from, *to);
+    }
     Ok(match job {
         Job::Connect { account_id } => {
             let folders = c.folders()?;
             Some(Event::Connected { account_id: account_id.clone(), folders, syncs_items: c.items().is_some() })
         }
-        Job::Sync { account_id, from, to } => {
-            let store = items_of(c)?;
-            let appointments = store.appointments(*from, *to)?;
-            let contacts = store.contacts()?;
-            let tasks = store.tasks()?;
-            Some(Event::Synced { account_id: account_id.clone(), appointments, contacts, tasks })
-        }
+        // Fetched in `sync` above.
+        Job::Sync { .. } => None,
         Job::SaveItem { account_id, local_id, item } => {
             let remote_id = items_of(c)?.save(item)?;
             Some(Event::ItemSaved { account_id: account_id.clone(), local_id: local_id.clone(), remote_id })
@@ -382,13 +406,15 @@ fn run(c: &mut dyn Mailbox, account: &Account, keys: &Keys, job: &Job) -> Result
             };
             Some(Event::Sent { account_id: account.id.clone(), draft_id: *draft_id, result })
         }
-    })
+    }
+    .into_iter()
+    .collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use merel_mailbox::Flag;
-    use merel_model::{Address, Auth, Server, Tls};
+    use merel_mailbox::{Flag, Item, ItemStore};
+    use merel_model::{Address, Appointment, Auth, Contact, Server, Task, Tls};
     use merel_secrets::Secret;
 
     use super::*;
@@ -433,5 +459,33 @@ mod tests {
             Event::Failed { account_id, what } => assert!(account_id == "a1" && what.contains("127.0.0.1"), "{what}"),
             other => panic!("expected a failure, got {other:?}"),
         }
+    }
+
+    /// A store whose To Do part refuses, as Microsoft 365 did on a first live test.
+    struct NoTasks;
+
+    impl ItemStore for NoTasks {
+        fn appointments(&mut self, _: i64, _: i64) -> merel_mailbox::Result<Vec<Appointment>> {
+            Ok(Vec::new())
+        }
+        fn contacts(&mut self) -> merel_mailbox::Result<Vec<Contact>> {
+            Ok(Vec::new())
+        }
+        fn tasks(&mut self) -> merel_mailbox::Result<Vec<Task>> {
+            Err(MailboxError::Protocol("Invalid request".into()))
+        }
+        fn save(&mut self, _: &Item) -> merel_mailbox::Result<String> {
+            Ok(String::new())
+        }
+        fn delete(&mut self, _: &str) -> merel_mailbox::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn refused_tasks_leave_the_calendar_standing() {
+        let events = sync(&mut NoTasks, "a", 0, 1).unwrap();
+        assert!(matches!(&events[0], Event::Synced { account_id, .. } if account_id == "a"));
+        assert!(matches!(&events[1], Event::ItemsFailed { what, .. } if what == "Taken: De server gaf een fout: Invalid request"));
     }
 }
