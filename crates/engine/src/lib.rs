@@ -1071,6 +1071,22 @@ impl Engine {
         self.cache.raw(account, message_id)
     }
 
+    /// The secret store the accounts' passwords and tokens are in.
+    pub fn secrets(&self) -> &Arc<dyn SecretStore> {
+        &self.secrets
+    }
+
+    /// The name of every secret Merel may have filed: the cache key, and per account its
+    /// password or token and its own client secret. What an update hands to the next version.
+    pub fn secret_names(&self) -> Vec<String> {
+        let mut names = vec![merel_store::KEY_NAME.to_string()];
+        for account in &self.session.accounts {
+            names.push(account.id.clone());
+            names.push(signin::client_secret_key(&account.id));
+        }
+        names
+    }
+
     /// Sample mail only, no worker: for tests and previews.
     pub fn sample() -> Self {
         let (_tx, rx) = channel();
@@ -1738,6 +1754,17 @@ mod tests {
         assert!(engine.session.is_sample(), "the last account gone brings the sample mail back");
         assert!(engine.session.appointments.iter().any(|a| a.title == "Lokaal"), "local items survive");
         assert!(engine.remove_account("b").is_err());
+    }
+
+    #[test]
+    fn secret_names_cover_the_cache_key_and_every_account() {
+        let engine = Engine::sample();
+        let names = engine.secret_names();
+        assert_eq!(names[0], merel_store::KEY_NAME);
+        for account in &engine.session.accounts {
+            assert!(names.contains(&account.id));
+            assert!(names.contains(&signin::client_secret_key(&account.id)));
+        }
     }
 
     #[test]
