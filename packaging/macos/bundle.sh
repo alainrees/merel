@@ -37,10 +37,17 @@ if [ -n "${MACOS_CERT_P12:-}" ]; then
   security create-keychain -p "$keychain_password" "$keychain"
   security unlock-keychain -p "$keychain_password" "$keychain"
   printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$work/cert.p12"
-  security import "$work/cert.p12" -k "$keychain" -P "${MACOS_CERT_PASSWORD:-}" -T /usr/bin/codesign >/dev/null
+  echo "Importing the signing certificate"
+  security import "$work/cert.p12" -k "$keychain" -P "${MACOS_CERT_PASSWORD:-}" -T /usr/bin/codesign
   rm "$work/cert.p12"
+  # What arrived (names and kinds only), for when the next step finds nothing.
+  security dump-keychain "$keychain" | grep -E '^class|"labl"' || true
+  echo "Letting codesign use the key"
   security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
-  identity="$(security find-certificate -c Merel -Z "$keychain" | awk '/SHA-1/ { print $3 }')"
+  # Without -v: a self-made certificate is not trusted by the system, and need not be.
+  security find-identity -p codesigning "$keychain"
+  identity="$(security find-identity -p codesigning "$keychain" | awk '/"Merel"/ { print $2; exit }')"
+  [ -n "$identity" ] || { echo "No Merel signing identity in MACOS_CERT_P12" >&2; exit 1; }
   codesign --force --deep --keychain "$keychain" --sign "$identity" "$app"
   security delete-keychain "$keychain"
 else
