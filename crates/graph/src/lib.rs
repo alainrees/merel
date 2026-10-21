@@ -31,6 +31,8 @@ const MAX_REPLY: u64 = 32 * 1024 * 1024;
 const PAGE: u32 = 1000;
 /// Microsoft To Do pages more narrowly than the Outlook endpoints.
 const TODO_PAGE: u32 = 100;
+/// How many of To Do's own pages (ten items each) a plain listing follows.
+const TODO_PAGES: usize = 100;
 const MAX_PAGES: usize = 5;
 /// The well-known mail folders, with the kind each one is.
 const WELL_KNOWN: [(&str, FolderKind); 6] = [
@@ -140,8 +142,33 @@ fn title_of(v: &Value, key: &str) -> String {
     if t.is_empty() { "(Zonder titel)".into() } else { t }
 }
 
+/// Graph's `error` object as a line: the message, with the code when that says more.
+fn error_text(e: &Value) -> String {
+    let (message, code) = (clean_text(str_of(e, "message")), clean_text(str_of(e, "code")));
+    if code.is_empty() || message.contains(&code) {
+        message
+    } else if message.is_empty() {
+        code
+    } else {
+        format!("{message} ({code})")
+    }
+}
+
+/// Names the To Do step that failed, for the note on the account.
+fn todo_step(e: MailboxError, step: &str) -> MailboxError {
+    match e {
+        MailboxError::Protocol(m) => MailboxError::Protocol(format!("{m} (To Do-{step})")),
+        e => e,
+    }
+}
+
+/// An item's text; a body sent as HTML (when To Do was asked without preferences) becomes text.
 fn body_text(v: &Value) -> String {
-    v.get("body").map(|b| str_of(b, "content")).unwrap_or("").to_string()
+    let Some(b) = v.get("body") else { return String::new() };
+    match str_of(b, "contentType") {
+        t if t.eq_ignore_ascii_case("html") => merel_mime::html_to_text(str_of(b, "content")),
+        _ => str_of(b, "content").to_string(),
+    }
 }
 
 fn text_body(content: &str) -> Value {
@@ -424,11 +451,24 @@ impl GraphClient {
     /// One request. `body` is JSON unless `content_type` says otherwise. Returns the status
     /// and the raw reply.
     fn request(&self, method: &str, path: &str, content_type: Option<&str>, body: &[u8]) -> Result<(u16, Vec<u8>)> {
+        self.request_with(method, path, content_type, body, Some(PREFER))
+    }
+
+    /// `request` with the `Prefer` header of choice; Microsoft To Do is asked without one when
+    /// it refuses the Outlook preferences.
+    fn request_with(&self, method: &str, path: &str, content_type: Option<&str>, body: &[u8], prefer: Option<&str>) -> Result<(u16, Vec<u8>)> {
         let url = self.url(path);
         let connect = |e: ureq::Error| MailboxError::Connect { host: self.host.clone(), reason: e.to_string() };
         let auth = format!("Bearer {}", self.token.expose());
         let mut response = match method {
-            "GET" => self.agent.get(&url).header("Authorization", &auth).header("Prefer", PREFER).call().map_err(connect)?,
+            "GET" => {
+                let req = self.agent.get(&url).header("Authorization", &auth);
+                match prefer {
+                    Some(p) => req.header("Prefer", p).call(),
+                    None => req.call(),
+                }
+                .map_err(connect)?
+            }
             "DELETE" => self.agent.delete(&url).header("Authorization", &auth).call().map_err(connect)?,
             _ => {
                 let req = if method == "PATCH" { self.agent.patch(&url) } else { self.agent.post(&url) };
@@ -448,25 +488,48 @@ impl GraphClient {
     fn call(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value> {
         let payload = body.map(Value::to_string).unwrap_or_default();
         let (status, bytes) = self.request(method, path, None, payload.as_bytes())?;
-        let value: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        Self::reply(method, status, &bytes)
+    }
+
+    /// A reply as JSON, or the error Graph gave: its message, with its code when that adds
+    /// something ("Invalid request (invalidRequest)").
+    fn reply(method: &str, status: u16, bytes: &[u8]) -> Result<Value> {
+        let value: Value = serde_json::from_slice(bytes).unwrap_or(Value::Null);
         match status {
             200..=299 => Ok(value),
             401 => Err(MailboxError::Login),
             404 if method == "DELETE" => Ok(Value::Null),
             _ => {
-                let message = value.get("error").map(|e| str_of(e, "message")).filter(|m| !m.is_empty()).map(clean_text);
-                Err(MailboxError::Protocol(message.unwrap_or_else(|| format!("HTTP {status}"))))
+                Err(MailboxError::Protocol(value.get("error").map(error_text).filter(|m| !m.is_empty()).unwrap_or_else(|| format!("HTTP {status}"))))
             }
         }
     }
 
     /// Every item of a paged listing, following `@odata.nextLink` up to `MAX_PAGES` pages.
     fn list(&self, path: &str) -> Result<Vec<Value>> {
+        self.list_with(path, Some(PREFER), MAX_PAGES)
+    }
+
+    /// A Microsoft To Do listing. To Do is a service of its own behind Graph and has refused
+    /// what Outlook takes; when it does, the plain listing is asked for, without query options
+    /// or preferences, in To Do's own small pages.
+    fn list_todo(&self, path: &str, plain: &str) -> Result<Vec<Value>> {
+        match self.list(path) {
+            Err(MailboxError::Protocol(first)) => self.list_with(plain, None, TODO_PAGES).map_err(|e| match e {
+                MailboxError::Protocol(again) if again != first => MailboxError::Protocol(format!("{again}; eerder: {first}")),
+                e => e,
+            }),
+            other => other,
+        }
+    }
+
+    fn list_with(&self, path: &str, prefer: Option<&str>, pages: usize) -> Result<Vec<Value>> {
         let mut out = Vec::new();
         let mut next = Some(path.to_string());
-        for _ in 0..MAX_PAGES {
+        for _ in 0..pages {
             let Some(url) = next.take() else { break };
-            let page = self.call("GET", &url, None)?;
+            let (status, bytes) = self.request_with("GET", &url, None, &[], prefer)?;
+            let page = Self::reply("GET", status, &bytes)?;
             if let Some(items) = page.get("value").and_then(Value::as_array) {
                 out.extend(items.iter().cloned());
             }
@@ -510,7 +573,7 @@ impl GraphClient {
             401 => Err(MailboxError::Login),
             _ => {
                 let value: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-                let message = value.get("error").map(|e| str_of(e, "message")).filter(|m| !m.is_empty()).map(clean_text);
+                let message = value.get("error").map(error_text).filter(|m| !m.is_empty());
                 Err(MailboxError::Protocol(message.unwrap_or_else(|| format!("HTTP {status}"))))
             }
         }
@@ -521,7 +584,7 @@ impl GraphClient {
         if let Some(id) = &self.task_list {
             return Ok(id.clone());
         }
-        let lists = self.list(&format!("/me/todo/lists?$top={TODO_PAGE}"))?;
+        let lists = self.list_todo(&format!("/me/todo/lists?$top={TODO_PAGE}"), "/me/todo/lists").map_err(|e| todo_step(e, "lijsten"))?;
         let default = lists.iter().find(|l| str_of(l, "wellknownListName") == "defaultList").or_else(|| lists.first());
         let id = default.and_then(id_of).ok_or_else(|| MailboxError::Protocol("the account has no To Do list".into()))?;
         self.task_list = Some(id.clone());
@@ -703,7 +766,8 @@ impl ItemStore for GraphClient {
         let list = self.task_list()?;
         let path =
             format!("/me/todo/lists/{}/tasks?$top={TODO_PAGE}&$select=id,title,status,importance,dueDateTime,completedDateTime,body", encode(&list));
-        Ok(self.list(&path)?.iter().filter_map(task_of).collect())
+        let plain = format!("/me/todo/lists/{}/tasks", encode(&list));
+        Ok(self.list_todo(&path, &plain).map_err(|e| todo_step(e, "taken"))?.iter().filter_map(task_of).collect())
     }
 
     fn save(&mut self, item: &Item) -> Result<String> {
@@ -897,5 +961,15 @@ mod tests {
         assert_eq!(body["dueDateTime"]["timeZone"], "Europe/Amsterdam");
         let open = Task { title: "x".into(), ..Task::default() };
         assert!(GraphClient::task_json(&open, "UTC")["dueDateTime"].is_null());
+    }
+
+    #[test]
+    fn errors_name_their_code_and_html_bodies_become_text() {
+        assert_eq!(error_text(&json!({ "code": "invalidRequest", "message": "Invalid request" })), "Invalid request (invalidRequest)");
+        assert_eq!(error_text(&json!({ "code": "ErrorX", "message": "ErrorX: kapot" })), "ErrorX: kapot");
+        assert_eq!(error_text(&json!({ "code": "x" })), "x");
+        let task = json!({ "id": "T", "title": "Bellen", "body": { "contentType": "html", "content": "<p>Om tien uur</p>" } });
+        assert_eq!(task_of(&task).unwrap().notes.trim(), "Om tien uur");
+        assert!(matches!(todo_step(MailboxError::Protocol("x".into()), "taken"), MailboxError::Protocol(m) if m == "x (To Do-taken)"));
     }
 }
