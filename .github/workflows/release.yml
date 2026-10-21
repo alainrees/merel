@@ -118,4 +118,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
-        run: gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "Merel ${TAG#v}" --generate-notes
+        # packaging/release-notes/<version>.md, when there is one, goes above GitHub's list of
+        # pull requests: what is new, in Dutch, for the people who use Merel.
+        run: |
+          notes="packaging/release-notes/${TAG#v}.md"
+          set --
+          if [ -f "$notes" ]; then set -- --notes-file "$notes"; fi
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "Merel ${TAG#v}" --generate-notes "$@"
