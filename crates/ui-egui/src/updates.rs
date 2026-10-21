@@ -459,7 +459,7 @@ mod tests {
 
     #[test]
     fn long_notes_are_cut() {
-        let reply = json!({"tag_name": "v1.0.0", "body": "x".repeat(2000)});
+        let reply = json!({"tag_name": "v1.0.0", "body": "x".repeat(NOTES_CHARS + 500)});
         let Outcome::Newer(r) = judge(&reply, "0.1.0") else { panic!() };
         assert_eq!(r.notes.chars().count(), NOTES_CHARS + 1);
     }
