@@ -29,6 +29,8 @@ use serde_json::{Value, json};
 const MAX_REPLY: u64 = 32 * 1024 * 1024;
 /// Items per page, and pages followed per listing.
 const PAGE: u32 = 1000;
+/// Microsoft To Do pages more narrowly than the Outlook endpoints.
+const TODO_PAGE: u32 = 100;
 const MAX_PAGES: usize = 5;
 /// The well-known mail folders, with the kind each one is.
 const WELL_KNOWN: [(&str, FolderKind); 6] = [
@@ -519,7 +521,7 @@ impl GraphClient {
         if let Some(id) = &self.task_list {
             return Ok(id.clone());
         }
-        let lists = self.list("/me/todo/lists?$top=100")?;
+        let lists = self.list(&format!("/me/todo/lists?$top={TODO_PAGE}"))?;
         let default = lists.iter().find(|l| str_of(l, "wellknownListName") == "defaultList").or_else(|| lists.first());
         let id = default.and_then(id_of).ok_or_else(|| MailboxError::Protocol("the account has no To Do list".into()))?;
         self.task_list = Some(id.clone());
@@ -700,7 +702,7 @@ impl ItemStore for GraphClient {
     fn tasks(&mut self) -> Result<Vec<Task>> {
         let list = self.task_list()?;
         let path =
-            format!("/me/todo/lists/{}/tasks?$top={PAGE}&$select=id,title,status,importance,dueDateTime,completedDateTime,body", encode(&list));
+            format!("/me/todo/lists/{}/tasks?$top={TODO_PAGE}&$select=id,title,status,importance,dueDateTime,completedDateTime,body", encode(&list));
         Ok(self.list(&path)?.iter().filter_map(task_of).collect())
     }
 
