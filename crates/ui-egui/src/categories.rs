@@ -135,7 +135,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut remove: Option<String> = None;
     let mut add = false;
     let mut close = false;
-    egui::Window::new("Alle categorieën").collapsible(false).resizable(false).default_width(360.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "categories", "Alle categorieën", 360.0, |ui| {
         if list.is_empty() {
             ui.label(RichText::new("Nog geen categorieën.").color(t.text_dim));
         }
@@ -166,7 +166,8 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     ui.selectable_value(&mut m.color, option, option.dutch_name());
                 }
             });
-            if ui.button("Toevoegen").clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+            if ui.add(crate::helder::primary_text(t, "Toevoegen")).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+            {
                 add = true;
             }
         });
@@ -177,7 +178,9 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         if ui.button("Sluiten").clicked() {
             close = true;
         }
-    });
+    }) {
+        close = true;
+    }
     if let Some((name, color)) = recolor {
         app.run("category.save", json!({ "name": name, "color": color }));
     }

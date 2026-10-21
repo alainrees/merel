@@ -68,7 +68,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let lists = app.engine.session.junk.clone();
     let mut action = None;
     let mut close = false;
-    egui::Window::new("Ongewenste e-mail").collapsible(false).resizable(false).default_width(520.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "junk", "Ongewenste e-mail", 520.0, |ui| {
         ui.label(
             RichText::new(
                 "Mail van een geblokkeerde afzender of een geblokkeerd domein gaat bij aankomst meteen naar Ongewenste e-mail. \
@@ -81,7 +81,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         ui.horizontal(|ui| {
             let r = ui.add(egui::TextEdit::singleline(&mut entry).hint_text("naam@voorbeeld.nl of voorbeeld.nl").desired_width(260.0));
             let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui.button("Blokkeren").clicked() || enter {
+            if ui.add(crate::helder::primary_text(t, "Blokkeren")).clicked() || enter {
                 action = Some(Action::Block);
             }
             if ui.button("Vertrouwen").clicked() {
@@ -110,7 +110,9 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         if ui.button("Sluiten").clicked() {
             close = true;
         }
-    });
+    }) {
+        close = true;
+    }
     match action {
         Some(Action::Block) | Some(Action::Trust) => {
             let id = if matches!(action, Some(Action::Block)) { "junk.block" } else { "junk.trust" };

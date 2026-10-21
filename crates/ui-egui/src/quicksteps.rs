@@ -238,8 +238,7 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
     let mut save = false;
     let mut cancel = false;
     ui.horizontal(|ui| {
-        save =
-            ui.add(egui::Button::new(RichText::new("Snelle stap opslaan").color(t.on_accent)).fill(t.accent).min_size(vec2(130.0, 26.0))).clicked();
+        save = ui.add(crate::helder::primary_text(t, "Snelle stap opslaan")).clicked();
         cancel = ui.add(egui::Button::new("Annuleren").min_size(vec2(90.0, 26.0))).clicked();
     });
     (save, cancel)
@@ -265,7 +264,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut cancel = false;
     let mut close = false;
     let mut form_state = app.quick_steps.as_mut().and_then(|s| s.form.take());
-    egui::Window::new("Snelle stappen").collapsible(false).resizable(false).default_width(460.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "quick-steps", "Snelle stappen", 460.0, |ui| {
         ui.label(
             RichText::new(format!(
                 "Een snelle stap is een eigen knop op het tabblad Start die in één keer meerdere dingen met het geselecteerde bericht doet; de eerste negen ook met {} tot 9.",
@@ -282,7 +281,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             cancel = c;
             return;
         }
-        if ui.button("Nieuwe snelle stap").clicked() {
+        if ui.add(crate::helder::primary_text(t, "Nieuwe snelle stap")).clicked() {
             action = Some(Action::New);
         }
         ui.add_space(6.0);
@@ -314,7 +313,9 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         if ui.button("Sluiten").clicked() {
             close = true;
         }
-    });
+    }) {
+        close = true;
+    }
     if save && let Some(form) = form_state.as_mut() {
         match app.engine.run("quickstep.save", &form.params()) {
             Ok(()) => form_state = None,

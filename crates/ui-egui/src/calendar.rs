@@ -95,7 +95,7 @@ pub fn goto_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(mut text) = app.calendar.goto.take() else { return };
     let mut go = false;
     let mut close = false;
-    egui::Window::new(GOTO).collapsible(false).resizable(false).default_width(260.0).show(ctx, |ui| {
+    if helder::popup(ctx, t, "goto-date", GOTO, 260.0, |ui| {
         ui.label(RichText::new("Welke dag wil je zien? (dag-maand-jaar)").color(t.text));
         ui.horizontal(|ui| {
             let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0).id(egui::Id::new(GOTO_BOX)));
@@ -111,14 +111,16 @@ pub fn goto_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             ui.label(RichText::new(GOTO_HINT).size(12.0).color(t.flag));
         }
         ui.horizontal(|ui| {
-            if ui.button("Ga").clicked() {
+            if ui.add(helder::primary_text(t, "Ga")).clicked() {
                 go = true;
             }
             if ui.button("Annuleren").clicked() {
                 close = true;
             }
         });
-    });
+    }) {
+        close = true;
+    }
     if go && let Some(day) = parse_date(&text) {
         app.calendar.focus = day;
         app.calendar.query.clear();
