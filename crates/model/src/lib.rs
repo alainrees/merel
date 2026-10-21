@@ -77,9 +77,9 @@ pub enum Auth {
 }
 
 /// Merel's own registration with Microsoft Entra: a multi-tenant public client (no secret,
-/// loopback redirects only), so people sign in without registering anything themselves. Empty
-/// until the registration exists.
-pub const MICROSOFT_CLIENT_ID: &str = "";
+/// loopback redirects only), so people sign in without registering anything themselves. Not a
+/// secret: it travels in every sign-in link.
+pub const MICROSOFT_CLIENT_ID: &str = "88e91d33-f14d-4f27-8820-68b8c486c5a8";
 
 impl Protocol {
     /// The client ID this build signs in with when the person names none of their own. A build

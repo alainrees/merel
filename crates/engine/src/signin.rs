@@ -165,6 +165,7 @@ mod tests {
         assert!(matches!(own.unwrap().auth, Auth::OAuth2 { ref client_id, .. } if client_id == "own"));
         assert!(account_with(Protocol::Microsoft365, "", "a@outlook.com", "", None).is_err());
         assert_eq!(Protocol::Gmail.builtin_client_id(), None);
+        assert!(Protocol::Microsoft365.builtin_client_id().is_some());
     }
 
     #[test]
