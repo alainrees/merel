@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds Merel.app for Apple Silicon and Intel in one binary, gives it a free ad-hoc
-# signature and wraps it in a .dmg with a shortcut to Applications. Run on macOS from the
+# Builds Merel.app for Apple Silicon and Intel in one binary, signs it for free (see below)
+# and wraps it in a .dmg with a shortcut to Applications. Run on macOS from the
 # repository root after both release builds:
 #   cargo build --release -p merel --target aarch64-apple-darwin
 #   cargo build --release -p merel --target x86_64-apple-darwin
@@ -27,9 +27,28 @@ iconutil -c icns "$iconset" -o "$app/Contents/Resources/Merel.icns"
 
 sed -e "s/@VERSION@/$version/g" -e "s/@BUILD@/${commit:-$version}/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
 
-# Ad-hoc: no Apple account, so Gatekeeper asks once, but the bundle is sealed against changes.
-codesign --force --deep --sign - "$app"
+# No Apple account, so Gatekeeper asks once either way, but the bundle is sealed against
+# changes. With MACOS_CERT_P12 (made by packaging/macos/make-signing-cert.sh) every release
+# carries the same self-made identity, so the keychain keeps trusting Merel after an update;
+# an ad-hoc signature differs per build and makes macOS ask for the keychain password again.
+if [ -n "${MACOS_CERT_P12:-}" ]; then
+  keychain="$work/sign.keychain-db"
+  keychain_password="$(uuidgen)"
+  security create-keychain -p "$keychain_password" "$keychain"
+  security unlock-keychain -p "$keychain_password" "$keychain"
+  printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$work/cert.p12"
+  security import "$work/cert.p12" -k "$keychain" -P "${MACOS_CERT_PASSWORD:-}" -T /usr/bin/codesign >/dev/null
+  rm "$work/cert.p12"
+  security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+  identity="$(security find-certificate -c Merel -Z "$keychain" | awk '/SHA-1/ { print $3 }')"
+  codesign --force --deep --keychain "$keychain" --sign "$identity" "$app"
+  security delete-keychain "$keychain"
+else
+  codesign --force --deep --sign - "$app"
+fi
 codesign --verify --deep --strict "$app"
+# The requirement the keychain checks; the same on every release when signed with the certificate.
+codesign --display --requirements - "$app"
 
 stage="$work/dmg"
 mkdir -p "$stage"
