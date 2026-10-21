@@ -8,7 +8,10 @@ fn main() -> ExitCode {
     match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["keygen"] => match merel_sign::keygen() {
             Ok((secret, public)) => {
-                println!("Geheime sleutel. Zet die in GitHub als secret MEREL_SIGNING_KEY en bewaar hem nergens anders:\n\n{}\n", *secret);
+                println!(
+                    "Geheime sleutel. Zet die in GitHub als secret MEREL_SIGNING_KEY en bewaar hem ook in je wachtwoordbeheerder (GitHub laat hem niet meer zien). Nooit in de repo of in een chat:\n\n{}\n",
+                    *secret
+                );
                 println!("Publieke sleutel. Die komt in de app:\n\n{public}");
                 ExitCode::SUCCESS
             }
