@@ -2,8 +2,8 @@
 
 use serde_json::Value;
 
-use mailcraft_mailbox::Flag;
-use mailcraft_model::FolderKind;
+use merel_mailbox::Flag;
+use merel_model::FolderKind;
 
 use crate::{Job, Session};
 
@@ -235,7 +235,7 @@ fn selection(s: &Session) -> Result<Vec<String>, CommandError> {
     if ids.is_empty() { Err(CommandError::NoSelection) } else { Ok(ids) }
 }
 
-fn header_mut<'a>(s: &'a mut Session, id: &str) -> Result<&'a mut mailcraft_model::MessageHeader, CommandError> {
+fn header_mut<'a>(s: &'a mut Session, id: &str) -> Result<&'a mut merel_model::MessageHeader, CommandError> {
     s.messages.iter_mut().find(|m| m.id == id).ok_or(CommandError::NoSelection)
 }
 
@@ -494,15 +494,15 @@ mod tests {
 
     #[test]
     fn real_accounts_leave_jobs_behind() {
-        use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
-        use mailcraft_model::{Account, Address, Protocol, Server, Tls};
+        use merel_mailbox::{RemoteFolder, RemoteHeader};
+        use merel_model::{Account, Address, Protocol, Server, Tls};
         let account = Account {
             id: "acc".into(),
             name: "Acc".into(),
             address: Address::new(None, "a@b.nl").unwrap(),
             username: "a@b.nl".into(),
             protocol: Protocol::ImapSmtp,
-            auth: mailcraft_model::Auth::Password,
+            auth: merel_model::Auth::Password,
             incoming: Some(Server { host: "imap.b.nl".into(), port: 993, tls: Tls::Implicit }),
             outgoing: None,
             dav: None,
@@ -531,7 +531,7 @@ mod tests {
                 limit: crate::HEADER_LIMIT
             }]
         );
-        let header = mailcraft_mime::parse_header(b"From: x@y.nl\r\nSubject: Hoi\r\n\r\n");
+        let header = merel_mime::parse_header(b"From: x@y.nl\r\nSubject: Hoi\r\n\r\n");
         s.apply(crate::Event::Headers {
             folder_id: "acc/INBOX".into(),
             headers: vec![RemoteHeader {
@@ -557,12 +557,8 @@ mod tests {
         assert_eq!(s.take_jobs(), vec![Job::Move { account_id: "acc".into(), path: "INBOX".into(), id: "7".into(), dest: "Trash".into() }]);
         assert_eq!(s.message("acc/INBOX#7").unwrap().folder_id, "acc/Trash");
 
-        let draft = mailcraft_model::Draft {
-            to: vec![Address::new(None, "x@y.nl").unwrap()],
-            subject: "Hoi".into(),
-            body: "Dag".into(),
-            ..Default::default()
-        };
+        let draft =
+            merel_model::Draft { to: vec![Address::new(None, "x@y.nl").unwrap()], subject: "Hoi".into(), body: "Dag".into(), ..Default::default() };
         let id = s.send("acc", draft.clone());
         assert_eq!(s.outbox.get(&id), Some(&crate::SendState::Sending));
         assert_eq!(s.take_jobs(), vec![Job::Send { account_id: "acc".into(), draft_id: id, draft: Box::new(draft), sent_path: None }]);
@@ -591,7 +587,7 @@ mod tests {
     #[test]
     fn sample_account_cannot_send() {
         let mut s = Session::sample();
-        let id = s.send(crate::SAMPLE_ACCOUNT, mailcraft_model::Draft::default());
+        let id = s.send(crate::SAMPLE_ACCOUNT, merel_model::Draft::default());
         assert!(matches!(s.outbox.get(&id), Some(crate::SendState::Failed(_))));
         assert!(s.take_jobs().is_empty());
     }

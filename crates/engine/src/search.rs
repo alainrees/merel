@@ -4,7 +4,7 @@
 //! `has:attachment`, `is:unread`, `is:flagged`) work too. The server gets only the plain
 //! words; what it finds is then held to the same operators here.
 
-use mailcraft_model::{Address, MessageHeader};
+use merel_model::{Address, MessageHeader};
 
 /// What the search box says the words mean, for a tooltip.
 pub const HINT: &str =

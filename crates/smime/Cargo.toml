@@ -1,5 +1,5 @@
 [package]
-name = "mailcraft-smime"
+name = "merel-smime"
 description = "S/MIME: the person's own certificate from a PKCS#12 file, and signed mail."
 version.workspace = true
 edition.workspace = true

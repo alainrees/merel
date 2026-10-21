@@ -1,8 +1,9 @@
-# Mailcraft
+# Merel
 
-Mail and calendar for the desktop, with the Outlook workflow you already know and the look of the
-ArtCraft family (WordCraft, GridCraft, DeskCraft). Pure Rust, one binary, runs on macOS, Windows
-and Linux.
+Mail and calendar for the desktop, with the Outlook workflow you already know. Pure Rust, one
+binary, runs on macOS, Windows and Linux. Merel is Dutch for blackbird; the icon is a folded paper
+one. The app was called Mailcraft until October 2026; settings, passwords and appointments from
+that time carry over on the first start.
 
 The windows are moving to the "Helder" style, a fresher look after the new Outlook: white rounded
 cards on a light grey ground, quiet buttons that are a line icon and a label (Lucide icons, ISC
@@ -39,7 +40,7 @@ messages and a button at the bottom of the list fetches the next 200, as often a
 comes in on its own: the inbox of every connected account and the open folder are refreshed every
 two minutes (calendar, contacts and tasks every five), a notice counts new unread messages,
 the window asks for attention, and its title shows the unread mail in the inboxes of every account
-together ("Mailcraft (3)"), so the count is visible in the dock, taskbar or window switcher. Junk: the
+together ("Merel (3)"), so the count is visible in the dock, taskbar or window switcher. Junk: the
 server's own filter stays the first line, and its Junk folder shows as "Ongewenste e-mail". On top of that,
 "Afzender blokkeren" in a message's right-click menu (or "Bestand" > "Ongewenste e-mail", for an address or a
 whole domain) keeps a list of blocked senders in `junk.json`; new mail from one of them goes straight to that
@@ -57,7 +58,7 @@ that conversation (same subject, prefixes aside) in the inbox go to "Verwijderde
 that arrives in it afterwards; a strip above such a message has "Niet meer negeren", which brings them back. The
 list is `ignored.json`, per account. "Gesprek opruimen…" (same menu) and "Map opruimen…" (a folder's menu, or
 "Opruimen" on the Map tab) are Outlook's Clean Up: of each conversation the older messages go to "Verwijderde
-items" and the newest stays, as do unread, flagged and categorised messages and messages with attachments; Mailcraft
+items" and the newest stays, as do unread, flagged and categorised messages and messages with attachments; Merel
 asks first and says how many would go. It goes by the headers it has, not by whether a later reply quotes the whole
 earlier message. Phishing: a message that shows signs of it
 gets a warning strip above its text that names them, with "Afzender blokkeren" at hand: a sender who uses a
@@ -68,14 +69,14 @@ runs as a program. The checks run on your computer only and never decide for you
 message is shown with its links, attachments and pictures from the internet switched off, as Outlook does; "Geen
 ongewenst" brings it back with everything working. A search box above the
 message list narrows it by subject, sender, recipient or preview text, in the current folder or
-across every folder of every account (it searches what Mailcraft has fetched so far). Outlook's search words work in it:
+across every folder of every account (it searches what Merel has fetched so far). Outlook's search words work in it:
 `van:sanne`, `aan:jan` and `onderwerp:offerte` look in one field, `heeft:bijlage`, `is:ongelezen` and `is:gemarkeerd` keep
 only such messages (the English `from:`, `to:`, `subject:`, `has:attachment`, `is:unread` and `is:flagged` too), and the
 rest are plain words that may occur anywhere. "Zoek op de server" asks the mail server itself, which also looks in older mail and in the text of the messages; the server gets the plain words, and what it finds is then held to the same search words here. "Zoekmap" next to the box saves the search under a name, as an Outlook search folder: it is listed under "Zoekmappen" in the folder pane with its words, scope and list filter, a click runs it again, and its menu removes it (`view.json`). The 🕒 menu next to the box lists the last ten searches, as Outlook's "Recente zoekopdrachten": a click searches those words again, "Lijst wissen" forgets them (`view.json`). Sending over SMTP: new mail,
-reply, reply all and forward (a forwarded message takes its attachments along, as in Outlook, except from the Junk folder; "Doorsturen als bijlage" in the message menu, or Ctrl+Alt+F, sends the message itself along as an .eml file with its headers, like Outlook's "Forward as Attachment", not from the Junk folder either; "Opnieuw verzenden" opens a message, a sent one say, as a new message with the same recipients, subject, text and attachments, like Outlook's "Resend This Message"), with attachments (picked with the file dialog or dropped onto the window, 25 MB together), a copy filed in Sent and the account's signature under the text. Closing a message you were writing puts it aside as a draft ("Concepten (deze computer)" under the account, kept in the encrypted offline cache, never on the server) to open, finish and send later. "Later verzenden" in the same window puts the message aside with a moment (in an hour, this evening, tomorrow morning, Monday morning), like Outlook's "Bezorging uitstellen": it shows under Concepten with that moment, Mailcraft sends it then if it is running, and opening it lets you drop the moment or send at once; one that cannot go becomes an ordinary draft again with a notice. Before a message goes, Mailcraft asks once, as Outlook does, when the text speaks of an attachment ("bijlage", "bijgevoegd", "attached", …) while none is on, or when the subject is empty; "Toch verzenden" sends it as it is. A password account's name,
+reply, reply all and forward (a forwarded message takes its attachments along, as in Outlook, except from the Junk folder; "Doorsturen als bijlage" in the message menu, or Ctrl+Alt+F, sends the message itself along as an .eml file with its headers, like Outlook's "Forward as Attachment", not from the Junk folder either; "Opnieuw verzenden" opens a message, a sent one say, as a new message with the same recipients, subject, text and attachments, like Outlook's "Resend This Message"), with attachments (picked with the file dialog or dropped onto the window, 25 MB together), a copy filed in Sent and the account's signature under the text. Closing a message you were writing puts it aside as a draft ("Concepten (deze computer)" under the account, kept in the encrypted offline cache, never on the server) to open, finish and send later. "Later verzenden" in the same window puts the message aside with a moment (in an hour, this evening, tomorrow morning, Monday morning), like Outlook's "Bezorging uitstellen": it shows under Concepten with that moment, Merel sends it then if it is running, and opening it lets you drop the moment or send at once; one that cannot go becomes an ordinary draft again with a notice. Before a message goes, Merel asks once, as Outlook does, when the text speaks of an attachment ("bijlage", "bijgevoegd", "attached", …) while none is on, or when the subject is empty; "Toch verzenden" sends it as it is. A password account's name,
 servers, user name and password can be changed afterwards from the account list. Gmail and Microsoft 365 sign in through
 the system browser (OAuth 2.0 with PKCE; XOAUTH2 on IMAP and SMTP for Gmail, Microsoft Graph
-for Microsoft 365). Microsoft 365 uses Mailcraft's own Entra registration, so only name and address are asked,
+for Microsoft 365). Microsoft 365 uses Merel's own Entra registration, so only name and address are asked,
 with room for a client ID of your own; Gmail needs a client of your own, see [docs/accounts.md](docs/accounts.md). Exchange Server (2013+)
 works through Exchange Web Services over HTTPS, reading and sending alike. The calendar module
 shows a month, week or day view with a local calendar: appointments are created, edited and
@@ -225,7 +226,7 @@ in the reading pane counts as read at once, after five seconds or not by itself,
 subject (whatever their "Re:" or "Fwd:" prefixes) behind the one that stands first in the list, with an arrow to
 unfold them; and a light, dark or system theme. "Groepen" (on by default) heads the list with "Vandaag", "Gisteren", "Deze week", "Vorige week", "Deze maand", "Vorige maand" and "Ouder" while it is sorted by date, as Outlook does. The choices are kept in `view.json` next to the accounts file.
 
-"Afdrukken" under "Bestand" (or Ctrl+P) prints the open message by way of the system browser: Mailcraft writes a
+"Afdrukken" under "Bestand" (or Ctrl+P) prints the open message by way of the system browser: Merel writes a
 page of its own (sender, recipients, date, subject, attachment names and the body as it drew it,
 with embedded pictures and without anything from the internet or any script) to one file in the
 temporary folder and opens it, and the browser's print dialog does the rest. In the calendar the same "Afdrukken"
@@ -271,7 +272,7 @@ cache, bound to the account, in `cache/<account>.identity`, and goes when the ce
 Signing is aws-lc-rs; the CMS structures come from the RustCrypto `cms` crate. Signed mail that comes in is checked
 when it opens (RSA with SHA-256/384/512, ECDSA P-256 and P-384): a strip over the message says "Digitaal ondertekend
 door …" when the signature holds, warns when the certificate belongs to another address than the sender's, and warns
-in red when the message changed after it was signed; a signature Mailcraft cannot check (SHA-1, an unknown algorithm)
+in red when the message changed after it was signed; a signature Merel cannot check (SHA-1, an unknown algorithm)
 is named as such, never shown as valid. The `smime.p7s` part is not listed as an attachment. The certificate's issuer
 is checked too: the chain from the certificate through the issuers enclosed with the signature must reach one of the
 computer's trusted root certificates (the system store, as for TLS), each link signed by the next, each issuer a
@@ -282,7 +283,7 @@ address; revocation is not checked online.
 Encrypted mail (S/MIME), Outlook's "Versleutelen": with a certificate on the account the compose window has a
 "Versleutelen" box. The message and its attachments go out as `application/pkcs7-mime` (AES-256-CBC, the key wrapped
 with RSA for every recipient and for the sender, so Sent stays readable); the subject travels in the clear, as in
-every mail program. Mailcraft learns a correspondent's certificate the way Outlook does, from a valid signature on
+every mail program. Merel learns a correspondent's certificate the way Outlook does, from a valid signature on
 their mail that matches the sender and comes from a trusted issuer (not from the Junk folder; others only through
 "Certificaat vertrouwen"), and keeps it in `certificates.json`; encrypting to
 someone whose certificate is not known yet is refused with their address named, never sent in the clear. Encrypted
@@ -331,15 +332,15 @@ one "Verzenden" invites everyone on the message, as in Outlook. Two more are abo
 zoeken" puts the address in the search box over every folder, and "Regel maken voor deze afzender…" opens the rules
 window with a rule for that address filled in. Hovering a ribbon button
 shows its shortcut, and the "Help" tab lists them all in one window; the same tab opens the folder
-that holds your settings and cache, the project page, and "Over Mailcraft" with the version. The version names the commit the app was
+that holds your settings and cache, the project page, and "Over Merel" with the version. The version names the commit the app was
 built from and its date (for example "Versie 0.1.0 (build 287797c van 2026-10-20)"), shown at the end
-of the Help tab and in "Over Mailcraft", where "Kopiëren" puts it on the clipboard for a bug report.
+of the Help tab and in "Over Merel", where "Kopiëren" puts it on the clipboard for a bug report.
 
 ## Readability
 
 Every colour pair the window draws meets WCAG 2.2 level AA: text at 4.5:1 or better on each
 surface it can sit on, including captions, previews, placeholders and disabled controls (AA
-exempts the last two; Mailcraft does not), and icons and control borders at 3:1 or better, in
+exempts the last two; Merel does not), and icons and control borders at 3:1 or better, in
 the light and the dark theme. `theme::contrast` measures the ratios and a test holds both themes
 to them, so a colour change that drops below the bar fails the build.
 
@@ -353,7 +354,7 @@ stay as the fallback for the pictographs.
 ## Build
 
 ```
-cargo run -p mailcraft
+cargo run -p merel
 cargo test
 cargo clippy --all-targets -- -D warnings
 ```
@@ -364,36 +365,36 @@ See [`docs/architecture.md`](docs/architecture.md).
 
 ## Install
 
-Each release on the [releases page](https://github.com/alainrees/mailcraft/releases) carries an
+Each release on the [releases page](https://github.com/alainrees/merel/releases) carries an
 installer per platform, built by `.github/workflows/release.yml` when a tag `vX.Y.Z` is pushed
 (the tag must match the version in `Cargo.toml`); `SHA256SUMS.txt` lists their checksums.
 
 | Platform | File | How |
 | --- | --- | --- |
-| macOS 11+ (Apple Silicon and Intel) | `Mailcraft-X.Y.Z-macos.dmg` | Drag Mailcraft to Applications. The app has a free ad-hoc signature, not an Apple one, so the first start needs "Open Anyway" under System Settings > Privacy & Security. |
-| Windows 10+ (x64) | `Mailcraft-X.Y.Z-windows-setup.exe` | A short wizard in Dutch or English; installs for the current user without administrator rights. SmartScreen asks once, under "More info". |
-| Linux (x86_64) | `Mailcraft-X.Y.Z-linux-x86_64.AppImage` or `mailcraft_X.Y.Z-1_amd64.deb` | Make the AppImage executable and run it, or install the .deb on Debian or Ubuntu. |
+| macOS 11+ (Apple Silicon and Intel) | `Merel-X.Y.Z-macos.dmg` | Drag Merel to Applications. The app has a free ad-hoc signature, not an Apple one, so the first start needs "Open Anyway" under System Settings > Privacy & Security. |
+| Windows 10+ (x64) | `Merel-X.Y.Z-windows-setup.exe` | A short wizard in Dutch or English; installs for the current user without administrator rights. SmartScreen asks once, under "More info". |
+| Linux (x86_64) | `Merel-X.Y.Z-linux-x86_64.AppImage` or `merel_X.Y.Z-1_amd64.deb` | Make the AppImage executable and run it, or install the .deb on Debian or Ubuntu. |
 
-The first start on a computer opens "Welkom bij Mailcraft", four short steps that can be left at
-any point: what Mailcraft is, adding an account (opens Bestand), whether to check daily for a new
+The first start on a computer opens "Welkom bij Merel", four short steps that can be left at
+any point: what Merel is, adding an account (opens Bestand), whether to check daily for a new
 version, and light or dark. It comes once; every choice stays changeable in its usual place.
 
-On macOS the app menu is Mailcraft's own, in Dutch: "Over Mailcraft" opens the window with the
-version and build, "Zoek naar updates…" checks at once, and Verberg/Stop Mailcraft carry the app's
+On macOS the app menu is Merel's own, in Dutch: "Over Merel" opens the window with the
+version and build, "Zoek naar updates…" checks at once, and Verberg/Stop Merel carry the app's
 name (built with [muda](https://crates.io/crates/muda); there is no Edit menu, so Cmd+C and Cmd+V
 stay with the text fields).
 
-Mailcraft tells you when a newer release is out: "Updates" on the Help tab asks GitHub right
-away, and "Elke dag controleren op een nieuwe versie" in "Over Mailcraft" asks once a day (off
+Merel tells you when a newer release is out: "Updates" on the Help tab asks GitHub right
+away, and "Elke dag controleren op een nieuwe versie" in "Over Merel" asks once a day (off
 until you switch it on). A newer version opens a small window with its release notes,
 "Downloaden" (the release page in the browser), "Deze versie overslaan" and "Later". Nothing is
 downloaded or installed by the app itself, and the question carries no account or identifier.
 
 The packaging files live in `packaging/`: the app icon, `macos/bundle.sh` with `Info.plist`,
-`windows/mailcraft.iss` for Inno Setup and `linux/` with the desktop entry and the AppImage script.
+`windows/merel.iss` for Inno Setup and `linux/` with the desktop entry and the AppImage script.
 
 ## License
 
-Mailcraft is licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+Merel is licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
 [MIT license](LICENSE-MIT), at your option. Unless you state otherwise, any contribution you submit
-for inclusion in Mailcraft is dual licensed as above, without any additional terms or conditions.
+for inclusion in Merel is dual licensed as above, without any additional terms or conditions.

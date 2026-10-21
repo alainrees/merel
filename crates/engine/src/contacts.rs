@@ -5,8 +5,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use mailcraft_mailbox::Item;
-use mailcraft_model::{Address, Contact, ContactError};
+use merel_mailbox::Item;
+use merel_model::{Address, Contact, ContactError};
 
 use crate::{CommandError, Session};
 

@@ -14,10 +14,10 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Local, NaiveDate, NaiveTime, TimeZone, Utc};
-use mailcraft_imap::ImapClient;
-use mailcraft_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result};
-use mailcraft_model::{Address, Appointment, Contact, Server, ShowAs, Task, clean_text};
-use mailcraft_secrets::Secret;
+use merel_imap::ImapClient;
+use merel_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result};
+use merel_model::{Address, Appointment, Contact, Server, ShowAs, Task, clean_text};
+use merel_secrets::Secret;
 use serde_json::{Value, json};
 
 /// The scopes the item store needs, besides `https://mail.google.com/` for IMAP and SMTP.
@@ -211,8 +211,9 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
     .ok()
 }
 
-/// Google has no categories; Mailcraft keeps their names in a private extended property, one
-/// per line, which only this account's own apps see.
+/// Google has no categories; Merel keeps their names in a private extended property, one
+/// per line, which only this account's own apps see. The property keeps the name from the time
+/// the app was called Mailcraft, so categories set then still show.
 const CATEGORIES: &str = "mailcraftCategories";
 
 fn categories_of(e: &Value) -> Vec<String> {
@@ -384,7 +385,7 @@ impl GoogleItems {
                 .tls_config(tls())
                 .timeout_global(Some(Duration::from_secs(60)))
                 .http_status_as_error(false)
-                .user_agent("Mailcraft")
+                .user_agent("Merel")
                 .build(),
         );
         let store = GoogleItems { agent, token: token.clone() };
@@ -541,7 +542,7 @@ impl ItemStore for GoogleItems {
 }
 
 /// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
-/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// like the rest of Merel. ureq has no root certificates of its own in this build: an
 /// agent without this panics on its first request.
 fn tls() -> ureq::tls::TlsConfig {
     ureq::tls::TlsConfig::builder()
@@ -630,7 +631,7 @@ mod tests {
         let body = event_json(&timed, "Europe/Amsterdam");
         assert!(body["start"]["dateTime"].as_str().unwrap().ends_with('Z') && body["start"]["date"].is_null());
         assert!(body.get("recurrence").is_none());
-        let series = Appointment { recurrence: Some(mailcraft_model::Recurrence::every(mailcraft_model::Frequency::Daily)), ..timed };
+        let series = Appointment { recurrence: Some(merel_model::Recurrence::every(merel_model::Frequency::Daily)), ..timed };
         let body = event_json(&series, "Europe/Amsterdam");
         assert_eq!(body["recurrence"], json!(["RRULE:FREQ=DAILY"]));
         assert_eq!(body["start"]["timeZone"], "Europe/Amsterdam", "a series names the zone it repeats in");

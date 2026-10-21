@@ -2,8 +2,8 @@
 //! that the signature does not hold. An encrypted message that opened says so too.
 
 use egui::{CornerRadius, Margin, RichText, Ui};
-use mailcraft_mime::Encryption;
-use mailcraft_smime::Signature;
+use merel_mime::Encryption;
+use merel_smime::Signature;
 
 use crate::Tokens;
 
@@ -30,8 +30,8 @@ pub fn encryption_strip(ui: &mut Ui, t: &Tokens, encryption: &Encryption) {
 pub const PGP_BROKEN: &str = "⚠ De OpenPGP-handtekening klopt niet. Het bericht is na het ondertekenen veranderd, of de handtekening is vervalst.";
 
 /// What the strip over an OpenPGP-signed message says, and whether it is a warning.
-pub fn pgp_text(verdict: &mailcraft_pgp::Verdict, from: &str) -> (String, bool) {
-    use mailcraft_pgp::Verdict;
+pub fn pgp_text(verdict: &merel_pgp::Verdict, from: &str) -> (String, bool) {
+    use merel_pgp::Verdict;
     match verdict {
         Verdict::Valid { signer } if signer.covers(from) => (
             format!(
@@ -52,14 +52,14 @@ pub fn pgp_text(verdict: &mailcraft_pgp::Verdict, from: &str) -> (String, bool) 
         ),
         Verdict::Broken => (PGP_BROKEN.to_string(), true),
         Verdict::UnknownKey(_) => (
-            "Dit bericht is met OpenPGP ondertekend, maar de sleutel van de afzender is nog niet bekend, dus Mailcraft kan de handtekening niet controleren.".to_string(),
+            "Dit bericht is met OpenPGP ondertekend, maar de sleutel van de afzender is nog niet bekend, dus Merel kan de handtekening niet controleren.".to_string(),
             false,
         ),
-        Verdict::Unchecked(reason) => (format!("Dit bericht is met OpenPGP ondertekend, maar Mailcraft kan de handtekening niet controleren: {reason}."), false),
+        Verdict::Unchecked(reason) => (format!("Dit bericht is met OpenPGP ondertekend, maar Merel kan de handtekening niet controleren: {reason}."), false),
     }
 }
 
-pub fn pgp_strip(ui: &mut Ui, t: &Tokens, verdict: &mailcraft_pgp::Verdict, from: &str) {
+pub fn pgp_strip(ui: &mut Ui, t: &Tokens, verdict: &merel_pgp::Verdict, from: &str) {
     let (line, warning) = pgp_text(verdict, from);
     let fill = if warning { t.flag.gamma_multiply(0.18) } else { t.checked };
     let response = egui::Frame::NONE
@@ -71,9 +71,9 @@ pub fn pgp_strip(ui: &mut Ui, t: &Tokens, verdict: &mailcraft_pgp::Verdict, from
             ui.label(RichText::new(line).size(12.0).color(t.text));
         })
         .response;
-    if let mailcraft_pgp::Verdict::Valid { signer } = verdict {
+    if let merel_pgp::Verdict::Valid { signer } = verdict {
         response.on_hover_text(format!(
-            "Vingerafdruk {}. Mailcraft kreeg deze sleutel met eerdere mail van dit adres (Autocrypt); vergelijk de vingerafdruk met de afzender als je zeker wilt zijn.",
+            "Vingerafdruk {}. Merel kreeg deze sleutel met eerdere mail van dit adres (Autocrypt); vergelijk de vingerafdruk met de afzender als je zeker wilt zijn.",
             signer.grouped()
         ));
     }
@@ -105,7 +105,7 @@ pub fn text(signature: &Signature, from: &str) -> (String, bool) {
         ),
         Signature::Broken => (BROKEN.to_string(), true),
         Signature::Unchecked(reason) => {
-            (format!("Dit bericht is digitaal ondertekend, maar Mailcraft kan de handtekening niet controleren: {reason}."), false)
+            (format!("Dit bericht is digitaal ondertekend, maar Merel kan de handtekening niet controleren: {reason}."), false)
         }
     }
 }
@@ -138,7 +138,7 @@ pub fn strip(ui: &mut Ui, t: &Tokens, signature: &Signature, from: &str, can_tru
         .response;
     if let Signature::Valid { signer, .. } = signature {
         response.on_hover_text(format!(
-            "Certificaat van {}, uitgegeven door {}, geldig tot {}. Mailcraft controleert niet online of het is ingetrokken.",
+            "Certificaat van {}, uitgegeven door {}, geldig tot {}. Merel controleert niet online of het is ingetrokken.",
             signer.name,
             if signer.issuer.is_empty() { "onbekend" } else { signer.issuer.as_str() },
             crate::dates::day(signer.not_after)
@@ -150,7 +150,7 @@ pub fn strip(ui: &mut Ui, t: &Tokens, signature: &Signature, from: &str, can_tru
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_smime::CertInfo;
+    use merel_smime::CertInfo;
 
     use super::*;
 
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn says_whose_openpgp_key_signed() {
-        use mailcraft_pgp::{KeyInfo, Verdict};
+        use merel_pgp::{KeyInfo, Verdict};
         let signer = KeyInfo {
             fingerprint: "0123456789ABCDEF0123456789ABCDEF01234567".into(),
             name: "Jij".into(),

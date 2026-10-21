@@ -13,7 +13,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use mailcraft_model::{Appointment, MAX_REMINDER};
+use merel_model::{Appointment, MAX_REMINDER};
 
 use crate::{CommandError, Session};
 

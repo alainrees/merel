@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 
 use aws_lc_rs::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
 use base64::Engine as _;
-use mailcraft_model::{Appointment, Calendar, Contact, Folder, MessageHeader, StoredDraft, Task};
-use mailcraft_secrets::{Secret, SecretStore};
+use merel_model::{Appointment, Calendar, Contact, Folder, MessageHeader, StoredDraft, Task};
+use merel_secrets::{Secret, SecretStore};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -280,13 +280,13 @@ mod raw_bytes {
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_model::{Address, Flags, FolderKind};
-    use mailcraft_secrets::MemoryStore;
+    use merel_model::{Address, Flags, FolderKind};
+    use merel_secrets::MemoryStore;
 
     use super::*;
 
     fn dir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("mailcraft-store-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("merel-store-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
     }

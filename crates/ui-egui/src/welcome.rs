@@ -1,8 +1,8 @@
-//! The welcome at the first start: a short window in four steps (what Mailcraft is, an
+//! The welcome at the first start: a short window in four steps (what Merel is, an
 //! account, updates, light or dark) that the person can leave at any step. It comes once per
 //! computer: [`ViewPrefs::welcomed`](crate::view::ViewPrefs) is set when it closes, however it
 //! closes. Every choice in it can be changed later in the same place as always (Bestand, Over
-//! Mailcraft, Beeld).
+//! Merel, Beeld).
 
 use egui::RichText;
 
@@ -12,7 +12,7 @@ use crate::view::ThemeChoice;
 use crate::{MailApp, Tab};
 
 /// The window's title and buttons, which tests and screen readers find them by.
-pub const WINDOW: &str = "Welkom bij Mailcraft";
+pub const WINDOW: &str = "Welkom bij Merel";
 pub const NEXT: &str = "Volgende";
 pub const BACK: &str = "Vorige";
 pub const DONE: &str = "Aan de slag";
@@ -92,7 +92,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         helder::card_frame(t).inner_margin(20).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                helder::badge(ui, t, step.icon());
+                if step == Step::Hello { helder::app_badge(ui) } else { helder::badge(ui, t, step.icon()) }
                 ui.add_space(8.0);
                 ui.vertical(|ui| {
                     helder::step_dots(ui, t, step.index(), Step::ALL.len());
@@ -103,7 +103,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             ui.add_space(12.0);
             match step {
                 Step::Hello => {
-                    helder::paragraph(ui, t, "Mailcraft werkt zoals Outlook en draait op je eigen computer. Je mail gaat rechtstreeks tussen deze computer en je mailserver; er zit geen dienst van ons tussen.");
+                    helder::paragraph(ui, t, "Merel werkt zoals Outlook en draait op je eigen computer. Je mail gaat rechtstreeks tussen deze computer en je mailserver; er zit geen dienst van ons tussen.");
                     ui.add_space(6.0);
                     helder::paragraph(ui, t, "Afbeeldingen van internet laden pas als je erom vraagt, wachtwoorden staan in de sleutelhanger van het systeem en de offline kopie van je mail is versleuteld.");
                 }
@@ -118,7 +118,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     });
                 }
                 Step::Updates => {
-                    helder::paragraph(ui, t, "Mailcraft kan eens per dag bij GitHub nagaan of er een nieuwe versie is en het je dan laten weten. Er gaat niets mee behalve die vraag; GitHub ziet wel het adres van je internetverbinding.");
+                    helder::paragraph(ui, t, "Merel kan eens per dag bij GitHub nagaan of er een nieuwe versie is en het je dan laten weten. Er gaat niets mee behalve die vraag; GitHub ziet wel het adres van je internetverbinding.");
                     ui.add_space(10.0);
                     let mut on = app.view.update_check == Some(true);
                     helder::toggle(ui, t, &mut on, UPDATES_ON);

@@ -5,8 +5,8 @@
 
 use std::path::Path;
 
-use mailcraft_dav::ical;
-use mailcraft_model::Contact;
+use merel_dav::ical;
+use merel_model::Contact;
 use serde_json::json;
 
 use crate::MailApp;
@@ -22,7 +22,7 @@ pub const MAX_FILE: u64 = 8 * 1024 * 1024;
 /// The contact as a vCard 3.0 text, with a fresh UID.
 pub fn export(c: &Contact) -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let mut card = ical::new_card(&format!("mailcraft-{now}-{}", c.id.len()));
+    let mut card = ical::new_card(&format!("merel-{now}-{}", c.id.len()));
     ical::write_contact(&mut card, c);
     card.serialize()
 }
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn a_file_with_several_cards_is_imported_once_and_known_addresses_are_skipped() {
-        let dir = std::env::temp_dir().join(format!("mailcraft-vcf-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("merel-vcf-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("export.vcf");
         std::fs::write(
@@ -151,7 +151,7 @@ mod tests {
              BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Zonder adres\r\nORG:Firma\r\nEND:VCARD\r\n",
         )
         .unwrap();
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let mut app = MailApp::new(merel_engine::Engine::sample());
         let before = app.engine.session.contacts.len();
         assert!(app.engine.session.contacts.iter().any(|c| c.emails.iter().any(|e| e == "sanne@example.org")), "the sample knows Sanne");
         let out = app.import_contacts(&[file.clone(), dir.join("missing.vcf")]);

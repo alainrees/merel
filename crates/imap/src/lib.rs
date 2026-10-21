@@ -15,9 +15,9 @@ use std::time::Duration;
 
 use imap::extensions::idle::SetReadTimeout;
 use imap_proto::{BodyStructure, NameAttribute};
-pub use mailcraft_mailbox::{Credential, Flag, Mailbox, MailboxError, RemoteFolder, RemoteHeader};
-use mailcraft_model::{FolderKind, Server, Tls};
-use mailcraft_secrets::Secret;
+pub use merel_mailbox::{Credential, Flag, Mailbox, MailboxError, RemoteFolder, RemoteHeader};
+use merel_model::{FolderKind, Server, Tls};
+use merel_secrets::Secret;
 
 struct XOAuth2<'a> {
     user: &'a str,
@@ -33,7 +33,7 @@ impl imap::Authenticator for XOAuth2<'_> {
 
 /// How long a server gets to accept the connection.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-/// How long a server may stay silent while Mailcraft waits for its answer.
+/// How long a server may stay silent while Merel waits for its answer.
 pub const READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, thiserror::Error)]
@@ -279,7 +279,7 @@ fn kind_of(name: &str, attrs: &[NameAttribute<'_>]) -> FolderKind {
             _ => {}
         }
     }
-    mailcraft_mailbox::kind_from_name(name)
+    merel_mailbox::kind_from_name(name)
 }
 
 fn is_special_use(a: &NameAttribute<'_>) -> bool {
@@ -456,7 +456,7 @@ impl ImapClient {
         }
         let uid = uid.to_string();
         let keywords =
-            |names: &[String]| names.iter().map(|n| mailcraft_model::category_keyword(n)).filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" ");
+            |names: &[String]| names.iter().map(|n| merel_model::category_keyword(n)).filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" ");
         let off = keywords(removed);
         if !off.is_empty() {
             self.session.uid_store(&uid, format!("-FLAGS.SILENT ({off})"))?;
@@ -591,7 +591,7 @@ fn header_query() -> String {
 /// One fetched message as a header; `None` for a reply without a UID.
 fn header_of(f: &imap::types::Fetch) -> Option<RemoteHeader> {
     let uid = f.uid?;
-    let header = mailcraft_mime::parse_header(f.header().unwrap_or(b""));
+    let header = merel_mime::parse_header(f.header().unwrap_or(b""));
     let internal = f.internal_date().map(|d| d.timestamp());
     let date = header.date.or(internal).unwrap_or(0);
     let flags = f.flags();
@@ -645,63 +645,63 @@ fn search_keys(words: &[&str], literals: bool) -> Result<String> {
 }
 
 impl Mailbox for ImapClient {
-    fn folders(&mut self) -> mailcraft_mailbox::Result<Vec<RemoteFolder>> {
+    fn folders(&mut self) -> merel_mailbox::Result<Vec<RemoteFolder>> {
         Ok(ImapClient::folders(self)?)
     }
 
-    fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> mailcraft_mailbox::Result<Vec<RemoteHeader>> {
+    fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> merel_mailbox::Result<Vec<RemoteHeader>> {
         Ok(ImapClient::headers(self, folder, offset, limit)?)
     }
 
-    fn search(&mut self, folder: &str, query: &str, limit: u32) -> mailcraft_mailbox::Result<Vec<RemoteHeader>> {
+    fn search(&mut self, folder: &str, query: &str, limit: u32) -> merel_mailbox::Result<Vec<RemoteHeader>> {
         Ok(ImapClient::search(self, folder, query, limit)?)
     }
 
-    fn body(&mut self, folder: &str, id: &str) -> mailcraft_mailbox::Result<Vec<u8>> {
+    fn body(&mut self, folder: &str, id: &str) -> merel_mailbox::Result<Vec<u8>> {
         Ok(ImapClient::body(self, folder, uid_of(id)?)?)
     }
 
-    fn set_flag(&mut self, folder: &str, id: &str, flag: Flag, on: bool) -> mailcraft_mailbox::Result<()> {
+    fn set_flag(&mut self, folder: &str, id: &str, flag: Flag, on: bool) -> merel_mailbox::Result<()> {
         Ok(ImapClient::set_flag(self, folder, uid_of(id)?, flag, on)?)
     }
 
-    fn move_to(&mut self, folder: &str, id: &str, dest: &str) -> mailcraft_mailbox::Result<()> {
+    fn move_to(&mut self, folder: &str, id: &str, dest: &str) -> merel_mailbox::Result<()> {
         Ok(ImapClient::move_to(self, folder, uid_of(id)?, dest)?)
     }
 
-    fn mark_junk(&mut self, folder: &str, id: &str, junk: bool) -> mailcraft_mailbox::Result<()> {
+    fn mark_junk(&mut self, folder: &str, id: &str, junk: bool) -> merel_mailbox::Result<()> {
         Ok(ImapClient::mark_junk(self, folder, uid_of(id)?, junk)?)
     }
 
-    fn append(&mut self, folder: &str, message: &[u8]) -> mailcraft_mailbox::Result<()> {
+    fn append(&mut self, folder: &str, message: &[u8]) -> merel_mailbox::Result<()> {
         Ok(ImapClient::append(self, folder, message)?)
     }
 
-    fn send(&mut self, _message: &[u8]) -> mailcraft_mailbox::Result<bool> {
+    fn send(&mut self, _message: &[u8]) -> merel_mailbox::Result<bool> {
         Ok(false)
     }
 
-    fn create_folder(&mut self, parent: Option<&str>, name: &str) -> mailcraft_mailbox::Result<()> {
+    fn create_folder(&mut self, parent: Option<&str>, name: &str) -> merel_mailbox::Result<()> {
         Ok(ImapClient::create_folder(self, parent, name)?)
     }
 
-    fn rename_folder(&mut self, folder: &str, name: &str) -> mailcraft_mailbox::Result<()> {
+    fn rename_folder(&mut self, folder: &str, name: &str) -> merel_mailbox::Result<()> {
         Ok(ImapClient::rename_folder(self, folder, name)?)
     }
 
-    fn delete_folder(&mut self, folder: &str) -> mailcraft_mailbox::Result<()> {
+    fn delete_folder(&mut self, folder: &str) -> merel_mailbox::Result<()> {
         Ok(ImapClient::delete_folder(self, folder)?)
     }
 
-    fn delete_message(&mut self, folder: &str, id: &str) -> mailcraft_mailbox::Result<()> {
+    fn delete_message(&mut self, folder: &str, id: &str) -> merel_mailbox::Result<()> {
         Ok(ImapClient::delete_message(self, folder, uid_of(id)?)?)
     }
 
-    fn empty_folder(&mut self, folder: &str) -> mailcraft_mailbox::Result<()> {
+    fn empty_folder(&mut self, folder: &str) -> merel_mailbox::Result<()> {
         Ok(ImapClient::empty_folder(self, folder)?)
     }
 
-    fn set_categories(&mut self, folder: &str, id: &str, categories: &[String], removed: &[String]) -> mailcraft_mailbox::Result<()> {
+    fn set_categories(&mut self, folder: &str, id: &str, categories: &[String], removed: &[String]) -> merel_mailbox::Result<()> {
         Ok(ImapClient::set_categories(self, folder, uid_of(id)?, categories, removed)?)
     }
 
@@ -895,7 +895,7 @@ mod tests {
 
 #[cfg(test)]
 mod network_tests {
-    //! Needs the network: `cargo test -p mailcraft-imap -- --ignored`.
+    //! Needs the network: `cargo test -p merel-imap -- --ignored`.
     use super::*;
 
     #[test]

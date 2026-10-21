@@ -5,8 +5,8 @@
 use egui::{RichText, Ui, vec2};
 use serde_json::json;
 
-use mailcraft_engine::CommandError;
-use mailcraft_model::{ContactGroup, mailbox};
+use merel_engine::CommandError;
+use merel_model::{ContactGroup, mailbox};
 
 use crate::{ComposeKind, MailApp, Tokens};
 
@@ -59,7 +59,7 @@ impl MailApp {
 fn describe(e: &CommandError) -> String {
     match e {
         CommandError::Param("name") => "Vul een naam in.".into(),
-        CommandError::Param("members") => format!("Vul bij Leden ten minste één geldig adres in, hoogstens {}.", mailcraft_model::MAX_GROUP_MEMBERS),
+        CommandError::Param("members") => format!("Vul bij Leden ten minste één geldig adres in, hoogstens {}.", merel_model::MAX_GROUP_MEMBERS),
         CommandError::NotFound => "Deze groep bestaat niet meer.".into(),
         _ => "Opslaan is niet gelukt.".into(),
     }

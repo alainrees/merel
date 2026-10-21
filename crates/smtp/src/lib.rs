@@ -8,8 +8,8 @@ use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::transport::smtp::client::{Tls as SmtpTls, TlsParameters};
 use lettre::{Message, SmtpTransport, Transport};
-use mailcraft_model::{Address, Draft, Importance, MAX_ATTACHMENTS, Server, Tls};
-use mailcraft_secrets::Secret;
+use merel_model::{Address, Draft, Importance, MAX_ATTACHMENTS, Server, Tls};
+use merel_secrets::Secret;
 
 /// How to log in.
 #[derive(Clone, Debug)]
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn attachments_make_a_mixed_message_with_the_file_type_and_name() {
-        use mailcraft_model::DraftAttachment;
+        use merel_model::DraftAttachment;
         let from = Address::new(None, "jij@example.org").unwrap();
         let draft = Draft {
             to: vec![Address::new(None, "sanne@example.org").unwrap()],
@@ -234,7 +234,7 @@ mod tests {
         assert!(text.contains("filename=\"offerte.pdf\""), "{text}");
         assert!(text.contains("Content-Type: application/octet-stream"));
         assert!(!text.contains("/Users/"), "the path stays private");
-        let parsed = mailcraft_mime::parse_body(text.as_bytes());
+        let parsed = merel_mime::parse_body(text.as_bytes());
         assert_eq!(parsed.attachments.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["offerte.pdf", "x.unknown"]);
         assert_eq!(parsed.text.trim(), "Zie bijlage.");
 
@@ -244,8 +244,8 @@ mod tests {
 
     #[test]
     fn formatted_text_goes_as_html_beside_the_text_and_attachments_after_it() {
-        use mailcraft_model::DraftAttachment;
-        use mailcraft_model::rich::{List, Rich};
+        use merel_model::DraftAttachment;
+        use merel_model::rich::{List, Rich};
         let from = Address::new(None, "jij@example.org").unwrap();
         let body = "Agenda\nbegroting\nplanning";
         let mut rich = Rich::plain(body);
@@ -255,14 +255,14 @@ mod tests {
         let text = String::from_utf8(build(&from, &draft).unwrap().formatted()).unwrap();
         assert!(text.contains("Content-Type: multipart/alternative"), "{text}");
         assert!(text.contains("Content-Type: text/plain") && text.contains("Content-Type: text/html"), "{text}");
-        let parsed = mailcraft_mime::parse_body(text.as_bytes());
+        let parsed = merel_mime::parse_body(text.as_bytes());
         assert_eq!(parsed.text.trim().replace("\r\n", "\n"), "Agenda\n• begroting\n• planning", "the text part writes the bullets out");
         assert!(parsed.rich.is_some() && !parsed.from_html, "the reader gets both parts");
 
         let with_file = Draft { attachments: vec![DraftAttachment::new("a.txt", b"x".to_vec())], ..draft };
         let text = String::from_utf8(build(&from, &with_file).unwrap().formatted()).unwrap();
         assert!(text.contains("multipart/mixed") && text.contains("multipart/alternative"), "{text}");
-        assert_eq!(mailcraft_mime::parse_body(text.as_bytes()).attachments.len(), 1);
+        assert_eq!(merel_mime::parse_body(text.as_bytes()).attachments.len(), 1);
     }
 
     #[test]

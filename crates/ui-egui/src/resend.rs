@@ -1,7 +1,7 @@
 //! Outlook's "Dit bericht opnieuw verzenden": the message opens as a new one with the same
 //! recipients, subject, text and attachments, to send again, to someone else, or corrected.
 
-use mailcraft_model::{FolderKind, MessageHeader};
+use merel_model::{FolderKind, MessageHeader};
 
 use crate::MailApp;
 use crate::compose::{Compose, Kind, join};
@@ -39,7 +39,7 @@ impl MailApp {
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_engine::Engine;
+    use merel_engine::Engine;
 
     use super::*;
 

@@ -1,5 +1,5 @@
 [package]
-name = "mailcraft-exchange"
+name = "merel-exchange"
 description = "Exchange Web Services (EWS) over HTTPS for Exchange Server 2013 and later."
 version.workspace = true
 edition.workspace = true
@@ -7,10 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-mailcraft-model = { workspace = true }
-mailcraft-mime = { workspace = true }
-mailcraft-mailbox = { workspace = true }
-mailcraft-secrets = { workspace = true }
+merel-model = { workspace = true }
+merel-mime = { workspace = true }
+merel-mailbox = { workspace = true }
+merel-secrets = { workspace = true }
 ureq = { workspace = true }
 rustls = { workspace = true }
 roxmltree = { workspace = true }

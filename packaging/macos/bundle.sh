@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
-# Builds Mailcraft.app for Apple Silicon and Intel in one binary, gives it a free ad-hoc
+# Builds Merel.app for Apple Silicon and Intel in one binary, gives it a free ad-hoc
 # signature and wraps it in a .dmg with a shortcut to Applications. Run on macOS from the
 # repository root after both release builds:
-#   cargo build --release -p mailcraft --target aarch64-apple-darwin
-#   cargo build --release -p mailcraft --target x86_64-apple-darwin
+#   cargo build --release -p merel --target aarch64-apple-darwin
+#   cargo build --release -p merel --target x86_64-apple-darwin
 set -euo pipefail
 version="$(packaging/version.sh)"
 commit="$(git rev-parse --short=7 HEAD 2>/dev/null || true)"
 out=dist
 work="$(mktemp -d)"
-app="$work/Mailcraft.app"
+app="$work/Merel.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$out"
 
-lipo -create -output "$app/Contents/MacOS/mailcraft" \
-  target/aarch64-apple-darwin/release/mailcraft \
-  target/x86_64-apple-darwin/release/mailcraft
+lipo -create -output "$app/Contents/MacOS/merel" \
+  target/aarch64-apple-darwin/release/merel \
+  target/x86_64-apple-darwin/release/merel
 
-iconset="$work/Mailcraft.iconset"
+iconset="$work/Merel.iconset"
 mkdir -p "$iconset"
 for size in 16 32 128 256 512; do
   sips -z "$size" "$size" packaging/icon.png --out "$iconset/icon_${size}x${size}.png" >/dev/null
   double=$((size * 2))
   sips -z "$double" "$double" packaging/icon.png --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
-iconutil -c icns "$iconset" -o "$app/Contents/Resources/Mailcraft.icns"
+iconutil -c icns "$iconset" -o "$app/Contents/Resources/Merel.icns"
 
 sed -e "s/@VERSION@/$version/g" -e "s/@BUILD@/${commit:-$version}/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
 
@@ -38,4 +38,4 @@ ln -s /Applications "$stage/Applications"
 # hdiutil's own size guess runs short for a fresh bundle ("No space left on device"), so give
 # it the content size plus room for the file system.
 size_mb=$(($(du -sm "$stage" | cut -f1) * 12 / 10 + 20))
-hdiutil create -volname "Mailcraft" -srcfolder "$stage" -size "${size_mb}m" -fs HFS+ -ov -format UDZO "$out/Mailcraft-$version-macos.dmg"
+hdiutil create -volname "Merel" -srcfolder "$stage" -size "${size_mb}m" -fs HFS+ -ov -format UDZO "$out/Merel-$version-macos.dmg"

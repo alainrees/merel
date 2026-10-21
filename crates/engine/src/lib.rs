@@ -38,20 +38,20 @@ pub mod view;
 pub mod worker;
 
 pub use commands::{COMMANDS, CommandError, CommandSpec};
-pub use mailcraft_mime::Body;
+pub use merel_mime::Body;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
-use mailcraft_mailbox::{Flag, Item};
-pub use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
-use mailcraft_model::{
+use merel_mailbox::{Flag, Item};
+pub use merel_mailbox::{RemoteFolder, RemoteHeader};
+use merel_model::{
     Account, Appointment, Auth, Calendar, Category, Contact, ContactGroup, Draft, Flags, Folder, FolderKind, MessageHeader, QuickStep, Rule,
     StoredDraft, Task, Template, clean_text,
 };
-use mailcraft_secrets::{Secret, SecretStore};
+use merel_secrets::{Secret, SecretStore};
 use serde::{Deserialize, Serialize};
 
 /// How many of the newest messages a folder shows.
@@ -266,7 +266,7 @@ pub enum Event {
         message_id: String,
         body: Box<Body>,
         /// The envelope as the raw message carries it; fills in what the listing left out.
-        header: mailcraft_mime::ParsedHeader,
+        header: merel_mime::ParsedHeader,
         /// The message as the server sent it, for the offline cache (empty when served from it).
         raw: Vec<u8>,
     },
@@ -308,7 +308,7 @@ pub enum SendState {
 
 /// A listed header as the session shows it; `None` when it has no usable sender.
 fn message_of(folder_id: &str, h: RemoteHeader) -> Option<MessageHeader> {
-    let from = h.header.from.clone().or_else(|| mailcraft_model::Address::new(Some("Onbekende afzender"), "unknown@invalid").ok())?;
+    let from = h.header.from.clone().or_else(|| merel_model::Address::new(Some("Onbekende afzender"), "unknown@invalid").ok())?;
     Some(MessageHeader {
         id: format!("{folder_id}#{}", h.id),
         folder_id: folder_id.to_string(),
@@ -415,13 +415,13 @@ pub struct Session {
     pub rules: Vec<Rule>,
     rules_dirty: bool,
     /// Blocked and safe senders, for every account; `junk.json`.
-    pub junk: mailcraft_model::JunkLists,
+    pub junk: merel_model::JunkLists,
     junk_dirty: bool,
     /// Conversations whose mail goes to Deleted Items on arrival; see [`ignore`].
-    pub ignored: Vec<mailcraft_model::IgnoredConversation>,
+    pub ignored: Vec<merel_model::IgnoredConversation>,
     ignored_dirty: bool,
     /// The due days of flagged messages, kept in `follow_ups.json`; see [`followup`].
-    pub follow_ups: Vec<mailcraft_model::FollowUp>,
+    pub follow_ups: Vec<merel_model::FollowUp>,
     follow_ups_dirty: bool,
     /// Follow-up reminders put off until a moment, by the follow-up's key; in memory only.
     pub snoozed_follow_ups: HashMap<String, i64>,
@@ -430,7 +430,7 @@ pub struct Session {
     /// Task reminders put off until a moment, by task id; in memory only.
     pub snoozed_task_reminders: HashMap<String, i64>,
     /// Messages put off with "Sluimeren", kept in `snoozed.json`; see [`snooze`].
-    pub snoozes: Vec<mailcraft_model::Snooze>,
+    pub snoozes: Vec<merel_model::Snooze>,
     snoozes_dirty: bool,
     /// The categories (coloured labels) the person knows, kept in `categories.json`.
     pub categories: Vec<Category>,
@@ -876,7 +876,7 @@ impl Session {
             Event::Body { message_id, body, header, .. } => {
                 self.loading.remove(&message_id);
                 if let Some(m) = self.messages.iter_mut().find(|m| m.id == message_id) {
-                    m.preview = mailcraft_mime::preview(&body.text, 120);
+                    m.preview = merel_mime::preview(&body.text, 120);
                     if m.to.is_empty() {
                         m.to = header.to;
                     }
@@ -1055,7 +1055,7 @@ impl Engine {
             session: Session::sample(),
             worker: None,
             events: rx,
-            secrets: Arc::new(mailcraft_secrets::MemoryStore::default()),
+            secrets: Arc::new(merel_secrets::MemoryStore::default()),
             config_path: None,
             cache: cache::Cache::none(),
             keys: certificates::Keys::default(),
@@ -1109,7 +1109,7 @@ impl Engine {
         }
         let rules = engine.config_path.as_deref().map(|p| config::load_json::<rules::RulesFile>(&config::rules_path(p))).unwrap_or_default();
         engine.session.set_rules(rules.rules);
-        let junk = engine.config_path.as_deref().map(|p| config::load_json::<mailcraft_model::JunkLists>(&config::junk_path(p))).unwrap_or_default();
+        let junk = engine.config_path.as_deref().map(|p| config::load_json::<merel_model::JunkLists>(&config::junk_path(p))).unwrap_or_default();
         engine.session.set_junk(junk);
         let ignored = engine.config_path.as_deref().map(|p| config::load_json::<ignore::IgnoredFile>(&config::ignored_path(p))).unwrap_or_default();
         engine.session.set_ignored(ignored.ignored);
@@ -1323,7 +1323,7 @@ impl Engine {
     /// Stores the signature of `account_id` and rewrites the accounts file.
     pub fn set_signature(&mut self, account_id: &str, signature: &str) -> Result<(), String> {
         let account = self.session.accounts.iter_mut().find(|a| a.id == account_id).ok_or_else(|| "Dit account bestaat niet meer.".to_string())?;
-        account.signature = mailcraft_model::clean_signature(signature);
+        account.signature = merel_model::clean_signature(signature);
         self.save_accounts()
     }
 
@@ -1428,7 +1428,7 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_model::{Address, Protocol, Server, Tls};
+    use merel_model::{Address, Protocol, Server, Tls};
 
     use super::*;
 
@@ -1455,7 +1455,7 @@ mod tests {
             answered: false,
             size: 1,
             has_attachments: false,
-            header: mailcraft_mime::parse_header(format!("From: x@y.nl\r\nSubject: Bericht {n}\r\n\r\n").as_bytes()),
+            header: merel_mime::parse_header(format!("From: x@y.nl\r\nSubject: Bericht {n}\r\n\r\n").as_bytes()),
             date: i64::from(n),
             categories: Vec::new(),
         }
@@ -1665,7 +1665,7 @@ mod tests {
                 recurrence: None,
                 reminder: None,
                 private: false,
-                show_as: mailcraft_model::ShowAs::Busy,
+                show_as: merel_model::ShowAs::Busy,
                 categories: Vec::new(),
                 meeting: None,
             }],

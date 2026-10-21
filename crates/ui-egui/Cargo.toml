@@ -1,5 +1,5 @@
 [package]
-name = "mailcraft-ui-egui"
+name = "merel-ui-egui"
 description = "Outlook-style front end in the ArtCraft look: ribbon, folder pane, message list, reading pane."
 version.workspace = true
 edition.workspace = true
@@ -7,14 +7,14 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-mailcraft-model = { workspace = true }
-mailcraft-engine = { workspace = true }
-mailcraft-smime = { workspace = true }
-mailcraft-secrets = { workspace = true }
-mailcraft-html = { workspace = true }
-mailcraft-mime = { workspace = true }
-mailcraft-pgp = { workspace = true }
-mailcraft-dav = { workspace = true }
+merel-model = { workspace = true }
+merel-engine = { workspace = true }
+merel-smime = { workspace = true }
+merel-secrets = { workspace = true }
+merel-html = { workspace = true }
+merel-mime = { workspace = true }
+merel-pgp = { workspace = true }
+merel-dav = { workspace = true }
 chrono = { workspace = true }
 zeroize = { workspace = true }
 egui = { workspace = true }

@@ -61,7 +61,7 @@ pub enum SmimeError {
     Pkcs12,
     #[error("Dit bestand bevat geen privésleutel met certificaat.")]
     NoKey,
-    #[error("Mailcraft ondersteunt voorlopig alleen certificaten met een RSA-sleutel.")]
+    #[error("Merel ondersteunt voorlopig alleen certificaten met een RSA-sleutel.")]
     KeyType,
     #[error("De privésleutel hoort niet bij het certificaat.")]
     Mismatch,
@@ -349,7 +349,7 @@ pub enum Signature {
     },
     /// It does not match: the message changed after it was signed, or the signature is false.
     Broken,
-    /// Signed in a way Mailcraft cannot check; the reason, in Dutch.
+    /// Signed in a way Merel cannot check; the reason, in Dutch.
     Unchecked(String),
 }
 

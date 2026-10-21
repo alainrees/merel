@@ -1,5 +1,5 @@
 [package]
-name = "mailcraft-smtp"
+name = "merel-smtp"
 description = "Sending mail over SMTP with mandatory TLS."
 version.workspace = true
 edition.workspace = true
@@ -7,13 +7,13 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-mailcraft-model = { workspace = true }
-mailcraft-secrets = { workspace = true }
+merel-model = { workspace = true }
+merel-secrets = { workspace = true }
 lettre = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-mailcraft-mime = { workspace = true }
+merel-mime = { workspace = true }
 
 [lints]
 workspace = true

@@ -10,10 +10,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use base64::Engine as _;
-use mailcraft_mime::{Body, Encryption};
-use mailcraft_model::Address;
-use mailcraft_pgp::{KeyInfo, PublicKey, SecretKey};
-use mailcraft_store::KeyKind;
+use merel_mime::{Body, Encryption};
+use merel_model::Address;
+use merel_pgp::{KeyInfo, PublicKey, SecretKey};
+use merel_store::KeyKind;
 use serde::{Deserialize, Serialize};
 
 use crate::{Engine, SAMPLE_ACCOUNT, config};
@@ -65,8 +65,8 @@ impl PgpKeys {
     }
 
     /// What the PGP/MIME signature on `raw` says, if it has one.
-    pub fn check(&self, raw: &[u8]) -> Option<mailcraft_pgp::Verdict> {
-        mailcraft_pgp::check_message(raw, &self.people())
+    pub fn check(&self, raw: &[u8]) -> Option<merel_pgp::Verdict> {
+        merel_pgp::check_message(raw, &self.people())
     }
 
     /// The body of the PGP/MIME encrypted message `raw`, opened with the key of `account_id`;
@@ -75,15 +75,15 @@ impl PgpKeys {
         let key = self.own.read().ok().and_then(|map| map.get(account_id).cloned());
         let people = self.people();
         let opened = match key {
-            Some(key) => mailcraft_pgp::decrypt_message(&key, raw, &people).map_err(|e| e.to_string()),
+            Some(key) => merel_pgp::decrypt_message(&key, raw, &people).map_err(|e| e.to_string()),
             None => Err("Dit bericht is met OpenPGP versleuteld, maar je hebt voor dit account geen OpenPGP-sleutel. Importeer die onder Bestand om het te lezen.".to_string()),
         };
         match opened {
             Ok((plain, inner)) => {
-                let mut body = mailcraft_mime::parse_body(&plain);
+                let mut body = merel_mime::parse_body(&plain);
                 body.encrypted = Some(Encryption::Opened);
                 // Signed inside the encryption, or signed as PGP/MIME and then encrypted.
-                body.pgp_signature = mailcraft_pgp::check_message(&plain, &people).or(inner);
+                body.pgp_signature = merel_pgp::check_message(&plain, &people).or(inner);
                 body
             }
             Err(reason) => Body { text: format!("🔒 {reason}"), encrypted: Some(Encryption::Locked(reason)), ..Body::default() },
@@ -138,7 +138,7 @@ impl Engine {
         }
     }
 
-    /// The correspondent's key Mailcraft knows for `email`, if any.
+    /// The correspondent's key Merel knows for `email`, if any.
     pub fn pgp_key_of(&self, email: &str) -> Option<KeyInfo> {
         self.keys.openpgp.people.read().ok()?.get(&email.trim().to_lowercase()).map(|k| k.info().clone())
     }
@@ -148,7 +148,7 @@ impl Engine {
     /// that address yet. Mail in the junk folder teaches nothing.
     pub(crate) fn learn_autocrypt(&mut self, message_id: &str, from: Option<&Address>, raw: &[u8]) {
         let Some(from) = from else { return };
-        let Some((addr, key)) = mailcraft_pgp::autocrypt(raw) else { return };
+        let Some((addr, key)) = merel_pgp::autocrypt(raw) else { return };
         if addr != from.email().to_lowercase() || self.in_junk(message_id) {
             return;
         }
@@ -195,9 +195,9 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_model::{Account, Auth, Protocol, Server, Tls};
-    use mailcraft_pgp::Verdict;
-    use mailcraft_secrets::Secret;
+    use merel_model::{Account, Auth, Protocol, Server, Tls};
+    use merel_pgp::Verdict;
+    use merel_secrets::Secret;
 
     use super::*;
 
@@ -281,11 +281,11 @@ mod tests {
 
     #[test]
     fn the_keys_are_kept_and_come_back_after_a_restart() {
-        let dir = std::env::temp_dir().join(format!("mailcraft-pgp-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("merel-pgp-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("accounts.json");
-        let secrets: Arc<dyn mailcraft_secrets::SecretStore> = Arc::new(mailcraft_secrets::MemoryStore::default());
+        let secrets: Arc<dyn merel_secrets::SecretStore> = Arc::new(merel_secrets::MemoryStore::default());
         let mut e = Engine::load(Arc::clone(&secrets), Some(path.clone()));
         e.add_account(account("alain@voorbeeld.nl"), Secret::new("x")).unwrap();
         e.import_pgp_key("a1", ALAIN, "geheim").unwrap();
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn mail_from_an_account_with_a_key_is_signed_carries_autocrypt_and_encrypts_to_known_keys() {
         use crate::certificates::{outgoing, parse_body};
-        use mailcraft_model::Draft;
+        use merel_model::Draft;
         let mut e = engine("alain@voorbeeld.nl");
         let a = account("alain@voorbeeld.nl");
         let raw = b"From: alain@voorbeeld.nl\r\nTo: jij@example.org\r\nSubject: Contract\r\nContent-Type: text/plain\r\n\r\nHallo\r\n".to_vec();
@@ -315,11 +315,11 @@ mod tests {
 
         let signed = outgoing(&e.keys, &a, &draft, raw.clone()).unwrap();
         assert!(String::from_utf8_lossy(&signed).contains("application/pgp-signature"));
-        let (addr, key) = mailcraft_pgp::autocrypt(&signed).unwrap();
+        let (addr, key) = merel_pgp::autocrypt(&signed).unwrap();
         assert_eq!(addr, "alain@voorbeeld.nl");
         assert_eq!(key.info().name, "Alain Tester");
         let unsigned = outgoing(&e.keys, &a, &Draft { sign: Some(false), ..draft.clone() }, raw.clone()).unwrap();
-        assert!(!String::from_utf8_lossy(&unsigned).contains("multipart/signed") && mailcraft_pgp::autocrypt(&unsigned).is_some());
+        assert!(!String::from_utf8_lossy(&unsigned).contains("multipart/signed") && merel_pgp::autocrypt(&unsigned).is_some());
 
         let secret = Draft { encrypt: true, ..draft.clone() };
         let refused = outgoing(&e.keys, &a, &secret, raw.clone()).unwrap_err();
@@ -328,7 +328,7 @@ mod tests {
         e.learn_autocrypt("x", Some(&jij()), &with_autocrypt("jij@example.org", SIGNED));
         assert!(e.missing_certificates("a1", &[jij()]).is_empty());
         let sent = outgoing(&e.keys, &a, &secret, raw).unwrap();
-        assert!(mailcraft_pgp::is_encrypted(&sent) && !sent.windows(5).any(|w| w == b"Hallo"));
+        assert!(merel_pgp::is_encrypted(&sent) && !sent.windows(5).any(|w| w == b"Hallo"));
         let mine = parse_body(&e.keys, "a1", &sent);
         assert_eq!(mine.encrypted, Some(Encryption::Opened));
         assert!(mine.text.contains("Hallo"), "{}", mine.text);

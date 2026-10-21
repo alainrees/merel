@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use egui::text::{ByteIndex, CCursor, CCursorRange, LayoutJob, LayoutSection, TextWrapping};
 use egui::{Color32, FontId, Galley, Key, KeyboardShortcut, Modifiers, Response, RichText, Stroke, TextFormat, Ui, vec2};
-use mailcraft_model::rich::{Align, DEFAULT_SIZE, Face, List, Para, Rgb, Rich, SIZES, Style, line_of, line_ranges};
+use merel_model::rich::{Align, DEFAULT_SIZE, Face, List, Para, Rgb, Rich, SIZES, Style, line_of, line_ranges};
 
 use crate::Tokens;
 use crate::helder::{self, Icon};

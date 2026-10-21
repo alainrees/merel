@@ -8,7 +8,7 @@
 //! request is HTTPS with the platform certificate verifier and Basic authentication; redirects
 //! are followed by hand so the method and body stay what they were; replies are size-capped
 //! and read with a read-only XML parser. Items are plain iCalendar and vCard resources
-//! ([`ical`]); a change is written back into the resource as it was read, so what Mailcraft
+//! ([`ical`]); a change is written back into the resource as it was read, so what Merel
 //! does not model (alarms, attendees, photos) stays. Recurring appointments are shown as the
 //! server expands them and are not edited from here.
 //!
@@ -23,10 +23,10 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use chrono::{DateTime, Utc};
-use mailcraft_imap::ImapClient;
-use mailcraft_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result};
-use mailcraft_model::{Appointment, Contact, Dav, Server, Task, clean_text};
-use mailcraft_secrets::Secret;
+use merel_imap::ImapClient;
+use merel_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result};
+use merel_model::{Appointment, Contact, Dav, Server, Task, clean_text};
+use merel_secrets::Secret;
 use roxmltree::{Document, Node};
 
 use ical::Component;
@@ -279,7 +279,7 @@ fn ical_time(ts: i64) -> String {
     DateTime::<Utc>::from_timestamp(ts, 0).map(|d| d.format("%Y%m%dT%H%M%SZ").to_string()).unwrap_or_else(|| "19700101T000000Z".into())
 }
 
-const RECURRING: &str = "Herhalende afspraken kun je nog niet bewerken in Mailcraft; doe dat in de agenda van je aanbieder.";
+const RECURRING: &str = "Herhalende afspraken kun je nog niet bewerken in Merel; doe dat in de agenda van je aanbieder.";
 
 impl DavClient {
     /// Finds the calendars and address books behind `dav` for `username`.
@@ -293,7 +293,7 @@ impl DavClient {
                 .max_redirects(0)
                 // PROPFIND and REPORT are WebDAV methods; ureq refuses them unless told.
                 .allow_non_standard_methods(true)
-                .user_agent("Mailcraft")
+                .user_agent("Merel")
                 .build(),
         );
         let mut client = DavClient {
@@ -731,7 +731,7 @@ impl ItemStore for DavClient {
 }
 
 /// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
-/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// like the rest of Merel. ureq has no root certificates of its own in this build: an
 /// agent without this panics on its first request.
 fn tls() -> ureq::tls::TlsConfig {
     ureq::tls::TlsConfig::builder()

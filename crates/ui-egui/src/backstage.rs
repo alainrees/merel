@@ -3,9 +3,9 @@
 use egui::{Margin, RichText, Ui, vec2};
 use zeroize::Zeroize;
 
-use mailcraft_engine::{AccountStatus, signin};
-use mailcraft_model::{Account, Address, Dav, Protocol, Server, Tls};
-use mailcraft_secrets::Secret;
+use merel_engine::{AccountStatus, signin};
+use merel_model::{Account, Address, Dav, Protocol, Server, Tls};
+use merel_secrets::Secret;
 
 use crate::helder::{self, Icon};
 use crate::{MailApp, Tab, Tokens};
@@ -199,7 +199,7 @@ impl AccountForm {
             address,
             username,
             protocol,
-            auth: mailcraft_model::Auth::Password,
+            auth: merel_model::Auth::Password,
             incoming: Some(incoming),
             outgoing,
             dav,
@@ -278,7 +278,7 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         a.id.clone(),
                         a.name.clone(),
                         a.address.email().to_string(),
-                        matches!(a.auth, mailcraft_model::Auth::OAuth2 { .. }),
+                        matches!(a.auth, merel_model::Auth::OAuth2 { .. }),
                         app.engine.session.status.get(&a.id).cloned().unwrap_or(AccountStatus::Offline),
                         a.signature.clone(),
                     )
@@ -570,7 +570,7 @@ fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if exchange {
         section(ui, t, "Exchange-server");
         field(ui, t, "Server", &mut f.imap_host, false);
-        ui.label(RichText::new("Bijvoorbeeld mail.bedrijf.nl; Mailcraft gebruikt https://<server>/EWS/Exchange.asmx. Gebruikersnaam als DOMEIN\\naam of als e-mailadres.").size(12.0).color(t.text_dim));
+        ui.label(RichText::new("Bijvoorbeeld mail.bedrijf.nl; Merel gebruikt https://<server>/EWS/Exchange.asmx. Gebruikersnaam als DOMEIN\\naam of als e-mailadres.").size(12.0).color(t.text_dim));
     } else {
         section(ui, t, "Ontvangen (IMAP)");
         field(ui, t, "Server", &mut f.imap_host, false);
@@ -651,7 +651,7 @@ fn oauth_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         None => {}
     }
     let busy = app.engine.session.sign_in.is_some();
-    // With Mailcraft's own registration the client ID is only for those who bring their own.
+    // With Merel's own registration the client ID is only for those who bring their own.
     let builtin = app.form.kind.builtin_client_id().is_some();
     let (provider, secret_needed, help) = match app.form.kind {
         Protocol::Gmail => (
@@ -659,9 +659,7 @@ fn oauth_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             true,
             "Maak in de Google Cloud Console een OAuth-client van het type Desktop app en vul de client-ID en het client-secret in. Zie docs/accounts.md.",
         ),
-        _ if builtin => {
-            ("Microsoft", false, "Vul je naam en e-mailadres in en log in bij Microsoft in je browser. Mailcraft ziet je wachtwoord niet.")
-        }
+        _ if builtin => ("Microsoft", false, "Vul je naam en e-mailadres in en log in bij Microsoft in je browser. Merel ziet je wachtwoord niet."),
         _ => (
             "Microsoft",
             false,
@@ -778,7 +776,7 @@ mod tests {
     fn a_signature_is_set_from_the_account_list_and_lands_in_new_mail() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut engine = mailcraft_engine::Engine::sample();
+        let mut engine = merel_engine::Engine::sample();
         let mut f = AccountForm::default();
         f.email = "alain@voorbeeld.nl".into();
         f.password = "x".into();
@@ -806,7 +804,7 @@ mod tests {
     fn the_account_card_says_why_the_calendar_is_missing() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut engine = mailcraft_engine::Engine::sample();
+        let mut engine = merel_engine::Engine::sample();
         let mut f = AccountForm::default();
         f.email = "alain@voorbeeld.nl".into();
         f.password = "x".into();
@@ -826,7 +824,7 @@ mod tests {
     fn removing_an_account_asks_first_and_then_brings_the_sample_back() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut engine = mailcraft_engine::Engine::sample();
+        let mut engine = merel_engine::Engine::sample();
         let mut f = AccountForm::default();
         f.email = "alain@voorbeeld.nl".into();
         f.password = "x".into();
@@ -855,7 +853,7 @@ mod tests {
     fn an_account_is_edited_from_the_list_and_keeps_its_mail() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut engine = mailcraft_engine::Engine::sample();
+        let mut engine = merel_engine::Engine::sample();
         let mut f = AccountForm::default();
         f.email = "alain@fastmail.com".into();
         f.password = "x".into();
@@ -908,7 +906,7 @@ mod tests {
     fn oauth_kinds_show_a_browser_button() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let mut app = MailApp::new(merel_engine::Engine::sample());
         app.tab = Tab::File;
         app.form.kind = Protocol::Gmail;
         let mut harness = Harness::builder().with_size(vec2(1100.0, 760.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);

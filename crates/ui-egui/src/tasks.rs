@@ -5,8 +5,8 @@ use chrono::{Days, NaiveDate, NaiveTime};
 use egui::{Align2, Color32, CornerRadius, FontId, Margin, RichText, Sense, Stroke, Ui, vec2};
 use serde_json::json;
 
-use mailcraft_engine::{CommandError, followup, tasks::TaskFilter};
-use mailcraft_model::{Frequency, MessageHeader, Priority, Repeat, Task};
+use merel_engine::{CommandError, followup, tasks::TaskFilter};
+use merel_model::{Frequency, MessageHeader, Priority, Repeat, Task};
 
 use crate::calendar::{to_local, to_timestamp, today};
 use crate::helder::{self, Icon};

@@ -1,15 +1,15 @@
 //! Message parsing: RFC 5322 headers and MIME bodies, through `mail-parser`.
 //!
 //! Everything that comes out of here is bounded and cleaned: names and subjects go through
-//! [`mailcraft_model::clean_text`], addresses through [`Address::new`], and HTML goes through
-//! `mailcraft_html` into a small layout tree (no scripts, no styles, no remote loads can
+//! [`merel_model::clean_text`], addresses through [`Address::new`], and HTML goes through
+//! `merel_html` into a small layout tree (no scripts, no styles, no remote loads can
 //! survive that), with a plain-text rendering next to it for previews and replies.
 
 use std::sync::Arc;
 
 use mail_parser::{MessageParser, MimeHeaders};
-use mailcraft_html::Document;
-use mailcraft_model::{Address, Importance, clean_text, parse_address_list};
+use merel_html::Document;
+use merel_model::{Address, Importance, clean_text, parse_address_list};
 
 /// Longest message body (bytes) that is parsed; the rest is dropped with a note.
 pub const MAX_BODY: usize = 8 * 1024 * 1024;
@@ -71,10 +71,10 @@ pub struct Body {
     /// "Leesbevestiging vragen" sets it. Nothing is sent back unless the person asks for it.
     pub receipt_to: Option<Address>,
     /// The S/MIME signature on the message, when it is signed.
-    pub signature: Option<mailcraft_smime::Signature>,
+    pub signature: Option<merel_smime::Signature>,
     /// The OpenPGP signature on the message, when it is signed that way; the engine checks it,
     /// since only it knows the keys.
-    pub pgp_signature: Option<mailcraft_pgp::Verdict>,
+    pub pgp_signature: Option<merel_pgp::Verdict>,
     /// Set for a message that came encrypted (S/MIME): whether it opened.
     pub encrypted: Option<Encryption>,
 }
@@ -125,7 +125,7 @@ fn importance_of(m: &mail_parser::Message<'_>) -> Importance {
 /// Parses a whole message into what the reading pane shows. Oversized input is truncated.
 pub fn parse_body(bytes: &[u8]) -> Body {
     // Checked on the whole message: a signature covers every byte.
-    let signature = mailcraft_smime::check_message(bytes);
+    let signature = merel_smime::check_message(bytes);
     let truncated = bytes.len() > MAX_BODY;
     let bytes = bytes.get(..bytes.len().min(MAX_BODY)).unwrap_or(bytes);
     let Some(m) = MessageParser::default().parse(bytes) else {
@@ -140,7 +140,7 @@ pub fn parse_body(bytes: &[u8]) -> Body {
         (None, Some(h)) => (html_to_text(h), true),
         (None, None) => (String::new(), false),
     };
-    let rich = html.map(mailcraft_html::parse).filter(|d| !d.is_empty());
+    let rich = html.map(merel_html::parse).filter(|d| !d.is_empty());
     if truncated {
         text.push_str("\n\n[Bericht afgekapt: te groot om volledig te tonen.]");
     }
@@ -340,9 +340,9 @@ mod tests {
     fn a_signed_message_carries_its_signature_instead_of_an_attachment() {
         let b = parse_body(include_bytes!("../../smime/testdata/signed-openssl.eml"));
         assert!(b.text.starts_with("Hallo Sanne,"), "{}", b.text);
-        assert!(matches!(b.signature, Some(mailcraft_smime::Signature::Valid { .. })));
+        assert!(matches!(b.signature, Some(merel_smime::Signature::Valid { .. })));
         assert!(b.attachments.is_empty(), "smime.p7s is not listed");
-        assert_eq!(parse_body(include_bytes!("../../smime/testdata/signed-tampered.eml")).signature, Some(mailcraft_smime::Signature::Broken));
+        assert_eq!(parse_body(include_bytes!("../../smime/testdata/signed-tampered.eml")).signature, Some(merel_smime::Signature::Broken));
         assert_eq!(parse_body(b"Subject: x\r\n\r\nHoi").signature, None);
         // An OpenPGP signature is not listed either.
         let pgp = parse_body(include_bytes!("../../pgp/testdata/signed-gpg.eml"));

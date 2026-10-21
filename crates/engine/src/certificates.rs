@@ -15,10 +15,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
 use base64::Engine as _;
-use mailcraft_mime::{Body, Encryption};
-use mailcraft_model::{Account, Address, Draft};
-use mailcraft_smime::{CertInfo, Identity, Signature};
-use mailcraft_store::KeyKind;
+use merel_mime::{Body, Encryption};
+use merel_model::{Account, Address, Draft};
+use merel_smime::{CertInfo, Identity, Signature};
+use merel_store::KeyKind;
 use serde::{Deserialize, Serialize};
 
 use crate::{Engine, SAMPLE_ACCOUNT, config};
@@ -61,7 +61,7 @@ impl Keys {
     pub fn judge(&self, body: &mut Body) {
         let Some(Signature::Valid { signer, certificate, issuers, trusted }) = body.signature.as_mut() else { return };
         let known = self.people.read().is_ok_and(|p| signer.emails.iter().any(|e| p.get(e) == Some(&*certificate)));
-        *trusted = known || mailcraft_smime::issued_by_trusted(certificate, issuers, self.roots(), now());
+        *trusted = known || merel_smime::issued_by_trusted(certificate, issuers, self.roots(), now());
     }
 }
 
@@ -91,7 +91,7 @@ pub fn sign_if_asked(identities: &Identities, account: &Account, sign: Option<bo
         }
         (_, Some(identity)) => {
             identity.check_usable(now()).map_err(|e| format!("{e} Importeer een nieuw certificaat onder Bestand, of zet Ondertekenen uit."))?;
-            mailcraft_smime::sign_message(&identity, &raw, now()).map_err(|e| e.to_string())
+            merel_smime::sign_message(&identity, &raw, now()).map_err(|e| e.to_string())
         }
     }
 }
@@ -104,7 +104,7 @@ pub fn sign_if_asked(identities: &Identities, account: &Account, sign: Option<bo
 pub fn outgoing(keys: &Keys, account: &Account, draft: &Draft, raw: Vec<u8>) -> Result<Vec<u8>, String> {
     let pgp = keys.openpgp.own_key(&account.id);
     let raw = match &pgp {
-        Some(key) => mailcraft_pgp::with_header(&raw, &key.autocrypt_header(account.address.email())),
+        Some(key) => merel_pgp::with_header(&raw, &key.autocrypt_header(account.address.email())),
         None => raw,
     };
     let own = keys.identities.read().ok().and_then(|map| map.get(&account.id).map(|i| i.certificate_der().to_vec()));
@@ -131,12 +131,12 @@ pub fn outgoing(keys: &Keys, account: &Account, draft: &Draft, raw: Vec<u8>) -> 
     // The sender's own copy too, so Verzonden items stays readable.
     let mut certificates = vec![own];
     certificates.extend(recipients.iter().filter_map(|a| people.get(&a.email().to_lowercase()).cloned()));
-    mailcraft_smime::encrypt_message(&signed, &certificates).map_err(|e| e.to_string())
+    merel_smime::encrypt_message(&signed, &certificates).map_err(|e| e.to_string())
 }
 
 /// [`outgoing`] with the OpenPGP key `key`: signed unless the draft says not to, encrypted
 /// (and signed inside) when it asks for it.
-fn pgp_outgoing(keys: &Keys, key: &mailcraft_pgp::SecretKey, draft: &Draft, recipients: &[&Address], raw: Vec<u8>) -> Result<Vec<u8>, String> {
+fn pgp_outgoing(keys: &Keys, key: &merel_pgp::SecretKey, draft: &Draft, recipients: &[&Address], raw: Vec<u8>) -> Result<Vec<u8>, String> {
     let sign = draft.sign != Some(false);
     if draft.encrypt {
         let missing = keys.openpgp.missing(recipients.iter().copied(), now());
@@ -144,9 +144,9 @@ fn pgp_outgoing(keys: &Keys, key: &mailcraft_pgp::SecretKey, draft: &Draft, reci
             return Err(format!("{} Zet Versleutelen uit om toch te verzenden.", missing_text(&missing)));
         }
         let people = keys.openpgp.keys_of(recipients.iter().copied());
-        return mailcraft_pgp::encrypt_message(key, &raw, &people, sign, now()).map_err(|e| e.to_string());
+        return merel_pgp::encrypt_message(key, &raw, &people, sign, now()).map_err(|e| e.to_string());
     }
-    if sign { mailcraft_pgp::sign_message(key, &raw, now()).map_err(|e| e.to_string()) } else { Ok(raw) }
+    if sign { merel_pgp::sign_message(key, &raw, now()).map_err(|e| e.to_string()) } else { Ok(raw) }
 }
 
 /// The addresses among `addresses` without a known certificate, lowercase, each once.
@@ -154,7 +154,7 @@ fn missing<'a>(people: &People, addresses: impl Iterator<Item = &'a Address>) ->
     let Ok(people) = people.read() else { return addresses.map(|a| a.email().to_lowercase()).collect() };
     let mut out: Vec<String> = Vec::new();
     for email in addresses.map(|a| a.email().to_lowercase()) {
-        if !people.get(&email).is_some_and(|c| mailcraft_smime::can_encrypt_to(c)) && !out.contains(&email) {
+        if !people.get(&email).is_some_and(|c| merel_smime::can_encrypt_to(c)) && !out.contains(&email) {
             out.push(email);
         }
     }
@@ -174,7 +174,7 @@ pub fn missing_text(missing: &[String]) -> String {
 /// certificate first; one that does not open shows why instead of its contents. A signature
 /// is judged for trust ([`Keys::judge`]).
 pub fn parse_body(keys: &Keys, account_id: &str, raw: &[u8]) -> Body {
-    if mailcraft_pgp::is_encrypted(raw) {
+    if merel_pgp::is_encrypted(raw) {
         let mut body = keys.openpgp.open_body(account_id, raw);
         keys.judge(&mut body);
         return body;
@@ -188,17 +188,17 @@ pub fn parse_body(keys: &Keys, account_id: &str, raw: &[u8]) -> Body {
 }
 
 fn open_body(identities: &Identities, account_id: &str, raw: &[u8]) -> Body {
-    if !mailcraft_smime::is_encrypted(raw) {
-        return mailcraft_mime::parse_body(raw);
+    if !merel_smime::is_encrypted(raw) {
+        return merel_mime::parse_body(raw);
     }
     let identity = identities.read().ok().and_then(|map| map.get(account_id).cloned());
     let opened = match identity {
-        Some(identity) => mailcraft_smime::decrypt_message(&identity, raw).map_err(|e| e.to_string()),
+        Some(identity) => merel_smime::decrypt_message(&identity, raw).map_err(|e| e.to_string()),
         None => Err("Dit bericht is versleuteld, maar je hebt voor dit account geen certificaat met privésleutel. Importeer het onder Bestand om het te lezen.".to_string()),
     };
     match opened {
         Ok(plain) => {
-            let mut body = mailcraft_mime::parse_body(&plain);
+            let mut body = merel_mime::parse_body(&plain);
             body.encrypted = Some(Encryption::Opened);
             body
         }
@@ -225,14 +225,14 @@ impl Engine {
     pub(crate) fn learn_certificate(&mut self, message_id: &str, from: Option<&Address>, body: &Body) {
         let (Some(from), Some(Signature::Valid { signer, certificate, trusted: true, .. })) = (from, &body.signature) else { return };
         let email = from.email().to_lowercase();
-        if self.in_junk(message_id) || !signer.covers(&email) || !mailcraft_smime::can_encrypt_to(certificate) {
+        if self.in_junk(message_id) || !signer.covers(&email) || !merel_smime::can_encrypt_to(certificate) {
             return;
         }
         self.keep_certificate(email, certificate);
     }
 
     pub(crate) fn in_junk(&self, message_id: &str) -> bool {
-        self.session.message(message_id).and_then(|m| self.session.folder(&m.folder_id)).is_some_and(|f| f.kind == mailcraft_model::FolderKind::Junk)
+        self.session.message(message_id).and_then(|m| self.session.folder(&m.folder_id)).is_some_and(|f| f.kind == merel_model::FolderKind::Junk)
     }
 
     /// "Certificaat vertrouwen": the person says the certificate on the open message
@@ -353,8 +353,8 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_model::{Address, Auth, Protocol, Server, Tls};
-    use mailcraft_secrets::Secret;
+    use merel_model::{Address, Auth, Protocol, Server, Tls};
+    use merel_secrets::Secret;
 
     use super::*;
 
@@ -377,7 +377,7 @@ mod tests {
     }
 
     fn signed(e: &Engine, raw: &[u8]) -> Body {
-        let mut body = mailcraft_mime::parse_body(raw);
+        let mut body = merel_mime::parse_body(raw);
         e.keys.judge(&mut body);
         body
     }
@@ -457,10 +457,10 @@ mod tests {
         assert!(e.missing_certificates("a1", &[jij()]).is_empty());
 
         let sent = outgoing(&e.keys, &a, &draft, raw.clone()).unwrap();
-        assert!(mailcraft_smime::is_encrypted(&sent) && !sent.windows(5).any(|w| w == b"Hallo"));
+        assert!(merel_smime::is_encrypted(&sent) && !sent.windows(5).any(|w| w == b"Hallo"));
         // The recipient opens it, and so does the sender, signature and all.
         let theirs = Identity::from_pkcs12(JIJ, "geheim", now()).unwrap();
-        assert!(String::from_utf8_lossy(&mailcraft_smime::decrypt_message(&theirs, &sent).unwrap()).contains("multipart/signed"));
+        assert!(String::from_utf8_lossy(&merel_smime::decrypt_message(&theirs, &sent).unwrap()).contains("multipart/signed"));
         let mine = parse_body(&e.keys, "a1", &sent);
         assert_eq!(mine.encrypted, Some(Encryption::Opened));
         assert!(mine.text.contains("Hallo"), "{}", mine.text);
@@ -469,7 +469,7 @@ mod tests {
         assert!(matches!(locked.encrypted, Some(Encryption::Locked(_))) && locked.text.contains("geen certificaat met privésleutel"));
 
         let plain = Draft { encrypt: false, ..draft };
-        assert!(!mailcraft_smime::is_encrypted(&outgoing(&e.keys, &a, &plain, raw).unwrap()));
+        assert!(!merel_smime::is_encrypted(&outgoing(&e.keys, &a, &plain, raw).unwrap()));
     }
 
     #[test]
@@ -497,11 +497,11 @@ mod tests {
 
     #[test]
     fn the_certificate_is_kept_sealed_and_comes_back_after_a_restart() {
-        let dir = std::env::temp_dir().join(format!("mailcraft-certs-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("merel-certs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("accounts.json");
-        let secrets: Arc<dyn mailcraft_secrets::SecretStore> = Arc::new(mailcraft_secrets::MemoryStore::default());
+        let secrets: Arc<dyn merel_secrets::SecretStore> = Arc::new(merel_secrets::MemoryStore::default());
         let mut e = Engine::load(Arc::clone(&secrets), Some(path.clone()));
         e.add_account(account("alain@voorbeeld.nl"), Secret::new("x")).unwrap();
         e.import_certificate("a1", P12, "geheim").unwrap();

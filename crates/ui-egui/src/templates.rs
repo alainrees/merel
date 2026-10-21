@@ -5,8 +5,8 @@
 use egui::{RichText, Ui, vec2};
 use serde_json::json;
 
-use mailcraft_engine::CommandError;
-use mailcraft_model::Template;
+use merel_engine::CommandError;
+use merel_model::Template;
 
 use crate::{MailApp, Tokens};
 

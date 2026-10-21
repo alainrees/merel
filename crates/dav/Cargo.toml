@@ -1,5 +1,5 @@
 [package]
-name = "mailcraft-dav"
+name = "merel-dav"
 description = "IMAP accounts with a CalDAV/CardDAV server next to them: appointments, contacts and tasks."
 version.workspace = true
 edition.workspace = true
@@ -7,10 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-mailcraft-model = { workspace = true }
-mailcraft-mailbox = { workspace = true }
-mailcraft-imap = { workspace = true }
-mailcraft-secrets = { workspace = true }
+merel-model = { workspace = true }
+merel-mailbox = { workspace = true }
+merel-imap = { workspace = true }
+merel-secrets = { workspace = true }
 ureq = { workspace = true }
 rustls = { workspace = true }
 roxmltree = { workspace = true }

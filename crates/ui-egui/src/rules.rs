@@ -4,7 +4,7 @@
 use egui::{RichText, Ui, vec2};
 use serde_json::json;
 
-use mailcraft_model::{FolderKind, Rule, RuleField};
+use merel_model::{FolderKind, Rule, RuleField};
 
 use crate::{MailApp, Tokens};
 
@@ -105,8 +105,8 @@ impl MailApp {
     }
 }
 
-fn save_error(e: &mailcraft_engine::CommandError) -> String {
-    use mailcraft_engine::CommandError;
+fn save_error(e: &merel_engine::CommandError) -> String {
+    use merel_engine::CommandError;
     match e {
         CommandError::Param("contains") => "Vul in waar de regel op moet letten.".into(),
         CommandError::Param("move_to") => {

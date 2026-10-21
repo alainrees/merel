@@ -9,7 +9,7 @@ use chrono::{DateTime, Datelike, Days, Local, TimeZone};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use mailcraft_model::{MessageHeader, Snooze};
+use merel_model::{MessageHeader, Snooze};
 
 use crate::{CommandError, Session, commands, followup};
 

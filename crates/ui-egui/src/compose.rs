@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 
 use egui::{Margin, RichText, Stroke, Ui, vec2};
 
-use mailcraft_engine::SendState;
-use mailcraft_model::{Address, Draft, DraftAttachment, FolderKind, Importance, MAX_ATTACHMENTS, MessageHeader, StoredDraft};
+use merel_engine::SendState;
+use merel_model::{Address, Draft, DraftAttachment, FolderKind, Importance, MAX_ATTACHMENTS, MessageHeader, StoredDraft};
 
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 
@@ -694,7 +694,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 if !missing.is_empty() {
                     egui::Frame::new().fill(t.flag.gamma_multiply(0.15)).corner_radius(helder::CONTROL_RADIUS).inner_margin(8).show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.label(RichText::new(format!("🔒 {}", mailcraft_engine::certificates::missing_text(&missing))).color(t.text));
+                        ui.label(RichText::new(format!("🔒 {}", merel_engine::certificates::missing_text(&missing))).color(t.text));
                     });
                     ui.add_space(8.0);
                 }
@@ -851,7 +851,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     }
     // Encrypted mail does not go out in the clear, and not to someone who could not open it.
     if (send || schedule.is_some() || anyway) && !missing.is_empty() {
-        c.error = Some(format!("{} Zet Versleutelen uit om toch te verzenden.", mailcraft_engine::certificates::missing_text(&missing)));
+        c.error = Some(format!("{} Zet Versleutelen uit om toch te verzenden.", merel_engine::certificates::missing_text(&missing)));
         send = false;
         schedule = None;
         anyway = false;
@@ -880,7 +880,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 app.put_aside();
                 if app.engine.session.last_draft.as_deref().and_then(|id| app.engine.session.draft(id)).is_some_and(|d| d.send_at == Some(ts)) {
                     app.notice = Some(crate::Notice::success(format!(
-                        "Het bericht wordt verzonden op {} als Mailcraft dan draait. Tot die tijd staat het onder Concepten; open het daar om dat te veranderen.",
+                        "Het bericht wordt verzonden op {} als Merel dan draait. Tot die tijd staat het onder Concepten; open het daar om dat te veranderen.",
                         when_text(ts)
                     )));
                 }
@@ -1031,7 +1031,7 @@ fn later_menu(ui: &mut Ui, t: &Tokens, add: impl FnOnce(&mut Ui)) {
     let (response, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, add);
     ui.painter().vline(response.rect.left(), response.rect.shrink(8.0).y_range(), Stroke::new(1.0, t.on_accent.gamma_multiply(0.5)));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, LATER));
-    response.on_hover_text("Zet het bericht opzij en verstuurt het op dat moment, als Mailcraft dan draait. Tot die tijd staat het onder Concepten.");
+    response.on_hover_text("Zet het bericht opzij en verstuurt het op dat moment, als Merel dan draait. Tot die tijd staat het onder Concepten.");
 }
 
 /// A quiet square button with only an icon; `label` is what a screen reader says.
@@ -1089,7 +1089,7 @@ fn attachment_tile(ui: &mut Ui, t: &Tokens, name: &str, bytes: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mailcraft_model::Flags;
+    use merel_model::Flags;
 
     fn header() -> MessageHeader {
         MessageHeader {
@@ -1136,7 +1136,7 @@ mod tests {
 
     #[test]
     fn files_become_attachments_within_the_size_limit() {
-        let dir = std::env::temp_dir().join(format!("mailcraft-compose-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("merel-compose-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("offerte.pdf");
         std::fs::write(&file, b"%PDF-1.4").unwrap();
@@ -1161,7 +1161,7 @@ mod tests {
     fn the_action_row_is_one_even_line_of_buttons_and_menus() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let mut app = MailApp::new(merel_engine::Engine::sample());
         app.open_compose(Kind::New);
         let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         harness.run();
@@ -1181,7 +1181,7 @@ mod tests {
     fn the_window_lists_attachments_and_removes_one_on_click() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let mut app = MailApp::new(merel_engine::Engine::sample());
         app.open_compose(Kind::New);
         if let Some(c) = app.compose.as_mut() {
             c.attachments.push(DraftAttachment::new("offerte.pdf", vec![0; 2048]));
@@ -1204,7 +1204,7 @@ mod tests {
     fn the_urgency_menu_marks_the_message_as_urgent_and_the_draft_carries_it() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let mut app = MailApp::new(merel_engine::Engine::sample());
         app.open_compose(Kind::New);
         let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         h.run();
@@ -1227,7 +1227,7 @@ mod tests {
     fn later_verzenden_puts_the_message_aside_with_a_moment_and_can_be_undone() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let mut app = MailApp::new(merel_engine::Engine::sample());
         app.open_compose(Kind::New);
         let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         h.run();
@@ -1280,7 +1280,7 @@ mod tests {
 
     #[test]
     fn verzenden_closes_the_window_at_once_and_a_failure_brings_it_back() {
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let mut app = MailApp::new(merel_engine::Engine::sample());
         let start = |app: &mut MailApp, subject: &str| {
             app.open_compose(Kind::New);
             if let Some(c) = app.compose.as_mut() {
@@ -1323,7 +1323,7 @@ mod tests {
     fn send_asks_first_about_a_missing_attachment_or_subject_and_sends_on_toch_verzenden() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let mut app = MailApp::new(merel_engine::Engine::sample());
         app.open_compose(Kind::New);
         if let Some(c) = app.compose.as_mut() {
             c.to = "sanne@example.org".into();
@@ -1364,7 +1364,7 @@ mod tests {
     fn toch_verzenden_sends_and_later_verzenden_is_checked_too() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let mut app = MailApp::new(merel_engine::Engine::sample());
         app.open_compose(Kind::New);
         if let Some(c) = app.compose.as_mut() {
             c.to = "sanne@example.org".into();
@@ -1400,7 +1400,7 @@ mod tests {
     fn a_template_is_dropped_in_above_the_signature_and_the_text_can_be_saved_as_one() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let mut app = MailApp::new(merel_engine::Engine::sample());
         app.engine.run("template.save", &serde_json::json!({ "name": "Route", "text": "Kom via de A2, afslag 9." })).unwrap();
         app.open_compose(Kind::New);
         if let Some(c) = app.compose.as_mut() {
@@ -1445,7 +1445,7 @@ mod tests {
     fn the_window_keeps_the_message_as_a_draft_a_moment_after_a_change_and_says_so() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let mut app = MailApp::new(merel_engine::Engine::sample());
         app.open_compose(Kind::New);
         let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         h.run();
@@ -1473,8 +1473,8 @@ mod tests {
     fn cc_and_bcc_lines_show_on_request_and_the_address_book_fills_aan() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
-        app.engine.session.contacts.push(mailcraft_model::Contact {
+        let mut app = MailApp::new(merel_engine::Engine::sample());
+        app.engine.session.contacts.push(merel_model::Contact {
             id: "c1".into(),
             name: "Ravi Kumar".into(),
             emails: vec!["ravi@example.org".into()],
@@ -1507,7 +1507,7 @@ mod tests {
     fn formatting_from_the_bar_travels_with_the_draft() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
+        let mut app = MailApp::new(merel_engine::Engine::sample());
         app.open_compose(Kind::New);
         if let Some(c) = app.compose.as_mut() {
             c.to = "sanne@example.org".into();
@@ -1520,9 +1520,9 @@ mod tests {
         h.run();
         let c = h.state().compose.as_ref().expect("the window");
         let rich = c.draft().ok().and_then(|d| d.rich).expect("formatted");
-        assert_eq!(rich.paras[0].list, mailcraft_model::rich::List::Bullet);
+        assert_eq!(rich.paras[0].list, merel_model::rich::List::Bullet);
         let again = Compose::from_stored(&c.as_stored());
-        assert_eq!(again.editor.rich.paras[0].list, mailcraft_model::rich::List::Bullet, "and comes back with it");
+        assert_eq!(again.editor.rich.paras[0].list, merel_model::rich::List::Bullet, "and comes back with it");
     }
 
     #[test]
@@ -1571,16 +1571,15 @@ mod tests {
 
     #[test]
     fn forwarding_takes_the_attachments_along_except_from_the_junk_folder() {
-        use mailcraft_model::Folder;
-        let mut app = MailApp::new(mailcraft_engine::Engine::sample());
-        let attachment = |name: &str, bytes: &[u8]| mailcraft_mime::Attachment {
+        use merel_model::Folder;
+        let mut app = MailApp::new(merel_engine::Engine::sample());
+        let attachment = |name: &str, bytes: &[u8]| merel_mime::Attachment {
             name: name.into(),
             mime: "application/octet-stream".into(),
             size: bytes.len(),
             bytes: std::sync::Arc::from(bytes),
         };
-        let body =
-            mailcraft_engine::Body { attachments: vec![attachment("offerte.pdf", b"%PDF"), attachment("foto.jpg", b"jpg")], ..Default::default() };
+        let body = merel_engine::Body { attachments: vec![attachment("offerte.pdf", b"%PDF"), attachment("foto.jpg", b"jpg")], ..Default::default() };
         app.engine.session.bodies.insert("m2".into(), body);
         app.engine.session.selected_message = Some("m2".into());
         app.open_compose(Kind::Forward);

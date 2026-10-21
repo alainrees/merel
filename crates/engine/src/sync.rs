@@ -14,9 +14,9 @@ use std::collections::HashMap;
 use chrono::{Days, Local, NaiveTime, TimeZone};
 use serde_json::Value;
 
-use mailcraft_mailbox::Item;
-use mailcraft_model::rich::Rich;
-use mailcraft_model::{Account, Appointment, Calendar, Contact, Meeting, Task};
+use merel_mailbox::Item;
+use merel_model::rich::Rich;
+use merel_model::{Account, Appointment, Calendar, Contact, Meeting, Task};
 
 use crate::{CommandError, Job, Session};
 
@@ -145,7 +145,7 @@ impl Session {
             .filter(|a| a.calendar_id == calendar_id)
             .filter_map(|a| a.notes_rich.clone().map(|r| (a.id.clone(), (a.notes.clone(), r))))
             .collect();
-        // Meetings Mailcraft sent keep their attendees and answers here when the server does
+        // Meetings Merel sent keep their attendees and answers here when the server does
         // not track them (Exchange, Microsoft 365, Google); what a server does track wins, with
         // the details of the answers filed here.
         let meetings: HashMap<String, Meeting> =
@@ -245,7 +245,7 @@ pub fn refresh(s: &mut Session, _: &Value) -> Result<(), CommandError> {
 mod tests {
     use serde_json::json;
 
-    use mailcraft_model::{Address, Auth, Priority, Protocol, Server, Tls};
+    use merel_model::{Address, Auth, Priority, Protocol, Server, Tls};
 
     use super::*;
     use crate::Event;
@@ -283,7 +283,7 @@ mod tests {
             recurrence: None,
             reminder: None,
             private: false,
-            show_as: mailcraft_model::ShowAs::Busy,
+            show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
         }
@@ -385,9 +385,9 @@ mod tests {
         connected(&mut s);
         let a = appointment("A1", 1_792_000_000, 1_792_003_600, false);
         s.apply(Event::Synced { account_id: "acc".into(), appointments: vec![a.clone()], contacts: Vec::new(), tasks: Vec::new() });
-        let sanne = mailcraft_model::Attendee {
+        let sanne = merel_model::Attendee {
             email: "sanne@example.org".into(),
-            response: mailcraft_model::Response::Accepted,
+            response: merel_model::Response::Accepted,
             replied: Some(5),
             ..Default::default()
         };
@@ -398,7 +398,7 @@ mod tests {
         s.apply(Event::Synced { account_id: "acc".into(), appointments: vec![a.clone()], contacts: Vec::new(), tasks: Vec::new() });
         assert_eq!(s.appointment("acc/A1").and_then(|x| x.meeting.clone()), Some(ours.clone()), "the server had none, ours stays");
         // A server that tracks the answers wins, with the time of our answer kept.
-        let theirs = Meeting { attendees: vec![mailcraft_model::Attendee { replied: None, ..sanne }], ..ours };
+        let theirs = Meeting { attendees: vec![merel_model::Attendee { replied: None, ..sanne }], ..ours };
         let tracked = Appointment { meeting: Some(theirs), ..a };
         s.apply(Event::Synced { account_id: "acc".into(), appointments: vec![tracked], contacts: Vec::new(), tasks: Vec::new() });
         let kept = s.appointment("acc/A1").and_then(|x| x.meeting.clone()).expect("a meeting");

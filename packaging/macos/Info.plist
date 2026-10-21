@@ -5,17 +5,17 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>nl</string>
   <key>CFBundleDisplayName</key>
-  <string>Mailcraft</string>
+  <string>Merel</string>
   <key>CFBundleExecutable</key>
-  <string>mailcraft</string>
+  <string>merel</string>
   <key>CFBundleIconFile</key>
-  <string>Mailcraft</string>
+  <string>Merel</string>
   <key>CFBundleIdentifier</key>
-  <string>io.github.alainrees.mailcraft</string>
+  <string>io.github.alainrees.merel</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>Mailcraft</string>
+  <string>Merel</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

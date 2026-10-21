@@ -6,8 +6,8 @@
 use egui::{Color32, FontId, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
-use mailcraft_engine::CommandError;
-use mailcraft_model::{CALENDAR_COLORS, Calendar, MAX_CALENDAR_NAME};
+use merel_engine::CommandError;
+use merel_model::{CALENDAR_COLORS, Calendar, MAX_CALENDAR_NAME};
 
 use crate::helder::{self, Icon};
 use crate::{MailApp, Tokens};

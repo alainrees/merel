@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mailcraft_html::{Block, Document, ImageSource, Inline};
+use merel_html::{Block, Document, ImageSource, Inline};
 
 /// The largest picture fetched, in bytes.
 pub const MAX_IMAGE_BYTES: u64 = 5 * 1024 * 1024;
@@ -95,7 +95,7 @@ impl RemoteImages {
     }
 }
 
-/// Whether `url` is one Mailcraft is willing to fetch: `https`, no control characters.
+/// Whether `url` is one Merel is willing to fetch: `https`, no control characters.
 pub fn fetchable(url: &str) -> bool {
     url.starts_with("https://") && url.len() <= 2048 && !url.chars().any(|c| c.is_control() || c.is_whitespace())
 }
@@ -137,7 +137,7 @@ fn fetch(url: &str) -> Result<Arc<[u8]>, String> {
             .http_status_as_error(false)
             .https_only(true)
             .max_redirects(3)
-            .user_agent("Mailcraft")
+            .user_agent("Merel")
             .build(),
     );
     let mut response = agent.get(url).call().map_err(|e| e.to_string())?;
@@ -160,7 +160,7 @@ fn fetch(url: &str) -> Result<Arc<[u8]>, String> {
 }
 
 /// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
-/// like the rest of Mailcraft. ureq has no root certificates of its own in this build: an
+/// like the rest of Merel. ureq has no root certificates of its own in this build: an
 /// agent without this panics on its first request.
 pub(crate) fn tls() -> ureq::tls::TlsConfig {
     ureq::tls::TlsConfig::builder()
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn remote_urls_are_collected_once_and_only_https_is_fetchable() {
-        let doc = mailcraft_html::parse(
+        let doc = merel_html::parse(
             r#"<p><img src="https://a.example/1.png"> <img src="https://a.example/1.png"></p>
             <blockquote><img src="http://a.example/plain.png"></blockquote>
             <ul><li><img src="https://b.example/2.gif" alt="x"></li></ul>
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn allowing_is_per_message_and_a_reset_forgets() {
-        let doc = mailcraft_html::parse(r#"<p><img src="http://a.example/plain.png"></p>"#);
+        let doc = merel_html::parse(r#"<p><img src="http://a.example/plain.png"></p>"#);
         let ctx = egui::Context::default();
         let mut r = RemoteImages::default();
         assert!(r.snapshot("m1").is_none());

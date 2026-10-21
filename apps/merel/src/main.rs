@@ -1,11 +1,11 @@
-//! Mailcraft desktop app.
+//! Merel desktop app.
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::sync::Arc;
 
-use mailcraft_engine::{Engine, config};
-use mailcraft_secrets::Keychain;
-use mailcraft_ui_egui::MailApp;
+use merel_engine::{Engine, config};
+use merel_secrets::Keychain;
+use merel_ui_egui::MailApp;
 
 #[cfg(target_os = "macos")]
 mod app_menu;
@@ -22,7 +22,7 @@ impl eframe::App for App {
         if let Some(menu) = &self.menu {
             for action in menu.actions() {
                 match action {
-                    app_menu::Action::About => self.app.help = Some(mailcraft_ui_egui::help::HelpWindow::About),
+                    app_menu::Action::About => self.app.help = Some(merel_ui_egui::help::HelpWindow::About),
                     app_menu::Action::Updates => self.app.check_for_updates(ui.ctx(), true),
                 }
             }
@@ -43,11 +43,11 @@ const MACOS_WINDOW_BUTTONS: f32 = 72.0;
 const ICON: &[u8] = include_bytes!("../../../packaging/icon-256.png");
 
 fn main() -> eframe::Result {
-    mailcraft_oauth::install_crypto();
-    mailcraft_touch_bar::guard();
+    merel_oauth::install_crypto();
+    merel_touch_bar::guard();
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("Mailcraft")
-        .with_app_id("mailcraft")
+        .with_title("Merel")
+        .with_app_id("merel")
         .with_inner_size([1280.0, 800.0])
         .with_min_inner_size([800.0, 500.0]);
     // On macOS the window's content runs up under a see-through title bar, as Outlook's does:
@@ -62,7 +62,7 @@ fn main() -> eframe::Result {
     }
     let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native(
-        "Mailcraft",
+        "Merel",
         options,
         Box::new(|#[cfg_attr(not(target_os = "macos"), allow(unused_variables))] cc| {
             let engine = Engine::load(Arc::new(Keychain), config::default_path());

@@ -7,7 +7,7 @@
 
 use egui::{Color32, Stroke};
 
-/// Mailcraft's app colour (each ArtCraft app has its own; WordCraft's is #3B5BDB).
+/// Merel's app colour (each ArtCraft app has its own; WordCraft's is #3B5BDB).
 pub const APP_COLOR: Color32 = Color32::from_rgb(0x1F, 0x6F, 0xC9);
 pub const APP_INK: Color32 = Color32::from_rgb(0x17, 0x57, 0xA3);
 

@@ -615,7 +615,7 @@ pub fn ribbon_icon(label: &str, glyph: &str) -> Option<Icon> {
         "Maand" => Icon::CalendarDays,
         "Vernieuwen" => Icon::RefreshCw,
         "Sneltoetsen" => Icon::Keyboard,
-        "Over Mailcraft" => Icon::Info,
+        "Over Merel" => Icon::Info,
         "Op GitHub" => Icon::Globe,
         "Nieuw contact" => Icon::UserPlus,
         "Nieuwe groep" => Icon::UsersRound,
@@ -974,6 +974,14 @@ pub fn badge(ui: &mut Ui, t: &Tokens, icon: Icon) {
     let (rect, _) = ui.allocate_exact_size(vec2(48.0, 48.0), Sense::hover());
     ui.painter().circle_filled(rect.center(), 24.0, t.checked);
     icon.image(24.0, t.accent_text).paint_at(ui, Rect::from_center_size(rect.center(), vec2(24.0, 24.0)));
+}
+
+/// The app icon, the folded blackbird, at the size of a [`badge`]: for "Over Merel" and the
+/// first step of the welcome.
+pub fn app_badge(ui: &mut Ui) {
+    const ICON: &[u8] = include_bytes!("../../../packaging/icon-256.png");
+    let (rect, _) = ui.allocate_exact_size(vec2(48.0, 48.0), Sense::hover());
+    Image::from_bytes("bytes://merel/app-icon.png", ICON).fit_to_exact_size(vec2(56.0, 56.0)).paint_at(ui, rect.expand(4.0));
 }
 
 /// A row of dots for the steps of a wizard: the steps done and the current one in the app

@@ -9,7 +9,7 @@ use chrono::{Datelike, Days, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use mailcraft_model::{FollowUp, MessageHeader};
+use merel_model::{FollowUp, MessageHeader};
 
 use crate::{CommandError, Session, commands};
 
@@ -164,7 +164,7 @@ pub fn snooze(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let minutes = params
         .get("minutes")
         .and_then(Value::as_u64)
-        .filter(|m| (1..=u64::from(mailcraft_model::MAX_REMINDER)).contains(m))
+        .filter(|m| (1..=u64::from(merel_model::MAX_REMINDER)).contains(m))
         .ok_or(CommandError::Param("minutes"))?;
     s.snoozed_follow_ups.insert(k, now() + minutes as i64 * 60);
     Ok(())

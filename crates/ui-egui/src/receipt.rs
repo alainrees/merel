@@ -3,8 +3,8 @@
 //! presses the button, or does not, and the sender learns nothing otherwise.
 
 use egui::{RichText, Ui};
-use mailcraft_engine::SendState;
-use mailcraft_model::{Address, Draft, MessageHeader};
+use merel_engine::SendState;
+use merel_model::{Address, Draft, MessageHeader};
 
 use crate::{MailApp, Tokens};
 
@@ -73,7 +73,7 @@ impl MailApp {
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_model::Flags;
+    use merel_model::Flags;
 
     use super::*;
 

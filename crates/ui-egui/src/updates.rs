@@ -1,9 +1,9 @@
-//! "Controleren op updates": asks GitHub which Mailcraft release is the newest and, when it is
+//! "Controleren op updates": asks GitHub which Merel release is the newest and, when it is
 //! newer than this build, says so in a small window with a button to the release page. Nothing
 //! is downloaded or installed here; the person downloads the installer in the browser.
 //!
 //! The question goes out only when the person asks (Help tab) or has switched on the daily
-//! check, because it shows GitHub this computer's address and that Mailcraft runs. It carries
+//! check, because it shows GitHub this computer's address and that Merel runs. It carries
 //! no account, no identifier and no version: one `https` GET with a short timeout and a size
 //! cap. The reply is data, never a link to follow: the release page is built from our own
 //! repository address and a tag that must read as a version number.
@@ -20,7 +20,7 @@ use crate::theme::Tokens;
 use crate::{MailApp, Notice};
 
 /// Where the newest release is described.
-const LATEST: &str = "https://api.github.com/repos/alainrees/mailcraft/releases/latest";
+const LATEST: &str = "https://api.github.com/repos/alainrees/merel/releases/latest";
 const TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_REPLY_BYTES: u64 = 512 * 1024;
 /// How often the daily check asks while the app keeps running.
@@ -29,7 +29,7 @@ pub const INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const NOTES_CHARS: usize = 600;
 
 /// The window's title and buttons, which tests and screen readers find them by.
-pub const WINDOW: &str = "Nieuwe versie van Mailcraft";
+pub const WINDOW: &str = "Nieuwe versie van Merel";
 pub const CHECK: &str = "Updates";
 pub const DOWNLOAD: &str = "Downloaden";
 pub const SKIP: &str = "Deze versie overslaan";
@@ -119,7 +119,7 @@ fn ask() -> Outcome {
             .http_status_as_error(false)
             .https_only(true)
             .max_redirects(0)
-            .user_agent("Mailcraft")
+            .user_agent("Merel")
             .build(),
     );
     let mut response = match agent.get(LATEST).header("Accept", "application/vnd.github+json").call() {
@@ -177,10 +177,10 @@ impl MailApp {
                 }
             }
             Outcome::UpToDate if manual => {
-                self.notice = Some(Notice::success(format!("Je hebt de nieuwste versie van Mailcraft ({}).", env!("CARGO_PKG_VERSION"))));
+                self.notice = Some(Notice::success(format!("Je hebt de nieuwste versie van Merel ({}).", env!("CARGO_PKG_VERSION"))));
             }
             Outcome::NoneYet if manual => {
-                self.notice = Some(Notice::info("Er staat nog geen versie van Mailcraft klaar om te downloaden."));
+                self.notice = Some(Notice::info("Er staat nog geen versie van Merel klaar om te downloaden."));
             }
             Outcome::Failed(reason) => {
                 log::warn!("update check failed: {reason}");
@@ -217,7 +217,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 helder::badge(ui, t, Icon::Download);
                 ui.add_space(8.0);
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(format!("Mailcraft {} is beschikbaar.", release.version)).size(18.0).strong().color(t.text));
+                    ui.label(RichText::new(format!("Merel {} is beschikbaar.", release.version)).size(18.0).strong().color(t.text));
                     ui.label(RichText::new(format!("Je gebruikt nu versie {}.", env!("CARGO_PKG_VERSION"))).size(14.0).color(t.text_dim));
                 });
             });
@@ -288,7 +288,7 @@ mod tests {
         let Outcome::Newer(r) = judge(&reply, "0.1.0") else { panic!("expected a newer release") };
         assert_eq!(r.version, "0.2.0");
         assert_eq!(r.notes, "Nieuw: zoeken.");
-        assert_eq!(r.page(), "https://github.com/alainrees/mailcraft/releases/tag/v0.2.0");
+        assert_eq!(r.page(), "https://github.com/alainrees/merel/releases/tag/v0.2.0");
         assert_eq!(judge(&reply, "0.2.0"), Outcome::UpToDate);
         assert_eq!(judge(&reply, "0.3.0"), Outcome::UpToDate);
         assert_eq!(judge(&json!({"tag_name": "v9.0.0", "prerelease": true}), "0.1.0"), Outcome::UpToDate);

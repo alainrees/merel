@@ -1,6 +1,6 @@
 [package]
-name = "mailcraft-touch-bar"
-description = "Keeps AppKit's Touch Bar bookkeeping from aborting Mailcraft on macOS."
+name = "merel-touch-bar"
+description = "Keeps AppKit's Touch Bar bookkeeping from aborting Merel on macOS."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

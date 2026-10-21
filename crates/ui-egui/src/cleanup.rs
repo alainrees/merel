@@ -1,9 +1,9 @@
 //! "Opruimen", Outlook's Clean Up, for one conversation or a whole folder: the question first,
 //! with how many messages would go to Verwijderde items and what stays, then the command. See
-//! `mailcraft_engine::cleanup` for what counts as redundant.
+//! `merel_engine::cleanup` for what counts as redundant.
 
 use egui::RichText;
-use mailcraft_model::{FolderKind, conversation_key};
+use merel_model::{FolderKind, conversation_key};
 use serde_json::json;
 
 use crate::{MailApp, Tokens};

@@ -10,7 +10,7 @@ use std::fmt;
 use std::io::Cursor;
 
 use base64::Engine as _;
-use mailcraft_smime::raw::{crlf, header, parameter, split_entity, split_message, two_parts};
+use merel_smime::raw::{crlf, header, parameter, split_entity, split_message, two_parts};
 use pgp::composed::{DecryptionOptions, Deserializable, DetachedSignature, Message, SignedPublicKey, SignedSecretKey, TheRing};
 use pgp::ser::Serialize as _;
 use pgp::types::{KeyDetails, Password};
@@ -207,14 +207,14 @@ impl PublicKey {
 /// What an OpenPGP signature on a message says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Verdict {
-    /// Made by the key of `signer`, one Mailcraft knows; the message is as it was signed.
+    /// Made by the key of `signer`, one Merel knows; the message is as it was signed.
     Valid { signer: KeyInfo },
     /// Made by a known key, but the message changed after it was signed, or the signature is
     /// false.
     Broken,
-    /// Signed with a key Mailcraft does not have yet; its id, in hex.
+    /// Signed with a key Merel does not have yet; its id, in hex.
     UnknownKey(String),
-    /// Signed in a way Mailcraft cannot check; the reason, in Dutch.
+    /// Signed in a way Merel cannot check; the reason, in Dutch.
     Unchecked(String),
 }
 

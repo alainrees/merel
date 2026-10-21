@@ -6,7 +6,7 @@ on:
   push:
     tags: ["v*"]
   pull_request:
-    paths: [".github/workflows/release.yml", "packaging/**", "apps/mailcraft/**"]
+    paths: [".github/workflows/release.yml", "packaging/**", "apps/merel/**"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,8 +21,8 @@ jobs:
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked -p mailcraft --target aarch64-apple-darwin
-      - run: cargo build --release --locked -p mailcraft --target x86_64-apple-darwin
+      - run: cargo build --release --locked -p merel --target aarch64-apple-darwin
+      - run: cargo build --release --locked -p merel --target x86_64-apple-darwin
       - run: packaging/macos/bundle.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -35,14 +35,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked -p mailcraft
+      - run: cargo build --release --locked -p merel
       - name: Installer
         # PowerShell, not Git Bash: Bash would turn the /D switch into a path.
         shell: pwsh
         run: |
           choco install innosetup --no-progress -y
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"$' | Select-Object -First 1).Matches.Groups[1].Value
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" packaging\windows\mailcraft.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" packaging\windows\merel.iss
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
@@ -57,12 +57,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfuse2
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked -p mailcraft
+      - run: cargo build --release --locked -p merel
       - name: Debian package
         run: |
           cargo install cargo-deb --locked
           mkdir -p dist
-          cargo deb -p mailcraft --no-build --output dist/
+          cargo deb -p merel --no-build --output dist/
       - name: AppImage
         run: |
           curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
@@ -93,4 +93,4 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Mailcraft ${GITHUB_REF_NAME#v}" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Merel ${GITHUB_REF_NAME#v}" --generate-notes

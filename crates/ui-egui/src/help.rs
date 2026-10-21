@@ -1,21 +1,21 @@
 //! The "Help" tab: the keyboard shortcuts in one list, the folder with this computer's settings,
-//! the project page, and "Over Mailcraft" with the version and what the app stands for.
+//! the project page, and "Over Merel" with the version and what the app stands for.
 
 use egui::{RichText, vec2};
 
 use crate::helder::{self, Icon};
 use crate::{MailApp, Tokens, key_hint, ribbon_action_hint};
 
-/// The button in "Over Mailcraft" that shows the folder with this computer's settings.
+/// The button in "Over Merel" that shows the folder with this computer's settings.
 pub const OPEN_SETTINGS: &str = "Instellingenmap openen";
 
 /// The project page, for the "Op GitHub" button.
-pub const REPOSITORY: &str = "https://github.com/alainrees/mailcraft";
+pub const REPOSITORY: &str = "https://github.com/alainrees/merel";
 
-/// The version of this build, as "Over Mailcraft" and the Help tab show it: the release number
+/// The version of this build, as "Over Merel" and the Help tab show it: the release number
 /// plus the commit and its date, so two builds of the same release can be told apart.
 pub fn version_line() -> String {
-    version_text(env!("CARGO_PKG_VERSION"), env!("MAILCRAFT_COMMIT"), env!("MAILCRAFT_COMMIT_DATE"))
+    version_text(env!("CARGO_PKG_VERSION"), env!("MEREL_COMMIT"), env!("MEREL_COMMIT_DATE"))
 }
 
 fn version_text(version: &str, commit: &str, date: &str) -> String {
@@ -97,11 +97,11 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
         open_outside(app, REPOSITORY);
     }
     ui.separator();
-    if ribbon_action_hint(ui, t, "ℹ", "Over Mailcraft", true, Some("Versie en uitgangspunten")) {
+    if ribbon_action_hint(ui, t, "ℹ", "Over Merel", true, Some("Versie en uitgangspunten")) {
         app.help = Some(HelpWindow::About);
     }
     let checking = app.updates.running();
-    if ribbon_action_hint(ui, t, "⟳", crate::updates::CHECK, !checking, Some("Bij GitHub nagaan of er een nieuwere versie van Mailcraft is")) {
+    if ribbon_action_hint(ui, t, "⟳", crate::updates::CHECK, !checking, Some("Bij GitHub nagaan of er een nieuwere versie van Merel is")) {
         app.check_for_updates(ui.ctx(), true);
     }
     ui.separator();
@@ -128,14 +128,14 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 });
             });
         }),
-        HelpWindow::About => helder::dialog(ctx, t, "Over Mailcraft", 460.0, |ui| {
+        HelpWindow::About => helder::dialog(ctx, t, "Over Merel", 460.0, |ui| {
             helder::card_frame(t).inner_margin(20).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
-                        helder::badge(ui, t, Icon::Mail);
+                        helder::app_badge(ui);
                         ui.add_space(8.0);
                         ui.vertical(|ui| {
-                            ui.label(RichText::new("Mailcraft").size(18.0).strong().color(t.text));
+                            ui.label(RichText::new("Merel").size(18.0).strong().color(t.text));
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(version_line()).size(14.0).color(t.text_dim));
                                 helder::quiet(ui, t, |ui| {
@@ -144,20 +144,20 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                                         .on_hover_text("De versie naar het klembord, handig bij een foutmelding")
                                         .clicked()
                                     {
-                                        ui.ctx().copy_text(format!("Mailcraft {}", version_line().trim_start_matches("Versie ")));
+                                        ui.ctx().copy_text(format!("Merel {}", version_line().trim_start_matches("Versie ")));
                                     }
                                 });
                             });
                         });
                     });
                     ui.add_space(12.0);
-                    helder::paragraph(ui, t, "Mail, agenda, contacten en taken voor de desktop, met de werkwijze van Outlook en de stijl van de ArtCraft-familie. Geschreven in Rust met egui; één programma voor macOS, Windows en Linux.");
+                    helder::paragraph(ui, t, "Mail, agenda, contacten en taken voor de desktop, met de werkwijze van Outlook. Geschreven in Rust met egui; één programma voor macOS, Windows en Linux.");
                     ui.add_space(8.0);
                     helder::paragraph(ui, t, "Veiligheid en privacy voorop: mail kan geen scripts uitvoeren, afbeeldingen van internet worden pas geladen als je erom vraagt, verbindingen lopen altijd over TLS, wachtwoorden staan in de sleutelhanger van het systeem en de offline cache is versleuteld.");
                     ui.add_space(8.0);
                     let mut auto = app.view.update_check == Some(true);
                     if helder::toggle(ui, t, &mut auto, crate::updates::AUTO)
-                        .on_hover_text("Mailcraft vraagt dan eens per dag bij GitHub naar de nieuwste versie; er gaat niets anders mee dan die vraag")
+                        .on_hover_text("Merel vraagt dan eens per dag bij GitHub naar de nieuwste versie; er gaat niets anders mee dan die vraag")
                         .changed()
                     {
                         app.view.update_check = Some(auto);

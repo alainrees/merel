@@ -6,8 +6,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use mailcraft_mailbox::Flag;
-use mailcraft_model::{QuickStep, QuickStepError};
+use merel_mailbox::Flag;
+use merel_model::{QuickStep, QuickStepError};
 
 use crate::commands::{self, CommandError, str_param};
 use crate::{SAMPLE_ACCOUNT, Session};
@@ -216,8 +216,8 @@ mod tests {
 
     #[test]
     fn a_real_account_gets_the_jobs_and_a_step_stays_with_its_account() {
-        use mailcraft_mailbox::RemoteFolder;
-        use mailcraft_model::FolderKind;
+        use merel_mailbox::RemoteFolder;
+        use merel_model::FolderKind;
 
         let mut s = Session::with_accounts(vec![crate::tests::account("acc")]);
         let folders = vec![

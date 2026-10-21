@@ -7,9 +7,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mailcraft_model::{Account, Auth, Protocol};
-use mailcraft_oauth::{Client, OAuthError};
-use mailcraft_secrets::{Secret, SecretStore};
+use merel_model::{Account, Auth, Protocol};
+use merel_oauth::{Client, OAuthError};
+use merel_secrets::{Secret, SecretStore};
 
 /// The keychain key of an account's client secret.
 pub fn client_secret_key(account_id: &str) -> String {
@@ -42,17 +42,17 @@ impl Credentials {
     }
 
     /// The credential to log in with right now, refreshing the access token when needed.
-    pub fn incoming(&mut self) -> Result<mailcraft_mailbox::Credential, String> {
+    pub fn incoming(&mut self) -> Result<merel_mailbox::Credential, String> {
         Ok(match self.access_token()? {
-            Some(t) => mailcraft_mailbox::Credential::OAuth2(t),
-            None => mailcraft_mailbox::Credential::Password(self.secret.clone()),
+            Some(t) => merel_mailbox::Credential::OAuth2(t),
+            None => merel_mailbox::Credential::Password(self.secret.clone()),
         })
     }
 
-    pub fn smtp(&mut self) -> Result<mailcraft_smtp::Credential, String> {
+    pub fn smtp(&mut self) -> Result<merel_smtp::Credential, String> {
         Ok(match self.access_token()? {
-            Some(t) => mailcraft_smtp::Credential::OAuth2(t),
-            None => mailcraft_smtp::Credential::Password(self.secret.clone()),
+            Some(t) => merel_smtp::Credential::OAuth2(t),
+            None => merel_smtp::Credential::Password(self.secret.clone()),
         })
     }
 
@@ -81,7 +81,7 @@ pub fn describe(e: &OAuthError) -> String {
         OAuthError::Browser(_) => "Kon de browser niet openen.".into(),
         OAuthError::Cancelled => "Het aanmelden is afgebroken of duurde te lang.".into(),
         OAuthError::State => "Het aanmelden kwam verkeerd terug; probeer het opnieuw.".into(),
-        OAuthError::Provider(m) => format!("De aanbieder weigerde: {}", mailcraft_model::clean_text(m)),
+        OAuthError::Provider(m) => format!("De aanbieder weigerde: {}", merel_model::clean_text(m)),
         OAuthError::Http(_) => "Kon de aanbieder niet bereiken.".into(),
     }
 }
@@ -110,14 +110,14 @@ pub fn run(secrets: &Arc<dyn SecretStore>, sign_in: SignIn) -> Result<Account, S
 }
 
 /// A new OAuth account from the form fields, with the provider's preset servers. An empty
-/// client ID falls back to the one built into Mailcraft, where there is one.
+/// client ID falls back to the one built into Merel, where there is one.
 pub fn account(protocol: Protocol, name: &str, email: &str, client_id: &str) -> Result<Account, String> {
     account_with(protocol, name, email, client_id, protocol.builtin_client_id())
 }
 
 fn account_with(protocol: Protocol, name: &str, email: &str, client_id: &str, builtin: Option<&str>) -> Result<Account, String> {
     let preset = protocol.preset().ok_or_else(|| "Kies Gmail of Microsoft 365.".to_string())?;
-    let address = mailcraft_model::Address::new(Some(name.trim()), email.trim()).map_err(|_| "Vul een geldig e-mailadres in.".to_string())?;
+    let address = merel_model::Address::new(Some(name.trim()), email.trim()).map_err(|_| "Vul een geldig e-mailadres in.".to_string())?;
     let client_id = match client_id.trim() {
         "" => builtin.unwrap_or_default(),
         own => own,
@@ -174,7 +174,7 @@ mod tests {
             a
         });
         let mut c = Credentials::new(&a.unwrap(), Secret::new("pw"), None);
-        assert!(matches!(c.incoming().unwrap(), mailcraft_mailbox::Credential::Password(_)));
-        assert!(matches!(c.smtp().unwrap(), mailcraft_smtp::Credential::Password(_)));
+        assert!(matches!(c.incoming().unwrap(), merel_mailbox::Credential::Password(_)));
+        assert!(matches!(c.smtp().unwrap(), merel_smtp::Credential::Password(_)));
     }
 }

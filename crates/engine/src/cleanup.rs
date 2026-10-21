@@ -1,5 +1,5 @@
 //! "Opruimen", Outlook's Clean Up: of each conversation in a folder the older messages go to
-//! Deleted Items and the newest stays. Mailcraft goes by the headers it has, not by whether a
+//! Deleted Items and the newest stays. Merel goes by the headers it has, not by whether a
 //! later reply quotes the whole earlier message, so it keeps every message that may hold
 //! something the newest one does not: unread, flagged or categorised messages and messages
 //! with attachments. The moves are ordinary moves, so nothing is lost and the server sees them
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use mailcraft_model::{FolderKind, MessageHeader, conversation_key};
+use merel_model::{FolderKind, MessageHeader, conversation_key};
 
 use crate::{CommandError, Session, commands::move_message};
 
@@ -79,7 +79,7 @@ pub fn folder(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
+    use merel_mailbox::{RemoteFolder, RemoteHeader};
     use serde_json::json;
 
     use super::*;
@@ -94,7 +94,7 @@ mod tests {
             size: 1,
             has_attachments,
             categories: Vec::new(),
-            header: mailcraft_mime::parse_header(format!("From: x@example.org\r\nSubject: {subject}\r\n\r\n").as_bytes()),
+            header: merel_mime::parse_header(format!("From: x@example.org\r\nSubject: {subject}\r\n\r\n").as_bytes()),
             date: i64::from(n),
         }
     }

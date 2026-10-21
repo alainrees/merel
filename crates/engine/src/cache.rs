@@ -1,4 +1,4 @@
-//! Keeping the offline cache (`mailcraft_store`) in step with the session.
+//! Keeping the offline cache (`merel_store`) in step with the session.
 //!
 //! On start the cache fills the session with what each account showed last time, so the
 //! window is usable before the first server answer, and stays usable without one. Every
@@ -12,8 +12,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use mailcraft_secrets::SecretStore;
-use mailcraft_store::{AccountCache, KeyKind, Store};
+use merel_secrets::SecretStore;
+use merel_store::{AccountCache, KeyKind, Store};
 
 use crate::{Event, Job, SAMPLE_ACCOUNT, Session};
 
@@ -155,7 +155,7 @@ impl Cache {
                 && let Some(raw) = self.accounts.get(account_id).and_then(|c| c.body(message_id))
             {
                 let body = Box::new(crate::certificates::parse_body(keys, account_id, raw));
-                let header = mailcraft_mime::parse_header(raw);
+                let header = merel_mime::parse_header(raw);
                 session.apply(Event::Body { message_id: message_id.clone(), body, header, raw: Vec::new() });
                 continue;
             }
@@ -243,16 +243,16 @@ impl Session {
         }
         self.recount_unread();
         if self.selected_folder.is_none() {
-            self.selected_folder = self.folder_of_kind(id, mailcraft_model::FolderKind::Inbox).map(|f| f.id.clone());
+            self.selected_folder = self.folder_of_kind(id, merel_model::FolderKind::Inbox).map(|f| f.id.clone());
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_mailbox::{RemoteFolder, RemoteHeader};
-    use mailcraft_model::{Account, Address, Auth, FolderKind, Protocol, Server, Tls};
-    use mailcraft_secrets::MemoryStore;
+    use merel_mailbox::{RemoteFolder, RemoteHeader};
+    use merel_model::{Account, Address, Auth, FolderKind, Protocol, Server, Tls};
+    use merel_secrets::MemoryStore;
     use serde_json::json;
 
     use super::*;
@@ -290,7 +290,7 @@ mod tests {
             size: 10,
             has_attachments: false,
             categories: Vec::new(),
-            header: mailcraft_mime::parse_header(RAW),
+            header: merel_mime::parse_header(RAW),
             date: 1_000,
         };
         s.apply(Event::Headers { folder_id: "a1/INBOX".into(), headers: vec![header], offset: 0, limit: crate::HEADER_LIMIT });
@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn the_cache_fills_a_new_session_and_serves_opened_messages() {
-        let dir = std::env::temp_dir().join(format!("mailcraft-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("merel-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("accounts.json");
         let secrets = MemoryStore::default();
@@ -317,14 +317,14 @@ mod tests {
         }
         let body = Event::Body {
             message_id: "a1/INBOX#7".into(),
-            body: Box::new(mailcraft_mime::parse_body(RAW)),
-            header: mailcraft_mime::parse_header(RAW),
+            body: Box::new(merel_mime::parse_body(RAW)),
+            header: merel_mime::parse_header(RAW),
             raw: RAW.to_vec(),
         };
         cache.note_event(&s, &body);
         s.apply(body);
         // A flag set while the connection is gone waits in the queue.
-        let flag = Job::Flag { account_id: "a1".into(), path: "INBOX".into(), id: "7".into(), flag: mailcraft_mailbox::Flag::Seen, on: true };
+        let flag = Job::Flag { account_id: "a1".into(), path: "INBOX".into(), id: "7".into(), flag: merel_mailbox::Flag::Seen, on: true };
         let deferred = Event::Deferred { account_id: "a1".into(), job: Box::new(flag.clone()) };
         cache.note_event(&s, &deferred);
         s.apply(deferred);

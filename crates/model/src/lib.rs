@@ -76,21 +76,19 @@ pub enum Auth {
     },
 }
 
-/// Mailcraft's own registration with Microsoft Entra: a multi-tenant public client (no secret,
+/// Merel's own registration with Microsoft Entra: a multi-tenant public client (no secret,
 /// loopback redirects only), so people sign in without registering anything themselves. Empty
 /// until the registration exists.
 pub const MICROSOFT_CLIENT_ID: &str = "";
 
 impl Protocol {
     /// The client ID this build signs in with when the person names none of their own. A build
-    /// can bring its own registration through `MAILCRAFT_MICROSOFT_CLIENT_ID`.
+    /// can bring its own registration through `MEREL_MICROSOFT_CLIENT_ID`.
     pub fn builtin_client_id(self) -> Option<&'static str> {
         match self {
-            Protocol::Microsoft365 => [option_env!("MAILCRAFT_MICROSOFT_CLIENT_ID"), Some(MICROSOFT_CLIENT_ID)]
-                .into_iter()
-                .flatten()
-                .map(str::trim)
-                .find(|id| !id.is_empty()),
+            Protocol::Microsoft365 => {
+                [option_env!("MEREL_MICROSOFT_CLIENT_ID"), Some(MICROSOFT_CLIENT_ID)].into_iter().flatten().map(str::trim).find(|id| !id.is_empty())
+            }
             _ => None,
         }
     }

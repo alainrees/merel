@@ -6,8 +6,8 @@
 
 use chrono::Timelike;
 use egui::Response;
-use mailcraft_engine::Session;
-use mailcraft_model::{Address, MessageHeader, mailbox};
+use merel_engine::Session;
+use merel_model::{Address, MessageHeader, mailbox};
 use serde_json::{Value, json};
 
 use crate::{ComposeKind, MailApp, Module, calendar, dates, tasks};
@@ -100,7 +100,7 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
             if i == 7 {
                 // Outlook's "Opvolgen": the flag with a due day, under its own arrow.
                 ui.menu_button("Opvolgen", |ui| {
-                    for (when, label) in mailcraft_engine::followup::WHEN {
+                    for (when, label) in merel_engine::followup::WHEN {
                         if ui.button(label).clicked() {
                             pick = Some(Pick::FollowUp(when));
                         }
@@ -120,7 +120,7 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
                 });
                 // Outlook's "Sluimeren": out of the list until a moment of choice.
                 ui.menu_button(SNOOZE, |ui| {
-                    for (when, label) in mailcraft_engine::snooze::WHEN {
+                    for (when, label) in merel_engine::snooze::WHEN {
                         if ui.button(label).clicked() {
                             pick = Some(Pick::Snooze(when));
                         }
@@ -227,7 +227,7 @@ impl MailApp {
 
 #[cfg(test)]
 mod tests {
-    use mailcraft_engine::Engine;
+    use merel_engine::Engine;
 
     use super::*;
 
@@ -261,8 +261,8 @@ mod tests {
     fn reply_with_meeting_invites_the_sender_and_the_other_recipients_but_not_me() {
         let mut app = MailApp::new(Engine::sample());
         let mut m = app.engine.session.message("m1").expect("sample mail").clone();
-        m.to.push(mailcraft_model::Address::new(Some("Ravi"), "ravi@example.org").unwrap());
-        m.to.push(mailcraft_model::Address::new(None, "SANNE@example.org").unwrap());
+        m.to.push(merel_model::Address::new(Some("Ravi"), "ravi@example.org").unwrap());
+        m.to.push(merel_model::Address::new(None, "SANNE@example.org").unwrap());
         app.act_on_message(&m, Pick::Meeting);
         let e = app.calendar.editor.as_ref().expect("appointment window");
         assert_eq!(e.title, "Planning voor donderdag");
@@ -295,6 +295,6 @@ mod tests {
         assert!(app.engine.session.visible_messages().iter().all(|h| h.from.email() == "sanne@example.org"));
         app.act_on_message(&m, Pick::Rule);
         let form = app.rules.as_ref().and_then(|r| r.form.as_ref()).expect("the rules window with a new rule");
-        assert_eq!((form.contains.as_str(), form.field), ("sanne@example.org", mailcraft_model::RuleField::From));
+        assert_eq!((form.contains.as_str(), form.field), ("sanne@example.org", merel_model::RuleField::From));
     }
 }
