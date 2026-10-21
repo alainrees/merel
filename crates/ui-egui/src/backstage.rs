@@ -456,7 +456,7 @@ fn name_hint(ui: &mut Ui, t: &Tokens, name: &str) {
     let (text, color) = if name.contains('@') {
         ("Vul je echte naam in, geen e-mailadres: een adres als naam laat je mail op nep lijken en Outlook zet er \"Niet-geverifieerd\" bij.", t.flag)
     } else {
-        ("De naam die ontvangers bij je mail zien, bijvoorbeeld Alain Rees.", t.text_dim)
+        ("De naam die ontvangers bij je mail zien, bijvoorbeeld Sanne de Vries.", t.text_dim)
     };
     ui.horizontal(|ui| {
         ui.add_space(LABEL_WIDTH + ui.spacing().item_spacing.x);

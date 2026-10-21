@@ -3032,7 +3032,7 @@ mod tests {
             merel_model::Account {
                 id: "acc".into(),
                 name: "MXroute".into(),
-                address: merel_model::Address::new(Some("Alain Rees"), "alain@voorbeeld.nl").unwrap(),
+                address: merel_model::Address::new(Some("Alain Tester"), "alain@voorbeeld.nl").unwrap(),
                 username: "alain@voorbeeld.nl".into(),
                 protocol: merel_model::Protocol::ImapSmtp,
                 auth: merel_model::Auth::Password,
@@ -3052,14 +3052,14 @@ mod tests {
         let tomorrow = chrono::Local::now().naive_local() + chrono::TimeDelta::days(1);
         let mut e = calendar::Editor::new_at(tomorrow.date().and_hms_opt(12, 0, 0).unwrap());
         e.title = "Lunch".into();
-        e.attendees = "Alain Rees <alain@werk.example.org>; ".into();
+        e.attendees = "Alain Tester <alain@werk.example.org>; ".into();
         h.state_mut().calendar.editor = Some(e);
         h.run();
         {
             let e = h.state().calendar.editor.as_ref().expect("editor");
             assert_eq!((e.invited.len(), e.attendees.as_str()), (1, ""), "the finished address became a chip");
         }
-        h.get_by_label("Alain Rees verwijderen");
+        h.get_by_label("Alain Tester verwijderen");
         assert!(h.query_by_label(calendar::IN_THE_PAST).is_none());
         h.get_by_label("Verzenden").click();
         h.run_steps(3);
@@ -3072,7 +3072,7 @@ mod tests {
 
         // The acceptance comes in and is filed.
         let reply = format!(
-            "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:{}\r\nDTSTAMP:20261020T210000Z\r\nDTSTART:20261027T110000Z\r\nDTEND:20261027T120000Z\r\nSUMMARY:Lunch\r\nATTENDEE;CN=Alain Rees;PARTSTAT=ACCEPTED:mailto:alain@werk.example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+            "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:{}\r\nDTSTAMP:20261020T210000Z\r\nDTSTART:20261027T110000Z\r\nDTEND:20261027T120000Z\r\nSUMMARY:Lunch\r\nATTENDEE;CN=Alain Tester;PARTSTAT=ACCEPTED:mailto:alain@werk.example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
             m.uid
         );
         let answer = merel_engine::meetings::parse_answer(&reply).expect("an answer");
@@ -3082,7 +3082,7 @@ mod tests {
         assert!(h.query_all_by_label_contains("1 geaccepteerd").count() >= 1, "the window says who answered");
         assert!(h.query_by_label("Opslaan").is_some(), "an unchanged meeting is only saved");
         // Taking the person off sends them a cancellation with the update.
-        h.get_by_label("Alain Rees verwijderen").click();
+        h.get_by_label("Alain Tester verwijderen").click();
         h.run_steps(3);
         h.get_by_label(meeting::SEND_UPDATE).click();
         h.run_steps(3);
@@ -3098,7 +3098,7 @@ mod tests {
         let id = {
             let s = &mut h.state_mut().engine.session;
             let a = s.appointments.iter_mut().find(|a| a.title == "Lunch met Sanne").expect("sample");
-            a.notes = "Genodigden: Alain Rees <alain@werk.example.org>".into();
+            a.notes = "Genodigden: Alain Tester <alain@werk.example.org>".into();
             a.id.clone()
         };
         let start = h.state().engine.session.appointment(&id).map(|a| a.start).unwrap();
@@ -3106,7 +3106,7 @@ mod tests {
         h.run();
         let e = h.state().calendar.editor.as_ref().expect("editor");
         assert_eq!((e.invited.len(), e.notes.as_str(), e.legacy), (1, "", true));
-        h.get_by_label("Alain Rees verwijderen");
+        h.get_by_label("Alain Tester verwijderen");
         assert!(h.query_by_label("Opslaan").is_some(), "nothing changed, so nothing is sent again");
         h.get_by_label("Opslaan").click();
         h.run();

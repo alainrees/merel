@@ -178,8 +178,8 @@ mod tests {
         let named = |name: &str| Address::new(Some(name), "alain@voorbeeld.nl").unwrap();
         assert_eq!(display_name(&named("alain@voorbeeld.nl")), None);
         assert_eq!(display_name(&named("Alain <alain@voorbeeld.nl>")), None);
-        assert_eq!(display_name(&named("Alain Rees")).as_deref(), Some("Alain Rees"));
-        let draft = Draft { to: vec![named("Alain Rees")], subject: "test".into(), body: "hoi".into(), ..Draft::default() };
+        assert_eq!(display_name(&named("Alain Tester")).as_deref(), Some("Alain Tester"));
+        let draft = Draft { to: vec![named("Alain Tester")], subject: "test".into(), body: "hoi".into(), ..Draft::default() };
         let raw = String::from_utf8(build(&named("alain@voorbeeld.nl"), &draft).unwrap().formatted()).unwrap();
         assert!(raw.contains("From: alain@voorbeeld.nl\r\n"), "{raw}");
     }
