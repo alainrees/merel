@@ -155,7 +155,13 @@ impl Cache {
                 && let Some(raw) = self.accounts.get(account_id).and_then(|c| c.body(message_id))
             {
                 let (body, header, _) = crate::certificates::read(keys, account_id, raw);
-                session.apply(Event::Body { message_id: message_id.clone(), body: Box::new(body), header, raw: Vec::new(), carried: None });
+                session.apply(Event::Body {
+                    message_id: message_id.clone(),
+                    body: Box::new(body),
+                    header: Box::new(header),
+                    raw: Vec::new(),
+                    carried: None,
+                });
                 continue;
             }
             rest.push(job);
@@ -323,7 +329,7 @@ mod tests {
         let body = Event::Body {
             message_id: "a1/INBOX#7".into(),
             body: Box::new(merel_mime::parse_body(RAW)),
-            header: merel_mime::parse_header(RAW),
+            header: Box::new(merel_mime::parse_header(RAW)),
             raw: RAW.to_vec(),
             carried: None,
         };

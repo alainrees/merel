@@ -183,8 +183,8 @@ impl Engine {
     /// Learns the keys an encrypted message carried inside: the sender's own, as with
     /// [`Self::learn_autocrypt`], and, when the message is signed with a key Merel believes,
     /// those of the others it went to, for addresses without a key yet (Delta Chat's groups).
-    pub(crate) fn learn_carried(&mut self, message_id: &str, from: Option<&Address>, body: &Body, carried: Carried) {
-        if let Some((addr, key)) = carried.autocrypt {
+    pub(crate) fn learn_carried(&mut self, message_id: &str, from: Option<&Address>, body: &Body, carried: &Carried) {
+        if let Some((addr, key)) = carried.autocrypt.clone() {
             self.learn_key(message_id, from, addr, key);
         }
         let Some(from) = from else { return };
@@ -193,9 +193,9 @@ impl Engine {
             return;
         }
         let own: Vec<String> = self.session.accounts.iter().map(|a| a.address.email().to_lowercase()).collect();
-        for (addr, key) in carried.gossip {
-            if !own.contains(&addr) {
-                self.remember_key(addr, key);
+        for (addr, key) in &carried.gossip {
+            if !own.contains(addr) {
+                self.remember_key(addr.clone(), key.clone());
             }
         }
     }
@@ -211,8 +211,18 @@ impl Engine {
 
     /// Keeps `key` for `addr`, on disk too, unless a key is known for it already.
     pub(crate) fn remember_key(&mut self, addr: String, key: PublicKey) {
+        self.keep_key(addr, key, false);
+    }
+
+    /// Keeps `key` for `addr` in place of the one Merel had: it was checked through an
+    /// invitation.
+    pub(crate) fn replace_key(&mut self, addr: String, key: PublicKey) {
+        self.keep_key(addr, key, true);
+    }
+
+    fn keep_key(&mut self, addr: String, key: PublicKey, replace: bool) {
         let Ok(mut people) = self.keys.openpgp.people.write() else { return };
-        if people.contains_key(&addr) || people.len() >= MAX_PEOPLE {
+        if (people.contains_key(&addr) && !replace) || (!people.contains_key(&addr) && people.len() >= MAX_PEOPLE) {
             return;
         }
         people.insert(addr, key);

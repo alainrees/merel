@@ -41,6 +41,15 @@ pub struct State {
     pub error: Option<String>,
     /// The message on its way, by outbox id.
     pub sending: Option<u64>,
+    /// The invitation link on show, with its account.
+    pub invite: Option<(String, String)>,
+    /// When the link was last copied (egui time), to say so for a moment.
+    pub copied_at: Option<f64>,
+    /// An invitation link pasted to accept, and the account it is for.
+    pub accept: String,
+    pub accept_account: String,
+    /// What became of the last invitation accepted.
+    pub accept_note: Option<Result<String, String>>,
 }
 
 /// The form for a new chat.
@@ -92,6 +101,46 @@ impl MailApp {
             }
             Err(e) => self.chat.error = Some(e),
         }
+    }
+
+    /// Shows the invitation link of `account_id`, turning chat on for it if need be.
+    fn show_invite(&mut self, account_id: &str, renew: bool) {
+        let link = if renew { self.engine.renew_invite_link(account_id) } else { self.engine.invite_link(account_id) };
+        match link {
+            Ok(link) => {
+                self.chat.invite = Some((account_id.to_string(), link));
+                self.chat.error = None;
+            }
+            Err(e) => self.chat.error = Some(e),
+        }
+    }
+
+    /// Opens a new message with the invitation link, for someone to get it by mail.
+    fn mail_invite(&mut self) {
+        let Some((account_id, link)) = self.chat.invite.clone() else { return };
+        let signature = self.engine.session.accounts.iter().find(|a| a.id == account_id).map(|a| a.signature.clone()).unwrap_or_default();
+        let mut c = crate::compose::Compose::new(crate::compose::Kind::New, None).with_signature(&signature);
+        c.subject = tr("chat-invite-mail-subject");
+        c.body = format!("{}\n\n{link}{}", tr("chat-invite-mail-text"), c.body);
+        self.compose = Some(c.opened_from(&account_id));
+    }
+
+    /// Accepts the invitation link pasted on the start page.
+    fn accept_invite(&mut self) {
+        let account_id = if self.chat.accept_account.is_empty() {
+            self.chat_accounts().into_iter().next().unwrap_or_default()
+        } else {
+            self.chat.accept_account.clone()
+        };
+        let text = self.chat.accept.trim().to_string();
+        self.chat.accept_note = Some(match self.engine.accept_invite(&account_id, &text) {
+            Ok(_) => {
+                self.chat.accept.clear();
+                let name = merel_engine::securejoin::parse_invite(&text).map(|i| if i.name.is_empty() { i.addr } else { i.name }).unwrap_or_default();
+                Ok(tr_args("chat-accept-sent", &[("name", name.into())]))
+            }
+            Err(e) => Err(e),
+        });
     }
 
     /// Starts the chat the form describes.
@@ -264,9 +313,14 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
         ui.vertical(|ui| {
             ui.label(RichText::new(&chat.title).size(17.0).color(t.text));
             let people = chat.people.iter().map(Address::email).collect::<Vec<_>>().join(", ");
+            let verified = !chat.is_group() && first.is_some_and(|p| app.engine.is_verified(p.email()));
             ui.horizontal(|ui| {
                 ui.add(Icon::Lock.image(14.0, t.text_dim));
-                ui.label(RichText::new(format!("{} · {people}", tr("chat-encrypted"))).size(12.5).color(t.text_dim));
+                let mut line = format!("{} · {people}", tr("chat-encrypted"));
+                if verified {
+                    line = format!("{line} · {}", tr("chat-verified"));
+                }
+                ui.label(RichText::new(line).size(12.5).color(t.text_dim));
             });
         });
     });
@@ -350,10 +404,14 @@ fn start_page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         helder::note(ui, t, &tr(key));
         return;
     }
-    for (id, email) in accounts {
+    for (id, email) in &accounts {
+        let (id, email) = (id.clone(), email.clone());
         helder::icon_row(ui, t, Icon::Lock, |ui| {
             if app.engine.chat_ready(&id) {
                 ui.label(RichText::new(tr_args("chat-on", &[("email", email.as_str().into())])).color(t.text));
+                if helder::secondary(ui, t, |ui| ui.button(tr("chat-invite"))).clicked() {
+                    app.show_invite(&id, false);
+                }
             } else {
                 ui.vertical(|ui| {
                     ui.label(RichText::new(tr_args("chat-off", &[("email", email.as_str().into())])).color(t.text));
@@ -375,6 +433,122 @@ fn start_page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.add_space(12.0);
     if helder::primary_button(ui, t, Icon::MessagesSquare, &tr("chat-new")).clicked() {
         app.new_chat();
+    }
+    if app.chat.invite.is_some() {
+        ui.add_space(16.0);
+        invite_card(app, ui, t);
+    }
+    ui.add_space(20.0);
+    accept_form(app, ui, t, &accounts);
+}
+
+/// The invitation link of an account: its QR code to scan, the link to copy or mail, and a
+/// way to make a new one.
+fn invite_card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let Some((account_id, link)) = app.chat.invite.clone() else { return };
+    let email = app.engine.session.accounts.iter().find(|a| a.id == account_id).map(|a| a.address.email().to_string()).unwrap_or_default();
+    egui::Frame::new().fill(t.window).corner_radius(10).inner_margin(Margin::same(16)).show(ui, |ui| {
+        ui.label(RichText::new(tr_args("chat-invite-for", &[("email", email.as_str().into())])).size(16.0).color(t.text));
+        ui.add_space(4.0);
+        helder::paragraph(ui, t, &tr("chat-invite-intro"));
+        ui.add_space(8.0);
+        ui.horizontal_top(|ui| {
+            qr_code(ui, &link, 200.0);
+            ui.add_space(16.0);
+            ui.vertical(|ui| {
+                ui.set_max_width(360.0);
+                ui.add(egui::Label::new(RichText::new(&link).font(FontId::monospace(12.0)).color(t.text_dim)).wrap());
+                ui.add_space(8.0);
+                let now = ui.input(|i| i.time);
+                let copied = app.chat.copied_at.is_some_and(|at| now - at < 2.0);
+                let copy = if copied { tr("chat-invite-copied") } else { tr("chat-invite-copy") };
+                if helder::primary_button(ui, t, Icon::Globe, &copy).clicked() {
+                    ui.ctx().copy_text(link.clone());
+                    app.chat.copied_at = Some(now);
+                }
+                ui.add_space(4.0);
+                if helder::secondary(ui, t, |ui| ui.button(tr("chat-invite-mail"))).clicked() {
+                    app.mail_invite();
+                }
+                if helder::secondary(ui, t, |ui| ui.button(tr("chat-invite-renew"))).on_hover_text(tr("chat-invite-renew-hint")).clicked() {
+                    app.show_invite(&account_id, true);
+                }
+                if helder::quiet(ui, t, |ui| helder::tool_button(ui, t, Icon::X, &tr("chat-invite-close"))).clicked() {
+                    app.chat.invite = None;
+                }
+            });
+        });
+    });
+}
+
+/// A QR code of `text`, `size` points wide: dark on white whatever the theme, with the quiet
+/// zone around it that scanners need.
+fn qr_code(ui: &mut Ui, text: &str, size: f32) {
+    let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, tr("chat-invite-qr")));
+    let Ok(code) = qrcode::QrCode::new(text.as_bytes()) else { return };
+    let width = code.width();
+    let colors = code.to_colors();
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 6.0, egui::Color32::WHITE);
+    let cell = size / (width + 4) as f32;
+    for (i, c) in colors.iter().enumerate() {
+        if *c == qrcode::Color::Dark {
+            let (x, y) = ((i % width + 2) as f32, (i / width + 2) as f32);
+            painter.rect_filled(
+                egui::Rect::from_min_size(rect.min + vec2(x * cell, y * cell), vec2(cell + 0.5, cell + 0.5)),
+                0.0,
+                egui::Color32::BLACK,
+            );
+        }
+    }
+}
+
+/// Where a link someone sent is pasted to accept it, and the invitations waiting for an answer.
+fn accept_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens, accounts: &[(String, String)]) {
+    ui.label(RichText::new(tr("chat-accept")).size(16.0).color(t.text));
+    ui.add_space(6.0);
+    let width = (ui.available_width() - 160.0).clamp(200.0, 520.0);
+    if accounts.len() > 1 {
+        let current = accounts
+            .iter()
+            .find(|(id, _)| *id == app.chat.accept_account)
+            .or(accounts.first())
+            .map(|(_, e)| tr_args("chat-via", &[("email", e.as_str().into())]))
+            .unwrap_or_default();
+        helder::select(ui, t, &current, width.min(360.0), |ui| {
+            for (id, email) in accounts {
+                if ui.selectable_label(app.chat.accept_account == *id, email).clicked() {
+                    app.chat.accept_account = id.clone();
+                    ui.close();
+                }
+            }
+        });
+        ui.add_space(4.0);
+    }
+    ui.horizontal(|ui| {
+        let r = ui.add(egui::TextEdit::singleline(&mut app.chat.accept).desired_width(width).hint_text(tr("chat-accept-hint")));
+        let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let ready = !app.chat.accept.trim().is_empty();
+        let clicked = ui.add_enabled_ui(ready, |ui| helder::secondary(ui, t, |ui| ui.button(tr("chat-accept-button")))).inner.clicked();
+        if ready && (clicked || enter) {
+            app.accept_invite();
+        }
+    });
+    match &app.chat.accept_note {
+        Some(Ok(note)) => {
+            ui.label(RichText::new(note).color(t.text_dim));
+        }
+        Some(Err(e)) => {
+            ui.label(RichText::new(e).color(t.flag));
+        }
+        None => {}
+    }
+    for p in app.engine.pending_invites() {
+        let name = if p.name.is_empty() { p.addr.clone() } else { format!("{} ({})", p.name, p.addr) };
+        helder::icon_row(ui, t, Icon::Clock, |ui| {
+            ui.label(RichText::new(tr_args("chat-pending", &[("name", name.into())])).color(t.text_dim));
+        });
     }
 }
 
@@ -419,16 +593,23 @@ fn new_chat_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     helder::icon_row(ui, t, Icon::Notes, |ui| {
         ui.add(egui::TextEdit::multiline(&mut form.text).hint_text(tr("chat-first-hint")).desired_width(width).desired_rows(5));
     });
+    let mut invite = false;
     if let Some(e) = &form.error {
         ui.add_space(6.0);
         ui.label(RichText::new(e).color(t.flag));
+        // Without someone's key the way in is the invitation link.
+        invite = ready && helder::secondary(ui, t, |ui| ui.button(tr("chat-show-invite"))).clicked();
     }
+    let account_id = form.account_id.clone();
     ui.add_space(10.0);
     helder::note(ui, t, &tr(if ready { "chat-ready-note" } else { "chat-enable-first" }));
     if cancel {
         app.chat.new = None;
     } else if start {
         app.start_chat();
+    } else if invite {
+        app.chat.new = None;
+        app.show_invite(&account_id, false);
     }
 }
 

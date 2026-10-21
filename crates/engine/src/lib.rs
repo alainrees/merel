@@ -30,6 +30,7 @@ pub mod reminders;
 pub mod rules;
 mod sample;
 pub mod search;
+pub mod securejoin;
 pub mod signin;
 pub mod snooze;
 pub mod sync;
@@ -268,7 +269,7 @@ pub enum Event {
         message_id: String,
         body: Box<Body>,
         /// The envelope as the raw message carries it; fills in what the listing left out.
-        header: merel_mime::ParsedHeader,
+        header: Box<merel_mime::ParsedHeader>,
         /// The message as the server sent it, for the offline cache (empty when served from it).
         raw: Vec<u8>,
         /// The keys an OpenPGP-encrypted message carried inside (not when served from the cache).
@@ -1093,6 +1094,8 @@ pub struct Engine {
     /// The S/MIME certificates, the accounts' own and the correspondents', shared with the
     /// worker threads that sign, encrypt and decrypt.
     keys: certificates::Keys,
+    /// The invitations: own tokens, those under way and the keys they verified.
+    invites: securejoin::Invites,
     last_refresh: Instant,
     last_item_refresh: Instant,
 }
@@ -1139,6 +1142,7 @@ impl Engine {
             config_path: None,
             cache: cache::Cache::none(),
             keys: certificates::Keys::default(),
+            invites: securejoin::Invites::default(),
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
         }
@@ -1160,6 +1164,7 @@ impl Engine {
             config_path,
             cache: cache::Cache::none(),
             keys,
+            invites: securejoin::Invites::default(),
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
         };
@@ -1173,6 +1178,7 @@ impl Engine {
             engine.load_identities();
             engine.load_people();
             engine.load_pgp_keys();
+            engine.load_invites();
             engine.spawn_accounts();
         }
         if !calendar.appointments.is_empty() || !calendar.calendars.is_empty() {
@@ -1466,13 +1472,7 @@ impl Engine {
                 continue;
             }
             self.cache.note_event(&self.session, &e);
-            if let Event::Body { message_id, body, header, raw, carried } = &mut e {
-                self.learn_certificate(message_id, header.from.as_ref(), body);
-                match carried.take() {
-                    Some(carried) => self.learn_carried(message_id, header.from.as_ref(), body, *carried),
-                    None => self.learn_autocrypt(message_id, header.from.as_ref(), raw),
-                }
-            }
+            self.take_in(&mut e);
             // Changes made offline reach the server before anything else does.
             let replay = match &e {
                 Event::Connected { account_id, .. } => self.cache.take_pending(account_id),
@@ -1503,6 +1503,19 @@ impl Engine {
         self.dispatch();
         self.cache.save(&self.session, false);
         changed
+    }
+
+    /// What an opened message teaches before the session shows it: the keys and certificates
+    /// it carries, and an invitation's handshake step to answer.
+    pub(crate) fn take_in(&mut self, e: &mut Event) {
+        let Event::Body { message_id, body, header, raw, carried } = e else { return };
+        self.learn_certificate(message_id, header.from.as_ref(), body);
+        let carried = carried.take();
+        match &carried {
+            Some(carried) => self.learn_carried(message_id, header.from.as_ref(), body, carried),
+            None => self.learn_autocrypt(message_id, header.from.as_ref(), raw),
+        }
+        self.handle_handshake(message_id, header, body, carried.as_deref());
     }
 
     fn dispatch(&mut self) {

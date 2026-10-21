@@ -3144,6 +3144,42 @@ mod tests {
     }
 
     #[test]
+    fn the_chat_start_page_shows_an_invitation_link_and_takes_one() {
+        let mut h = harness();
+        with_a_chat(h.state_mut());
+        h.state_mut().module = Module::Chat;
+        h.state_mut().engine.enable_chat("a1").unwrap();
+        h.run();
+        h.get_by_label("Uitnodigingslink").click();
+        h.run();
+        let (account, link) = h.state().chat.invite.clone().unwrap();
+        assert_eq!(account, "a1");
+        assert!(link.starts_with("https://i.delta.chat/#"), "{link}");
+        h.get_by_label("QR-code van de uitnodigingslink");
+        h.get_by_label("Link kopiëren").click();
+        h.run();
+        h.get_by_label("Gekopieerd");
+        h.get_by_label("Per e-mail sturen").click();
+        h.run();
+        assert!(h.state().compose.as_ref().is_some_and(|c| c.body.contains(&link) && c.account_id == "a1"));
+        h.state_mut().compose = None;
+        h.run();
+
+        h.state_mut().chat.accept = "geen link".into();
+        h.run();
+        h.get_by_label("Aannemen").click();
+        h.run();
+        assert!(matches!(&h.state().chat.accept_note, Some(Err(e)) if e.contains("geen uitnodiging")));
+        h.state_mut().chat.accept = "https://i.delta.chat/#1234567890ABCDEF1234567890ABCDEF12345678&i=abc&s=def&a=bob%40example.org&n=Bob".into();
+        h.run();
+        h.get_by_label("Aannemen").click();
+        // The first step waits to go out, so the window keeps waking.
+        h.run_steps(3);
+        h.get_by_label("Uitnodiging aangenomen. Zodra Bob antwoordt, staat de chat klaar.");
+        h.get_by_label("Wacht op antwoord van Bob (bob@example.org)");
+    }
+
+    #[test]
     fn chat_messages_stay_out_of_the_mail_list() {
         let mut h = harness();
         with_a_chat(h.state_mut());
