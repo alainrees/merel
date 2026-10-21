@@ -403,7 +403,7 @@ fn progress(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                         close = true;
                     }
                     helder::secondary(ui, t, |ui| {
-                        if ui.button(RichText::new(helder::CLOSE).size(14.0).color(t.text)).clicked() {
+                        if ui.button(RichText::new(helder::close_label()).size(14.0).color(t.text)).clicked() {
                             close = true;
                         }
                     });

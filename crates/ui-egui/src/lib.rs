@@ -1864,14 +1864,14 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     app.view.groups && matches!(app.engine.session.sort, merel_engine::view::Sort::Newest | merel_engine::view::Sort::Oldest);
                 let today = chrono::Local::now().date_naive();
                 let now_ts = chrono::Local::now().timestamp();
-                let mut last_group: Option<&str> = None;
+                let mut last_group: Option<String> = None;
                 for row in rows {
                     let m = row.m;
                     if grouped && !row.indent {
                         let group = dates::date_group(m.date, today);
-                        if last_group != Some(group) {
+                        if last_group.as_ref() != Some(&group) {
+                            group_heading(ui, t, &group);
                             last_group = Some(group);
-                            group_heading(ui, t, group);
                         }
                     }
                     let on = selected.as_deref() == Some(m.id.as_str()) || app.engine.session.marked.contains(&m.id);
@@ -2808,7 +2808,7 @@ mod tests {
         h.state_mut().updates.job = Some(Job::at("9.0.0", Stage::Installing));
         h.run();
         h.get_by_label("Merel 9.0.0 installeren");
-        h.get_by_label(helder::CLOSE).click();
+        h.get_by_label(&helder::close_label()).click();
         h.run();
         assert!(h.state().updates.job.is_some(), "an install in progress is not closed");
 
@@ -3276,12 +3276,12 @@ mod tests {
         let mut h = harness();
         h.state_mut().module = Module::Calendar;
         h.run();
-        h.get_all_by_label(calendar::GOTO).next().expect("the ribbon button").click();
+        h.get_all_by_label(&calendar::goto()).next().expect("the ribbon button").click();
         h.run();
         assert!(h.state().calendar.goto.is_some());
         *h.state_mut().calendar.goto.as_mut().expect("the window") = "31-02-2027".into();
         h.run();
-        h.get_by_label(calendar::GOTO_HINT);
+        h.get_by_label(&calendar::goto_hint());
         h.get_by_label("Ga").click();
         h.run();
         assert!(h.state().calendar.goto.is_some(), "a day that does not exist keeps the window open");
@@ -3307,7 +3307,7 @@ mod tests {
         assert!(h.state().view.work_hours, "on by default, as in Outlook");
         h.get_by_label("Beeld").click();
         h.run();
-        h.get_by_label(calendar::WORK_HOURS).click();
+        h.get_by_label(&calendar::work_hours()).click();
         h.run();
         assert!(!h.state().view.work_hours);
         h.get_by_label("Start").click();
@@ -3316,7 +3316,7 @@ mod tests {
         h.run();
         h.get_by_label("Beeld").click();
         h.run();
-        h.get_by_label(calendar::WORK_HOURS).click();
+        h.get_by_label(&calendar::work_hours()).click();
         h.run();
         assert!(h.state().view.work_hours, "and back on, with the week view drawing the shade");
     }
@@ -3380,7 +3380,7 @@ mod tests {
         let a = h.state().engine.session.appointments.first().cloned().expect("a sample appointment");
         h.state_mut().open_appointment(&a.id, a.start);
         h.run();
-        h.get_by_label(meeting::FORWARD).click();
+        h.get_by_label(&meeting::forward_label()).click();
         h.run();
         assert!(h.state().calendar.editor.is_none(), "the appointment window closed");
         let c = h.state().compose.as_ref().expect("the compose window");
@@ -3402,7 +3402,7 @@ mod tests {
         let id = e.notes_editor.id();
         h.state_mut().calendar.editor = Some(e);
         h.run();
-        h.get_by_label("Notities").focus();
+        h.get_by_label(&tr("notes")).focus();
         h.run();
         // "Agenda" selected, as dragging over it would.
         let mut state = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
@@ -3428,7 +3428,7 @@ mod tests {
         e.end_date = "06-10-2026".into();
         h.state_mut().calendar.editor = Some(e);
         h.run();
-        h.get_by_label(calendar::START_PICKER).click();
+        h.get_by_label(&calendar::start_picker()).click();
         h.run();
         h.get_by_label("oktober 2026");
         h.get_by_label("Volgende maand").click();
@@ -3439,7 +3439,7 @@ mod tests {
         let e = h.state().calendar.editor.as_ref().expect("still open");
         assert_eq!((e.start_date.as_str(), e.end_date.as_str()), ("12-11-2026", "13-11-2026"), "a day long, as before");
         assert!(h.query_by_label("Volgende maand").is_none(), "the month closes once a day is picked");
-        h.get_by_label(calendar::END_PICKER).click();
+        h.get_by_label(&calendar::end_picker()).click();
         h.run();
         h.get_by_label("20 november 2026").click();
         h.run();
@@ -3455,7 +3455,7 @@ mod tests {
         h.run();
         h.state_mut().tasks.editor.as_mut().expect("editor").due = "30-11-2026".into();
         h.run();
-        h.get_by_label(tasks::DUE_PICKER).click();
+        h.get_by_label(&tasks::due_picker()).click();
         h.run();
         h.get_by_label("1 december 2026").click();
         h.run();
@@ -3467,7 +3467,7 @@ mod tests {
         // Selects "Agenda" in the notes of the open form and makes it bold, as a drag and a
         // click on the bar would.
         fn bold_first_word(h: &mut egui_kittest::Harness<'static, MailApp>, id: egui::Id) {
-            h.get_by_label("Notities").focus();
+            h.get_by_label(&tr("notes")).focus();
             h.run();
             let mut state = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
             state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(6))));
@@ -3518,14 +3518,14 @@ mod tests {
         assert!(h.query_by_label("Opslaan").is_none(), "with attendees the button sends");
         h.get_by_label("Verzenden").click();
         h.run();
-        h.get_by_label(meeting::NO_ACCOUNT);
+        h.get_by_label(&meeting::no_account());
         assert!(h.state().calendar.editor.is_some(), "the window stays open");
         assert!(h.state().engine.session.appointments.iter().all(|a| a.title != "Overleg met Sanne"), "nothing was saved");
         h.state_mut().calendar.editor.as_mut().expect("editor").attendees = "sanne@".into();
         h.run();
         h.get_by_label("Verzenden").click();
         h.run();
-        h.get_by_label(meeting::BAD_ADDRESSES);
+        h.get_by_label(&meeting::bad_addresses());
     }
 
     fn with_real_account(h: &mut egui_kittest::Harness<'static, MailApp>) {
@@ -3563,7 +3563,7 @@ mod tests {
             assert_eq!((e.invited.len(), e.attendees.as_str()), (1, ""), "the finished address became a chip");
         }
         h.get_by_label("Alain Tester verwijderen");
-        assert!(h.query_by_label(calendar::IN_THE_PAST).is_none());
+        assert!(h.query_by_label(&calendar::in_the_past()).is_none());
         h.get_by_label("Verzenden").click();
         h.run_steps(3);
         assert!(h.state().calendar.editor.is_none(), "sent and closed");
@@ -3587,7 +3587,7 @@ mod tests {
         // Taking the person off sends them a cancellation with the update.
         h.get_by_label("Alain Tester verwijderen").click();
         h.run_steps(3);
-        h.get_by_label(meeting::SEND_UPDATE).click();
+        h.get_by_label(&meeting::send_update()).click();
         h.run_steps(3);
         assert_eq!(h.state().engine.session.outbox.len(), 2, "the cancellation went out too");
         let a = h.state().engine.session.appointments.iter().find(|a| a.title == "Lunch").cloned().expect("saved");
@@ -3648,7 +3648,7 @@ mod tests {
         e.title = "Gisteren".into();
         h.state_mut().calendar.editor = Some(e);
         h.run();
-        h.get_by_label(calendar::IN_THE_PAST);
+        h.get_by_label(&calendar::in_the_past());
     }
 
     #[test]
@@ -3656,7 +3656,7 @@ mod tests {
         let mut h = harness();
         h.state_mut().module = Module::People;
         h.run();
-        h.get_by_label(groups::NEW).click();
+        h.get_by_label(&groups::new()).click();
         h.run();
         {
             let e = h.state_mut().contacts.group_editor.as_mut().expect("the group window");
@@ -3671,7 +3671,7 @@ mod tests {
         assert!(h.state().contacts.group_editor.is_none());
         assert_eq!(h.state().contacts.group.as_deref(), Some(groups[0].id.as_str()), "the new group is shown");
         h.get_by_label("👥 Team ontwerp (2)");
-        h.get_by_label(groups::MAIL).click();
+        h.get_by_label(&groups::mail_label()).click();
         h.run();
         assert_eq!(h.state().compose.as_ref().map(|c| c.to.as_str()), Some("Sanne <sanne@example.org>; ravi@example.org; "));
         // Typing the group's name in an address field offers its members.
@@ -4089,11 +4089,11 @@ mod tests {
         h.state_mut().run("message.flag", json!({ "id": "m3" }));
         h.state_mut().module = Module::Tasks;
         h.run();
-        h.get_by_label(tasks::FLAGGED_HEADING);
+        h.get_by_label(&tasks::flagged_heading());
         assert!(h.query_by_label("Planning voor donderdag").is_some() && h.query_by_label("Wat er deze maand speelt").is_some());
         h.get_by_label("Voltooid").click();
         h.run();
-        assert!(h.query_by_label(tasks::FLAGGED_HEADING).is_none(), "the done filter is about tasks; flagged mail is open by nature");
+        assert!(h.query_by_label(&tasks::flagged_heading()).is_none(), "the done filter is about tasks; flagged mail is open by nature");
         h.get_by_label("Open").click();
         h.run();
         h.get_by_label("Vlag weghalen van Wat er deze maand speelt").click();
@@ -4671,6 +4671,34 @@ mod tests {
     }
 
     #[test]
+    fn the_calendar_contacts_and_tasks_speak_english_in_english() {
+        let mut h = harness();
+        i18n::set(i18n::Language::English);
+        let mut seen = Vec::new();
+        let today = chrono::Local::now().date_naive();
+        let screens: [&dyn Fn(&mut MailApp); 6] = [
+            &|app| app.module = Module::Calendar,
+            &|app| app.new_appointment(today, 9),
+            &|app| {
+                app.calendar.editor = None;
+                app.module = Module::People;
+            },
+            &|app| app.new_contact(),
+            &|app| app.module = Module::Tasks,
+            &|app| app.new_task(),
+        ];
+        for screen in screens {
+            screen(h.state_mut());
+            h.run();
+            h.run();
+            seen.extend(labels(&h));
+        }
+        let dutch = i18n::dutch_only_texts();
+        let left: Vec<&String> = seen.iter().filter(|l| dutch.contains(l.as_str())).collect();
+        assert!(left.is_empty(), "Dutch on the English calendar, contacts and tasks: {left:?}");
+    }
+
+    #[test]
     fn every_ribbon_fits_the_window_without_overlap_in_every_language() {
         for language in i18n::Language::ALL {
             let mut h = harness();
@@ -4813,12 +4841,12 @@ mod tests {
         let start = h.state().engine.session.appointment(&id).unwrap().start;
         h.state_mut().open_appointment(&id, start);
         h.run();
-        h.get_by_label(calendar::CATEGORIZE).click();
+        h.get_by_label(&calendar::categorize()).click();
         h.run();
         h.get_by_label("● Rode categorie").click();
         h.run();
         assert!(h.query_by_label("● Groene categorie").is_none(), "a pick closes the menu");
-        h.get_by_label(calendar::CATEGORIZE).click();
+        h.get_by_label(&calendar::categorize()).click();
         h.run();
         h.get_by_label("● Groene categorie").click();
         h.run();
@@ -4835,9 +4863,9 @@ mod tests {
         let start = h.state().engine.session.appointment(&id).unwrap().start;
         h.state_mut().open_appointment(&id, start);
         h.run();
-        h.get_by_label(calendar::CATEGORIZE).click();
+        h.get_by_label(&calendar::categorize()).click();
         h.run();
-        h.get_by_label(calendar::CLEAR_CATEGORIES).click();
+        h.get_by_label(&calendar::clear_categories()).click();
         h.run();
         assert!(h.state().calendar.editor.as_ref().unwrap().categories.is_empty(), "Alle categorieën wissen empties the list");
     }
@@ -4847,7 +4875,7 @@ mod tests {
         let mut h = harness();
         h.state_mut().module = Module::Calendar;
         h.run();
-        h.get_by_label(calendars::ADD).click();
+        h.get_by_label(&calendars::add()).click();
         h.run();
         h.get_by_label("Kleur Groen").click();
         h.run();
@@ -4882,7 +4910,7 @@ mod tests {
         h.get_by_label("Verwijderen…").click();
         h.run();
         assert!(h.query_by_label_contains("Agenda \"Hardlopen\" verwijderen?").is_some(), "deleting asks first");
-        h.get_by_label(calendars::CONFIRM_DELETE).click();
+        h.get_by_label(&calendars::confirm_delete()).click();
         h.run();
         assert!(h.state().engine.session.calendar(&sport.id).is_none());
         h.get_by_label(&calendars::options_label("Mijn agenda")).click();
@@ -4909,7 +4937,7 @@ mod tests {
             });
         }
         h.run();
-        let local = h.get_by_label(calendars::LOCAL).rect();
+        let local = h.get_by_label(&calendars::local()).rect();
         let mine = h.get_by_label("Mijn agenda").rect();
         let own = h.get_by_label(first.address.email()).rect();
         let work = h.get_by_label("alain@werk.example").rect();
@@ -5011,9 +5039,9 @@ mod tests {
             h.get_by_label("Verzenden").rect(),
             h.get_by_label_contains("Voorlopig").rect(),
             h.get_by_label("Op het moment zelf").rect(),
-            h.get_by_label(calendar::PRIVATE).rect(),
-            h.get_by_label(crate::meeting::FORWARD).rect(),
-            h.get_by_label(calendar::DELETE_MENU).rect(),
+            h.get_by_label(&calendar::private()).rect(),
+            h.get_by_label(&crate::meeting::forward_label()).rect(),
+            h.get_by_label(&calendar::delete_menu()).rect(),
             h.get_by_label("Annuleren").rect(),
         ];
         for pair in rects.windows(2) {
@@ -5041,9 +5069,9 @@ mod tests {
         assert_eq!(editor.repeat, Some(merel_model::Frequency::Weekly));
         let clicked = editor.occurrence.expect("the clicked occurrence is remembered");
         assert!(clicked > series_start && clicked - series_start <= 8 * 86_400, "it is next week's, not the first");
-        h.get_by_label(calendar::DELETE_MENU).click();
+        h.get_by_label(&calendar::delete_menu()).click();
         h.run();
-        h.get_by_label(calendar::SKIP_ONE).click();
+        h.get_by_label(&calendar::skip_one()).click();
         h.run();
         assert!(h.state().calendar.editor.is_none());
         assert!(h.query_all_by_label_contains("Weekstart").next().is_none(), "the skipped time is gone from this week");
@@ -5267,7 +5295,7 @@ mod tests {
         h.get_by_label_contains("Overleg ontwerp\n").click_secondary();
         h.run();
         assert!(h.state().calendar.editor.is_none(), "a right click only shows the menu");
-        h.get_by_label(calendar::OPEN_MENU).click();
+        h.get_by_label(&calendar::open_menu()).click();
         h.run();
         assert_eq!(h.state().calendar.editor.as_ref().and_then(|e| e.id.as_deref()), Some("sample-0"), "Openen opens it");
         h.state_mut().calendar.editor = None;
@@ -5296,12 +5324,12 @@ mod tests {
         h.query_all_by_label_contains("Weekstart").next().expect("a Weekstart").click_secondary();
         h.run();
         assert_eq!(h.query_all_by_label("Verwijderen").count(), 1, "only the ribbon's: a series asks which");
-        h.get_by_label(calendar::DELETE_ONE_MENU).click();
+        h.get_by_label(&calendar::delete_one_menu()).click();
         h.run();
         assert_eq!(series(&h), before - 1, "only that occurrence goes");
         h.query_all_by_label_contains("Weekstart").next().expect("another Weekstart").click_secondary();
         h.run();
-        h.get_by_label(calendar::DELETE_SERIES_MENU).click();
+        h.get_by_label(&calendar::delete_series_menu()).click();
         h.run();
         assert_eq!(series(&h), 0, "the whole series goes");
     }

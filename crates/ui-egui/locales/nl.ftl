@@ -767,3 +767,446 @@ chat-first-hint = Typ je eerste bericht…
 chat-check-addresses = Controleer de adressen.
 chat-ready-note = De chat is end-to-end versleuteld. Wie nog geen versleutelde chat met je heeft, krijgt straks een uitnodiging; tot dan gaat er niets weg.
 chat-enable-first = Zet eerst chat aan voor dit account; dat kan op de beginpagina van Chat.
+
+## Months and days of the week (1 = January, 1 = Monday)
+month-1 = januari
+month-2 = februari
+month-3 = maart
+month-4 = april
+month-5 = mei
+month-6 = juni
+month-7 = juli
+month-8 = augustus
+month-9 = september
+month-10 = oktober
+month-11 = november
+month-12 = december
+month-short-1 = jan
+month-short-2 = feb
+month-short-3 = mrt
+month-short-4 = apr
+month-short-5 = mei
+month-short-6 = jun
+month-short-7 = jul
+month-short-8 = aug
+month-short-9 = sep
+month-short-10 = okt
+month-short-11 = nov
+month-short-12 = dec
+weekday-1 = maandag
+weekday-2 = dinsdag
+weekday-3 = woensdag
+weekday-4 = donderdag
+weekday-5 = vrijdag
+weekday-6 = zaterdag
+weekday-7 = zondag
+weekday-short-1 = ma
+weekday-short-2 = di
+weekday-short-3 = wo
+weekday-short-4 = do
+weekday-short-5 = vr
+weekday-short-6 = za
+weekday-short-7 = zo
+weekday-letter-1 = M
+weekday-letter-2 = D
+weekday-letter-3 = W
+weekday-letter-4 = D
+weekday-letter-5 = V
+weekday-letter-6 = Z
+weekday-letter-7 = Z
+
+## Date groups over the message list
+date-group-later = Later
+date-group-today = Vandaag
+date-group-yesterday = Gisteren
+date-group-this-week = Deze week
+date-group-last-week = Vorige week
+date-group-this-month = Deze maand
+date-group-last-month = Vorige maand
+date-group-older = Ouder
+date-at-time = { $day } om { $time }
+
+## Date picker
+
+calendar-next-month = Volgende maand
+calendar-previous-month = Vorige maand
+
+## Reminders
+
+reminder-appointment = Afspraak
+reminder-follow-up = Opvolgen
+reminder-task = Taak
+reminder-dismiss-all = Alles sluiten
+reminder-dismiss = Sluiten
+reminder-done = Voltooid
+reminder-done-mail-hint = Haalt de vlag en de datum weg.
+reminder-dismiss-mail-hint = Sluit de herinnering; de vlag en de datum blijven.
+reminder-done-task-hint = Vinkt de taak af.
+reminder-dismiss-task-hint = Sluit de herinnering; de taak blijft open.
+reminder-minutes = { $count ->
+    [one] 1 minuut
+   *[other] { $count } minuten
+}
+reminder-hours = { $count } uur
+reminder-days = { $count ->
+    [one] 1 dag
+   *[other] { $count } dagen
+}
+reminder-now = Begint nu
+reminder-in = Begint over { $time }
+reminder-ago = Begon { $time } geleden
+reminder-all-day = { $day }, hele dag
+reminder-overdue = Verlopen op { $day }
+reminder-snooze = Uitstellen
+reminder-from = van { $name }
+reminder-title = { $count ->
+    [one] Herinnering
+   *[other] Herinneringen ({ $count })
+}
+
+## vCard
+
+vcard-export = Opslaan als vCard
+vcard-imported = { $count ->
+    [one] 1 contact geïmporteerd
+   *[other] { $count } contacten geïmporteerd
+}
+vcard-skipped = { $count } al bekend en overgeslagen
+vcard-failed = { $count ->
+    [one] 1 bestand niet leesbaar
+   *[other] { $count } bestanden niet leesbaar
+}
+vcard-not-saved = Contact niet opgeslagen: { $error }
+vcard-no-downloads = Contact niet opgeslagen: geen map Downloads gevonden.
+
+## Contact groups
+
+groups-heading = Contactgroepen
+groups-mail = E-mail aan groep
+groups-delete = Groep verwijderen
+groups-delete-hint = Alleen de groep verdwijnt; de contacten blijven.
+groups-members = Leden
+groups-members-hint = Adressen gescheiden door ; of elk op een eigen regel. Typ een naam voor suggesties uit je contacten.
+groups-need-name = Vul een naam in.
+groups-need-members = Vul bij Leden ten minste één geldig adres in, hoogstens { $max }.
+groups-gone = Deze groep bestaat niet meer.
+groups-count = { $count ->
+    [one] Contactgroep met 1 lid
+   *[other] Contactgroep met { $count } leden
+}
+groups-edit-title = Contactgroep bewerken
+groups-new-title = Nieuwe contactgroep
+
+## Invitations
+
+invitation-in-calendar = Staat al in je agenda.
+invitation-add = Aan agenda toevoegen
+invitation-add-hint = Opent het afspraakvenster, ingevuld; de organisator krijgt geen antwoord.
+no-title = (zonder titel)
+answer-proposed = { $who } stelt een nieuwe tijd voor
+answer-accepted = { $who } heeft geaccepteerd
+answer-tentative = { $who } heeft voorlopig geaccepteerd
+answer-declined = { $who } heeft afgewezen
+answer-none = { $who } heeft nog niet besloten
+answer-proposed-time = Voorgesteld: { $when }
+answer-filed = Bijgewerkt in je agenda.
+answer-not-filed = Deze vergadering staat niet in je agenda.
+invitation-cancelled = 📅 Afspraak geannuleerd: { $title }
+invitation-head = 📅 Uitnodiging: { $title }
+
+## Calendars in the side pane
+
+calendars-add = Agenda toevoegen
+calendars-rename = Naam van agenda wijzigen
+calendars-delete = Agenda verwijderen
+calendars-confirm-delete = Ja, verwijderen
+calendars-local = Op deze computer
+calendars-local-hint = Deze agenda's staan alleen op deze computer en worden niet met een account gedeeld.
+calendars-options = Opties voor { $name }
+calendars-color = Kleur { $name }
+calendars-color-heading = Kleur
+calendars-rename-menu = Naam wijzigen…
+calendars-delete-menu = Verwijderen…
+calendars-need-name = Geef de agenda een naam.
+calendars-keep-one = Deze agenda kan dat niet; er blijft altijd één agenda op deze computer.
+calendars-gone = Deze agenda bestaat niet meer.
+calendars-name = Naam van de agenda
+calendars-delete-question = { $count ->
+    [0] Agenda "{ $name }" verwijderen?
+    [one] Agenda "{ $name }" en de afspraak erin verwijderen? Dit kan niet ongedaan worden gemaakt.
+   *[other] Agenda "{ $name }" en de { $count } afspraken erin verwijderen? Dit kan niet ongedaan worden gemaakt.
+}
+calendars-name-too-long = Een naam is hooguit { $max } tekens.
+calendar-color-blauw = Blauw
+calendar-color-turkoois = Turkoois
+calendar-color-groen = Groen
+calendar-color-olijf = Olijf
+calendar-color-goud = Goud
+calendar-color-oranje = Oranje
+calendar-color-rood = Rood
+calendar-color-roze = Roze
+calendar-color-paars = Paars
+calendar-color-lavendel = Lavendel
+calendar-color-bruin = Bruin
+calendar-color-grijs = Grijs
+
+## Contacts
+
+contacts-store-in = Opslaan in
+contacts-pick = Kies een contact, of maak een nieuw contact.
+contacts-export-hint = Bewaart dit contact als .vcf-bestand in je map Downloads, om te delen of in een ander programma te openen.
+contacts-mail-hint = Nieuw bericht aan dit adres
+contacts-phone = Telefoon
+contacts-company = Bedrijf
+contacts-stored-in = Opgeslagen in
+contacts-first-name = Voornaam
+contacts-last-name = Achternaam
+contacts-emails = E-mailadressen
+contacts-email = E-mailadres
+contacts-add-email = E-mail toevoegen
+contacts-phones = Telefoonnummers
+contacts-phone-number = Telefoonnummer
+contacts-add-phone = Nummer toevoegen
+contacts-work = Werkgegevens
+contacts-need-name = Vul een naam of een e-mailadres in.
+contacts-bad-email = Een van de e-mailadressen is niet geldig.
+save-failed-because = Opslaan is mislukt: { $error }
+contacts-gone = Dit contact bestaat niet meer.
+contacts-search = Zoeken in contacten
+contacts-none-yet = Nog geen contacten.
+contacts-none-found = Geen contact gevonden.
+contacts-remove-row = { $what } weghalen
+contacts-edit-title = Contact bewerken
+
+## Meetings
+
+meeting-attendees = Genodigden
+meeting-optional = Optioneel
+meeting-no-account = Voeg eerst een echt account toe om een uitnodiging te kunnen versturen; de afspraak is nog niet opgeslagen.
+meeting-bad-addresses = Controleer de adressen bij Genodigden.
+meeting-forward = Doorsturen…
+meeting-send-update = Update verzenden
+meeting-cancel = Vergadering annuleren
+meeting-when = Wanneer: { $when }
+meeting-where = Waar: { $where }
+meeting-organizer = Organisator: { $who }
+meeting-changed = De afspraak is gewijzigd:
+meeting-invited = Je bent uitgenodigd voor:
+meeting-updated-subject = Bijgewerkt: { $title }
+meeting-invitation-subject = Uitnodiging: { $title }
+meeting-request-closing = De bijgevoegde uitnodiging zet de afspraak in je agenda.
+meeting-called-off = Deze afspraak gaat niet door:
+meeting-cancel-closing = Met de bijgevoegde annulering haal je hem uit je agenda.
+meeting-cancelled-subject = Geannuleerd: { $title }
+response-accepted = Geaccepteerd
+response-tentative = Voorlopig
+response-declined = Afgewezen
+response-none = Nog geen reactie
+tally-accepted = { $count } geaccepteerd
+tally-tentative = { $count } voorlopig
+tally-declined = { $count } afgewezen
+tally-none = { $count } nog geen reactie
+meeting-appointment = Afspraak: { $title }
+meeting-forward-closing = Met de bijgevoegde afspraak zet je hem in je eigen agenda.
+meeting-forwarded-subject = Doorgestuurd: { $title }
+
+## Repeating appointments and tasks
+repeat-never = Niet herhalen
+repeat-daily = { $count ->
+    [one] Elke dag
+   *[other] Om de { $count } dagen
+}
+repeat-weekly = { $count ->
+    [one] Elke week
+   *[other] Om de { $count } weken
+}
+repeat-monthly = { $count ->
+    [one] Elke maand
+   *[other] Om de { $count } maanden
+}
+repeat-yearly = { $count ->
+    [one] Elk jaar
+   *[other] Om de { $count } jaar
+}
+repeat-unit-daily = { $count ->
+    [one] dag
+   *[other] dagen
+}
+repeat-unit-weekly = { $count ->
+    [one] week
+   *[other] weken
+}
+repeat-unit-monthly = { $count ->
+    [one] maand
+   *[other] maanden
+}
+repeat-unit-yearly = jaar
+list-and = { $first } en { $last }
+repeat-on-days = { $repeat } op { $days }
+repeat-times = { $repeat }, { $count } keer
+repeat-every = Om de
+repeat-ends = Eindigt
+repeat-ends-never = Nooit
+repeat-ends-on-date = Op een datum
+repeat-ends-after = Na een aantal keer
+repeat-until = Tot en met
+repeat-after = Na
+repeat-times-unit = keer
+repeat-until-date = { $repeat }, tot en met { $date }
+
+## Tasks
+
+tasks-due-picker = Vervaldatum kiezen
+tasks-flagged = Gemarkeerde e-mail
+tasks-repeat-needs-due = Een herhalende taak heeft een vervaldatum nodig en blijft op deze computer.
+tasks-open-mail-hint = Opent het bericht in E-mail.
+tasks-unflag-hint = Haalt de vlag (en de datum) weg.
+tasks-pick = Kies een taak, of maak een nieuwe taak.
+tasks-add-title = Titel toevoegen
+tasks-due-field = Vervaldatum (dd-mm-jjjj)
+tasks-due-hint = Vervaldatum als dag-maand-jaar, of leeg voor geen deadline.
+tasks-repeat-note = Na Voltooien komt de taak terug met de volgende vervaldatum.
+tasks-today = vandaag
+tasks-tomorrow = morgen
+tasks-yesterday = gisteren
+tasks-overdue = verlopen op { $day }
+tasks-before = vóór { $day }
+tasks-daily = Dagelijks
+tasks-weekly = Wekelijks
+tasks-monthly = Maandelijks
+tasks-yearly = Jaarlijks
+tasks-need-title = Vul een titel in.
+tasks-bad-due = Vul een geldige vervaldatum in, bijvoorbeeld 18-10-2026.
+tasks-no-such-date = Deze datum bestaat niet in deze tijdzone.
+tasks-gone = Deze taak bestaat niet meer.
+priority-low = Laag
+priority-normal = Normaal
+priority-high = Hoog
+tasks-search = Zoeken in taken
+tasks-open = Open
+tasks-done = Voltooid
+tasks-all = Alles
+tasks-none-found = Geen taak gevonden.
+tasks-none-done = Nog niets voltooid.
+tasks-none = Geen taken. Lekker rustig.
+tasks-done-check = { $title } voltooid
+tasks-high-priority = hoge prioriteit
+tasks-unflag = Vlag weghalen van { $subject }
+tasks-status = Status
+tasks-due = Vervaldatum
+tasks-no-due = Geen vervaldatum
+tasks-priority = Prioriteit
+tasks-priority-value = Prioriteit { $priority }
+tasks-repeat = Herhalen
+tasks-edit-title = Taak bewerken
+
+## Calendar
+
+calendar-private = Privé
+calendar-work-hours = Werkuren
+calendar-goto-hint = Gebruik dag-maand-jaar, bijvoorbeeld 21-10-2026.
+calendar-pick-day = Dag kiezen
+calendar-pick-start = Begindatum kiezen
+calendar-pick-end = Einddatum kiezen
+calendar-pick-until = Laatste datum van de reeks kiezen
+calendar-week-number = Week { $week }
+calendar-goto-question = Welke dag wil je zien? (dag-maand-jaar)
+calendar-go = Ga
+show-as-free = Vrij
+show-as-tentative = Voorlopig
+show-as-busy = Bezet
+show-as-away = Afwezig
+reminder-none = Geen
+reminder-at-start = Op het moment zelf
+reminder-minutes-before = { $count ->
+    [one] 1 minuut ervoor
+   *[other] { $count } minuten ervoor
+}
+reminder-hours-before = { $count } uur ervoor
+reminder-days-before = { $count ->
+    [one] 1 dag ervoor
+   *[other] { $count } dagen ervoor
+}
+reminder-weeks-before = { $count ->
+    [one] 1 week ervoor
+   *[other] { $count } weken ervoor
+}
+calendar-bad-interval = Vul in om de hoeveel keer de afspraak terugkomt, van 1 tot 999.
+calendar-bad-until = Vul een geldige einddatum voor de herhaling in, bijvoorbeeld 31-12-2026.
+calendar-until-too-far = De einddatum van de herhaling ligt te ver weg.
+calendar-until-no-such = De einddatum van de herhaling bestaat niet in deze tijdzone.
+calendar-until-before-start = De herhaling eindigt voor de eerste keer.
+calendar-bad-count = Vul in na hoeveel keer de herhaling stopt, minstens 1.
+calendar-bad-start-date = Vul een geldige begindatum in, bijvoorbeeld { $example }.
+calendar-bad-end-date = Vul een geldige einddatum in, bijvoorbeeld { $example }.
+calendar-bad-start-time = Vul een geldige begintijd in, bijvoorbeeld { $example }.
+calendar-bad-end-time = Vul een geldige eindtijd in, bijvoorbeeld { $example }.
+calendar-end-too-far = De einddatum ligt te ver weg.
+calendar-start-no-such = De begintijd bestaat niet in deze tijdzone.
+calendar-end-no-such = De eindtijd bestaat niet in deze tijdzone.
+calendar-end-before-start = Het einde ligt voor het begin.
+calendar-time-no-such = Die tijd bestaat niet in deze tijdzone.
+
+## Calendar window
+
+calendar-tick-hint = Vinkje weg verbergt de afspraken van deze agenda in de weergaven; herinneringen komen wel.
+calendar-delete-one = Dit exemplaar verwijderen
+calendar-delete-series = Hele reeks verwijderen
+calendar-cancel-menu = Vergadering annuleren…
+calendar-in-the-past = Deze gebeurtenis vindt plaats in het verleden.
+calendar-take-proposal = Voorgestelde tijd overnemen
+calendar-delete-menu = Verwijderen…
+calendar-skip-one = Deze keer overslaan
+calendar-categorize = Categorie toevoegen
+calendar-clear-categories = Alle categorieën wissen
+calendar-tasks = Taken
+calendar-tasks-hint = Sleep een taak naar een dag of uur om er een afspraak voor in te plannen.
+calendar-more = +{ $count } meer
+calendar-split = { $name } naast elkaar weergeven
+calendar-merge = { $name } samenvoegen
+calendar-close = { $name } sluiten
+calendar-drag-end = Eindtijd van { $title } verslepen
+calendar-previous = Vorige
+calendar-next = Volgende
+calendar-search-results = Zoekresultaten
+calendar-found = { $count ->
+    [0] Geen afspraak gevonden in het afgelopen jaar en de twee jaar hierna.
+    [one] 1 afspraak gevonden.
+   *[other] { $count } afspraken gevonden, van een jaar terug tot twee jaar vooruit.
+}
+calendar-remove-attendee = { $name } verwijderen
+calendar-remove-attendee-hint = Haalt deze genodigde van de vergadering
+calendar-add-optional = Optionele genodigden toevoegen
+calendar-add-attendees = Genodigden toevoegen
+calendar-optional-hint = Nodigt iemand uit die er niet bij hoeft te zijn
+calendar-nothing-planned = Je hebt dan nog niets gepland.
+calendar-overlaps = Overlapt met { $titles }.
+calendar-recurring = Herhaalde afspraak
+calendar-send-hint = Slaat de afspraak op en mailt de genodigden een uitnodiging voor hun agenda.
+calendar-update-hint = Slaat de wijziging op en mailt hem de genodigden; wie eraf is gehaald, krijgt een annulering.
+calendar-show-as = Weergeven als
+calendar-reminder = Herinnering
+calendar-private-hint = Wie je agenda deelt, ziet alleen dat je bezet bent.
+calendar-forward-hint = Opent een nieuw bericht met de afspraak als bijlage, zodat iemand anders hem in zijn agenda kan zetten.
+calendar-skip-hint = Alleen deze keer vervalt; de reeks blijft.
+calendar-cancel-hint = Haalt de vergadering uit je agenda en mailt de genodigden een annulering.
+calendar-remove-category-hint = Klik om deze categorie weg te halen
+calendar-responses = Reacties: { $tally }.
+calendar-proposal = { $who } stelt een nieuwe tijd voor: { $when }.
+calendar-take-proposal-hint = Zet deze tijd in het venster; met Update verzenden hoort iedereen het.
+calendar-account-series-note = De reeks wordt in het account aangemaakt; daarna toont Merel elke keer apart en bewerk je ze los van elkaar.
+calendar-opened-from = Geopend vanaf de keer op { $day }. Wijzigingen gelden voor de hele reeks.
+calendar-add-location = Locatie toevoegen
+calendar-another-category = Nog een categorie
+calendar-no-categories = Nog geen categorieën; maak ze bij E-mail via Categoriseren.
+calendar-remove-category = Categorie { $name } weghalen
+calendar-no-drag-series = Een herhalende afspraak versleep je niet; open de reeks om de tijd te veranderen.
+calendar-bad-repeat = De herhaling kan zo niet: een afspraak moet korter zijn dan de tijd tussen twee keren, en herhalen kan alleen in een agenda op deze computer.
+calendar-gone = Deze afspraak bestaat niet meer.
+
+## Shared widgets
+
+notes = Notities
+notes-add = Notities toevoegen
+step-of = Stap { $step } van { $count }
+busy = Bezig

@@ -3,7 +3,7 @@
 
 use chrono::{DateTime, Datelike, Local, NaiveDate};
 
-const MONTHS: [&str; 12] = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
+use crate::i18n::tr;
 
 /// (year, month 1–12, day) from days since 1970-01-01 (Howard Hinnant's civil_from_days).
 fn civil(days: i64) -> (i64, u32, u32) {
@@ -25,7 +25,7 @@ fn parts(ts: i64) -> (i64, u32, u32, i64, i64) {
 }
 
 fn month(m: u32) -> &'static str {
-    MONTHS.get(m.saturating_sub(1) as usize).copied().unwrap_or("")
+    crate::i18n::month_short(m)
 }
 
 /// "18 okt 14:05".
@@ -53,27 +53,27 @@ pub fn day_name(d: NaiveDate) -> String {
 
 /// The group a message of `ts` falls in when the list is grouped by date, seen from `today`:
 /// the headings Outlook puts over the list.
-pub fn date_group(ts: i64, today: NaiveDate) -> &'static str {
-    let Some(day) = DateTime::from_timestamp(ts, 0).map(|t| t.with_timezone(&Local).date_naive()) else { return "Ouder" };
+pub fn date_group(ts: i64, today: NaiveDate) -> String {
+    let Some(day) = DateTime::from_timestamp(ts, 0).map(|t| t.with_timezone(&Local).date_naive()) else { return tr("date-group-older") };
     let week_start = today - chrono::Duration::days(i64::from(today.weekday().num_days_from_monday()));
     let month_start = today.with_day(1).unwrap_or(today);
     let last_month_start = month_start.pred_opt().and_then(|d| d.with_day(1)).unwrap_or(month_start);
     if day > today {
-        "Later"
+        tr("date-group-later")
     } else if day == today {
-        "Vandaag"
+        tr("date-group-today")
     } else if today.pred_opt() == Some(day) {
-        "Gisteren"
+        tr("date-group-yesterday")
     } else if day >= week_start {
-        "Deze week"
+        tr("date-group-this-week")
     } else if day >= week_start - chrono::Duration::days(7) {
-        "Vorige week"
+        tr("date-group-last-week")
     } else if day >= month_start {
-        "Deze maand"
+        tr("date-group-this-month")
     } else if day >= last_month_start {
-        "Vorige maand"
+        tr("date-group-last-month")
     } else {
-        "Ouder"
+        tr("date-group-older")
     }
 }
 

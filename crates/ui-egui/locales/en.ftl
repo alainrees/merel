@@ -770,3 +770,458 @@ chat-first-hint = Type your first message…
 chat-check-addresses = Check the addresses.
 chat-ready-note = The chat is end-to-end encrypted. Anyone who has no encrypted chat with you yet will get an invitation soon; until then nothing is sent.
 chat-enable-first = Turn on chat for this account first; you can do that on the Chat start page.
+
+## Months and days of the week (1 = January, 1 = Monday)
+month-1 = January
+month-2 = February
+month-3 = March
+month-4 = April
+month-5 = May
+month-6 = June
+month-7 = July
+month-8 = August
+month-9 = September
+month-10 = October
+month-11 = November
+month-12 = December
+month-short-1 = Jan
+month-short-2 = Feb
+month-short-3 = Mar
+month-short-4 = Apr
+month-short-5 = May
+month-short-6 = Jun
+month-short-7 = Jul
+month-short-8 = Aug
+month-short-9 = Sep
+month-short-10 = Oct
+month-short-11 = Nov
+month-short-12 = Dec
+weekday-1 = Monday
+weekday-2 = Tuesday
+weekday-3 = Wednesday
+weekday-4 = Thursday
+weekday-5 = Friday
+weekday-6 = Saturday
+weekday-7 = Sunday
+weekday-short-1 = Mo
+weekday-short-2 = Tu
+weekday-short-3 = We
+weekday-short-4 = Th
+weekday-short-5 = Fr
+weekday-short-6 = Sa
+weekday-short-7 = Su
+weekday-letter-1 = M
+weekday-letter-2 = T
+weekday-letter-3 = W
+weekday-letter-4 = T
+weekday-letter-5 = F
+weekday-letter-6 = S
+weekday-letter-7 = S
+
+## Date groups over the message list
+date-group-later = Later
+date-group-today = Today
+date-group-yesterday = Yesterday
+date-group-this-week = This week
+date-group-last-week = Last week
+date-group-this-month = This month
+date-group-last-month = Last month
+date-group-older = Older
+date-at-time = { $day } at { $time }
+
+## Date picker
+
+calendar-next-month = Next month
+calendar-previous-month = Previous month
+
+## Reminders
+
+reminder-appointment = Appointment
+reminder-follow-up = Follow up
+reminder-task = Task
+reminder-dismiss-all = Dismiss all
+reminder-dismiss = Dismiss
+reminder-done = Done
+reminder-done-mail-hint = Removes the flag and the date.
+reminder-dismiss-mail-hint = Closes the reminder; the flag and the date stay.
+reminder-done-task-hint = Ticks the task off.
+reminder-dismiss-task-hint = Closes the reminder; the task stays open.
+reminder-minutes = { $count ->
+    [one] 1 minute
+   *[other] { $count } minutes
+}
+reminder-hours = { $count ->
+    [one] 1 hour
+   *[other] { $count } hours
+}
+reminder-days = { $count ->
+    [one] 1 day
+   *[other] { $count } days
+}
+reminder-now = Starts now
+reminder-in = Starts in { $time }
+reminder-ago = Started { $time } ago
+reminder-all-day = { $day }, all day
+reminder-overdue = Overdue since { $day }
+reminder-snooze = Snooze
+reminder-from = from { $name }
+reminder-title = { $count ->
+    [one] Reminder
+   *[other] Reminders ({ $count })
+}
+
+## vCard
+
+vcard-export = Save as vCard
+vcard-imported = { $count ->
+    [one] 1 contact imported
+   *[other] { $count } contacts imported
+}
+vcard-skipped = { $count } already known and skipped
+vcard-failed = { $count ->
+    [one] 1 file could not be read
+   *[other] { $count } files could not be read
+}
+vcard-not-saved = Contact not saved: { $error }
+vcard-no-downloads = Contact not saved: no Downloads folder found.
+
+## Contact groups
+
+groups-heading = Contact groups
+groups-mail = Email the group
+groups-delete = Delete group
+groups-delete-hint = Only the group goes; the contacts stay.
+groups-members = Members
+groups-members-hint = Addresses separated by ; or each on its own line. Type a name for suggestions from your contacts.
+groups-need-name = Fill in a name.
+groups-need-members = Fill in at least one valid address under Members, at most { $max }.
+groups-gone = This group no longer exists.
+groups-count = { $count ->
+    [one] Contact group with 1 member
+   *[other] Contact group with { $count } members
+}
+groups-edit-title = Edit contact group
+groups-new-title = New contact group
+
+## Invitations
+
+invitation-in-calendar = Already in your calendar.
+invitation-add = Add to calendar
+invitation-add-hint = Opens the appointment window, filled in; the organizer gets no answer.
+no-title = (no title)
+answer-proposed = { $who } proposes a new time
+answer-accepted = { $who } has accepted
+answer-tentative = { $who } has tentatively accepted
+answer-declined = { $who } has declined
+answer-none = { $who } has not decided yet
+answer-proposed-time = Proposed: { $when }
+answer-filed = Updated in your calendar.
+answer-not-filed = This meeting is not in your calendar.
+invitation-cancelled = 📅 Appointment cancelled: { $title }
+invitation-head = 📅 Invitation: { $title }
+
+## Calendars in the side pane
+
+calendars-add = Add calendar
+calendars-rename = Rename calendar
+calendars-delete = Delete calendar
+calendars-confirm-delete = Yes, delete
+calendars-local = On this computer
+calendars-local-hint = These calendars are only on this computer and are not shared with an account.
+calendars-options = Options for { $name }
+calendars-color = Colour { $name }
+calendars-color-heading = Colour
+calendars-rename-menu = Rename…
+calendars-delete-menu = Delete…
+calendars-need-name = Give the calendar a name.
+calendars-keep-one = This calendar cannot do that; one calendar always stays on this computer.
+calendars-gone = This calendar no longer exists.
+calendars-name = Name of the calendar
+calendars-delete-question = { $count ->
+    [0] Delete calendar "{ $name }"?
+    [one] Delete calendar "{ $name }" and the appointment in it? This cannot be undone.
+   *[other] Delete calendar "{ $name }" and the { $count } appointments in it? This cannot be undone.
+}
+calendars-name-too-long = A name is at most { $max } characters.
+calendar-color-blauw = Blue
+calendar-color-turkoois = Turquoise
+calendar-color-groen = Green
+calendar-color-olijf = Olive
+calendar-color-goud = Gold
+calendar-color-oranje = Orange
+calendar-color-rood = Red
+calendar-color-roze = Pink
+calendar-color-paars = Purple
+calendar-color-lavendel = Lavender
+calendar-color-bruin = Brown
+calendar-color-grijs = Grey
+
+## Contacts
+
+contacts-store-in = Save in
+contacts-pick = Pick a contact, or make a new one.
+contacts-export-hint = Saves this contact as a .vcf file in your Downloads folder, to share or open in another program.
+contacts-mail-hint = New message to this address
+contacts-phone = Phone
+contacts-company = Company
+contacts-stored-in = Saved in
+contacts-first-name = First name
+contacts-last-name = Last name
+contacts-emails = Email addresses
+contacts-email = Email address
+contacts-add-email = Add email
+contacts-phones = Phone numbers
+contacts-phone-number = Phone number
+contacts-add-phone = Add number
+contacts-work = Work
+contacts-need-name = Fill in a name or an email address.
+contacts-bad-email = One of the email addresses is not valid.
+save-failed-because = Saving failed: { $error }
+contacts-gone = This contact no longer exists.
+contacts-search = Search contacts
+contacts-none-yet = No contacts yet.
+contacts-none-found = No contact found.
+contacts-remove-row = Remove { $what }
+contacts-edit-title = Edit contact
+
+## Meetings
+
+meeting-attendees = Attendees
+meeting-optional = Optional
+meeting-no-account = First add a real account to be able to send an invitation; the appointment has not been saved yet.
+meeting-bad-addresses = Check the addresses under Attendees.
+meeting-forward = Forward…
+meeting-send-update = Send update
+meeting-cancel = Cancel meeting
+meeting-when = When: { $when }
+meeting-where = Where: { $where }
+meeting-organizer = Organizer: { $who }
+meeting-changed = The appointment has changed:
+meeting-invited = You are invited to:
+meeting-updated-subject = Updated: { $title }
+meeting-invitation-subject = Invitation: { $title }
+meeting-request-closing = The attached invitation puts the appointment in your calendar.
+meeting-called-off = This appointment is off:
+meeting-cancel-closing = The attached cancellation takes it out of your calendar.
+meeting-cancelled-subject = Cancelled: { $title }
+response-accepted = Accepted
+response-tentative = Tentative
+response-declined = Declined
+response-none = No response yet
+tally-accepted = { $count } accepted
+tally-tentative = { $count } tentative
+tally-declined = { $count } declined
+tally-none = { $count } no response yet
+meeting-appointment = Appointment: { $title }
+meeting-forward-closing = The attached appointment puts it in your own calendar.
+meeting-forwarded-subject = Forwarded: { $title }
+
+## Repeating appointments and tasks
+repeat-never = Does not repeat
+repeat-daily = { $count ->
+    [one] Every day
+   *[other] Every { $count } days
+}
+repeat-weekly = { $count ->
+    [one] Every week
+   *[other] Every { $count } weeks
+}
+repeat-monthly = { $count ->
+    [one] Every month
+   *[other] Every { $count } months
+}
+repeat-yearly = { $count ->
+    [one] Every year
+   *[other] Every { $count } years
+}
+repeat-unit-daily = { $count ->
+    [one] day
+   *[other] days
+}
+repeat-unit-weekly = { $count ->
+    [one] week
+   *[other] weeks
+}
+repeat-unit-monthly = { $count ->
+    [one] month
+   *[other] months
+}
+repeat-unit-yearly = { $count ->
+    [one] year
+   *[other] years
+}
+list-and = { $first } and { $last }
+repeat-on-days = { $repeat } on { $days }
+repeat-times = { $repeat }, { $count ->
+    [one] once
+   *[other] { $count } times
+}
+repeat-every = Every
+repeat-ends = Ends
+repeat-ends-never = Never
+repeat-ends-on-date = On a date
+repeat-ends-after = After a number of times
+repeat-until = Until
+repeat-after = After
+repeat-times-unit = times
+repeat-until-date = { $repeat }, until { $date }
+
+## Tasks
+
+tasks-due-picker = Pick due date
+tasks-flagged = Flagged email
+tasks-repeat-needs-due = A repeating task needs a due date and stays on this computer.
+tasks-open-mail-hint = Opens the message in Mail.
+tasks-unflag-hint = Removes the flag (and the date).
+tasks-pick = Pick a task, or make a new one.
+tasks-add-title = Add a title
+tasks-due-field = Due date (dd-mm-yyyy)
+tasks-due-hint = Due date as day-month-year, or empty for no deadline.
+tasks-repeat-note = After Complete the task comes back with the next due date.
+tasks-today = today
+tasks-tomorrow = tomorrow
+tasks-yesterday = yesterday
+tasks-overdue = overdue since { $day }
+tasks-before = before { $day }
+tasks-daily = Daily
+tasks-weekly = Weekly
+tasks-monthly = Monthly
+tasks-yearly = Yearly
+tasks-need-title = Fill in a title.
+tasks-bad-due = Fill in a valid due date, for example 18-10-2026.
+tasks-no-such-date = This date does not exist in this time zone.
+tasks-gone = This task no longer exists.
+priority-low = Low
+priority-normal = Normal
+priority-high = High
+tasks-search = Search tasks
+tasks-open = Open
+tasks-done = Completed
+tasks-all = All
+tasks-none-found = No task found.
+tasks-none-done = Nothing completed yet.
+tasks-none = No tasks. Nice and quiet.
+tasks-done-check = { $title } completed
+tasks-high-priority = high priority
+tasks-unflag = Remove flag from { $subject }
+tasks-status = Status
+tasks-due = Due date
+tasks-no-due = No due date
+tasks-priority = Priority
+tasks-priority-value = { $priority } priority
+tasks-repeat = Repeat
+tasks-edit-title = Edit task
+
+## Calendar
+
+calendar-private = Private
+calendar-work-hours = Working hours
+calendar-goto-hint = Use day-month-year, for example 21-10-2026.
+calendar-pick-day = Pick a day
+calendar-pick-start = Pick start date
+calendar-pick-end = Pick end date
+calendar-pick-until = Pick the last date of the series
+calendar-week-number = Week { $week }
+calendar-goto-question = Which day do you want to see? (day-month-year)
+calendar-go = Go
+show-as-free = Free
+show-as-tentative = Tentative
+show-as-busy = Busy
+show-as-away = Away
+reminder-none = None
+reminder-at-start = At the start
+reminder-minutes-before = { $count ->
+    [one] 1 minute before
+   *[other] { $count } minutes before
+}
+reminder-hours-before = { $count ->
+    [one] 1 hour before
+   *[other] { $count } hours before
+}
+reminder-days-before = { $count ->
+    [one] 1 day before
+   *[other] { $count } days before
+}
+reminder-weeks-before = { $count ->
+    [one] 1 week before
+   *[other] { $count } weeks before
+}
+calendar-bad-interval = Fill in how often the appointment comes back, from 1 to 999.
+calendar-bad-until = Fill in a valid end date for the repeat, for example 31-12-2026.
+calendar-until-too-far = The end date of the repeat is too far away.
+calendar-until-no-such = The end date of the repeat does not exist in this time zone.
+calendar-until-before-start = The repeat ends before the first time.
+calendar-bad-count = Fill in after how many times the repeat stops, at least 1.
+calendar-bad-start-date = Fill in a valid start date, for example { $example }.
+calendar-bad-end-date = Fill in a valid end date, for example { $example }.
+calendar-bad-start-time = Fill in a valid start time, for example { $example }.
+calendar-bad-end-time = Fill in a valid end time, for example { $example }.
+calendar-end-too-far = The end date is too far away.
+calendar-start-no-such = The start time does not exist in this time zone.
+calendar-end-no-such = The end time does not exist in this time zone.
+calendar-end-before-start = The end is before the start.
+calendar-time-no-such = That time does not exist in this time zone.
+
+## Calendar window
+
+calendar-tick-hint = Unticking hides this calendar's appointments in the views; reminders still come.
+calendar-delete-one = Delete this occurrence
+calendar-delete-series = Delete the whole series
+calendar-cancel-menu = Cancel meeting…
+calendar-in-the-past = This event takes place in the past.
+calendar-take-proposal = Take the proposed time
+calendar-delete-menu = Delete…
+calendar-skip-one = Skip this time
+calendar-categorize = Add category
+calendar-clear-categories = Clear all categories
+calendar-tasks = Tasks
+calendar-tasks-hint = Drag a task to a day or hour to plan an appointment for it.
+calendar-more = +{ $count } more
+calendar-split = Show { $name } side by side
+calendar-merge = Merge { $name }
+calendar-close = Close { $name }
+calendar-drag-end = Drag the end time of { $title }
+calendar-previous = Previous
+calendar-next = Next
+calendar-search-results = Search results
+calendar-found = { $count ->
+    [0] No appointment found in the past year and the two years after.
+    [one] 1 appointment found.
+   *[other] { $count } appointments found, from a year back to two years ahead.
+}
+calendar-remove-attendee = Remove { $name }
+calendar-remove-attendee-hint = Takes this attendee off the meeting
+calendar-add-optional = Add optional attendees
+calendar-add-attendees = Add attendees
+calendar-optional-hint = Invites someone who does not have to be there
+calendar-nothing-planned = You have nothing planned then.
+calendar-overlaps = Overlaps with { $titles }.
+calendar-recurring = Recurring appointment
+calendar-send-hint = Saves the appointment and emails the attendees an invitation for their calendar.
+calendar-update-hint = Saves the change and emails it to the attendees; whoever was taken off gets a cancellation.
+calendar-show-as = Show as
+calendar-reminder = Reminder
+calendar-private-hint = Whoever shares your calendar only sees that you are busy.
+calendar-forward-hint = Opens a new message with the appointment attached, so someone else can put it in their calendar.
+calendar-skip-hint = Only this time is dropped; the series stays.
+calendar-cancel-hint = Takes the meeting out of your calendar and emails the attendees a cancellation.
+calendar-remove-category-hint = Click to remove this category
+calendar-responses = Responses: { $tally }.
+calendar-proposal = { $who } proposes a new time: { $when }.
+calendar-take-proposal-hint = Puts this time in the window; with Send update everyone hears it.
+calendar-account-series-note = The series is made in the account; after that Merel shows each time on its own and you edit them separately.
+calendar-opened-from = Opened from the time on { $day }. Changes apply to the whole series.
+calendar-add-location = Add location
+calendar-another-category = Another category
+calendar-no-categories = No categories yet; make them in Mail under Categorize.
+calendar-remove-category = Remove category { $name }
+calendar-no-drag-series = A recurring appointment cannot be dragged; open the series to change the time.
+calendar-bad-repeat = The repeat cannot be like this: an appointment must be shorter than the time between two occurrences, and repeating only works in a calendar on this computer.
+calendar-gone = This appointment no longer exists.
+
+## Shared widgets
+
+notes = Notes
+notes-add = Add notes
+step-of = Step { $step } of { $count }
+busy = Working

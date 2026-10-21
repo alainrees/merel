@@ -2,6 +2,7 @@
 //! from, with buttons for the previous month, today and the next month. The field stays
 //! typable as dag-maand-jaar; the month is a quicker way to fill it.
 
+use crate::i18n::tr;
 use chrono::{Datelike, NaiveDate};
 use egui::{Align2, FontId, Response, RichText, Sense, Stroke, Ui, vec2};
 
@@ -11,8 +12,6 @@ use crate::helder::{self, Icon};
 
 const DATE_FORMAT: &str = "%d-%m-%Y";
 const CELL: f32 = 32.0;
-/// The weekday letters over the month, Monday first.
-const WEEKDAYS: [&str; 7] = ["M", "D", "W", "D", "V", "Z", "Z"];
 
 /// A date field: what `helder::underline_field` draws, followed by the calendar button.
 /// Returns the day picked from the calendar, if one was picked this frame.
@@ -59,13 +58,13 @@ fn month(ui: &mut Ui, t: &Tokens, shown: &mut NaiveDate, selected: Option<NaiveD
         ui.label(RichText::new(format!("{} {}", month_name(shown.month()), shown.year())).size(15.0).strong().color(t.text));
         helder::right(ui, |ui| {
             helder::quiet(ui, t, |ui| {
-                if nav_button(ui, t, Icon::ChevronRight, "Volgende maand").clicked() {
+                if nav_button(ui, t, Icon::ChevronRight, &tr("calendar-next-month")).clicked() {
                     *shown = add_months(*shown, 1);
                 }
-                if nav_button(ui, t, Icon::CalendarDay, "Vandaag").clicked() {
+                if nav_button(ui, t, Icon::CalendarDay, &tr("calendar-today")).clicked() {
                     *shown = today();
                 }
-                if nav_button(ui, t, Icon::ChevronLeft, "Vorige maand").clicked() {
+                if nav_button(ui, t, Icon::ChevronLeft, &tr("calendar-previous-month")).clicked() {
                     *shown = add_months(*shown, -1);
                 }
             });
@@ -74,7 +73,7 @@ fn month(ui: &mut Ui, t: &Tokens, shown: &mut NaiveDate, selected: Option<NaiveD
     ui.add_space(2.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        for d in WEEKDAYS {
+        for d in (0..7).map(crate::i18n::weekday_letter) {
             let (rect, _) = ui.allocate_exact_size(vec2(CELL, 20.0), Sense::hover());
             ui.painter().text(rect.center(), Align2::CENTER_CENTER, d, FontId::proportional(12.0), t.text_dim);
         }

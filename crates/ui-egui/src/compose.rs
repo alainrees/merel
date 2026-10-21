@@ -183,7 +183,8 @@ pub fn later_options(now: DateTime<Local>) -> Vec<(String, i64)> {
 pub(crate) fn when_text(ts: i64) -> String {
     let Some(t) = DateTime::from_timestamp(ts, 0).map(|t| t.with_timezone(&Local)) else { return dates::long(ts) };
     let d = t.date_naive();
-    format!("{} {} {} om {:02}:{:02}", calendar::weekday_name(d), d.day(), calendar::month_name(d.month()), t.hour(), t.minute())
+    let day = format!("{} {} {}", calendar::weekday_name(d), d.day(), calendar::month_name(d.month()));
+    crate::i18n::tr_args("date-at-time", &[("day", day.into()), ("time", format!("{:02}:{:02}", t.hour(), t.minute()).into())])
 }
 
 pub(crate) fn join(list: &[Address]) -> String {

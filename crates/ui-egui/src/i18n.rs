@@ -199,6 +199,65 @@ pub fn tr_args<'a>(key: &str, args: &[(&'a str, FluentValue<'a>)]) -> String {
     lookup(key, Some(&fluent))
 }
 
+/// The names of the months and the days of the week, read once per language from the Fluent
+/// files (`month-1`, `weekday-1` for Monday, …) so a translation brings its own.
+struct Names {
+    months: Vec<String>,
+    months_short: Vec<String>,
+    weekdays: Vec<String>,
+    weekdays_short: Vec<String>,
+    weekday_letters: Vec<String>,
+}
+
+static NAMES: LazyLock<[Names; 2]> = LazyLock::new(|| [names(Language::Dutch), names(Language::English)]);
+
+fn names(language: Language) -> Names {
+    let list = |prefix: &str, n: usize| -> Vec<String> {
+        (1..=n)
+            .map(|i| {
+                let key = format!("{prefix}-{i}");
+                plain(language, &key).or_else(|| plain(Language::English, &key)).unwrap_or_default()
+            })
+            .collect()
+    };
+    Names {
+        months: list("month", 12),
+        months_short: list("month-short", 12),
+        weekdays: list("weekday", 7),
+        weekdays_short: list("weekday-short", 7),
+        weekday_letters: list("weekday-letter", 7),
+    }
+}
+
+fn pick(list: &'static [String], i: usize) -> &'static str {
+    list.get(i).map_or("", String::as_str)
+}
+
+/// "oktober" / "October", for month 1–12.
+pub fn month_name(m: u32) -> &'static str {
+    pick(&NAMES[usize::from(current().code())].months, m.saturating_sub(1) as usize)
+}
+
+/// "okt" / "Oct", for month 1–12.
+pub fn month_short(m: u32) -> &'static str {
+    pick(&NAMES[usize::from(current().code())].months_short, m.saturating_sub(1) as usize)
+}
+
+/// "woensdag" / "Wednesday"; 0 is Monday.
+pub fn weekday_name(i: usize) -> &'static str {
+    pick(&NAMES[usize::from(current().code())].weekdays, i)
+}
+
+/// "wo" / "We"; 0 is Monday.
+pub fn weekday_short(i: usize) -> &'static str {
+    pick(&NAMES[usize::from(current().code())].weekdays_short, i)
+}
+
+/// "W" / "W", the letter over a column of a small month; 0 is Monday.
+pub fn weekday_letter(i: usize) -> &'static str {
+    pick(&NAMES[usize::from(current().code())].weekday_letters, i)
+}
+
 /// The Dutch words for a text shown in the current language, for the tables that still pick an
 /// icon or a style by a button's Dutch name; other text comes back as it is.
 pub fn dutch(text: &str) -> std::borrow::Cow<'_, str> {

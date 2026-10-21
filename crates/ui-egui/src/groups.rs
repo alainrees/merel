@@ -2,6 +2,7 @@
 //! contacts, a card with the members, and a window to make or change one. A group's name typed
 //! in an address field offers its members; see `contacts::complete_addresses`.
 
+use crate::i18n::tr;
 use egui::{RichText, Ui, vec2};
 use serde_json::json;
 
@@ -10,9 +11,15 @@ use merel_model::{ContactGroup, mailbox};
 
 use crate::{ComposeKind, MailApp, Tokens};
 
-pub const HEADING: &str = "Contactgroepen";
-pub const NEW: &str = "Nieuwe groep";
-pub const MAIL: &str = "E-mail aan groep";
+pub fn heading() -> String {
+    tr("groups-heading")
+}
+pub fn new() -> String {
+    tr("contacts-new-group")
+}
+pub fn mail_label() -> String {
+    tr("groups-mail")
+}
 
 /// The window's fields as text.
 #[derive(Default)]
@@ -58,10 +65,10 @@ impl MailApp {
 
 fn describe(e: &CommandError) -> String {
     match e {
-        CommandError::Param("name") => "Vul een naam in.".into(),
-        CommandError::Param("members") => format!("Vul bij Leden ten minste één geldig adres in, hoogstens {}.", merel_model::MAX_GROUP_MEMBERS),
-        CommandError::NotFound => "Deze groep bestaat niet meer.".into(),
-        _ => "Opslaan is niet gelukt.".into(),
+        CommandError::Param("name") => tr("groups-need-name"),
+        CommandError::Param("members") => crate::i18n::tr_args("groups-need-members", &[("max", merel_model::MAX_GROUP_MEMBERS.into())]),
+        CommandError::NotFound => tr("groups-gone"),
+        _ => tr("save-failed"),
     }
 }
 
@@ -72,7 +79,7 @@ pub fn section(ui: &mut Ui, t: &Tokens, groups: &[ContactGroup], selected: Optio
     }
     let mut pick = None;
     ui.add_space(10.0);
-    ui.label(RichText::new(HEADING).size(12.0).strong().color(t.accent_text));
+    ui.label(RichText::new(heading()).size(12.0).strong().color(t.accent_text));
     for g in groups {
         if ui.selectable_label(selected == Some(g.id.as_str()), RichText::new(label(g)).color(t.text)).clicked() {
             pick = Some(g.id.clone());
@@ -89,7 +96,7 @@ pub fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens, id: &str) {
     };
     ui.label(RichText::new(&g.name).size(22.0).strong().color(t.text));
     let n = g.members.len();
-    ui.label(RichText::new(format!("Contactgroep met {n} {}", if n == 1 { "lid" } else { "leden" })).color(t.text_dim));
+    ui.label(RichText::new(crate::i18n::tr_args("groups-count", &[("count", n.into())])).color(t.text_dim));
     ui.add_space(14.0);
     for m in &g.members {
         ui.label(RichText::new(mailbox(m)).color(t.text));
@@ -97,12 +104,9 @@ pub fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens, id: &str) {
     ui.add_space(14.0);
     let (mut mail, mut edit, mut delete) = (false, false, false);
     ui.horizontal(|ui| {
-        mail = ui.add(egui::Button::new(RichText::new(MAIL).color(t.on_accent)).fill(t.accent).min_size(vec2(130.0, 26.0))).clicked();
-        edit = ui.add(egui::Button::new("Bewerken").min_size(vec2(90.0, 26.0))).clicked();
-        delete = ui
-            .add(egui::Button::new("Groep verwijderen").min_size(vec2(90.0, 26.0)))
-            .on_hover_text("Alleen de groep verdwijnt; de contacten blijven.")
-            .clicked();
+        mail = ui.add(egui::Button::new(RichText::new(mail_label()).color(t.on_accent)).fill(t.accent).min_size(vec2(130.0, 26.0))).clicked();
+        edit = ui.add(egui::Button::new(tr("edit")).min_size(vec2(90.0, 26.0))).clicked();
+        delete = ui.add(egui::Button::new(tr("groups-delete")).min_size(vec2(90.0, 26.0))).on_hover_text(tr("groups-delete-hint")).clicked();
     });
     if mail {
         app.mail_group(id);
@@ -121,29 +125,25 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(editor) = app.contacts.group_editor.as_mut() else { return };
     let mut save = false;
     let mut close = false;
-    let title = if editor.id.is_some() { "Contactgroep bewerken" } else { "Nieuwe contactgroep" };
+    let title = if editor.id.is_some() { tr("groups-edit-title") } else { tr("groups-new-title") };
     egui::Window::new(title).collapsible(false).resizable(false).default_width(470.0).show(ctx, |ui| {
         ui.horizontal(|ui| {
-            ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Naam").color(t.text)));
+            ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new(tr("name")).color(t.text)));
             ui.add(egui::TextEdit::singleline(&mut editor.name).desired_width(340.0));
         });
         ui.horizontal(|ui| {
-            ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new("Leden").color(t.text)));
+            ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new(tr("groups-members")).color(t.text)));
             ui.add(egui::TextEdit::multiline(&mut editor.members).desired_width(340.0).desired_rows(5));
         });
         crate::contacts::complete_addresses(ui, t, &app.engine.session, &mut editor.members);
-        ui.label(
-            RichText::new("Adressen gescheiden door ; of elk op een eigen regel. Typ een naam voor suggesties uit je contacten.")
-                .size(11.5)
-                .color(t.text_dim),
-        );
+        ui.label(RichText::new(tr("groups-members-hint")).size(11.5).color(t.text_dim));
         if let Some(e) = &editor.error {
             ui.label(RichText::new(e).color(t.flag));
         }
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            save = ui.add(egui::Button::new(RichText::new("Opslaan").color(t.on_accent)).fill(t.accent).min_size(vec2(90.0, 26.0))).clicked();
-            close = ui.add(egui::Button::new("Annuleren").min_size(vec2(90.0, 26.0))).clicked();
+            save = ui.add(egui::Button::new(RichText::new(tr("save")).color(t.on_accent)).fill(t.accent).min_size(vec2(90.0, 26.0))).clicked();
+            close = ui.add(egui::Button::new(tr("cancel")).min_size(vec2(90.0, 26.0))).clicked();
         });
     });
     if save {

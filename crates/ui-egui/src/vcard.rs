@@ -3,6 +3,7 @@
 //! one or more files into the local address book. Both use the vCard code the CardDAV sync
 //! already has, so what goes out is what a server would get.
 
+use crate::i18n::tr;
 use std::path::Path;
 
 use merel_dav::ical;
@@ -12,8 +13,12 @@ use serde_json::json;
 use crate::MailApp;
 use crate::attachments::{downloads_dir, save_to};
 
-pub const EXPORT: &str = "Opslaan als vCard";
-pub const IMPORT: &str = "Importeren…";
+pub fn export_label() -> String {
+    tr("vcard-export")
+}
+pub fn import_label() -> String {
+    tr("contacts-import")
+}
 
 /// The most a vCard file may be to be read; address books are small, and this keeps a wrong
 /// file from being loaded whole.
@@ -44,15 +49,12 @@ pub struct Outcome {
 
 impl Outcome {
     pub fn notice(&self) -> String {
-        let mut parts = vec![match self.added {
-            1 => "1 contact geïmporteerd".to_string(),
-            n => format!("{n} contacten geïmporteerd"),
-        }];
+        let mut parts = vec![crate::i18n::tr_args("vcard-imported", &[("count", self.added.into())])];
         if self.skipped > 0 {
-            parts.push(format!("{} al bekend en overgeslagen", self.skipped));
+            parts.push(crate::i18n::tr_args("vcard-skipped", &[("count", self.skipped.into())]));
         }
         if self.failed > 0 {
-            parts.push(format!("{} bestand(en) niet leesbaar", self.failed));
+            parts.push(crate::i18n::tr_args("vcard-failed", &[("count", self.failed.into())]));
         }
         format!("{}.", parts.join(", "))
     }
@@ -66,10 +68,10 @@ impl MailApp {
         let name = format!("{}.vcf", if c.name.trim().is_empty() { "contact" } else { c.name.trim() });
         self.notice = Some(match downloads_dir() {
             Some(dir) => match save_to(&dir, &name, text.as_bytes()) {
-                Ok(path) => crate::attachments::saved("Contact", &path),
-                Err(e) => crate::Notice::error(format!("Contact niet opgeslagen: {e}")),
+                Ok(path) => crate::attachments::saved(&tr("noun-contact"), &path),
+                Err(e) => crate::Notice::error(crate::i18n::tr_args("vcard-not-saved", &[("error", e.to_string().into())])),
             },
-            None => crate::Notice::error("Contact niet opgeslagen: geen map Downloads gevonden."),
+            None => crate::Notice::error(tr("vcard-no-downloads")),
         });
     }
 
@@ -159,7 +161,7 @@ mod tests {
         assert_eq!(app.engine.session.contacts.len(), before + 2);
         assert!(app.engine.session.contacts.iter().any(|c| c.name == "Ravi Patel" && c.phones == ["+31 6 1111"]));
         assert!(app.engine.session.contacts.iter().any(|c| c.name == "Zonder adres" && c.company == "Firma"));
-        assert_eq!(app.notice.as_deref(), Some("2 contacten geïmporteerd, 1 al bekend en overgeslagen, 1 bestand(en) niet leesbaar."));
+        assert_eq!(app.notice.as_deref(), Some("2 contacten geïmporteerd, 1 al bekend en overgeslagen, 1 bestand niet leesbaar."));
         // The same file again adds nothing; the card without an address is the exception, as
         // nothing identifies it.
         let again = app.import_contacts(&[file]);
