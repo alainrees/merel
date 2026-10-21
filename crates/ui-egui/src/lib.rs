@@ -668,9 +668,10 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
     let title = app.title.clone().unwrap_or_else(|| "Mailcraft".to_string());
     egui::Panel::top("searchbar")
         .show_separator_line(false)
-        .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin { left: 12, right: 12, top: if inset > 0.0 { 1 } else { 4 }, bottom: 4 }))
+        .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin { left: 12, right: 12, top: 4, bottom: if inset > 0.0 { 6 } else { 4 } }))
         .show(ui, |ui| {
-            // In a macOS title bar the box is centred on the window buttons, 28 points down.
+            // In a macOS title bar the box is centred on the window buttons, whose middle is
+            // about 17 points down (macOS 26).
             let height = if inset > 0.0 { 26.0 } else { SEARCH_HEIGHT };
             let bar = egui::Rect::from_min_size(ui.max_rect().min, vec2(ui.available_width(), height));
             if inset > 0.0 {
