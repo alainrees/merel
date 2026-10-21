@@ -107,8 +107,8 @@ pub fn goto_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(mut text) = app.calendar.goto.take() else { return };
     let mut go = false;
     let mut close = false;
-    egui::Window::new(goto()).collapsible(false).resizable(false).default_width(260.0).show(ctx, |ui| {
-        ui.label(RichText::new(tr("calendar-goto-question")).color(t.text));
+    if helder::popup(ctx, t, "goto-date", &goto(), 260.0, |ui| {
+        ui.label(RichText::new(crate::i18n::tr("calendar-goto-question")).color(t.text));
         ui.horizontal(|ui| {
             let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0).id(egui::Id::new(GOTO_BOX)));
             if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -123,14 +123,16 @@ pub fn goto_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             ui.label(RichText::new(goto_hint()).size(12.0).color(t.flag));
         }
         ui.horizontal(|ui| {
-            if ui.button(tr("calendar-go")).clicked() {
+            if ui.add(helder::primary_text(t, &tr("calendar-go"))).clicked() {
                 go = true;
             }
             if ui.button(tr("cancel")).clicked() {
                 close = true;
             }
         });
-    });
+    }) {
+        close = true;
+    }
     if go && let Some(day) = parse_date(&text) {
         app.calendar.focus = day;
         app.calendar.query.clear();

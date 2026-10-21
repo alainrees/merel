@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use merel_model::{Address, ChatTag, Draft, FolderKind, MessageHeader};
+use merel_model::{Address, ChatTag, Draft, FolderKind, MessageHeader, Sealed};
 use merel_pgp::{KeyInfo, SecretKey};
 
 use crate::{Engine, SAMPLE_ACCOUNT, Session};
@@ -218,7 +218,42 @@ pub fn can_chat(account: &merel_model::Account) -> bool {
     account.protocol == merel_model::Protocol::ImapSmtp && account.id != SAMPLE_ACCOUNT
 }
 
+/// Most encrypted messages opened after one listing to read the header inside.
+const OPEN_SEALED: usize = 30;
+
 impl Engine {
+    /// Opens the newest encrypted messages in `folder_id` whose header inside has not been
+    /// read yet, for an account with chat on: Delta Chat names a chat only inside the
+    /// encryption, so this is how its chats show up.
+    pub(crate) fn open_sealed_in(&mut self, folder_id: &str) {
+        let Some(folder) = self.session.folder(folder_id) else { return };
+        if matches!(folder.kind, FolderKind::Junk | FolderKind::Deleted | FolderKind::Drafts) || !self.chat_ready(&folder.account_id) {
+            return;
+        }
+        let mut sealed: Vec<(i64, String)> =
+            self.session.messages.iter().filter(|m| m.folder_id == folder_id && m.sealed == Sealed::Closed).map(|m| (m.date, m.id.clone())).collect();
+        sealed.sort_by_key(|m| std::cmp::Reverse(m.0));
+        for (_, id) in sealed.into_iter().take(OPEN_SEALED) {
+            self.session.request_body(&id);
+        }
+    }
+
+    /// Lists the Verzonden items of every connected account with chat on, so chat messages
+    /// sent from elsewhere (Delta Chat on a phone) join the chats too.
+    pub(crate) fn refresh_chat_folders(&mut self) {
+        let ids: Vec<String> = self
+            .session
+            .accounts
+            .iter()
+            .filter(|a| self.session.status.get(&a.id) == Some(&crate::AccountStatus::Online) && self.chat_ready(&a.id))
+            .filter_map(|a| self.session.folder_of_kind(&a.id, FolderKind::Sent))
+            .map(|f| f.id.clone())
+            .collect();
+        for id in ids {
+            self.session.request_headers(&id);
+        }
+    }
+
     /// Opens the chat `id`; see [`Session::open_chat`].
     pub fn open_chat(&mut self, id: &str) {
         self.session.open_chat(id);
@@ -320,6 +355,7 @@ mod tests {
             categories: Vec::new(),
             importance: merel_model::Importance::Normal,
             chat,
+            sealed: Default::default(),
         }
     }
 
@@ -444,5 +480,120 @@ mod tests {
         assert_eq!(merel_mime::parse_header(&sent).chat, Some(ChatTag::default()));
         let plain_mail = Draft { encrypt: false, chat: None, ..draft.clone() };
         assert!(crate::certificates::outgoing(&e.keys, &account(), &Draft { chat: Some(ChatTag::default()), ..plain_mail }, Vec::new()).is_err());
+    }
+
+    /// A message as Delta Chat sends it: everything inside the encryption, outside only the
+    /// address, `[...]` as the subject and a date days off.
+    fn from_delta_chat(sender: &SecretKey, to: &merel_pgp::PublicKey, inner: &str) -> Vec<u8> {
+        let raw = merel_pgp::with_header(inner.as_bytes(), &sender.autocrypt_header("jij@example.org"));
+        let sealed = merel_pgp::encrypt_message(sender, &raw, std::slice::from_ref(to), true, crate::drafts::now()).unwrap();
+        let text = String::from_utf8(sealed).unwrap();
+        let (outer, rest) = text.split_once("MIME-Version: 1.0\r\n").unwrap();
+        let mut kept = String::new();
+        let mut skipping = false;
+        for line in outer.split_inclusive("\r\n") {
+            if !line.starts_with([' ', '\t']) {
+                let name = line.split(':').next().unwrap_or_default().to_ascii_lowercase();
+                skipping = name.starts_with("chat-") || name == "autocrypt" || name == "subject" || name == "date";
+            }
+            if !skipping {
+                kept.push_str(line);
+            }
+        }
+        format!("{kept}Subject: [...]\r\nDate: Mon, 1 Jan 2024 00:00:00 +0000\r\nMIME-Version: 1.0\r\n{rest}").into_bytes()
+    }
+
+    fn listed(raw: &[u8]) -> merel_mailbox::RemoteHeader {
+        let header = merel_mime::parse_header(raw);
+        merel_mailbox::RemoteHeader {
+            id: "1".into(),
+            seen: false,
+            flagged: false,
+            answered: false,
+            size: raw.len() as u32,
+            has_attachments: true,
+            date: header.date.unwrap_or(0),
+            header,
+            categories: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_delta_chat_message_becomes_a_chat_once_its_header_inside_is_read() {
+        let mut e = Engine::sample();
+        e.add_account(account(), Secret::new("x")).unwrap();
+        e.enable_chat("a1").unwrap();
+        e.session.folders.push(Folder { account_id: "a1".into(), ..folder("a1/INBOX", FolderKind::Inbox) });
+        let me = e.keys.openpgp.own_key("a1").unwrap().public();
+        let jij = SecretKey::import(include_bytes!("../../pgp/testdata/jij-secret.asc"), "geheim").unwrap();
+        let ravi = SecretKey::generate("Ravi", "ravi@example.org").unwrap().public();
+        let raw = from_delta_chat(
+            &jij,
+            &me,
+            &format!(
+                "From: Jij <jij@example.org>\r\nTo: alain@voorbeeld.nl, ravi@example.org\r\nSubject: Fietsclub\r\n\
+                 Date: Wed, 21 Oct 2026 20:15:00 +0000\r\nMessage-ID: <dc1@example.org>\r\nChat-Version: 1.0\r\nChat-Group-ID: G7\r\n\
+                 Chat-Group-Name: Fietsclub\r\n{}Content-Type: text/plain; charset=utf-8\r\n\r\nZondag om tien uur?\r\n\r\n-- \r\nSent with Delta Chat\r\n",
+                ravi.gossip_header("ravi@example.org")
+            ),
+        );
+        let outside = String::from_utf8_lossy(&raw);
+        assert!(!outside.contains("Chat-") && !outside.contains("Fietsclub") && !outside.contains("Autocrypt"), "{outside}");
+
+        e.session.apply(crate::Event::Headers { folder_id: "a1/INBOX".into(), headers: vec![listed(&raw)], offset: 0, limit: 50 });
+        let id = "a1/INBOX#1";
+        assert_eq!(e.session.message(id).map(|m| (m.sealed, m.chat.is_some(), m.subject.as_str())), Some((Sealed::Closed, false, "[...]")));
+        assert!(e.session.chats().is_empty(), "outside it is no chat yet");
+        e.open_sealed_in("a1/INBOX");
+        assert!(e.session.loading.contains(id), "an account with chat on opens it");
+
+        // What the worker hands back once the message is fetched.
+        let (body, header, carried) = crate::certificates::read(&e.keys, "a1", &raw);
+        assert!(matches!(&body.pgp_signature, Some(merel_pgp::Verdict::Valid { signer }) if signer.covers("jij@example.org")));
+        e.learn_carried(id, header.from.as_ref(), &body, carried.unwrap());
+        e.session.apply(crate::Event::Body { message_id: id.into(), body: Box::new(body), header, raw: Vec::new(), carried: None });
+        assert!(e.pgp_key_of("jij@example.org").is_some(), "the sender's key from inside");
+        assert!(e.pgp_key_of("ravi@example.org").is_some(), "the others' keys from a signed message");
+        let m = e.session.message(id).unwrap();
+        assert_eq!((m.sealed, m.subject.as_str(), m.from.display()), (Sealed::Opened, "Fietsclub", "Jij"));
+        assert_eq!(m.date, 1_792_613_700, "the real date, from inside");
+        let chats = e.session.chats();
+        assert_eq!(chats.len(), 1);
+        assert_eq!((chats[0].id.as_str(), chats[0].title.as_str()), ("group:a1:G7", "Fietsclub"));
+        assert_eq!(e.session.chat_text(id).as_deref(), Some("Zondag om tien uur?"));
+
+        // The next listing still knows what was inside.
+        e.session.apply(crate::Event::Headers { folder_id: "a1/INBOX".into(), headers: vec![listed(&raw)], offset: 0, limit: 50 });
+        assert_eq!(e.session.chats().first().map(|c| c.title.clone()).as_deref(), Some("Fietsclub"));
+
+        // An answer to the group tells everyone everyone's key, inside only.
+        let reply = e.session.chat_reply(&chats[0], "Ik ben er");
+        assert!(e.send_chat("a1", reply.clone()).is_ok());
+        let sent =
+            crate::certificates::outgoing(&e.keys, &account(), &reply, merel_smtp::build(&account().address, &reply).unwrap().formatted()).unwrap();
+        assert!(!String::from_utf8_lossy(&sent).contains("Autocrypt-Gossip"));
+        let opened = merel_pgp::open_message(&jij, &sent, std::slice::from_ref(&me)).unwrap();
+        let inside = String::from_utf8_lossy(&opened.plain);
+        assert!(inside.contains("Chat-Group-ID: G7") && inside.matches("Autocrypt-Gossip:").count() == 2, "{inside}");
+    }
+
+    #[test]
+    fn a_key_brought_along_does_not_vouch_for_an_address_with_another_key() {
+        let mut e = Engine::sample();
+        e.add_account(account(), Secret::new("x")).unwrap();
+        e.enable_chat("a1").unwrap();
+        e.session.folders.push(Folder { account_id: "a1".into(), ..folder("a1/INBOX", FolderKind::Inbox) });
+        let me = e.keys.openpgp.own_key("a1").unwrap().public();
+        // Merel knows another key for jij@example.org already.
+        let other = SecretKey::generate("Jij", "jij@example.org").unwrap();
+        e.remember_key("jij@example.org".into(), other.public());
+        let jij = SecretKey::import(include_bytes!("../../pgp/testdata/jij-secret.asc"), "geheim").unwrap();
+        let raw = from_delta_chat(
+            &jij,
+            &me,
+            "From: jij@example.org\r\nTo: alain@voorbeeld.nl\r\nSubject: Hoi\r\nChat-Version: 1.0\r\nContent-Type: text/plain\r\n\r\nHoi\r\n",
+        );
+        let (body, _, _) = crate::certificates::read(&e.keys, "a1", &raw);
+        assert!(matches!(body.pgp_signature, Some(merel_pgp::Verdict::UnknownKey(_))), "{:?}", body.pgp_signature);
     }
 }

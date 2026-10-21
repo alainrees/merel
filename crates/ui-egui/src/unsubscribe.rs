@@ -1,4 +1,4 @@
-//! tr("unsubscribe-title"), as Outlook offers it over a newsletter: the `List-Unsubscribe` header of a
+//! "Unsubscribe", as Outlook offers it over a newsletter: the `List-Unsubscribe` header of a
 //! message names a mail address or a web page that takes you off the list. Merel shows a
 //! line over such a message and, after asking, either sends the mail from the account the
 //! message came in on or opens the page in the browser. Nothing happens without the click:
@@ -127,18 +127,20 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     };
     let mut go = false;
     let mut close = false;
-    egui::Window::new(tr("unsubscribe-title")).collapsible(false).resizable(false).default_width(340.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "unsubscribe", &tr("unsubscribe-title"), 340.0, |ui| {
         ui.label(RichText::new(text).color(t.text));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if ui.button(tr("unsubscribe-yes")).clicked() {
+            if ui.add(crate::helder::primary_text(t, &tr("unsubscribe-yes"))).clicked() {
                 go = true;
             }
             if ui.button(tr("cancel")).clicked() {
                 close = true;
             }
         });
-    });
+    }) {
+        close = true;
+    }
     if go {
         app.unsubscribe_now(ctx, &c);
     }

@@ -141,7 +141,7 @@ fn entry(ui: &mut Ui, color: Color32, name: &str, on: bool) -> bool {
     r.clicked()
 }
 
-/// The tr("view-all-categories") window: the list with colours, a field for a new one.
+/// The "All categories" window: the list with colours, a field for a new one.
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(mut m) = app.categories.clone() else { return };
     let list: Vec<Category> = app.engine.session.categories.clone();
@@ -149,7 +149,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut remove: Option<String> = None;
     let mut add = false;
     let mut close = false;
-    egui::Window::new(tr("view-all-categories")).collapsible(false).resizable(false).default_width(360.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "categories", &tr("view-all-categories"), 360.0, |ui| {
         if list.is_empty() {
             ui.label(RichText::new(tr("categories-none")).color(t.text_dim));
         }
@@ -180,7 +180,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     ui.selectable_value(&mut m.color, option, color_name(option));
                 }
             });
-            if ui.button(tr("add")).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+            if ui.add(crate::helder::primary_text(t, &tr("add"))).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
                 add = true;
             }
         });
@@ -191,7 +191,9 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         if ui.button(tr("close")).clicked() {
             close = true;
         }
-    });
+    }) {
+        close = true;
+    }
     if let Some((name, color)) = recolor {
         app.run("category.save", json!({ "name": name, "color": color }));
     }

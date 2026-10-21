@@ -158,7 +158,7 @@ pub struct MailApp {
     pub quick_steps: Option<quicksteps::State>,
     /// The "Sjablonen" window, when it is open.
     pub templates: Option<templates::State>,
-    /// Whether the tr("move-to-title") window for the selected message is open.
+    /// Whether the "Move to" window for the selected message is open.
     pub move_to: bool,
     /// The window for a new, renamed or removed folder, while it is open.
     pub folder_edit: Option<folders::FolderEdit>,
@@ -1629,7 +1629,7 @@ fn folding_heading(ui: &mut Ui, t: &Tokens, text: &str, open: bool, status: Opti
     r
 }
 
-/// The tr("move-to-title") window: the folders of the selected message's account.
+/// The "Move to" window: the folders of the selected message's account.
 fn move_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     if !app.move_to {
         return;
@@ -1649,7 +1649,7 @@ fn move_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         .collect();
     let mut target = None;
     let mut close = false;
-    egui::Window::new(tr("move-to-title")).collapsible(false).resizable(false).default_width(280.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "move-to", &tr("move-to-title"), 280.0, |ui| {
         ui.label(RichText::new(clip(&m.subject, 48)).size(12.0).color(t.text_dim));
         ui.add_space(4.0);
         egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
@@ -1663,7 +1663,9 @@ fn move_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         if ui.button(tr("cancel")).clicked() {
             close = true;
         }
-    });
+    }) {
+        close = true;
+    }
     if let Some(folder) = target {
         app.run("message.move", json!({ "folder_id": folder }));
         close = true;
@@ -3132,6 +3134,7 @@ mod tests {
             categories: Vec::new(),
             importance: merel_model::Importance::Normal,
             chat: Some(ChatTag::default()),
+            sealed: Default::default(),
         });
         s.bodies.insert("a1/INBOX#1".into(), merel_engine::Body { text: "Zie ik je om tien uur?".into(), ..Default::default() });
     }
@@ -3739,6 +3742,7 @@ mod tests {
             categories: Vec::new(),
             importance: Default::default(),
             chat: None,
+            sealed: Default::default(),
         };
         let body = merel_engine::Body {
             rich: Some(merel_html::parse(r#"<p><a href="https://evil.example/login">https://www.bank.nl/inloggen</a></p>"#)),

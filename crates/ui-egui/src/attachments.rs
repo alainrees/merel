@@ -215,28 +215,30 @@ impl MailApp {
 }
 
 /// The preview window, while a picture is open: the picture fitted to the window, with
-/// tr("attachment-save-downloads") and tr("close").
+/// "Save to Downloads" and "Close".
 pub fn preview_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(p) = app.preview.clone() else { return };
     let mut save = false;
     let mut close = false;
     let screen = ctx.content_rect().size();
     let max = egui::vec2((screen.x - 80.0).clamp(200.0, 1000.0), (screen.y - 160.0).clamp(150.0, 700.0));
-    egui::Window::new(preview_label(&p.attachment.name)).collapsible(false).resizable(false).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "attachment-preview", &preview_label(&p.attachment.name), max.x, |ui| {
         let image =
             egui::Image::from_bytes(p.uri.clone(), egui::load::Bytes::Shared(p.attachment.bytes.clone())).max_size(max).fit_to_original_size(1.0);
         ui.add(image);
         ui.label(egui::RichText::new(format!("{}  ({})", p.attachment.name, crate::size_text(p.attachment.size))).size(12.0).color(t.text_dim));
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.button(tr("attachment-save-downloads")).clicked() {
+            if ui.add(crate::helder::primary_text(t, &tr("attachment-save-downloads"))).clicked() {
                 save = true;
             }
             if ui.button(tr("close")).clicked() {
                 close = true;
             }
         });
-    });
+    }) {
+        close = true;
+    }
     if save {
         app.save_attachment(&p.attachment);
     }

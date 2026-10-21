@@ -252,7 +252,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     };
     let mut submit = false;
     let mut close = false;
-    egui::Window::new(title).collapsible(false).resizable(false).default_width(300.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "folder-edit", &title, 300.0, |ui| {
         match &edit.action {
             Action::Delete { .. } => {
                 ui.label(RichText::new(crate::i18n::tr_args("folder-delete-confirm", &[("folder", edit.name.as_str().into())])).color(t.text));
@@ -288,14 +288,16 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 Action::Delete { .. } | Action::DeleteForever { .. } => tr("yes-delete"),
                 Action::Empty { .. } => tr("yes-empty"),
             };
-            if ui.button(ok).clicked() {
+            if ui.add(crate::helder::primary_text(t, &ok)).clicked() {
                 submit = true;
             }
             if ui.button(tr("cancel")).clicked() {
                 close = true;
             }
         });
-    });
+    }) {
+        close = true;
+    }
     if submit {
         let params = match &edit.action {
             Action::Create { account_id, parent } => json!({ "name": edit.name, "parent": parent, "account_id": account_id }),

@@ -3,7 +3,7 @@
 //! the window behind "Sjablonen beheren…" makes and changes them.
 
 use crate::i18n::tr;
-use egui::{RichText, Ui, vec2};
+use egui::{RichText, Ui};
 use serde_json::json;
 
 use merel_engine::CommandError;
@@ -171,8 +171,8 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut cancel = false;
     let mut close = false;
     let mut form_state = app.templates.as_mut().and_then(|s| s.form.take());
-    egui::Window::new(heading()).collapsible(false).resizable(false).default_width(460.0).show(ctx, |ui| {
-        ui.label(RichText::new(tr("templates-intro")).size(12.0).color(t.text_dim));
+    if crate::helder::popup(ctx, t, "templates", &heading(), 460.0, |ui| {
+        ui.label(RichText::new(crate::i18n::tr("templates-intro")).size(12.0).color(t.text_dim));
         ui.add_space(6.0);
         if let Some(form) = form_state.as_mut() {
             ui.label(RichText::new(if form.id.is_some() { tr("template-edit") } else { tr("template-new") }).strong().color(t.text));
@@ -188,7 +188,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 ui.label(RichText::new(e).color(t.flag));
             }
             ui.horizontal(|ui| {
-                if ui.add(egui::Button::new(tr("save")).min_size(vec2(90.0, 26.0))).clicked() {
+                if ui.add(crate::helder::primary_text(t, &tr("save"))).clicked() {
                     save = true;
                 }
                 if ui.button(tr("cancel")).clicked() {
@@ -197,7 +197,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             });
             return;
         }
-        if ui.button(new()).clicked() {
+        if ui.add(crate::helder::primary_text(t, &new())).clicked() {
             action = Some(Action::New);
         }
         ui.add_space(6.0);
@@ -224,7 +224,9 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         if ui.button(tr("close")).clicked() {
             close = true;
         }
-    });
+    }) {
+        close = true;
+    }
     if save && let Some(form) = form_state.as_mut() {
         match app.engine.run("template.save", &form.params()) {
             Ok(()) => form_state = None,

@@ -69,18 +69,20 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     };
     let mut go = false;
     let mut close = false;
-    egui::Window::new(title).collapsible(false).resizable(false).default_width(340.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "cleanup", &title, 340.0, |ui| {
         ui.label(RichText::new(text).color(t.text));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if c.count > 0 && ui.button(tr("cleanup-yes")).clicked() {
+            if c.count > 0 && ui.add(crate::helder::primary_text(t, &tr("cleanup-yes"))).clicked() {
                 go = true;
             }
             if ui.button(tr(if c.count > 0 { "cancel" } else { "close" })).clicked() {
                 close = true;
             }
         });
-    });
+    }) {
+        close = true;
+    }
     if go {
         match &c.scope {
             Scope::Conversation { message_id, .. } => app.run("conversation.cleanup", json!({ "id": message_id })),

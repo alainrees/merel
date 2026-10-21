@@ -232,7 +232,7 @@ pub struct ImapClient {
     selected: Option<String>,
 }
 
-const HEADER_FIELDS: &str = "BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID CHAT-VERSION CHAT-GROUP-ID CHAT-GROUP-NAME)]";
+const HEADER_FIELDS: &str = "BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID CONTENT-TYPE CHAT-VERSION CHAT-GROUP-ID CHAT-GROUP-NAME)]";
 
 /// A mailbox name as it may go to the imap crate, which quotes it itself (SELECT, MOVE,
 /// CREATE, RENAME, DELETE, SUBSCRIBE). CR, LF and NUL can never be quoted, so they are refused.

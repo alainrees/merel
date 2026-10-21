@@ -205,7 +205,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     };
     let mut ok = false;
     let mut close = false;
-    egui::Window::new(title).collapsible(false).resizable(false).default_width(320.0).frame(helder::window_frame(ctx, t)).show(ctx, |ui| {
+    if helder::popup(ctx, t, "calendar-dialog", &title, 320.0, |ui| {
         match &mut dialog {
             Dialog::Add { name, color } => {
                 let r = helder::underline_field(ui, t, name, &tr("calendars-name"), 280.0, false);
@@ -259,7 +259,9 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 }
             });
         });
-    });
+    }) {
+        close = true;
+    }
     if ok {
         let result = match &dialog {
             Dialog::Add { name, color } => app.engine.run("calendar.add", &json!({ "name": name, "color": color })),

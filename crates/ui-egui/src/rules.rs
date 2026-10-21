@@ -223,8 +223,8 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
     let mut save = false;
     let mut cancel = false;
     ui.horizontal(|ui| {
-        save = ui.add(egui::Button::new(RichText::new(tr("rule-save")).color(t.on_accent)).fill(t.accent).min_size(vec2(110.0, 26.0))).clicked();
-        cancel = ui.add(egui::Button::new(tr("cancel")).min_size(vec2(90.0, 26.0))).clicked();
+        save = ui.add(crate::helder::primary_text(t, &tr("rule-save"))).clicked();
+        cancel = ui.add(egui::Button::new(crate::i18n::tr("cancel")).min_size(vec2(90.0, 26.0))).clicked();
     });
     (save, cancel)
 }
@@ -254,8 +254,8 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut cancel = false;
     let mut close = false;
     let mut form_state = app.rules.as_mut().and_then(|s| s.form.take());
-    egui::Window::new(tr("mail-rules")).collapsible(false).resizable(false).default_width(460.0).show(ctx, |ui| {
-        ui.label(RichText::new(tr("rules-intro")).size(12.0).color(t.text_dim));
+    if crate::helder::popup(ctx, t, "rules", &tr("mail-rules"), 460.0, |ui| {
+        ui.label(RichText::new(crate::i18n::tr("rules-intro")).size(12.0).color(t.text_dim));
         ui.add_space(6.0);
         if let Some(form) = form_state.as_mut() {
             ui.label(RichText::new(tr(if form.id.is_some() { "rule-edit" } else { "rule-new" })).strong().color(t.text));
@@ -265,7 +265,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             return;
         }
         ui.horizontal(|ui| {
-            if ui.button(tr("rule-new")).clicked() {
+            if ui.add(crate::helder::primary_text(t, &tr("rule-new"))).clicked() {
                 action = Some(Action::New);
             }
             if ui.add_enabled(has_message, egui::Button::new(tr("rule-for-sender"))).on_hover_text(tr("rule-for-sender-hint")).clicked() {
@@ -310,7 +310,9 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 close = true;
             }
         });
-    });
+    }) {
+        close = true;
+    }
     if save && let Some(form) = form_state.as_mut() {
         match app.engine.run("rule.save", &form.params()) {
             Ok(()) => form_state = None,

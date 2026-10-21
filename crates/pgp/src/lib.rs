@@ -10,7 +10,7 @@ use std::fmt;
 use std::io::Cursor;
 
 use base64::Engine as _;
-use merel_smime::raw::{crlf, header, parameter, split_entity, split_message, two_parts};
+use merel_smime::raw::{crlf, fields, header, parameter, split_entity, split_message, two_parts};
 use pgp::composed::{DecryptionOptions, Deserializable, DetachedSignature, Message, SignedPublicKey, SignedSecretKey, TheRing};
 use pgp::ser::Serialize as _;
 use pgp::types::{KeyDetails, Password};
@@ -303,10 +303,34 @@ pub fn is_encrypted(raw: &[u8]) -> bool {
         .is_some_and(|k| k.starts_with("multipart/encrypted") && k.contains("application/pgp-encrypted"))
 }
 
+/// An encrypted message, opened: see [`open_message`].
+#[derive(Debug)]
+pub struct Opened {
+    /// The message as it was before it was encrypted: the outer header fields, with the ones
+    /// the encrypted part repeats in its own header (protected headers, RFC 9788, as Delta
+    /// Chat sends every field) taken from inside, then the decrypted entity.
+    pub plain: Zeroizing<Vec<u8>>,
+    /// What the signature inside says, when it was signed too.
+    pub verdict: Option<Verdict>,
+    /// The key in the `Autocrypt` header inside, when it is for the sender's address.
+    pub autocrypt: Option<(String, PublicKey)>,
+    /// The keys in the `Autocrypt-Gossip` headers inside: those of the other people the
+    /// message went to, as the sender knows them.
+    pub gossip: Vec<(String, PublicKey)>,
+}
+
 /// Opens the PGP/MIME message `raw` with `key`. The result is the message as it was before it
 /// was encrypted (the outer headers with the decrypted entity under them), and what the
 /// signature inside says, if it was signed too, checked against `keys`.
 pub fn decrypt_message(key: &SecretKey, raw: &[u8], keys: &[PublicKey]) -> Result<(Zeroizing<Vec<u8>>, Option<Verdict>), PgpError> {
+    open_message(key, raw, keys).map(|o| (o.plain, o.verdict))
+}
+
+/// Opens the PGP/MIME message `raw` with `key`, as [`decrypt_message`], with the keys it
+/// carries inside. A signature is checked against `keys` and against the key in the
+/// `Autocrypt` header inside, so the first message from someone checks out with the key it
+/// brings; whether that key is to be believed is the caller's to say.
+pub fn open_message(key: &SecretKey, raw: &[u8], keys: &[PublicKey]) -> Result<Opened, PgpError> {
     let raw = crlf(raw);
     let (head, body) = split_entity(&raw);
     let kind = header(head, b"content-type").ok_or(PgpError::Decrypt)?;
@@ -341,19 +365,74 @@ pub fn decrypt_message(key: &SecretKey, raw: &[u8], keys: &[PublicKey]) -> Resul
     if data.len() > MAX_CONTENT {
         return Err(PgpError::Decrypt);
     }
+    let data = Zeroizing::new(crlf(&data));
+    let (outer, _) = split_message(&raw);
+    let plain = protected(&outer, &data);
+    let (inner_head, _) = split_entity(&plain);
+    let from = header(inner_head, b"from").map(|f| address_of(&f)).unwrap_or_default();
+    let autocrypt = header(inner_head, b"autocrypt").and_then(|v| parse_autocrypt(&v)).filter(|(addr, _)| *addr == from);
+    let gossip = all_headers(inner_head, b"autocrypt-gossip").iter().filter_map(|v| parse_autocrypt(v)).collect();
     let verdict = message.is_signed().then(|| {
-        for k in keys {
+        for k in keys.iter().chain(autocrypt.as_ref().map(|(_, k)| k)) {
             if message.verify(&k.key).is_ok() || k.key.public_subkeys.iter().any(|s| message.verify(s).is_ok()) {
                 return Verdict::Valid { signer: k.info.clone() };
             }
         }
         Verdict::UnknownKey(String::new())
     });
-    let (outer, _) = split_message(&raw);
-    let mut out = Zeroizing::new(outer);
+    Ok(Opened { plain, verdict, autocrypt, gossip })
+}
+
+/// The outer header fields `outer` and the decrypted entity `data` as one message: an outer
+/// field the entity repeats gives way to the one inside, except a `From` with another
+/// address, where the outer one stays (a message passed on under someone else's name).
+fn protected(outer: &[u8], data: &[u8]) -> Zeroizing<Vec<u8>> {
+    let (inner_head, inner_body) = split_entity(data);
+    let name = |f: &[u8]| f.split(|b| *b == b':').next().unwrap_or_default().trim_ascii().to_ascii_lowercase();
+    let outer_from = header(outer, b"from").map(|f| address_of(&f));
+    let inner_from = header(inner_head, b"from").map(|f| address_of(&f));
+    let keep_outer_from = outer_from.is_some() && inner_from.is_some() && outer_from != inner_from;
+    let inner_names: Vec<Vec<u8>> = fields(inner_head).iter().map(|f| name(f)).collect();
+    let mut out = Zeroizing::new(Vec::with_capacity(outer.len() + data.len() + 32));
+    for f in fields(outer) {
+        let n = name(f);
+        if !inner_names.contains(&n) || (n == b"from" && keep_outer_from) {
+            out.extend_from_slice(f);
+        }
+    }
     out.extend_from_slice(b"MIME-Version: 1.0\r\n");
-    out.extend_from_slice(&crlf(&data));
-    Ok((out, verdict))
+    for f in fields(inner_head) {
+        let n = name(f);
+        if !(n == b"mime-version" || n == b"hp-outer" || (n == b"from" && keep_outer_from)) {
+            out.extend_from_slice(f);
+        }
+    }
+    out.extend_from_slice(b"\r\n");
+    out.extend_from_slice(inner_body);
+    out
+}
+
+/// The address in a `From` value, lower case: the part in angle brackets, else all of it.
+fn address_of(value: &str) -> String {
+    let addr = match (value.rfind('<'), value.rfind('>')) {
+        (Some(open), Some(close)) if open < close => &value[open + 1..close],
+        _ => value,
+    };
+    addr.trim().to_lowercase()
+}
+
+/// The unfolded values of every header field called `name` (lower case).
+fn all_headers(head: &[u8], name: &[u8]) -> Vec<String> {
+    fields(head)
+        .into_iter()
+        .filter_map(|f| {
+            let colon = f.iter().position(|b| *b == b':')?;
+            f[..colon]
+                .trim_ascii()
+                .eq_ignore_ascii_case(name)
+                .then(|| String::from_utf8_lossy(&f[colon + 1..]).replace("\r\n", "").trim().to_string())
+        })
+        .collect()
 }
 
 /// Whether one of the message's encrypted session keys names `key` (or a subkey of it).
@@ -372,7 +451,12 @@ fn message_is_for(message: &Message<'_>, key: &SecretKey) -> bool {
 pub fn autocrypt(raw: &[u8]) -> Option<(String, PublicKey)> {
     let raw = crlf(raw);
     let (head, _) = split_entity(&raw);
-    let value = header(head, b"autocrypt")?;
+    parse_autocrypt(&header(head, b"autocrypt")?)
+}
+
+/// The address and key of an `Autocrypt` (or `Autocrypt-Gossip`) header value; `None` when
+/// the key is not for that address.
+fn parse_autocrypt(value: &str) -> Option<(String, PublicKey)> {
     let mut addr = None;
     let mut keydata = None;
     for part in value.split(';') {
@@ -522,5 +606,45 @@ mod tests {
         let with = with_header(raw, &header);
         let (addr, key) = autocrypt(&with).unwrap();
         assert_eq!((addr.as_str(), key), ("alain@voorbeeld.nl", me.public()));
+    }
+
+    #[test]
+    fn encrypted_mail_carries_its_header_inside_and_the_secret_fields_only_there() {
+        const NOW: i64 = 1_798_761_600;
+        let me = alain();
+        let gossip = jij().to_bytes();
+        let gossip = base64::engine::general_purpose::STANDARD.encode(gossip);
+        let raw = format!(
+            "From: Alain Tester <alain@voorbeeld.nl>\r\nTo: jij@example.org\r\nSubject: Chatbericht\r\nChat-Version: 1.0\r\n\
+             Secure-Join: vc-request-with-auth\r\nSecure-Join-Auth: geheimtoken\r\nAutocrypt-Gossip: addr=jij@example.org; keydata={gossip}\r\n\
+             Content-Type: text/plain; charset=utf-8\r\n\r\nHoi\r\n"
+        );
+        let raw = with_header(raw.as_bytes(), &me.autocrypt_header("alain@voorbeeld.nl"));
+        let encrypted = encrypt_message(&me, &raw, &[jij()], true, NOW).unwrap();
+        let outside = String::from_utf8_lossy(&encrypted);
+        assert!(!outside.contains("geheimtoken") && !outside.contains("Secure-Join") && !outside.contains("Autocrypt-Gossip"), "{outside}");
+        assert!(outside.contains("Chat-Version: 1.0") && outside.contains("Autocrypt: addr=alain@voorbeeld.nl"));
+
+        // The first message from someone checks out with the key it brings along.
+        let jij_secret = SecretKey::import(include_bytes!("../testdata/jij-secret.asc"), "geheim").unwrap();
+        let opened = open_message(&jij_secret, &encrypted, &[]).unwrap();
+        assert!(matches!(&opened.verdict, Some(Verdict::Valid { signer }) if signer.covers("alain@voorbeeld.nl")));
+        assert_eq!(opened.autocrypt.as_ref().map(|(a, k)| (a.as_str(), k)), Some(("alain@voorbeeld.nl", &me.public())));
+        assert_eq!(opened.gossip, vec![("jij@example.org".to_string(), jij())]);
+        let plain = String::from_utf8_lossy(&opened.plain);
+        assert!(plain.contains("Secure-Join-Auth: geheimtoken") && plain.contains("protected-headers=\"v1\""), "{plain}");
+        assert_eq!(plain.matches("Subject:").count(), 1, "{plain}");
+    }
+
+    #[test]
+    fn the_protected_header_inside_wins_but_not_a_from_with_another_address() {
+        let outer = b"From: alain@voorbeeld.nl\r\nSubject: [...]\r\nDate: Mon, 1 Jan 2024 00:00:00 +0000\r\n";
+        let data = b"From: Alain <alain@voorbeeld.nl>\r\nSubject: Echt\r\nHP-Outer: Subject: [...]\r\nContent-Type: text/plain\r\n\r\nHoi\r\n";
+        let plain = String::from_utf8_lossy(&protected(outer, data)).into_owned();
+        assert!(plain.contains("From: Alain <alain@voorbeeld.nl>") && plain.contains("Subject: Echt") && plain.contains("Date: Mon"), "{plain}");
+        assert!(!plain.contains("[...]") && plain.matches("From:").count() == 1, "{plain}");
+        let forged = b"From: Bank <bank@example.org>\r\nContent-Type: text/plain\r\n\r\nHoi\r\n";
+        let plain = String::from_utf8_lossy(&protected(outer, forged)).into_owned();
+        assert!(plain.contains("From: alain@voorbeeld.nl") && !plain.contains("bank@"), "{plain}");
     }
 }

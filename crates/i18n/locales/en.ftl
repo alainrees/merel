@@ -1695,3 +1695,4 @@ folder-kind-archive = Archive
 folder-kind-junk = Junk Email
 folder-kind-deleted = Deleted Items
 calendar-mine = My calendar
+junk-intro = Mail from a blocked sender or a blocked domain goes straight to Junk Email when it arrives. Safe senders and your contacts never end up there. Your mail provider filters too; what it sees as junk is in that folder as well.

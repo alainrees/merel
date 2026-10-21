@@ -1,6 +1,6 @@
 //! A meeting invitation in the mail, as Outlook shows one: a `text/calendar` part (an `.ics`)
 //! with a VEVENT becomes a strip over the message that names the appointment, when and where
-//! it is and who asks, with tr("invitation-add"), which opens the appointment window filled in
+//! it is and who asks, with "Add to calendar", which opens the appointment window filled in
 //! so the person looks before it is saved. Nothing is answered to the organiser: Merel sends
 //! no acceptance, it only files the appointment in the person's own calendar. An answer to a
 //! meeting the person organises shows as Outlook shows it, "Sanne heeft geaccepteerd", and the

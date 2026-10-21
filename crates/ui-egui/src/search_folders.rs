@@ -143,7 +143,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     };
     let mut save = false;
     let mut close = false;
-    egui::Window::new(tr("search-folder-save")).collapsible(false).resizable(false).default_width(320.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "save-search-folder", &tr("search-folder-save"), 320.0, |ui| {
         ui.label(RichText::new(format!("{}. {}", describe(&current), tr("search-folder-save-hint"))).size(12.0).color(t.text_dim));
         ui.add_space(6.0);
         let field = ui.add(egui::TextEdit::singleline(&mut form.name).hint_text(tr("search-folder-name")).desired_width(300.0));
@@ -152,14 +152,16 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.add_enabled(!form.name.trim().is_empty(), egui::Button::new(tr("save"))).clicked() {
+            if ui.add_enabled(!form.name.trim().is_empty(), crate::helder::primary_text(t, &tr("save"))).clicked() {
                 save = true;
             }
             if ui.button(tr("cancel")).clicked() {
                 close = true;
             }
         });
-    });
+    }) {
+        close = true;
+    }
     if save {
         app.save_search_folder(&form.name, ctx);
     }

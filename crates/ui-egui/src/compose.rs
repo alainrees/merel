@@ -1063,7 +1063,7 @@ fn icon_button(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str) -> egui::Respon
     r
 }
 
-/// A small rounded note with an icon, such as &tr("compose-encrypted-pill").
+/// A small rounded note with an icon, such as "Sent encrypted".
 fn pill(ui: &mut Ui, t: &Tokens, icon: Icon, text: &str) {
     egui::Frame::new().fill(t.checked).corner_radius(12).inner_margin(Margin::symmetric(10, 4)).show(ui, |ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
@@ -1124,6 +1124,7 @@ mod tests {
             categories: Vec::new(),
             importance: Default::default(),
             chat: None,
+            sealed: Default::default(),
         }
     }
 

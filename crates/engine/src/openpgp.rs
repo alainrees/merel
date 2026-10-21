@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use base64::Engine as _;
-use merel_mime::{Body, Encryption};
+use merel_mime::{Body, Encryption, ParsedHeader};
 use merel_model::Address;
 use merel_pgp::{KeyInfo, PublicKey, SecretKey};
 use merel_store::KeyKind;
@@ -70,25 +70,48 @@ impl PgpKeys {
     }
 
     /// The body of the PGP/MIME encrypted message `raw`, opened with the key of `account_id`;
-    /// one that does not open shows why instead of its contents.
-    pub fn open_body(&self, account_id: &str, raw: &[u8]) -> Body {
+    /// one that does not open shows why instead of its contents. An opened message also gives
+    /// its header as it reads inside the encryption, and the keys it carried there.
+    pub fn open(&self, account_id: &str, raw: &[u8]) -> (Body, Option<(ParsedHeader, Carried)>) {
         let key = self.own.read().ok().and_then(|map| map.get(account_id).cloned());
         let people = self.people();
         let opened = match key {
-            Some(key) => merel_pgp::decrypt_message(&key, raw, &people).map_err(|e| e.to_string()),
+            Some(key) => merel_pgp::open_message(&key, raw, &people).map_err(|e| e.to_string()),
             None => Err(merel_i18n::tr("decrypt-no-pgp")),
         };
         match opened {
-            Ok((plain, inner)) => {
-                let mut body = merel_mime::parse_body(&plain);
+            Ok(opened) => {
+                let mut body = merel_mime::parse_body(&opened.plain);
+                let header = merel_mime::parse_header(&opened.plain);
                 body.encrypted = Some(Encryption::Opened);
                 // Signed inside the encryption, or signed as PGP/MIME and then encrypted.
-                body.pgp_signature = merel_pgp::check_message(&plain, &people).or(inner);
-                body
+                let verdict = merel_pgp::check_message(&opened.plain, &people).or(opened.verdict);
+                body.pgp_signature = verdict.map(|v| self.weigh(v, header.from.as_ref()));
+                (body, Some((header, Carried { autocrypt: opened.autocrypt, gossip: opened.gossip })))
             }
-            Err(reason) => Body { text: format!("🔒 {reason}"), encrypted: Some(Encryption::Locked(reason)), ..Body::default() },
+            Err(reason) => (Body { text: format!("🔒 {reason}"), encrypted: Some(Encryption::Locked(reason)), ..Body::default() }, None),
         }
     }
+
+    /// `verdict` as it stands for mail from `from`: a signature that only checks out with the
+    /// key the message brought along counts for nothing when another key is known for `from`
+    /// (someone else's key under that address).
+    fn weigh(&self, verdict: merel_pgp::Verdict, from: Option<&Address>) -> merel_pgp::Verdict {
+        let merel_pgp::Verdict::Valid { signer } = &verdict else { return verdict };
+        let Ok(people) = self.people.read() else { return verdict };
+        let known = people.values().any(|k| k.info().fingerprint == signer.fingerprint)
+            || self.own.read().is_ok_and(|own| own.values().any(|k| k.info().fingerprint == signer.fingerprint));
+        let other = from.and_then(|f| people.get(&f.email().to_lowercase())).is_some_and(|k| k.info().fingerprint != signer.fingerprint);
+        if !known && other { merel_pgp::Verdict::UnknownKey(signer.fingerprint.clone()) } else { verdict }
+    }
+}
+
+/// The keys an OpenPGP-encrypted message carried inside: the sender's own (`Autocrypt`) and
+/// those of the others it went to (`Autocrypt-Gossip`), for the engine to weigh.
+#[derive(Debug, Default)]
+pub struct Carried {
+    pub autocrypt: Option<(String, PublicKey)>,
+    pub gossip: Vec<(String, PublicKey)>,
 }
 
 /// `pgp_keys.json`: the correspondents' public keys, base64 by address.
@@ -150,11 +173,42 @@ impl Engine {
     /// server sent it) when it is for the sender's own address `from` and no key is known for
     /// that address yet. Mail in the junk folder teaches nothing.
     pub(crate) fn learn_autocrypt(&mut self, message_id: &str, from: Option<&Address>, raw: &[u8]) {
+        if let Some((addr, key)) = merel_pgp::autocrypt(raw) {
+            self.learn_key(message_id, from, addr, key);
+        }
+    }
+
+    /// Learns the keys an encrypted message carried inside: the sender's own, as with
+    /// [`Self::learn_autocrypt`], and, when the message is signed with a key Merel believes,
+    /// those of the others it went to, for addresses without a key yet (Delta Chat's groups).
+    pub(crate) fn learn_carried(&mut self, message_id: &str, from: Option<&Address>, body: &Body, carried: Carried) {
+        if let Some((addr, key)) = carried.autocrypt {
+            self.learn_key(message_id, from, addr, key);
+        }
         let Some(from) = from else { return };
-        let Some((addr, key)) = merel_pgp::autocrypt(raw) else { return };
+        let Some(merel_pgp::Verdict::Valid { signer }) = &body.pgp_signature else { return };
+        if self.pgp_key_of(from.email()).is_none_or(|k| k.fingerprint != signer.fingerprint) || self.in_junk(message_id) {
+            return;
+        }
+        let own: Vec<String> = self.session.accounts.iter().map(|a| a.address.email().to_lowercase()).collect();
+        for (addr, key) in carried.gossip {
+            if !own.contains(&addr) {
+                self.remember_key(addr, key);
+            }
+        }
+    }
+
+    /// Keeps `key` for `addr` when it is the sender's own address and no key is known yet.
+    fn learn_key(&mut self, message_id: &str, from: Option<&Address>, addr: String, key: PublicKey) {
+        let Some(from) = from else { return };
         if addr != from.email().to_lowercase() || self.in_junk(message_id) {
             return;
         }
+        self.remember_key(addr, key);
+    }
+
+    /// Keeps `key` for `addr`, on disk too, unless a key is known for it already.
+    pub(crate) fn remember_key(&mut self, addr: String, key: PublicKey) {
         let Ok(mut people) = self.keys.openpgp.people.write() else { return };
         if people.contains_key(&addr) || people.len() >= MAX_PEOPLE {
             return;

@@ -136,7 +136,7 @@ fn save_error(e: &CommandError) -> String {
     }
 }
 
-/// The tr("quick-steps") group in the ribbon: a small button per step of the current account
+/// The "Quick steps" group in the ribbon: a small button per step of the current account
 /// (the first nine also answer to Ctrl+Shift+1 to 9) and one to manage them.
 pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let steps: Vec<(String, String)> = app
@@ -238,9 +238,8 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
     let mut save = false;
     let mut cancel = false;
     ui.horizontal(|ui| {
-        save =
-            ui.add(egui::Button::new(RichText::new(tr("quick-step-save")).color(t.on_accent)).fill(t.accent).min_size(vec2(130.0, 26.0))).clicked();
-        cancel = ui.add(egui::Button::new(tr("cancel")).min_size(vec2(90.0, 26.0))).clicked();
+        save = ui.add(crate::helder::primary_text(t, &tr("quick-step-save"))).clicked();
+        cancel = ui.add(egui::Button::new(crate::i18n::tr("cancel")).min_size(vec2(90.0, 26.0))).clicked();
     });
     (save, cancel)
 }
@@ -265,7 +264,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut cancel = false;
     let mut close = false;
     let mut form_state = app.quick_steps.as_mut().and_then(|s| s.form.take());
-    egui::Window::new(tr("quick-steps")).collapsible(false).resizable(false).default_width(460.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "quick-steps", &tr("quick-steps"), 460.0, |ui| {
         ui.label(RichText::new(crate::i18n::tr_args("quick-steps-intro", &[("key", key_hint("Shift+1").into())])).size(12.0).color(t.text_dim));
         ui.add_space(6.0);
         if let Some(form) = form_state.as_mut() {
@@ -275,7 +274,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             cancel = c;
             return;
         }
-        if ui.button(tr("quick-step-new")).clicked() {
+        if ui.add(crate::helder::primary_text(t, &tr("quick-step-new"))).clicked() {
             action = Some(Action::New);
         }
         ui.add_space(6.0);
@@ -307,7 +306,9 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         if ui.button(tr("close")).clicked() {
             close = true;
         }
-    });
+    }) {
+        close = true;
+    }
     if save && let Some(form) = form_state.as_mut() {
         match app.engine.run("quickstep.save", &form.params()) {
             Ok(()) => form_state = None,

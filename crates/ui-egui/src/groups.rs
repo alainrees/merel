@@ -125,8 +125,8 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(editor) = app.contacts.group_editor.as_mut() else { return };
     let mut save = false;
     let mut close = false;
-    let title = if editor.id.is_some() { tr("groups-edit-title") } else { tr("groups-new-title") };
-    egui::Window::new(title).collapsible(false).resizable(false).default_width(470.0).show(ctx, |ui| {
+    let title = if editor.id.is_some() { &tr("groups-edit-title") } else { &tr("groups-new-title") };
+    if crate::helder::popup(ctx, t, "contact-group", title, 470.0, |ui| {
         ui.horizontal(|ui| {
             ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new(tr("name")).color(t.text)));
             ui.add(egui::TextEdit::singleline(&mut editor.name).desired_width(340.0));
@@ -142,10 +142,12 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         }
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            save = ui.add(egui::Button::new(RichText::new(tr("save")).color(t.on_accent)).fill(t.accent).min_size(vec2(90.0, 26.0))).clicked();
-            close = ui.add(egui::Button::new(tr("cancel")).min_size(vec2(90.0, 26.0))).clicked();
+            save = ui.add(crate::helder::primary_text(t, &tr("save"))).clicked();
+            close = ui.add(egui::Button::new(crate::i18n::tr("cancel")).min_size(vec2(90.0, 26.0))).clicked();
         });
-    });
+    }) {
+        close = true;
+    }
     if save {
         let mut params = json!({ "name": editor.name, "members": editor.members });
         if let Some(id) = &editor.id {
