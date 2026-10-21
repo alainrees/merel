@@ -42,7 +42,8 @@ Source: "..\..\target\release\merel.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "merel.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Merel"; Filename: "{app}\merel.exe"; IconFilename: "{app}\merel.ico"
+; The AppUserModelID lets Windows show Merel's notifications under Merel's name and icon.
+Name: "{group}\Merel"; Filename: "{app}\merel.exe"; IconFilename: "{app}\merel.ico"; AppUserModelID: "io.github.alainrees.merel"
 Name: "{autodesktop}\Merel"; Filename: "{app}\merel.exe"; IconFilename: "{app}\merel.ico"; Tasks: desktopicon
 
 [Run]

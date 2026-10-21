@@ -131,6 +131,8 @@ pub struct ViewPrefs {
     pub skipped_version: Option<String>,
     /// Whether the welcome of the first start has been closed (see [`crate::welcome`]).
     pub welcomed: bool,
+    /// The count on the app icon and the computer's notifications (Bestand > Meldingen).
+    pub notifications: crate::notifications::Prefs,
 }
 
 /// How many recent searches the menu next to the search box keeps.
@@ -159,6 +161,7 @@ impl Default for ViewPrefs {
             update_check: None,
             skipped_version: None,
             welcomed: false,
+            notifications: Default::default(),
         }
     }
 }

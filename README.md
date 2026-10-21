@@ -40,7 +40,12 @@ messages and a button at the bottom of the list fetches the next 200, as often a
 comes in on its own: the inbox of every connected account and the open folder are refreshed every
 two minutes (calendar, contacts and tasks every five), a notice counts new unread messages,
 the window asks for attention, and its title shows the unread mail in the inboxes of every account
-together ("Merel (3)"), so the count is visible in the dock, taskbar or window switcher. Junk: the
+together ("Merel (3)"), so the count is visible in the dock, taskbar or window switcher. As in Outlook,
+that count also stands in red on the app icon (the Dock on macOS, the launcher on Linux desktops that show
+one), and while Merel is in the background the computer's own notification announces new mail and due
+reminders; a click on one opens the message, appointment or task. "Bestand" > "Meldingen" switches each of
+these on or off; the notification names no sender, subject or title unless that is switched on there too,
+so nothing is read off a locked screen. Junk: the
 server's own filter stays the first line, and its Junk folder shows as "Ongewenste e-mail". On top of that,
 "Afzender blokkeren" in a message's right-click menu (or "Bestand" > "Ongewenste e-mail", for an address or a
 whole domain) keeps a list of blocked senders in `junk.json`; new mail from one of them goes straight to that

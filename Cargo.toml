@@ -30,6 +30,7 @@ merel-pgp = { path = "crates/pgp" }
 merel-touch-bar = { path = "crates/touch-bar" }
 merel-window-buttons = { path = "crates/window-buttons" }
 merel-sign = { path = "crates/sign" }
+merel-notify = { path = "crates/notify" }
 
 # foundation
 thiserror = "2"
