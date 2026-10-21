@@ -153,6 +153,13 @@ fn pgp_outgoing(keys: &Keys, key: &merel_pgp::SecretKey, draft: &Draft, recipien
             return Err(format!("{} Zet Versleutelen uit om toch te verzenden.", missing_text(&missing)));
         }
         let people = keys.openpgp.keys_of(recipients.iter().copied());
+        // In a group chat everyone learns everyone's key, as Delta Chat does it.
+        let mut raw = raw;
+        if draft.chat.is_some() && recipients.len() > 1 {
+            for (a, k) in recipients.iter().zip(&people) {
+                raw = merel_pgp::with_header(&raw, &k.gossip_header(a.email()));
+            }
+        }
         return merel_pgp::encrypt_message(key, &raw, &people, sign, now()).map_err(|e| e.to_string());
     }
     if sign { merel_pgp::sign_message(key, &raw, now()).map_err(|e| e.to_string()) } else { Ok(raw) }
@@ -183,11 +190,25 @@ pub fn missing_text(missing: &[String]) -> String {
 /// certificate first; one that does not open shows why instead of its contents. A signature
 /// is judged for trust ([`Keys::judge`]).
 pub fn parse_body(keys: &Keys, account_id: &str, raw: &[u8]) -> Body {
+    read(keys, account_id, raw).0
+}
+
+/// The body of `raw` for `account_id` as [`parse_body`] gives it, with the header the reader
+/// should see (for an opened OpenPGP message the one inside the encryption) and the keys an
+/// OpenPGP-encrypted message carried inside.
+pub fn read(keys: &Keys, account_id: &str, raw: &[u8]) -> (Body, merel_mime::ParsedHeader, Option<crate::openpgp::Carried>) {
     if merel_pgp::is_encrypted(raw) {
-        let mut body = keys.openpgp.open_body(account_id, raw);
+        let (mut body, inside) = keys.openpgp.open(account_id, raw);
         keys.judge(&mut body);
-        return body;
+        return match inside {
+            Some((header, carried)) => (body, header, Some(carried)),
+            None => (body, merel_mime::parse_header(raw), None),
+        };
     }
+    (body_of(keys, account_id, raw), merel_mime::parse_header(raw), None)
+}
+
+fn body_of(keys: &Keys, account_id: &str, raw: &[u8]) -> Body {
     let mut body = open_body(&keys.identities, account_id, raw);
     keys.judge(&mut body);
     if body.pgp_signature.is_none() {

@@ -31,6 +31,8 @@ pub struct ParsedHeader {
     pub importance: Importance,
     /// From `Chat-Version`, `Chat-Group-ID` and `Chat-Group-Name`: set on a chat message.
     pub chat: Option<ChatTag>,
+    /// Whether the message is encrypted with OpenPGP (`multipart/encrypted`).
+    pub encrypted: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -105,6 +107,11 @@ pub fn parse_header(bytes: &[u8]) -> ParsedHeader {
         message_id: m.message_id().map(|id| format!("<{}>", clean_text(id.trim_matches(['<', '>'])))),
         importance: importance_of(&m),
         chat: chat_of(&m),
+        encrypted: m.content_type().is_some_and(|c| {
+            c.ctype().eq_ignore_ascii_case("multipart")
+                && c.subtype().is_some_and(|s| s.eq_ignore_ascii_case("encrypted"))
+                && c.attribute("protocol").is_some_and(|p| p.eq_ignore_ascii_case("application/pgp-encrypted"))
+        }),
     }
 }
 

@@ -1107,6 +1107,7 @@ mod tests {
             categories: Vec::new(),
             importance: Default::default(),
             chat: None,
+            sealed: Default::default(),
         }
     }
 

@@ -94,6 +94,7 @@ mod tests {
             categories: Vec::new(),
             importance: Default::default(),
             chat: None,
+            sealed: Default::default(),
         };
         let to = Address::new(None, "receipts@example.org").unwrap();
         let d = draft(&m, &to, 1_760_100_000);

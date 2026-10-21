@@ -3107,6 +3107,7 @@ mod tests {
             categories: Vec::new(),
             importance: merel_model::Importance::Normal,
             chat: Some(ChatTag::default()),
+            sealed: Default::default(),
         });
         s.bodies.insert("a1/INBOX#1".into(), merel_engine::Body { text: "Zie ik je om tien uur?".into(), ..Default::default() });
     }
@@ -3714,6 +3715,7 @@ mod tests {
             categories: Vec::new(),
             importance: Default::default(),
             chat: None,
+            sealed: Default::default(),
         };
         let body = merel_engine::Body {
             rich: Some(merel_html::parse(r#"<p><a href="https://evil.example/login">https://www.bank.nl/inloggen</a></p>"#)),
