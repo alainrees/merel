@@ -84,8 +84,13 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Mailcraft",
         options,
-        Box::new(|#[cfg_attr(not(target_os = "macos"), allow(unused_variables))] cc| {
+        Box::new(|cc| {
             let engine = Engine::load(Arc::new(Keychain), config::default_path());
+            // MAILCRAFT_EMBEDDED_WINDOWS=1 opens items inside the main window, should windows
+            // of their own not work on a system.
+            if std::env::var_os("MAILCRAFT_EMBEDDED_WINDOWS").is_some() {
+                cc.egui_ctx.set_embed_viewports(true);
+            }
             let mut app = MailApp::new(engine);
             if cfg!(target_os = "macos") {
                 app.title_bar_inset = MACOS_WINDOW_BUTTONS;
