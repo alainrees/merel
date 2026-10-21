@@ -10,6 +10,8 @@ use std::sync::Mutex;
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+pub mod handover;
+
 /// The keychain service name every Merel entry is filed under. It keeps the name from the time
 /// the app was called Mailcraft, so passwords saved then are still found.
 pub const SERVICE: &str = "nl.artcraft.mailcraft";

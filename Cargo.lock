@@ -3478,6 +3478,9 @@ dependencies = [
 name = "merel-secrets"
 version = "0.1.6"
 dependencies = [
+ "aws-lc-rs",
+ "base64 0.23.1",
+ "getrandom 0.4.3",
  "keyring",
  "log",
  "thiserror 2.0.21",

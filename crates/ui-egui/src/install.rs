@@ -20,6 +20,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use merel_secrets::handover::{self, ENV, HandoverKey};
+
 use crate::help::REPOSITORY;
 
 /// The public half of the release key (base64); with `None` every update goes through the
@@ -111,20 +113,79 @@ pub enum Restart {
 }
 
 impl Restart {
-    /// Starts what replaces this process; the caller then closes the window.
-    pub fn start(&self) -> std::io::Result<()> {
+    /// Starts what replaces this process; the caller then closes the window. `handover` is the
+    /// key to the secrets [`hand_over`] put aside, which the new version gets in its
+    /// environment (macOS only).
+    pub fn start(&self, handover: Option<&HandoverKey>) -> std::io::Result<()> {
         use std::process::Command;
         match self {
             Restart::Relaunch(path) => {
                 // Waits for this process to end, so two copies never share the files. The path
-                // is an argument, never part of the script.
-                let open = if cfg!(target_os = "macos") { "exec open -n \"$1\"" } else { "exec \"$1\"" };
+                // is an argument and the key an environment variable, never part of the script.
+                let open = match (cfg!(target_os = "macos"), handover.is_some()) {
+                    (true, true) => format!("exec open -n --env \"{ENV}=${ENV}\" \"$1\""),
+                    (true, false) => "exec open -n \"$1\"".to_string(),
+                    _ => "exec \"$1\"".to_string(),
+                };
                 let script = format!("while kill -0 \"$0\" 2>/dev/null; do sleep 0.2; done; {open}");
-                Command::new("/bin/sh").arg("-c").arg(script).arg(std::process::id().to_string()).arg(path).spawn().map(drop)
+                let mut command = Command::new("/bin/sh");
+                command.arg("-c").arg(script).arg(std::process::id().to_string()).arg(path);
+                match handover {
+                    Some(key) => command.env(ENV, key.expose()),
+                    None => command.env_remove(ENV),
+                };
+                command.spawn().map(drop)
             }
             Restart::Installer(path) => {
                 Command::new(path).args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"]).spawn().map(drop)
             }
+        }
+    }
+}
+
+/// Where the secrets wait for the next version during an update.
+pub fn handover_file() -> Option<PathBuf> {
+    Some(directories::ProjectDirs::from("nl", "", "Merel")?.cache_dir().join("handover"))
+}
+
+/// On macOS, puts the secrets aside for the version about to start, so it can file them as its
+/// own and macOS does not ask for the keychain password (see [`merel_secrets::handover`]).
+/// Elsewhere the credential store does not ask, and nothing happens.
+pub fn hand_over(engine: &merel_engine::Engine) -> Option<HandoverKey> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let path = handover_file()?;
+    match handover::export(&**engine.secrets(), &engine.secret_names(), &path) {
+        Ok(key) => key,
+        Err(e) => {
+            log::warn!("secrets not handed over, the new version will ask for them: {e}");
+            None
+        }
+    }
+}
+
+/// Puts the secrets back when the new version did not start after all.
+pub fn take_back(engine: &merel_engine::Engine, key: &HandoverKey) {
+    if let Some(path) = handover_file()
+        && let Err(e) = handover::import(&**engine.secrets(), key.expose(), &path)
+    {
+        log::warn!("secrets could not be taken back: {e}");
+    }
+}
+
+/// At start, files the secrets the previous version handed over, before anything reads the
+/// keychain. Returns how many came over.
+pub fn receive_handover(store: &dyn merel_secrets::SecretStore) -> usize {
+    // The variable stays in this process's environment; the key is worthless once the file
+    // below is gone, which it is whatever happens next.
+    let Some(key) = std::env::var_os(ENV) else { return 0 };
+    let Some(path) = handover_file() else { return 0 };
+    match handover::import(store, &key.to_string_lossy(), &path) {
+        Ok(n) => n,
+        Err(e) => {
+            log::warn!("handed-over secrets not received, Merel asks for them again: {e}");
+            0
         }
     }
 }

@@ -68,6 +68,8 @@ fn main() -> eframe::Result {
     if log::set_logger(&Stderr).is_ok() {
         log::set_max_level(log::LevelFilter::Warn);
     }
+    // Before anything reads the keychain.
+    merel_ui_egui::install::receive_handover(&Keychain);
     merel_oauth::install_crypto();
     merel_touch_bar::guard();
     let mut viewport = egui::ViewportBuilder::default()

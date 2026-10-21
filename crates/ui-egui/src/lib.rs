@@ -35,6 +35,7 @@ pub mod notifications;
 pub mod print;
 pub mod quicksteps;
 pub mod receipt;
+pub mod release_notes;
 pub mod reminders;
 pub mod remote;
 pub mod resend;

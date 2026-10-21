@@ -27,8 +27,11 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_REPLY_BYTES: u64 = 512 * 1024;
 /// How often the daily check asks while the app keeps running.
 pub const INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+/// Where the list GitHub adds to the release notes begins.
+const GENERATED: [&str; 3] = ["## What's Changed", "## New Contributors", "**Full Changelog**"];
+
 /// How much of the release notes the window shows.
-const NOTES_CHARS: usize = 600;
+const NOTES_CHARS: usize = 2000;
 
 /// The window's title and buttons, which tests and screen readers find them by.
 pub const WINDOW: &str = "Nieuwe versie van Merel";
@@ -47,7 +50,7 @@ pub const AUTO: &str = "Elke dag controleren op een nieuwe versie";
 pub struct Release {
     /// "0.2.0", without the "v".
     pub version: String,
-    /// The release notes, as written on GitHub, shortened.
+    /// Our part of the release notes on GitHub, Markdown, shortened.
     pub notes: String,
 }
 
@@ -111,7 +114,9 @@ pub fn judge(reply: &Value, current: &str) -> Outcome {
     if draft || prerelease || latest <= ours {
         return Outcome::UpToDate;
     }
-    let notes = reply.get("body").and_then(Value::as_str).unwrap_or_default().trim();
+    let body = reply.get("body").and_then(Value::as_str).unwrap_or_default();
+    // Our own notes come first; GitHub's list of pull requests after them is for developers.
+    let notes = GENERATED.iter().filter_map(|mark| body.find(mark)).min().map_or(body, |end| &body[..end]).trim();
     let mut short: String = notes.chars().take(NOTES_CHARS).collect();
     if notes.chars().count() > NOTES_CHARS {
         short.push('…');
@@ -247,7 +252,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             });
             if !release.notes.is_empty() {
                 ui.add_space(12.0);
-                egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| helder::paragraph(ui, t, &release.notes));
+                egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| crate::release_notes::show(ui, t, &release.notes));
             }
             ui.add_space(12.0);
             let how = if here.is_some() {
@@ -373,10 +378,14 @@ fn progress(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 Stage::Checking | Stage::Installing => {}
                 Stage::Ready(restart) => {
                     if helder::primary_button(ui, t, Icon::RefreshCw, RESTART).clicked() {
-                        match restart.start() {
+                        let handover = install::hand_over(&app.engine);
+                        match restart.start(handover.as_ref()) {
                             Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
                             Err(e) => {
                                 log::warn!("could not start the new version: {e}");
+                                if let Some(key) = &handover {
+                                    install::take_back(&app.engine, key);
+                                }
                                 app.notice = Some(Notice::error("Opnieuw starten is niet gelukt. Start Merel zelf opnieuw."));
                             }
                         }
@@ -439,6 +448,13 @@ mod tests {
         assert_eq!(judge(&reply, "0.3.0"), Outcome::UpToDate);
         assert_eq!(judge(&json!({"tag_name": "v9.0.0", "prerelease": true}), "0.1.0"), Outcome::UpToDate);
         assert!(matches!(judge(&json!({"tag_name": "nightly"}), "0.1.0"), Outcome::Failed(_)));
+    }
+
+    #[test]
+    fn githubs_own_list_is_left_out() {
+        let body = "## Nieuw in Merel 0.1.6\n\n- Mappen als boom.\n\n## What's Changed\n* Folder tree by @someone in https://github.com/x/y/pull/1\n\n**Full Changelog**: https://x";
+        let Outcome::Newer(r) = judge(&json!({"tag_name": "v0.1.6", "body": body}), "0.1.5") else { panic!() };
+        assert_eq!(r.notes, "## Nieuw in Merel 0.1.6\n\n- Mappen als boom.");
     }
 
     #[test]
