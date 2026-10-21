@@ -271,6 +271,8 @@ pub enum Event {
         header: merel_mime::ParsedHeader,
         /// The message as the server sent it, for the offline cache (empty when served from it).
         raw: Vec<u8>,
+        /// The keys an OpenPGP-encrypted message carried inside (not when served from the cache).
+        carried: Option<Box<openpgp::Carried>>,
     },
     Failed {
         account_id: String,
@@ -309,6 +311,27 @@ pub enum SendState {
 }
 
 /// A listed header as the session shows it; `None` when it has no usable sender.
+/// Puts the header from inside an opened encrypted message in the place of the outer one: the
+/// real subject, date and sender's name, and the chat tag Delta Chat only writes inside.
+fn open_sealed(m: &mut MessageHeader, inside: &merel_mime::ParsedHeader) {
+    m.sealed = merel_model::Sealed::Opened;
+    if let Some(from) = inside.from.as_ref().filter(|f| f.email().eq_ignore_ascii_case(m.from.email())) {
+        m.from = from.clone();
+    }
+    if !inside.to.is_empty() {
+        m.to = inside.to.clone();
+    }
+    if !inside.subject.is_empty() {
+        m.subject = inside.subject.clone();
+    }
+    if let Some(date) = inside.date {
+        m.date = date;
+    }
+    if inside.chat.is_some() {
+        m.chat = inside.chat.clone();
+    }
+}
+
 fn message_of(folder_id: &str, h: RemoteHeader) -> Option<MessageHeader> {
     let from = h.header.from.clone().or_else(|| merel_model::Address::new(Some("Onbekende afzender"), "unknown@invalid").ok())?;
     Some(MessageHeader {
@@ -326,6 +349,7 @@ fn message_of(folder_id: &str, h: RemoteHeader) -> Option<MessageHeader> {
         categories: h.categories,
         importance: h.header.importance,
         chat: h.header.chat,
+        sealed: if h.header.encrypted { merel_model::Sealed::Closed } else { merel_model::Sealed::No },
     })
 }
 
@@ -839,6 +863,13 @@ impl Session {
                 }
                 // What was listed before a refresh, to tell new arrivals from a first load.
                 let known: HashSet<String> = self.messages.iter().filter(|m| m.folder_id == folder_id).map(|m| m.id.clone()).collect();
+                // Opened encrypted messages keep the header from inside, which the listing lacks.
+                let opened: HashMap<String, MessageHeader> = self
+                    .messages
+                    .iter()
+                    .filter(|m| m.folder_id == folder_id && m.sealed == merel_model::Sealed::Opened)
+                    .map(|m| (m.id.clone(), m.clone()))
+                    .collect();
                 if offset == 0 {
                     self.messages.retain(|m| m.folder_id != folder_id);
                 }
@@ -854,7 +885,11 @@ impl Session {
                         }
                         fresh.push(id);
                     }
-                    if let Some(m) = message_of(&folder_id, h) {
+                    if let Some(mut m) = message_of(&folder_id, h) {
+                        if let Some(o) = opened.get(&m.id).filter(|_| m.sealed == merel_model::Sealed::Closed) {
+                            (m.from, m.to, m.subject, m.date, m.chat, m.sealed) =
+                                (o.from.clone(), o.to.clone(), o.subject.clone(), o.date, o.chat.clone(), o.sealed);
+                        }
                         self.messages.push(m);
                     }
                 }
@@ -896,7 +931,9 @@ impl Session {
                 self.loading.remove(&message_id);
                 if let Some(m) = self.messages.iter_mut().find(|m| m.id == message_id) {
                     m.preview = merel_mime::preview(&body.text, 120);
-                    if m.to.is_empty() {
+                    if m.sealed != merel_model::Sealed::No && body.encrypted == Some(merel_mime::Encryption::Opened) {
+                        open_sealed(m, &header);
+                    } else if m.to.is_empty() {
                         m.to = header.to;
                     }
                 }
@@ -1414,12 +1451,13 @@ impl Engine {
         if self.last_refresh.elapsed() >= REFRESH_EVERY {
             self.last_refresh = Instant::now();
             self.session.refresh_open_folders();
+            self.refresh_chat_folders();
         }
         if self.last_item_refresh.elapsed() >= ITEMS_EVERY {
             self.last_item_refresh = Instant::now();
             self.session.refresh_items();
         }
-        while let Ok(e) = self.events.try_recv() {
+        while let Ok(mut e) = self.events.try_recv() {
             let signed_in = match &e {
                 Event::SignedIn { result: Ok(a) } => Some(a.id.clone()),
                 _ => None,
@@ -1428,9 +1466,12 @@ impl Engine {
                 continue;
             }
             self.cache.note_event(&self.session, &e);
-            if let Event::Body { message_id, body, header, raw } = &e {
+            if let Event::Body { message_id, body, header, raw, carried } = &mut e {
                 self.learn_certificate(message_id, header.from.as_ref(), body);
-                self.learn_autocrypt(message_id, header.from.as_ref(), raw);
+                match carried.take() {
+                    Some(carried) => self.learn_carried(message_id, header.from.as_ref(), body, *carried),
+                    None => self.learn_autocrypt(message_id, header.from.as_ref(), raw),
+                }
             }
             // Changes made offline reach the server before anything else does.
             let replay = match &e {
@@ -1438,7 +1479,14 @@ impl Engine {
                 _ => Vec::new(),
             };
             let sent = matches!(e, Event::Sent { .. });
+            let listed = match &e {
+                Event::Headers { folder_id, .. } => Some(folder_id.clone()),
+                _ => None,
+            };
             self.session.apply(e);
+            if let Some(folder_id) = listed {
+                self.open_sealed_in(&folder_id);
+            }
             if sent {
                 // A scheduled message that went out, or came back as a draft, changes the drafts.
                 self.cache.note_commands(&self.session);

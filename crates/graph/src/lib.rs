@@ -212,6 +212,7 @@ fn header_of(m: &Value) -> Option<RemoteHeader> {
                 _ => Importance::Normal,
             },
             chat: None,
+            encrypted: false,
         },
         date,
     })

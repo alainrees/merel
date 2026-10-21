@@ -296,6 +296,31 @@ pub struct MessageHeader {
     /// Set on a chat message (Delta Chat's chat over e-mail); see [`ChatTag`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat: Option<ChatTag>,
+    /// Whether the message came encrypted with OpenPGP, and whether its header inside the
+    /// encryption has been read yet.
+    #[serde(default, skip_serializing_if = "Sealed::is_no")]
+    pub sealed: Sealed,
+}
+
+/// An OpenPGP-encrypted message keeps its real header inside the encryption (protected
+/// headers): Delta Chat shows only `[...]` as the subject outside, and a date up to a week
+/// off. Once the message is opened, the header inside takes the outer one's place.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Sealed {
+    /// Not encrypted with OpenPGP.
+    #[default]
+    No,
+    /// Encrypted; the list shows the outer header.
+    Closed,
+    /// Encrypted, opened: the list shows the header from inside.
+    Opened,
+}
+
+impl Sealed {
+    pub fn is_no(&self) -> bool {
+        *self == Sealed::No
+    }
 }
 
 /// How urgent a message is, as the sender marked it: Outlook's "Hoge urgentie" and "Lage

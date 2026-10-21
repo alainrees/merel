@@ -329,6 +329,16 @@ lists the chats with search and the chips Alle, Ongelezen and Groepen, shows a c
 the right and a line to type in, and starts a chat with one person or a group. Chat messages stay out of the mail
 folders' lists.
 
+Delta Chat keeps everything but the address inside the encryption (protected headers, RFC 9788): outside a message
+shows `[...]` as its subject and a date up to a week off, and no chat header at all. So for an account with chat on,
+Merel opens the newest OpenPGP-encrypted messages after each listing, and the header inside takes the outer one's
+place: the subject, the real date, the sender's name and the chat tag; the next listing keeps it. A message also
+brings its sender's key inside (`Autocrypt`), and in a group the others' keys (`Autocrypt-Gossip`); Merel keeps the
+sender's like any Autocrypt key, and the others' only from a message signed with a key it already believes. A signature
+that only checks out with a key the message brought along counts for nothing when Merel knows another key for that
+address. Going out, every encrypted message carries its header inside too, and a group chat message tells everyone
+everyone's key; `Secure-Join` fields and gossip travel inside only.
+
 A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
 hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the
 list until then and comes back unread, with a notice; the "Gesluimerd" filter on the Beeld tab shows
