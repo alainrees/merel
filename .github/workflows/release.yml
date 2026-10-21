@@ -1,13 +1,19 @@
 name: Release
 # A tag vX.Y.Z builds the installers for macOS, Windows and Linux and publishes them as a GitHub
-# release. A pull request that changes the packaging builds them too, as workflow artifacts, so a
-# broken installer shows up before the next release.
+# release. Running the workflow by hand with "publish" on does the same for the version in
+# Cargo.toml, creating the tag on the chosen commit. A pull request that changes the packaging
+# builds them too, as workflow artifacts, so a broken installer shows up before the next release.
 on:
   push:
     tags: ["v*"]
   pull_request:
     paths: [".github/workflows/release.yml", "packaging/**", "apps/merel/**"]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a release for the version in Cargo.toml
+        type: boolean
+        default: false
 permissions:
   contents: read
 env:
@@ -75,15 +81,20 @@ jobs:
           path: dist/*
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
     needs: [macos, windows, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Tag matches the version in Cargo.toml
-        run: test "${GITHUB_REF_NAME}" = "v$(packaging/version.sh)"
+      - name: Tag
+        id: tag
+        run: |
+          tag="v$(packaging/version.sh)"
+          # A pushed tag must match the version; a run by hand creates that tag.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then test "$GITHUB_REF_NAME" = "$tag"; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -93,4 +104,5 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Merel ${GITHUB_REF_NAME#v}" --generate-notes
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "Merel ${TAG#v}" --generate-notes
