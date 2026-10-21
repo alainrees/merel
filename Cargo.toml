@@ -85,6 +85,11 @@ chrono-tz = "0.10"
 
 # ui
 egui = "0.36"
+# Translations: one Fluent file per language (crates/ui-egui/locales), and the language the computer is set to.
+fluent-bundle = "0.16"
+fluent-syntax = "0.12"
+unic-langid = "0.9"
+sys-locale = "0.3"
 eframe = { version = "0.36", default-features = false }
 egui_kittest = "0.36"
 # Image decoding for pictures embedded in mail (no SVG: no text rendering engine, no scripts).

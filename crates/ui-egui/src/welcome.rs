@@ -131,7 +131,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     ui.horizontal(|ui| {
                         helder::quiet(ui, t, |ui| {
                             for (choice, icon) in [(ThemeChoice::System, Icon::Monitor), (ThemeChoice::Light, Icon::Sun), (ThemeChoice::Dark, Icon::Moon)] {
-                                if helder::toggle_button(ui, t, icon, choice.dutch_name(), app.view.theme == choice).on_hover_text(choice.hint()).clicked() {
+                                if helder::toggle_button(ui, t, icon, &choice.name(), app.view.theme == choice).on_hover_text(choice.hint()).clicked() {
                                     app.view.theme = choice;
                                     ctx.set_theme(choice.preference());
                                 }

@@ -587,16 +587,19 @@ pub fn card_frame(t: &Tokens) -> Frame {
 /// Whether a ribbon button shows only its icon; its name is then a tooltip and stays its label
 /// for a screen reader. These are the actions everyone knows by their icon.
 pub fn ribbon_icon_only(label: &str) -> bool {
+    let label = &*crate::i18n::dutch(label);
     matches!(label, "Verwijderen" | "Archiveren" | "Ongewenst" | "Gelezen" | "Ongelezen" | "Vlag" | "Beheren…" | "Systeem" | "Licht" | "Donker")
 }
 
 /// Whether a ribbon button is its ribbon's blue main button: making something new.
 pub fn ribbon_primary(label: &str) -> bool {
+    let label = &*crate::i18n::dutch(label);
     matches!(label, "Nieuwe e-mail" | "Nieuwe afspraak" | "Nieuw contact" | "Nieuwe taak")
 }
 
 /// The icon of a ribbon button, by its label, else by the glyph it had before the Helder style.
 pub fn ribbon_icon(label: &str, glyph: &str) -> Option<Icon> {
+    let label = &*crate::i18n::dutch(label);
     Some(match label {
         "Nieuwe e-mail" | "E-mail sturen" => Icon::Mail,
         "Beantwoorden" => Icon::Reply,
@@ -634,7 +637,7 @@ pub fn ribbon_icon(label: &str, glyph: &str) -> Option<Icon> {
         "Groepen" => Icon::ListTree,
         "Weeknummers" => Icon::Hash,
         "Werkuren" => Icon::Clock,
-        "Systeem" => Icon::Monitor,
+        "Systeem" | "Systeemtaal" => Icon::Monitor,
         "Licht" => Icon::Sun,
         "Donker" => Icon::Moon,
         "Opruimen" => Icon::Sparkles,

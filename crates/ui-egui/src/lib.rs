@@ -23,6 +23,7 @@ pub mod groups;
 pub mod helder;
 pub mod help;
 mod html;
+pub mod i18n;
 pub mod importance;
 pub mod install;
 pub mod invitation;
@@ -270,6 +271,7 @@ fn list_rows<'a>(
 impl MailApp {
     pub fn new(mut engine: Engine) -> Self {
         let view = view::ViewPrefs::load(engine.config_path());
+        i18n::set(view.language.language());
         engine.session.sort = view.sort;
         let mut app = MailApp {
             engine,
@@ -4496,6 +4498,33 @@ mod tests {
     }
 
     #[test]
+    fn the_language_switches_on_the_view_tab_and_the_ribbon_still_fits() {
+        let mut h = harness();
+        h.state_mut().tab = Tab::View;
+        h.run();
+        assert!(h.query_by_label("Thema").is_some() && h.query_by_label("Taal").is_some(), "tests run in Dutch");
+        let menu = h.get_by_label("Systeemtaal").rect();
+        assert!(menu.max.x <= 1280.0, "the language menu ends at {} and falls off a 1280 px window", menu.max.x);
+        h.get_by_label("Systeemtaal").click();
+        h.run();
+        h.get_by_label("English").click();
+        h.run();
+        h.run();
+        assert_eq!(h.state().view.language, i18n::LanguageChoice::English);
+        assert_eq!(i18n::current(), i18n::Language::English);
+        assert!(h.query_by_label("Theme").is_some() && h.query_by_label("Dark").is_some(), "the theme buttons speak English now");
+        let menu = h.get_by_label("English").rect();
+        assert!(menu.max.x <= 1280.0, "the language menu ends at {} in English and falls off a 1280 px window", menu.max.x);
+        h.get_by_label("English").click();
+        h.run();
+        h.get_by_label("Nederlands").click();
+        h.run();
+        h.run();
+        assert!(h.query_by_label("Donker").is_some());
+        assert_eq!(i18n::current(), i18n::Language::Dutch);
+    }
+
+    #[test]
     fn ribbon_buttons_are_as_wide_as_their_labels_and_the_ribbons_fit_the_window() {
         let mut h = harness();
         h.run();
@@ -4508,7 +4537,7 @@ mod tests {
         let label = h.ctx.fonts_mut(|f| f.layout_no_wrap("Allen beantwoorden".to_owned(), egui::FontId::proportional(12.0), Color32::WHITE));
         assert!(all.width() >= label.size().x + 2.0 * RIBBON_LABEL_PADDING, "the label fits inside its button");
         assert!(h.query_by_label("Reageren").is_some() && h.query_by_label("Labels").is_some(), "the groups carry their names");
-        for (tab, last) in [(Tab::Home, "Snelle stappen"), (Tab::View, "Thema"), (Tab::Folder, "Opruimen")] {
+        for (tab, last) in [(Tab::Home, "Snelle stappen"), (Tab::View, "Taal"), (Tab::Folder, "Opruimen")] {
             h.state_mut().tab = tab;
             h.run();
             let rect = h.get_by_label_contains(last).rect();
