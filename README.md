@@ -376,7 +376,8 @@ one [Fluent](https://projectfluent.org) file per language, `crates/ui-egui/local
 `en.ftl`, built into the binary; a text missing from one falls back to English. To add a
 language, copy `en.ftl`, translate the right-hand side of each line and add the language to
 `crates/ui-egui/src/i18n.rs`; a test checks that every file has every text. The move of the
-window's words into these files goes screen by screen, so for now most of them are still Dutch.
+window's words into these files goes screen by screen: the ribbons, the tabs, the module rail and
+the macOS menu bar speak both languages; the panes and windows follow.
 Tests always run in Dutch, whatever the machine is set to.
 
 ## Fonts

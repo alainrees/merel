@@ -1,6 +1,7 @@
 //! The "Help" tab: the keyboard shortcuts in one list, the folder with this computer's settings,
 //! the project page, and "Over Merel" with the version and what the app stands for.
 
+use crate::i18n::tr;
 use egui::{RichText, vec2};
 
 use crate::helder::{self, Icon};
@@ -83,25 +84,25 @@ fn open_outside(app: &mut MailApp, target: &str) {
 
 /// The "Help" tab.
 pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
-    if ribbon_action_hint(ui, t, "⌨", "Sneltoetsen", true, Some("Alle toetsen van de mailmodule op een rij")) {
+    if ribbon_action_hint(ui, t, "⌨", &tr("help-shortcuts"), true, Some(&tr("help-shortcuts-hint"))) {
         app.help = Some(HelpWindow::Shortcuts);
     }
     crate::ribbon_separator(ui);
     let folder = settings_folder(app);
-    if ribbon_action_hint(ui, t, "📂", "Instellingenmap", folder.is_some(), Some("De map met accounts, agenda, regels en cache openen"))
+    if ribbon_action_hint(ui, t, "📂", &tr("help-settings-folder"), folder.is_some(), Some(&tr("help-settings-folder-hint")))
         && let Some(f) = folder
     {
         open_outside(app, &f.to_string_lossy());
     }
-    if ribbon_action_hint(ui, t, "🌐", "Op GitHub", true, Some("De projectpagina met de handleiding openen in de browser")) {
+    if ribbon_action_hint(ui, t, "🌐", &tr("help-github"), true, Some(&tr("help-github-hint"))) {
         open_outside(app, REPOSITORY);
     }
     crate::ribbon_separator(ui);
-    if ribbon_action_hint(ui, t, "ℹ", "Over Merel", true, Some("Versie en uitgangspunten")) {
+    if ribbon_action_hint(ui, t, "ℹ", &tr("help-about"), true, Some(&tr("help-about-hint"))) {
         app.help = Some(HelpWindow::About);
     }
     let checking = app.updates.running();
-    if ribbon_action_hint(ui, t, "⟳", crate::updates::CHECK, !checking, Some("Bij GitHub nagaan of er een nieuwere versie van Merel is")) {
+    if ribbon_action_hint(ui, t, "⟳", &tr("help-updates"), !checking, Some(&tr("help-updates-hint"))) {
         app.check_for_updates(ui.ctx(), true);
     }
     crate::ribbon_separator(ui);

@@ -54,6 +54,7 @@ pub mod vcard;
 pub mod view;
 pub mod welcome;
 
+use crate::i18n::tr;
 use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
 use serde_json::{Value, json};
 
@@ -79,14 +80,14 @@ pub enum Module {
 impl Module {
     const ALL: [Module; 5] = [Module::Mail, Module::Calendar, Module::Chat, Module::People, Module::Tasks];
 
-    fn label(self) -> &'static str {
-        match self {
-            Module::Mail => "E-mail",
-            Module::Calendar => "Agenda",
-            Module::Chat => "Chat",
-            Module::People => "Contacten",
-            Module::Tasks => "Taken",
-        }
+    fn label(self) -> String {
+        tr(match self {
+            Module::Mail => "module-mail",
+            Module::Calendar => "module-calendar",
+            Module::Chat => "module-chat",
+            Module::People => "module-people",
+            Module::Tasks => "module-tasks",
+        })
     }
 
     fn icon(self) -> helder::Icon {
@@ -113,15 +114,15 @@ pub(crate) enum Tab {
 impl Tab {
     const ALL: [Tab; 6] = [Tab::File, Tab::Home, Tab::Folder, Tab::SendReceive, Tab::View, Tab::Help];
 
-    fn label(self) -> &'static str {
-        match self {
-            Tab::File => "Bestand",
-            Tab::Home => "Start",
-            Tab::Folder => "Map",
-            Tab::SendReceive => "Verzenden/ontvangen",
-            Tab::View => "Beeld",
-            Tab::Help => "Help",
-        }
+    fn label(self) -> String {
+        tr(match self {
+            Tab::File => "tab-file",
+            Tab::Home => "tab-home",
+            Tab::Folder => "tab-folder",
+            Tab::SendReceive => "tab-send-receive",
+            Tab::View => "tab-view",
+            Tab::Help => "tab-help",
+        })
     }
 }
 
@@ -935,7 +936,7 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                             Tab::Help => help::ribbon(app, ui, t),
                             Tab::SendReceive => send_receive_ribbon(app, ui, t),
                             _ => {
-                                ui.label(RichText::new("Nog niet beschikbaar").color(t.text_dim));
+                                ui.label(RichText::new(tr("ribbon-not-yet")).color(t.text_dim));
                             }
                         }
                     })
@@ -962,20 +963,20 @@ fn menu_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let mut child = ui.new_child(egui::UiBuilder::new().id_salt("menu-bar").invisible());
     let ui = &mut child;
     let mut menus: Vec<menubar::Menu> = Vec::new();
-    let mut add = |app: &mut MailApp, ui: &mut Ui, title: &'static str, f: &dyn Fn(&mut MailApp, &mut Ui)| {
+    let mut add = |app: &mut MailApp, ui: &mut Ui, title: String, f: &dyn Fn(&mut MailApp, &mut Ui)| {
         let index = menus.len();
         let click = click.as_ref().filter(|(i, _)| *i == index).map(|(_, p)| p.clone());
         let entries = menubar::capture(click, || f(app, ui));
         menus.push(menubar::Menu { title, entries });
     };
-    add(app, ui, "Bestand", &|app, _| file_menu(app));
-    let module_menu = match app.module {
-        Module::Mail => "Bericht",
-        Module::Calendar => "Agenda",
-        Module::Chat => "Chat",
-        Module::People => "Contactpersonen",
-        Module::Tasks => "Taken",
-    };
+    add(app, ui, tr("menu-file"), &|app, _| file_menu(app));
+    let module_menu = tr(match app.module {
+        Module::Mail => "menu-message",
+        Module::Calendar => "menu-calendar",
+        Module::Chat => "menu-chat",
+        Module::People => "menu-people",
+        Module::Tasks => "menu-tasks",
+    });
     add(app, ui, module_menu, &|app, ui| match app.module {
         Module::Mail => mail_ribbon(app, ui, t),
         Module::Calendar => calendar_ribbon(app, ui, t),
@@ -984,45 +985,45 @@ fn menu_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         Module::Tasks => tasks::ribbon(app, ui, t),
     });
     if app.module == Module::Mail {
-        add(app, ui, "Map", &|app, ui| {
+        add(app, ui, tr("menu-folder"), &|app, ui| {
             folders::ribbon(app, ui, t);
             ribbon_separator(ui);
             send_receive_ribbon(app, ui, t);
         });
     }
-    add(app, ui, "Weergeven", &|app, ui| {
+    add(app, ui, tr("menu-view"), &|app, ui| {
         for m in Module::ALL {
-            if menubar::item(m.label(), true, Some(app.module == m)) {
+            if menubar::item(&m.label(), true, Some(app.module == m)) {
                 app.module = m;
             }
         }
         ribbon_separator(ui);
         view::ribbon(app, ui, t);
     });
-    add(app, ui, "Help", &|app, ui| help::ribbon(app, ui, t));
+    add(app, ui, tr("menu-help"), &|app, ui| help::ribbon(app, ui, t));
     app.menu_bar = menus;
 }
 
 /// The Bestand menu: something new in each module, then what the Bestand page holds.
 fn file_menu(app: &mut MailApp) {
-    if menubar::item("Nieuwe e-mail", true, None) {
+    if menubar::item(&tr("new-mail"), true, None) {
         app.open_compose(ComposeKind::New);
     }
-    if menubar::item("Nieuwe afspraak", true, None) {
+    if menubar::item(&tr("new-appointment"), true, None) {
         app.module = Module::Calendar;
         let date = app.calendar.focus;
         app.new_appointment(date, 9);
     }
-    if menubar::item("Nieuw contact", true, None) {
+    if menubar::item(&tr("new-contact"), true, None) {
         app.module = Module::People;
         app.new_contact();
     }
-    if menubar::item("Nieuwe taak", true, None) {
+    if menubar::item(&tr("new-task"), true, None) {
         app.module = Module::Tasks;
         app.new_task();
     }
     menubar::separator();
-    if menubar::item("Accounts…", true, None) {
+    if menubar::item(&tr("menu-accounts"), true, None) {
         app.tab = Tab::File;
         app.file_page = backstage::Page::Accounts;
     }
@@ -1042,20 +1043,20 @@ fn file_menu(app: &mut MailApp) {
 fn mail_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let has = app.engine.session.selected_message.is_some();
     let mut open: Option<ComposeKind> = None;
-    view::group(ui, t, "Nieuw", |ui| {
-        if ribbon_action_hint(ui, t, "✉", "Nieuwe e-mail", true, Some(&key_hint("N"))) {
+    view::group(ui, t, &tr("group-new"), |ui| {
+        if ribbon_action_hint(ui, t, "✉", &tr("new-mail"), true, Some(&key_hint("N"))) {
             open = Some(ComposeKind::New);
         }
     });
     ribbon_separator(ui);
-    view::group(ui, t, "Reageren", |ui| {
-        if ribbon_action_hint(ui, t, "↩", "Beantwoorden", has, Some(&key_hint("R"))) {
+    view::group(ui, t, &tr("group-respond"), |ui| {
+        if ribbon_action_hint(ui, t, "↩", &tr("mail-reply"), has, Some(&key_hint("R"))) {
             open = Some(ComposeKind::Reply);
         }
-        if ribbon_action_hint(ui, t, "↞", "Allen beantwoorden", has, Some(&key_hint("Shift+R"))) {
+        if ribbon_action_hint(ui, t, "↞", &tr("mail-reply-all"), has, Some(&key_hint("Shift+R"))) {
             open = Some(ComposeKind::ReplyAll);
         }
-        if ribbon_action_hint(ui, t, "↪", "Doorsturen", has, Some(&key_hint("F"))) {
+        if ribbon_action_hint(ui, t, "↪", &tr("mail-forward"), has, Some(&key_hint("F"))) {
             open = Some(ComposeKind::Forward);
         }
     });
@@ -1063,25 +1064,33 @@ fn mail_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         app.open_compose(kind);
     }
     ribbon_separator(ui);
-    view::group(ui, t, "Opschonen", |ui| {
-        ribbon_button(app, ui, t, "🗑", "Verwijderen", ("message.delete", Some("Delete")), has);
-        ribbon_button(app, ui, t, "🗄", "Archiveren", ("message.archive", Some(if cfg!(target_os = "macos") { "Ctrl+E" } else { "Backspace" })), has);
-        ribbon_button(app, ui, t, "⚠", "Ongewenst", ("message.junk", None), has);
+    view::group(ui, t, &tr("group-clean"), |ui| {
+        ribbon_button(app, ui, t, "🗑", &tr("delete"), ("message.delete", Some("Delete")), has);
+        ribbon_button(
+            app,
+            ui,
+            t,
+            "🗄",
+            &tr("mail-archive"),
+            ("message.archive", Some(if cfg!(target_os = "macos") { "Ctrl+E" } else { "Backspace" })),
+            has,
+        );
+        ribbon_button(app, ui, t, "⚠", &tr("mail-junk"), ("message.junk", None), has);
     });
     ribbon_separator(ui);
-    view::group(ui, t, "Ordenen", |ui| {
-        if ribbon_action_hint(ui, t, "📂", "Verplaatsen", has, Some(&key_hint("Shift+V"))) {
+    view::group(ui, t, &tr("group-file"), |ui| {
+        if ribbon_action_hint(ui, t, "📂", &tr("mail-move"), has, Some(&key_hint("Shift+V"))) {
             app.move_to = true;
         }
-        if ribbon_action_hint(ui, t, "⚙", "Regels", true, Some("Mail automatisch verplaatsen of markeren")) {
+        if ribbon_action_hint(ui, t, "⚙", &tr("mail-rules"), true, Some(&tr("mail-rules-hint"))) {
             app.open_rules(false);
         }
     });
     ribbon_separator(ui);
-    view::group(ui, t, "Labels", |ui| {
-        ribbon_button(app, ui, t, "◉", "Gelezen", ("message.mark_read", Some(&key_hint("Q"))), has);
-        ribbon_button(app, ui, t, "○", "Ongelezen", ("message.mark_unread", Some(&key_hint("U"))), has);
-        ribbon_button(app, ui, t, "⚑", "Vlag", ("message.flag", None), has);
+    view::group(ui, t, &tr("group-tags"), |ui| {
+        ribbon_button(app, ui, t, "◉", &tr("mail-read"), ("message.mark_read", Some(&key_hint("Q"))), has);
+        ribbon_button(app, ui, t, "○", &tr("mail-unread"), ("message.mark_unread", Some(&key_hint("U"))), has);
+        ribbon_button(app, ui, t, "⚑", &tr("mail-flag"), ("message.flag", None), has);
     });
     if !menubar::capturing() {
         categories::menu(app, ui, t);
@@ -1093,36 +1102,40 @@ fn mail_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 /// The Verzenden/ontvangen tab.
 fn send_receive_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let can = !app.engine.session.is_sample() && app.engine.session.selected_folder.is_some();
-    ribbon_button(app, ui, t, "⟳", "Vernieuwen", ("folder.refresh", Some("F5")), can);
+    ribbon_button(app, ui, t, "⟳", &tr("refresh"), ("folder.refresh", Some("F5")), can);
 }
 
 fn calendar_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     use calendar::View;
-    if ribbon_action_hint(ui, t, "📅", "Nieuwe afspraak", true, Some(&key_hint("Shift+A"))) {
+    if ribbon_action_hint(ui, t, "📅", &tr("new-appointment"), true, Some(&key_hint("Shift+A"))) {
         let date = app.calendar.focus;
         app.new_appointment(date, 9);
     }
     ribbon_separator(ui);
-    if ribbon_action(ui, t, "◎", "Vandaag", true) {
+    if ribbon_action(ui, t, "◎", &tr("calendar-today"), true) {
         app.calendar.focus = calendar::today();
     }
-    if ribbon_action_hint(ui, t, "↪", calendar::GOTO, true, Some(&key_hint("G"))) {
+    if ribbon_action_hint(ui, t, "↪", &tr("calendar-goto"), true, Some(&key_hint("G"))) {
         app.open_goto();
     }
     ribbon_separator(ui);
-    for (glyph, label, view) in [("▯", "Dag", View::Day), ("▤", "Werkweek", View::WorkWeek), ("▥", "Week", View::Week), ("▦", "Maand", View::Month)]
-    {
-        if ribbon_toggle(ui, t, glyph, label, app.calendar.view == view) {
+    for (glyph, label, view) in [
+        ("▯", "calendar-day", View::Day),
+        ("▤", "calendar-work-week", View::WorkWeek),
+        ("▥", "calendar-week", View::Week),
+        ("▦", "calendar-month", View::Month),
+    ] {
+        if ribbon_toggle(ui, t, glyph, &tr(label), app.calendar.view == view) {
             app.calendar.view = view;
         }
     }
     ribbon_separator(ui);
     let has = app.engine.session.selected_appointment.is_some();
-    if ribbon_action(ui, t, "🗑", "Verwijderen", has) {
+    if ribbon_action(ui, t, "🗑", &tr("delete"), has) {
         app.run("appointment.delete", Value::Null);
         app.calendar.editor = None;
     }
-    if ribbon_action(ui, t, "⟳", "Vernieuwen", !app.engine.session.item_accounts.is_empty()) {
+    if ribbon_action(ui, t, "⟳", &tr("refresh"), !app.engine.session.item_accounts.is_empty()) {
         app.run("sync.refresh", Value::Null);
     }
 }
@@ -2641,7 +2654,7 @@ mod tests {
         h.run();
         assert!(h.query_by_label("Verzenden/ontvangen").is_none(), "no tabs in the window");
         h.get_by_label("Nieuwe e-mail");
-        let titles: Vec<&str> = h.state().menu_bar.iter().map(|m| m.title).collect();
+        let titles: Vec<&str> = h.state().menu_bar.iter().map(|m| m.title.as_str()).collect();
         assert_eq!(titles, ["Bestand", "Bericht", "Map", "Weergeven", "Help"]);
         let bericht = &h.state().menu_bar[1];
         assert!(bericht.entries.iter().any(|e| matches!(e, menubar::Entry::Item { label, enabled: false, .. } if label == "Beantwoorden")));
@@ -4570,7 +4583,7 @@ mod tests {
         let mut h = harness();
         h.run();
         h.step();
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
+        let dirs = [concat!(env!("CARGO_MANIFEST_DIR"), "/src"), concat!(env!("CARGO_MANIFEST_DIR"), "/locales")];
         // The atlas rectangle a character is drawn from. A character no font has gets the
         // replacement box, so the same rectangle as a CJK character means an empty box on screen.
         let drawn = |h: &mut egui_kittest::Harness<'static, MailApp>, c: char| {
@@ -4580,9 +4593,9 @@ mod tests {
         assert_eq!(drawn(&mut h, '\u{4E01}'), replacement, "two characters no font has draw the same box");
         assert_ne!(drawn(&mut h, 'a'), replacement);
         let mut missing = std::collections::BTreeSet::new();
-        for entry in std::fs::read_dir(dir).expect("source directory") {
+        for entry in dirs.iter().flat_map(|dir| std::fs::read_dir(dir).expect("source directory")) {
             let path = entry.expect("entry").path();
-            if path.extension().is_some_and(|e| e == "rs") {
+            if path.extension().is_some_and(|e| e == "rs" || e == "ftl") {
                 let text = std::fs::read_to_string(&path).expect("source file");
                 for c in text.chars().filter(|c| !c.is_ascii() && !matches!(c, '\u{200D}' | '\u{FE0F}')) {
                     if drawn(&mut h, c) == replacement {
@@ -4592,6 +4605,45 @@ mod tests {
             }
         }
         assert!(missing.is_empty(), "these characters would draw as empty boxes: {missing:?}");
+    }
+
+    #[test]
+    fn every_ribbon_fits_the_window_without_overlap_in_every_language() {
+        for language in i18n::Language::ALL {
+            let mut h = harness();
+            i18n::set(language);
+            let cases = [
+                (Module::Mail, Tab::Home, "new-mail"),
+                (Module::Mail, Tab::Folder, "folder-new"),
+                (Module::Mail, Tab::SendReceive, "refresh"),
+                (Module::Mail, Tab::View, "language-system"),
+                (Module::Mail, Tab::Help, "help-shortcuts"),
+                (Module::Calendar, Tab::Home, "new-appointment"),
+                (Module::Calendar, Tab::View, "language-system"),
+                (Module::People, Tab::Home, "new-contact"),
+                (Module::Tasks, Tab::Home, "new-task"),
+            ];
+            for (module, tab, first) in cases {
+                h.state_mut().module = module;
+                h.state_mut().tab = tab;
+                h.run();
+                h.run();
+                let row = h.get_by_label(&tr(first)).rect().center().y;
+                let mut buttons: Vec<(String, egui::Rect)> = h
+                    .query_all_by_role(egui::accesskit::Role::Button)
+                    .map(|n| (egui_kittest::kittest::NodeT::accesskit_node(&n).label().unwrap_or_default(), n.rect()))
+                    .filter(|(_, r)| (r.center().y - row).abs() < 4.0 && r.width() > 0.0)
+                    .collect();
+                buttons.sort_by(|a, b| a.1.min.x.total_cmp(&b.1.min.x));
+                let at = format!("{module:?}/{tab:?} in {}", language.tag());
+                assert!(!buttons.is_empty(), "{at}: the ribbon has buttons");
+                for pair in buttons.windows(2) {
+                    assert!(pair[0].1.max.x <= pair[1].1.min.x + 0.5, "{at}: {} runs into {}", pair[0].0, pair[1].0);
+                }
+                let (last, rect) = &buttons[buttons.len() - 1];
+                assert!(rect.max.x <= 1280.0, "{at}: {last} ends at {} and falls off a 1280 px window", rect.max.x);
+            }
+        }
     }
 
     #[test]
