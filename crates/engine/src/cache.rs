@@ -230,7 +230,13 @@ impl Session {
         let calendar_ids: Vec<String> = cached.calendars.iter().map(|c| c.id.clone()).collect();
         self.calendars.retain(|c| c.account_id.as_deref() != Some(id));
         self.appointments.retain(|a| !calendar_ids.contains(&a.calendar_id));
-        self.calendars.extend(cached.calendars.iter().cloned());
+        let own = Self::account_calendar_id(id);
+        self.calendars.extend(cached.calendars.iter().cloned().map(|mut c| {
+            if c.id == own {
+                c.name = crate::sync::ACCOUNT_CALENDAR.into();
+            }
+            c
+        }));
         self.appointments.extend(cached.appointments.iter().cloned());
         self.contacts.retain(|c| c.account_id.as_deref() != Some(id));
         self.contacts.extend(cached.contacts.iter().cloned());

@@ -132,7 +132,7 @@ each week in the month view and in the time gutter of the week and day views, as
 (off by default, kept in `view.json`); "Ga naar datum" in the ribbon (Ctrl+G) asks for a day as dag-maand-jaar and
 shows it in the current view, as Outlook's Ga naar datum; "Werkuren" on the Beeld tab (on by default) shades the hours
 outside 8:00-17:00 and the weekend in the day and week views, as Outlook shades the time outside the working day; each
-calendar under "Mijn agenda's" in the side pane has a round dot in its colour, filled with a tick while it shows, and
+calendar in the side pane stands under the address of its account (an account's own calendar is called "Agenda", and "Agenda (address)" where it stands alone, as in the appointment window), the ones on this computer under "Op deze computer", so two accounts with the same name stay apart, as Outlook groups them; contacts and tasks name their account by its address too. Each calendar has a round dot in its colour, filled with a tick while it shows, and
 clicking the row hides it: an unticked calendar keeps its appointments out of the views, the search list and the
 printed page until it is ticked again (reminders still come), as in Outlook (kept in `view.json`). The "⋯" after a
 calendar (or a right click) gives it one of twelve colours, each at least 3:1 against the window in both themes, and

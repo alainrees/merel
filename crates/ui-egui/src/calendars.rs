@@ -69,15 +69,31 @@ pub fn list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             app.calendar.dialog = Some(Dialog::Add { name: String::new(), color });
         }
     });
-    ui.add_space(4.0);
-    ui.label(RichText::new("Mijn agenda's").size(12.0).strong().color(t.text_dim));
-    ui.add_space(2.0);
     let calendars: Vec<Calendar> = app.engine.session.calendars.clone();
     let locals = calendars.iter().filter(|c| c.account_id.is_none()).count();
-    for c in calendars {
-        row(app, ui, t, &c, c.account_id.is_none() && locals > 1);
+    // As Outlook: the calendars of each account under its address, the ones that live only
+    // here under a heading of their own, so two accounts with the same name stay apart.
+    let mut groups: Vec<(String, Vec<&Calendar>)> = vec![(LOCAL.into(), calendars.iter().filter(|c| c.account_id.is_none()).collect())];
+    for a in &app.engine.session.accounts {
+        groups.push((a.address.email().to_string(), calendars.iter().filter(|c| c.account_id.as_deref() == Some(a.id.as_str())).collect()));
+    }
+    for (heading, members) in groups.into_iter().filter(|(_, m)| !m.is_empty()) {
+        ui.add_space(6.0);
+        let r = ui.add(egui::Label::new(RichText::new(&heading).size(12.0).strong().color(t.text_dim)).truncate());
+        if heading == LOCAL {
+            r.on_hover_text(LOCAL_HINT);
+        }
+        ui.add_space(2.0);
+        for c in members {
+            row(app, ui, t, c, c.account_id.is_none() && locals > 1);
+        }
     }
 }
+
+/// The heading over the calendars that live only on this computer.
+pub const LOCAL: &str = "Op deze computer";
+/// What that heading explains on hover.
+pub const LOCAL_HINT: &str = "Deze agenda's staan alleen op deze computer en worden niet met een account gedeeld.";
 
 /// One calendar: a click on the dot or the name shows or hides its appointments.
 fn row(app: &mut MailApp, ui: &mut Ui, t: &Tokens, c: &Calendar, deletable: bool) {

@@ -120,7 +120,7 @@ pub struct ViewPrefs {
     /// What was last typed in the mail search box, newest first, as Outlook's "Recente
     /// zoekopdrachten"; at most [`RECENT_SEARCHES`].
     pub recent_searches: Vec<String>,
-    /// The calendars whose tick box under "Mijn agenda's" is off, by id: their appointments stay
+    /// The calendars whose tick box in the side pane is off, by id: their appointments stay
     /// out of the views, the search list and the printed page, as in Outlook when a calendar is
     /// unticked. Reminders still come.
     pub hidden_calendars: Vec<String>,
