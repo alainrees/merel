@@ -124,6 +124,14 @@ pub fn empty(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 /// `{ id? }`: every listed unread message of the folder (the selected one by default) is
 /// marked read, each as its own change so it works offline like a single one.
 pub fn mark_all_read(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    // In "Alle accounts", the folder of that kind of every account.
+    let id = params.get("id").and_then(Value::as_str).map(str::to_string).or_else(|| s.selected_folder.clone());
+    if let Some(id) = id.filter(|id| crate::unified::is_unified(id)) {
+        for member in s.members(&id) {
+            mark_all_read(s, &serde_json::json!({ "id": member }))?;
+        }
+        return Ok(());
+    }
     let folder = named(s, params)?;
     let unread: Vec<(String, String)> =
         s.messages.iter().filter(|m| m.folder_id == folder.id && !m.flags.seen).map(|m| (m.id.clone(), m.remote_id.clone())).collect();
