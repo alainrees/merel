@@ -2,6 +2,7 @@
 //! things to the selected message at once, also on Ctrl+Shift+1 to 9, and the window to make
 //! and change them.
 
+use crate::i18n::tr;
 use egui::{RichText, Ui, vec2};
 use serde_json::json;
 
@@ -146,14 +147,14 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let has = app.engine.session.selected_message.is_some();
     let mut run: Option<String> = None;
     let mut manage = false;
-    crate::view::section(ui, t, "Snelle stappen", |ui| {
+    crate::view::section(ui, t, &tr("quick-steps"), |ui| {
         for (n, (id, name)) in steps.iter().enumerate() {
             let hint = (n < 9).then(|| key_hint(&format!("Shift+{}", n + 1)));
             if crate::ribbon_action_hint(ui, t, "⚡", name, has, hint.as_deref()) {
                 run = Some(id.clone());
             }
         }
-        if crate::ribbon_action_hint(ui, t, "⚙", "Beheren…", true, Some("Snelle stappen maken of wijzigen")) {
+        if crate::ribbon_action_hint(ui, t, "⚙", &tr("quick-steps-manage"), true, Some(&tr("quick-steps-manage-hint"))) {
             manage = true;
         }
     });

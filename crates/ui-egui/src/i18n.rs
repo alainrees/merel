@@ -262,6 +262,18 @@ mod tests {
     }
 
     #[test]
+    fn ribbon_buttons_keep_their_icons_in_english() {
+        use crate::helder::{Icon, ribbon_icon, ribbon_icon_only, ribbon_primary};
+        set(Language::English);
+        assert_eq!(ribbon_icon(&tr("mail-reply"), "↩"), Some(Icon::Reply));
+        assert_eq!(ribbon_icon(&tr("calendar-week"), "▥"), Some(Icon::CalendarRange));
+        assert!(ribbon_icon_only(&tr("delete")) && ribbon_icon_only(&tr("theme-dark")));
+        assert!(ribbon_primary(&tr("new-mail")) && !ribbon_primary(&tr("mail-reply")));
+        assert_eq!(dutch("Reply"), "Beantwoorden");
+        set(Language::Dutch);
+    }
+
+    #[test]
     fn the_computers_locale_picks_dutch_or_else_english() {
         for (locale, language) in [
             ("nl-NL", Language::Dutch),

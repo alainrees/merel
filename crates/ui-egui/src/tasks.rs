@@ -1,6 +1,7 @@
 //! The tasks module: a list with an open/done filter, the flagged mail under it (Outlook's
 //! To-Do list shows those too), and the form to add or change a task.
 
+use crate::i18n::tr;
 use chrono::{Days, NaiveDate, NaiveTime};
 use egui::{Align2, Color32, CornerRadius, FontId, Margin, RichText, Sense, Stroke, Ui, vec2};
 use serde_json::json;
@@ -517,23 +518,23 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let selected = app.engine.session.selected_task().cloned();
     let has = selected.is_some();
-    if crate::ribbon_action_hint(ui, t, "✔", "Nieuwe taak", true, Some(&crate::key_hint("Shift+K"))) {
+    if crate::ribbon_action_hint(ui, t, "✔", &tr("new-task"), true, Some(&crate::key_hint("Shift+K"))) {
         app.new_task();
     }
     crate::ribbon_separator(ui);
-    if crate::ribbon_action(ui, t, "✎", "Bewerken", has) {
+    if crate::ribbon_action(ui, t, "✎", &tr("edit"), has) {
         app.edit_selected_task();
     }
-    let flip = if selected.as_ref().is_some_and(|t| t.done) { "Heropenen" } else { "Voltooien" };
-    if crate::ribbon_action(ui, t, "☑", flip, has) {
+    let flip = tr(if selected.as_ref().is_some_and(|t| t.done) { "tasks-reopen" } else { "tasks-complete" });
+    if crate::ribbon_action(ui, t, "☑", &flip, has) {
         app.run("task.complete", serde_json::Value::Null);
     }
     crate::ribbon_separator(ui);
-    if crate::ribbon_action(ui, t, "🗑", "Verwijderen", has) {
+    if crate::ribbon_action(ui, t, "🗑", &tr("delete"), has) {
         app.run("task.delete", serde_json::Value::Null);
         app.tasks.editor = None;
     }
-    if crate::ribbon_action(ui, t, "⟳", "Vernieuwen", !app.engine.session.item_accounts.is_empty()) {
+    if crate::ribbon_action(ui, t, "⟳", &tr("refresh"), !app.engine.session.item_accounts.is_empty()) {
         app.run("sync.refresh", serde_json::Value::Null);
     }
 }
