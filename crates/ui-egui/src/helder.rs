@@ -551,6 +551,52 @@ pub fn primary_text(t: &Tokens, text: &str) -> egui::Button<'static> {
         .min_size(vec2(0.0, BUTTON_HEIGHT))
 }
 
+/// One of a few choices, as a row with a frame of its own: a round mark, `title` and under it
+/// `detail` in quiet type. The chosen one has a frame and a filled mark in the app colour, as
+/// the settings of the new Outlook have them, instead of a bare radio button.
+pub fn choice(ui: &mut Ui, t: &Tokens, title: &str, detail: &str, on: bool) -> Response {
+    let background = ui.painter().add(egui::Shape::Noop);
+    let width = ui.available_width();
+    let frame = Frame::new().inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
+        ui.set_width(width - 24.0);
+        ui.horizontal_top(|ui| {
+            let (mark, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+            let p = ui.painter();
+            if on {
+                p.circle_filled(mark.center(), 9.0, t.accent);
+                p.circle_filled(mark.center(), 3.5, t.on_accent);
+            } else {
+                p.circle_stroke(mark.center(), 8.0, Stroke::new(1.5, t.control_border));
+            }
+            ui.add_space(4.0);
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                // Painted, not a label: the row itself carries the name for a screen reader.
+                let galley = ui.painter().layout_no_wrap(title.to_owned(), FontId::proportional(14.0), t.text);
+                let (rect, _) = ui.allocate_exact_size(galley.size(), Sense::hover());
+                ui.painter().galley(rect.min, galley, t.text);
+                ui.add(egui::Label::new(RichText::new(detail).size(12.0).color(t.text_dim)).wrap());
+            });
+        });
+    });
+    let rect = frame.response.rect;
+    let r = ui.interact(rect, ui.id().with(("choice", title)), Sense::click());
+    r.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, true, on, title));
+    let (fill, stroke) = if on {
+        (t.checked, Stroke::new(2.0, t.accent))
+    } else if r.hovered() {
+        (t.hover, Stroke::new(1.0, t.control_border))
+    } else {
+        (Color32::TRANSPARENT, Stroke::new(1.0, t.card_border))
+    };
+    let shape = egui::epaint::RectShape::new(rect, CONTROL_RADIUS, fill, stroke, egui::StrokeKind::Inside);
+    ui.painter().set(background, shape);
+    if r.has_focus() {
+        ui.painter().rect_stroke(rect.expand(2.0), CONTROL_RADIUS, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
+    }
+    r
+}
+
 /// A quiet button that opens a menu, with a chevron after its label; `icon` goes before it.
 pub fn menu_button<R>(ui: &mut Ui, t: &Tokens, icon: Option<Icon>, text: impl Into<WidgetText>, add: impl FnOnce(&mut Ui) -> R) -> Response {
     let text = text.into();
@@ -912,10 +958,13 @@ fn own_window<R>(ctx: &egui::Context, t: &Tokens, id: &str, title: &str, shape: 
     // off screen or behind the main one. Inside the main window (embedded) egui places it.
     let main = if ctx.embed_viewports() { None } else { ctx.input(|i| i.viewport().outer_rect) };
     let height_id = egui::Id::new(id).with("popup-height");
+    let height: Option<f32> = ctx.data(|d| d.get_temp(height_id));
     let size = match shape {
         Shape::Item(size) => size,
-        Shape::Popup(width, _) => vec2(width + 2.0 * (POPUP_GROUND + POPUP_CARD), ctx.data(|d| d.get_temp(height_id)).unwrap_or(200.0)),
+        Shape::Popup(width, _) => vec2(width + 2.0 * (POPUP_GROUND + POPUP_CARD), height.unwrap_or(200.0)),
     };
+    // A dialog is placed for good once its height is known, so it is centred as it is.
+    let settled = matches!(shape, Shape::Item(_)) || height.is_some();
     let (viewport, place, new) = ctx.data_mut(|d| {
         let w = d.get_temp_mut_or_default::<Windows>(egui::Id::new(WINDOWS));
         // Each opening is a window of its own. Reusing the one just closed, still kept hidden
@@ -938,7 +987,9 @@ fn own_window<R>(ctx: &egui::Context, t: &Tokens, id: &str, title: &str, shape: 
                     Shape::Item(_) => r.min + vec2(60.0, 60.0),
                     Shape::Popup(..) => (r.center() - size / 2.0).max(r.min + vec2(20.0, 60.0)),
                 });
-                if let Some(at) = at {
+                if let Some(at) = at
+                    && settled
+                {
                     w.placed.push((viewport, at));
                 }
                 at
