@@ -34,6 +34,7 @@ pub mod snooze;
 pub mod sync;
 pub mod tasks;
 pub mod templates;
+pub mod unified;
 pub mod view;
 pub mod worker;
 
@@ -542,6 +543,7 @@ impl Session {
             self.selected_folder = self.folders.iter().find(|f| f.kind == FolderKind::Inbox).map(|f| f.id.clone());
             self.selected_message = None;
         }
+        self.leave_unified_if_alone();
         self.calendars.retain(|c| c.account_id.as_deref() != Some(account_id));
         if self.calendar_colors.remove(&Self::account_calendar_id(account_id)).is_some() {
             self.calendar_dirty = true;
@@ -633,11 +635,13 @@ impl Session {
         let query = search::Query::parse(&self.search);
         let now = snooze::now();
         let hits = self.current_hits().map(|h| &h.ids);
+        // The selected folder, or each account's folder behind an "Alle accounts" one.
+        let members = self.selected_folder.as_deref().map(|id| self.members(id)).unwrap_or_default();
         let mut list: Vec<&MessageHeader> = self
             .messages
             .iter()
             .filter(|m| {
-                let in_folder = self.selected_folder.as_deref() == Some(m.folder_id.as_str());
+                let in_folder = members.contains(&m.folder_id);
                 if query.is_empty() {
                     in_folder
                 } else {
@@ -715,10 +719,14 @@ impl Session {
         draft_id
     }
 
-    /// The account to send from: the selected folder's, else the first.
+    /// The account to send from: the selected folder's, else (in an "Alle accounts" folder)
+    /// the selected message's, else the first.
     pub fn current_account(&self) -> Option<&Account> {
-        let by_folder =
-            self.selected_folder.as_deref().and_then(|f| self.folder(f)).and_then(|f| self.accounts.iter().find(|a| a.id == f.account_id));
+        let folder = match self.selected_folder.as_deref() {
+            Some(id) if unified::is_unified(id) => self.selected().map(|m| m.folder_id.as_str()),
+            id => id,
+        };
+        let by_folder = folder.and_then(|f| self.folder(f)).and_then(|f| self.accounts.iter().find(|a| a.id == f.account_id));
         by_folder.or_else(|| self.accounts.first())
     }
 
@@ -737,7 +745,7 @@ impl Session {
         !self.pending.is_empty() || !self.loading.is_empty() || self.outbox.values().any(|s| *s == SendState::Sending)
     }
 
-    fn folder_of_kind(&self, account_id: &str, kind: FolderKind) -> Option<&Folder> {
+    pub(crate) fn folder_of_kind(&self, account_id: &str, kind: FolderKind) -> Option<&Folder> {
         self.folders.iter().find(|f| f.account_id == account_id && f.kind == kind)
     }
 
@@ -785,6 +793,13 @@ impl Session {
                 match self.selected_folder.clone().filter(|id| self.folder(id).is_some_and(|f| f.account_id == account_id)) {
                     // The selected folder came from the cache: its list is refreshed.
                     Some(selected) => self.request_headers(&selected),
+                    // "Alle accounts" is open: this account's folder of that kind joins it.
+                    None if self.selected_folder.as_deref().is_some_and(unified::is_unified) => {
+                        let kind = self.selected_folder.as_deref().and_then(unified::kind_of);
+                        if let Some(id) = kind.and_then(|k| self.folder_of_kind(&account_id, k)).map(|f| f.id.clone()) {
+                            self.request_headers(&id);
+                        }
+                    }
                     None => {
                         if self.selected_folder.is_none()
                             && let Some(inbox) = self.folder_of_kind(&account_id, FolderKind::Inbox).map(|f| f.id.clone())
@@ -961,11 +976,13 @@ impl Session {
         let online: Vec<String> =
             self.accounts.iter().filter(|a| self.status.get(&a.id) == Some(&AccountStatus::Online)).map(|a| a.id.clone()).collect();
         let mut folders: Vec<String> = online.iter().filter_map(|a| self.folder_of_kind(a, FolderKind::Inbox)).map(|f| f.id.clone()).collect();
-        if let Some(selected) = self.selected_folder.as_deref().and_then(|id| self.folder(id))
-            && online.contains(&selected.account_id)
-            && !folders.contains(&selected.id)
-        {
-            folders.push(selected.id.clone());
+        for selected in self.selected_folder.as_deref().map(|id| self.members(id)).unwrap_or_default() {
+            if let Some(f) = self.folder(&selected)
+                && online.contains(&f.account_id)
+                && !folders.contains(&f.id)
+            {
+                folders.push(f.id.clone());
+            }
         }
         for id in folders {
             self.request_headers(&id);
@@ -988,6 +1005,9 @@ impl Session {
     /// Whether `folder_id` may have mail older than what is listed, and nothing is being
     /// fetched for it right now.
     pub fn can_load_older(&self, folder_id: &str) -> bool {
+        if unified::is_unified(folder_id) {
+            return self.members(folder_id).iter().any(|m| self.can_load_older(m));
+        }
         let Some(f) = self.folder(folder_id) else { return false };
         f.account_id != SAMPLE_ACCOUNT
             && !self.complete_folders.contains(folder_id)

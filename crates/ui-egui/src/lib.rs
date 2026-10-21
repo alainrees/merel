@@ -1170,8 +1170,9 @@ fn folder_icon(kind: FolderKind) -> &'static str {
 }
 
 /// One row of the folder pane: icon, name and the unread count, highlighted when it is the
-/// open folder. `hint` is shown on hover, when there is one.
-fn folder_row(ui: &mut Ui, t: &Tokens, f: &merel_model::Folder, on: bool, hint: Option<String>) -> egui::Response {
+/// open folder. `hint` is shown on hover, when there is one; `label` is what a screen reader
+/// says instead of the name, when the name alone would not tell the row apart.
+fn folder_row(ui: &mut Ui, t: &Tokens, f: &merel_model::Folder, on: bool, hint: Option<String>, label: Option<&str>) -> egui::Response {
     let r = ui.add_sized(
         [ui.available_width(), 28.0],
         egui::Button::new("")
@@ -1180,7 +1181,7 @@ fn folder_row(ui: &mut Ui, t: &Tokens, f: &merel_model::Folder, on: bool, hint: 
             .stroke(Stroke::NONE)
             .corner_radius(helder::CONTROL_RADIUS),
     );
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &f.name));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.unwrap_or(&f.name)));
     let r = match hint {
         Some(h) => r.on_hover_text(h),
         None => r,
@@ -1208,105 +1209,162 @@ fn folder_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .show_separator_line(false)
         .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin { left: 4, right: 10, top: 4, bottom: 10 }))
         .show(ui, |ui| {
-            let mut pick = None;
-            let mut pick_drafts = None;
-            let mut drop_on: Option<(String, String)> = None;
-            let mut menu_on: Option<(egui::Response, String, FolderKind)> = None;
-            let mut open_accounts = false;
-            // Outlook's "Favorieten": the pinned folders of every account, above the accounts.
-            let favorites: Vec<merel_model::Folder> = app.view.favorites.iter().filter_map(|id| app.engine.session.folder(id).cloned()).collect();
-            if !favorites.is_empty() {
-                ui.label(RichText::new("★ Favorieten").size(12.0).strong().color(t.text_dim));
-                ui.add_space(4.0);
-                for f in &favorites {
-                    let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
-                    let account = app.engine.session.accounts.iter().find(|a| a.id == f.account_id).map(|a| a.address.email().to_string());
-                    let r = folder_row(ui, t, f, on, account.map(|a| format!("{} van {a}", f.name)));
-                    if let Some(dragged) = r.dnd_release_payload::<DraggedMessage>() {
-                        drop_on = Some((dragged.0.clone(), f.id.clone()));
-                    }
-                    if r.clicked() {
-                        pick = Some(f.id.clone());
-                    }
-                    if r.secondary_clicked() || r.context_menu_opened() {
-                        menu_on = Some((r, f.id.clone(), f.kind));
-                    }
-                }
-                ui.add_space(12.0);
-            }
-            for account in &app.engine.session.accounts {
-                // Each account under a small heading: its name and address, as the design has it.
-                ui.horizontal(|ui| {
-                    let (name, email) = (account.address.display(), account.address.email());
-                    let heading = if name == email { email.to_string() } else { format!("{name} · {email}") };
-                    ui.label(RichText::new(heading).size(12.0).strong().color(t.text_dim));
-                    let (dot, tip) = match app.engine.session.status.get(&account.id) {
-                        Some(AccountStatus::Online) => (t.accent, "Verbonden"),
-                        Some(AccountStatus::Connecting) => (t.text_dim, "Verbinden…"),
-                        Some(AccountStatus::Error(_)) => (t.flag, "Fout, zie de statusbalk"),
-                        _ => (t.border, "Niet verbonden"),
-                    };
-                    let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
-                    ui.painter().circle_filled(r.center(), 4.0, dot);
-                    ui.allocate_rect(r, Sense::hover()).on_hover_text(tip);
-                });
-                ui.add_space(4.0);
-                for f in app.engine.session.folders.iter().filter(|f| f.account_id == account.id) {
-                    let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
-                    let r = folder_row(ui, t, f, on, None);
-                    if let Some(dragged) = r.dnd_release_payload::<DraggedMessage>() {
-                        drop_on = Some((dragged.0.clone(), f.id.clone()));
-                    }
-                    if r.clicked() {
-                        pick = Some(f.id.clone());
-                    }
-                    if r.secondary_clicked() || r.context_menu_opened() {
-                        menu_on = Some((r, f.id.clone(), f.kind));
-                    }
-                }
-                // Messages put aside on this computer, next to the server's folders.
-                let drafts = app.engine.session.drafts_of(&account.id).len();
-                if drafts > 0 {
-                    let on = app.drafts_for.as_deref() == Some(account.id.as_str());
-                    let r = ui.add_sized(
-                        [ui.available_width(), 28.0],
-                        egui::Button::new("").fill(if on { t.checked } else { Color32::TRANSPARENT }).frame_when_inactive(on),
-                    );
-                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Concepten op deze computer"));
-                    let r = r.on_hover_text("Berichten die je opzij hebt gezet; ze staan alleen op deze computer.");
-                    let rect = r.rect.shrink2(vec2(8.0, 0.0));
-                    let p = ui.painter();
-                    let font = egui::FontId::proportional(13.5);
-                    p.text(rect.left_center(), egui::Align2::LEFT_CENTER, "📝  Concepten (deze computer)", font.clone(), t.text);
-                    p.text(rect.right_center(), egui::Align2::RIGHT_CENTER, drafts.to_string(), font, t.text_dim);
-                    if r.clicked() {
-                        pick_drafts = Some(account.id.clone());
-                    }
-                }
-            }
-            ui.add_space(12.0);
-            // Outlook's "Zoekmappen": the saved searches, under the accounts.
-            search_folders::section(app, ui, t);
-            if ui.add(egui::Button::new(RichText::new("+ Account toevoegen").color(t.accent_text)).frame(false)).clicked() {
-                open_accounts = true;
-            }
-            if open_accounts {
-                app.tab = Tab::File;
-            }
-            if let Some(id) = pick {
-                app.drafts_for = None;
-                app.run("folder.select", json!({ "id": id }));
-            }
-            if let Some(id) = pick_drafts {
-                app.drafts_for = Some(id);
-            }
-            if let Some((message, folder)) = drop_on {
-                app.run("message.move", json!({ "id": message, "folder_id": folder }));
-            }
-            if let Some((r, id, kind)) = menu_on {
-                folders::context_menu(app, &r, &id, kind);
-            }
+            // Several accounts with all their folders run past the window: the pane scrolls.
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| folder_list(app, ui, t));
         });
+}
+
+fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let mut pick = None;
+    let mut pick_drafts = None;
+    let mut drop_on: Option<(String, String)> = None;
+    let mut menu_on: Option<(egui::Response, String, FolderKind)> = None;
+    let mut open_accounts = false;
+    let mut unified_read = None;
+    // Outlook's "Favorieten": the pinned folders of every account, above the accounts.
+    let favorites: Vec<merel_model::Folder> = app.view.favorites.iter().filter_map(|id| app.engine.session.folder(id).cloned()).collect();
+    if !favorites.is_empty() {
+        ui.label(RichText::new("★ Favorieten").size(12.0).strong().color(t.text_dim));
+        ui.add_space(4.0);
+        for f in &favorites {
+            let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
+            let account = app.engine.session.accounts.iter().find(|a| a.id == f.account_id).map(|a| a.address.email().to_string());
+            let r = folder_row(ui, t, f, on, account.map(|a| format!("{} van {a}", f.name)), None);
+            if let Some(dragged) = r.dnd_release_payload::<DraggedMessage>() {
+                drop_on = Some((dragged.0.clone(), f.id.clone()));
+            }
+            if r.clicked() {
+                pick = Some(f.id.clone());
+            }
+            if r.secondary_clicked() || r.context_menu_opened() {
+                menu_on = Some((r, f.id.clone(), f.kind));
+            }
+        }
+        ui.add_space(12.0);
+    }
+    // Outlook's "Alle accounts": each special folder once, with the mail of every
+    // account in it, as long as there is more than one account.
+    let unified = app.engine.session.unified_folders();
+    if !unified.is_empty() {
+        if folding_heading(ui, t, merel_engine::unified::HEADING, !app.view.all_accounts_closed).clicked() {
+            app.view.all_accounts_closed = !app.view.all_accounts_closed;
+            app.save_view(ui.ctx());
+        }
+        if !app.view.all_accounts_closed {
+            ui.add_space(4.0);
+            for f in &unified {
+                let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
+                let label = format!("{} (alle accounts)", f.name);
+                let r = folder_row(ui, t, f, on, Some(format!("{} van alle accounts samen", f.name)), Some(&label));
+                if let Some(dragged) = r.dnd_release_payload::<DraggedMessage>()
+                    && let Some(target) = app.engine.session.drop_target(&f.id, &dragged.0)
+                {
+                    drop_on = Some((dragged.0.clone(), target));
+                }
+                if r.clicked() {
+                    pick = Some(f.id.clone());
+                }
+                r.context_menu(|ui| {
+                    if ui.button("Alles als gelezen markeren").clicked() {
+                        unified_read = Some(f.id.clone());
+                        ui.close();
+                    }
+                });
+            }
+        }
+        ui.add_space(12.0);
+    }
+    for account in &app.engine.session.accounts {
+        // Each account under a small heading: its name and address, as the design has it.
+        ui.horizontal(|ui| {
+            let (name, email) = (account.address.display(), account.address.email());
+            let heading = if name == email { email.to_string() } else { format!("{name} · {email}") };
+            ui.label(RichText::new(heading).size(12.0).strong().color(t.text_dim));
+            let (dot, tip) = match app.engine.session.status.get(&account.id) {
+                Some(AccountStatus::Online) => (t.accent, "Verbonden"),
+                Some(AccountStatus::Connecting) => (t.text_dim, "Verbinden…"),
+                Some(AccountStatus::Error(_)) => (t.flag, "Fout, zie de statusbalk"),
+                _ => (t.border, "Niet verbonden"),
+            };
+            let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+            ui.painter().circle_filled(r.center(), 4.0, dot);
+            ui.allocate_rect(r, Sense::hover()).on_hover_text(tip);
+        });
+        ui.add_space(4.0);
+        for f in app.engine.session.folders.iter().filter(|f| f.account_id == account.id) {
+            let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
+            let r = folder_row(ui, t, f, on, None, None);
+            if let Some(dragged) = r.dnd_release_payload::<DraggedMessage>() {
+                drop_on = Some((dragged.0.clone(), f.id.clone()));
+            }
+            if r.clicked() {
+                pick = Some(f.id.clone());
+            }
+            if r.secondary_clicked() || r.context_menu_opened() {
+                menu_on = Some((r, f.id.clone(), f.kind));
+            }
+        }
+        // Messages put aside on this computer, next to the server's folders.
+        let drafts = app.engine.session.drafts_of(&account.id).len();
+        if drafts > 0 {
+            let on = app.drafts_for.as_deref() == Some(account.id.as_str());
+            let r = ui.add_sized(
+                [ui.available_width(), 28.0],
+                egui::Button::new("").fill(if on { t.checked } else { Color32::TRANSPARENT }).frame_when_inactive(on),
+            );
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Concepten op deze computer"));
+            let r = r.on_hover_text("Berichten die je opzij hebt gezet; ze staan alleen op deze computer.");
+            let rect = r.rect.shrink2(vec2(8.0, 0.0));
+            let p = ui.painter();
+            let font = egui::FontId::proportional(13.5);
+            p.text(rect.left_center(), egui::Align2::LEFT_CENTER, "📝  Concepten (deze computer)", font.clone(), t.text);
+            p.text(rect.right_center(), egui::Align2::RIGHT_CENTER, drafts.to_string(), font, t.text_dim);
+            if r.clicked() {
+                pick_drafts = Some(account.id.clone());
+            }
+        }
+    }
+    ui.add_space(12.0);
+    // Outlook's "Zoekmappen": the saved searches, under the accounts.
+    search_folders::section(app, ui, t);
+    if ui.add(egui::Button::new(RichText::new("+ Account toevoegen").color(t.accent_text)).frame(false)).clicked() {
+        open_accounts = true;
+    }
+    if open_accounts {
+        app.tab = Tab::File;
+    }
+    if let Some(id) = pick {
+        app.drafts_for = None;
+        app.run("folder.select", json!({ "id": id }));
+    }
+    if let Some(id) = pick_drafts {
+        app.drafts_for = Some(id);
+    }
+    if let Some((message, folder)) = drop_on {
+        app.run("message.move", json!({ "id": message, "folder_id": folder }));
+    }
+    if let Some((r, id, kind)) = menu_on {
+        folders::context_menu(app, &r, &id, kind);
+    }
+    if let Some(id) = unified_read {
+        app.run("folder.mark_all_read", json!({ "id": id }));
+    }
+}
+
+/// The heading of a group in the folder pane that folds open and shut, with a chevron that
+/// says which it is.
+fn folding_heading(ui: &mut Ui, t: &Tokens, text: &str, open: bool) -> egui::Response {
+    let r = ui.add_sized([ui.available_width(), 26.0], egui::Button::new("").frame(false));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, true, text));
+    let r = r.on_hover_text(if open { "Inklappen" } else { "Uitklappen" });
+    let rect = r.rect.shrink2(vec2(8.0, 0.0));
+    let chevron = egui::Rect::from_center_size(egui::pos2(rect.left() + 6.0, rect.center().y), vec2(14.0, 14.0));
+    let icon = if open { helder::Icon::ChevronDown } else { helder::Icon::ChevronRight };
+    icon.image(14.0, t.text_dim).paint_at(ui, chevron);
+    // As quiet as the account headings below it.
+    let font = egui::FontId::proportional(12.0);
+    ui.painter().text(egui::pos2(rect.left() + 20.0, rect.center().y), egui::Align2::LEFT_CENTER, text, font, t.text_dim);
+    r
 }
 
 /// The "Verplaatsen naar" window: the folders of the selected message's account.
@@ -1435,14 +1493,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 drafts_list(app, ui, t, &account_id);
                 return;
             }
-            let folder_name = app
-                .engine
-                .session
-                .selected_folder
-                .as_deref()
-                .and_then(|id| app.engine.session.folder(id))
-                .map(|f| f.name.clone())
-                .unwrap_or_default();
+            let folder_name = app.engine.session.selected_folder.as_deref().and_then(|id| app.engine.session.folder_name(id)).unwrap_or_default();
             let searching = app.engine.session.is_searching();
             let count = if searching { Some(app.engine.session.visible_messages().len()) } else { None };
             let mut server_search = false;
@@ -1525,7 +1576,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let mut older = false;
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 let list = app.engine.session.visible_messages();
-                let loading = app.engine.session.selected_folder.as_deref().is_some_and(|f| app.engine.session.loading.contains(f));
+                let loading = app.engine.session.selected_folder.as_deref().is_some_and(|f| app.engine.session.folder_loading(f));
                 if list.is_empty() {
                     ui.add_space(24.0);
                     let msg = if searching && app.engine.session.current_hits().is_some() {
@@ -1748,7 +1799,9 @@ impl MailApp {
         let Some(folder) = self.engine.session.message(id).map(|m| m.folder_id.clone()) else { return };
         self.module = Module::Mail;
         self.drafts_for = None;
-        if self.engine.session.selected_folder.as_deref() != Some(folder.as_str()) {
+        // A message that the open folder lists (an "Alle accounts" one too) is shown there.
+        let listed = self.engine.session.selected_folder.as_deref().is_some_and(|f| self.engine.session.members(f).contains(&folder));
+        if !listed {
             self.run("folder.select", json!({ "id": folder }));
         }
         self.select_message(id);
@@ -3790,6 +3843,66 @@ mod tests {
         h.get_by_label("Zoekmap verwijderen").click();
         h.run();
         assert!(h.state().view.search_folders.is_empty() && h.query_by_label(search_folders::HEADING).is_none());
+    }
+
+    /// Two connected accounts, each with an inbox holding one unread message.
+    fn two_accounts() -> egui_kittest::Harness<'static, MailApp> {
+        use merel_engine::{Event, RemoteFolder, RemoteHeader};
+        let mut engine = Engine::sample();
+        for (email, subject) in [("alain@voorbeeld.nl", "Van het eerste"), ("rees@voorbeeld.org", "Van het tweede")] {
+            let mut f = crate::backstage::AccountForm::default();
+            f.email = email.into();
+            f.password = "x".into();
+            f.suggest();
+            let account = f.account().expect("account");
+            let id = account.id.clone();
+            engine.add_account(account, merel_secrets::Secret::new("x")).expect("add");
+            let inbox = RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: merel_model::FolderKind::Inbox, selectable: true };
+            engine.session.apply(Event::Connected { account_id: id.clone(), folders: vec![inbox], syncs_items: false });
+            let header = RemoteHeader {
+                id: "1".into(),
+                seen: false,
+                flagged: false,
+                answered: false,
+                size: 1,
+                has_attachments: false,
+                categories: Vec::new(),
+                header: merel_mime::parse_header(format!("From: iemand@voorbeeld.nl\r\nSubject: {subject}\r\n\r\n").as_bytes()),
+                date: 1_700_000_000,
+            };
+            engine.session.apply(Event::Headers { folder_id: format!("{id}/INBOX"), headers: vec![header], offset: 0, limit: 200 });
+        }
+        engine.session.take_jobs();
+        engine.session.loading.clear();
+        egui_kittest::Harness::builder().with_size(vec2(1280.0, 800.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(engine))
+    }
+
+    #[test]
+    fn all_accounts_lists_the_mail_of_every_account_and_folds_shut() {
+        let mut h = two_accounts();
+        h.run();
+        h.get_by_label("Postvak IN (alle accounts)").click();
+        h.run();
+        h.get_by_label("Van het eerste");
+        h.get_by_label("Van het tweede");
+        // A reply from the unified inbox goes out from the account the message came to.
+        let second = h.state().engine.session.messages.iter().find(|m| m.subject == "Van het tweede").map(|m| m.id.clone()).expect("listed");
+        h.state_mut().select_message(&second);
+        let account = h.state().engine.session.current_account().map(|a| a.address.email().to_string());
+        assert_eq!(account.as_deref(), Some("rees@voorbeeld.org"));
+
+        // The body is on its way, so the window repaints on a timer: a bounded number of steps.
+        h.get_by_label(merel_engine::unified::HEADING).click();
+        h.run_steps(2);
+        assert!(h.query_by_label("Postvak IN (alle accounts)").is_none());
+        assert!(h.state().view.all_accounts_closed);
+    }
+
+    #[test]
+    fn one_account_has_no_all_accounts_group() {
+        let mut h = harness();
+        h.run();
+        assert!(h.query_by_label(merel_engine::unified::HEADING).is_none());
     }
 
     #[test]

@@ -133,6 +133,8 @@ pub struct ViewPrefs {
     pub welcomed: bool,
     /// The count on the app icon and the computer's notifications (Bestand > Meldingen).
     pub notifications: crate::notifications::Prefs,
+    /// Whether the "Alle accounts" group at the top of the folder pane is folded shut.
+    pub all_accounts_closed: bool,
 }
 
 /// How many recent searches the menu next to the search box keeps.
@@ -162,6 +164,7 @@ impl Default for ViewPrefs {
             skipped_version: None,
             welcomed: false,
             notifications: Default::default(),
+            all_accounts_closed: false,
         }
     }
 }

@@ -142,13 +142,19 @@ pub(crate) fn str_param<'a>(params: &'a Value, key: &'static str) -> Result<&'a 
 
 fn folder_select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let id = str_param(params, "id")?.to_string();
-    s.folder(&id).ok_or(CommandError::NotFound)?;
-    s.selected_folder = Some(id.clone());
+    // An "Alle accounts" folder opens each account's folder of its kind.
+    let members = s.members(&id);
+    if members.is_empty() {
+        return Err(CommandError::NotFound);
+    }
+    s.selected_folder = Some(id);
     s.selected_message = None;
     s.marked.clear();
-    let loaded = s.messages.iter().any(|m| m.folder_id == id);
-    if !loaded {
-        s.request_headers(&id);
+    for id in members {
+        let loaded = s.messages.iter().any(|m| m.folder_id == id);
+        if !loaded {
+            s.request_headers(&id);
+        }
     }
     Ok(())
 }
@@ -156,13 +162,17 @@ fn folder_select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 /// `folder.older`: the page of mail below what the selected folder lists.
 fn folder_older(s: &mut Session, _: &Value) -> Result<(), CommandError> {
     let id = s.selected_folder.clone().ok_or(CommandError::NoSelection)?;
-    s.request_older(&id);
+    for id in s.members(&id) {
+        s.request_older(&id);
+    }
     Ok(())
 }
 
 fn folder_refresh(s: &mut Session, _: &Value) -> Result<(), CommandError> {
     let id = s.selected_folder.clone().ok_or(CommandError::NoSelection)?;
-    s.request_headers(&id);
+    for id in s.members(&id) {
+        s.request_headers(&id);
+    }
     Ok(())
 }
 

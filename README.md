@@ -178,7 +178,11 @@ the folder pane shows the list the server answers with, so it needs a connection
 and menu empty a folder ("Map leegmaken", after asking: everything in it goes for good, on the
 server too) and mark all its mail read. "Toevoegen aan Favorieten" (same tab and menu) pins a folder
 of any account under "Favorieten" at the top of the folder pane, as Outlook has it; the choice is kept
-in `view.json`. Deleting a message that is already in "Verwijderde
+in `view.json`. With more than one account, "Alle accounts" above the accounts lists Postvak IN,
+Concepten, Verzonden items, Archief, Ongewenste e-mail and Verwijderde items once, each showing the
+mail of every account together with the unread counts added up, as in Outlook; it is a view, so a
+reply goes out from the account the message came to and a delete, move or drop stays in that
+account. The group folds shut with its chevron. Deleting a message that is already in "Verwijderde
 items" removes it for good, after a question; Exchange and Microsoft 365 keep such mail
 recoverable on the server for a while, as they do for Outlook.
 
