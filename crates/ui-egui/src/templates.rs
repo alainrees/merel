@@ -2,6 +2,7 @@
 //! drops a saved piece of text into the message, above the signature and the quoted text, and
 //! the window behind "Sjablonen beheren…" makes and changes them.
 
+use crate::i18n::tr;
 use egui::{RichText, Ui};
 use serde_json::json;
 
@@ -10,12 +11,24 @@ use merel_model::Template;
 
 use crate::{MailApp, Tokens};
 
-pub const MENU: &str = "Sjablonen";
-pub const SAVE_AS: &str = "Tekst opslaan als sjabloon…";
-pub const MANAGE: &str = "Sjablonen beheren…";
-pub const HEADING: &str = "Sjablonen";
-pub const NEW: &str = "Nieuw sjabloon";
-pub const NONE_YET: &str = "Nog geen sjablonen.";
+pub fn menu_label() -> String {
+    tr("templates-menu")
+}
+pub fn save_as() -> String {
+    tr("template-save-as")
+}
+pub fn manage() -> String {
+    tr("templates-manage")
+}
+pub fn heading() -> String {
+    tr("templates-heading")
+}
+pub fn new() -> String {
+    tr("template-new")
+}
+pub fn none_yet() -> String {
+    tr("templates-none")
+}
 
 /// What the window remembers between frames.
 #[derive(Default)]
@@ -98,9 +111,9 @@ pub fn own_text(body: &str) -> &str {
 
 fn save_error(e: &CommandError) -> String {
     match e {
-        CommandError::Param("name") => "Geef het sjabloon een naam van hoogstens 60 tekens.".into(),
-        CommandError::Param("text") => "Schrijf de tekst van het sjabloon; hoogstens 20.000 tekens.".into(),
-        CommandError::Store(m) => format!("Opslaan is mislukt: {m}"),
+        CommandError::Param("name") => tr("template-name-rule"),
+        CommandError::Param("text") => tr("template-text-rule"),
+        CommandError::Store(m) => crate::i18n::tr_args("template-save-failed", &[("error", m.to_string().into())]),
         e => e.to_string(),
     }
 }
@@ -109,7 +122,7 @@ fn save_error(e: &CommandError) -> String {
 /// so far, and the window.
 pub fn menu(ui: &mut Ui, t: &crate::Tokens, templates: &[&Template]) -> Option<Pick> {
     let mut pick = None;
-    crate::helder::menu_button(ui, t, Some(crate::helder::Icon::FileText), RichText::new(MENU).size(14.0).color(t.text), |ui| {
+    crate::helder::menu_button(ui, t, Some(crate::helder::Icon::FileText), RichText::new(menu_label()).size(14.0).color(t.text), |ui| {
         for t in templates {
             if ui.button(&t.name).on_hover_text(t.first_line()).clicked() {
                 pick = Some(Pick::Insert(t.text.clone()));
@@ -117,19 +130,19 @@ pub fn menu(ui: &mut Ui, t: &crate::Tokens, templates: &[&Template]) -> Option<P
             }
         }
         if templates.is_empty() {
-            ui.label(RichText::new(NONE_YET).size(12.0));
+            ui.label(RichText::new(none_yet()).size(12.0));
         }
         ui.separator();
-        if ui.button(SAVE_AS).clicked() {
+        if ui.button(save_as()).clicked() {
             pick = Some(Pick::SaveAs);
             ui.close();
         }
-        if ui.button(MANAGE).clicked() {
+        if ui.button(manage()).clicked() {
             pick = Some(Pick::Manage);
             ui.close();
         }
     })
-    .on_hover_text("Een vaste tekst in het bericht zetten, zoals Mijn sjablonen in Outlook.");
+    .on_hover_text(tr("templates-menu-hint"));
     pick
 }
 
@@ -158,42 +171,38 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut cancel = false;
     let mut close = false;
     let mut form_state = app.templates.as_mut().and_then(|s| s.form.take());
-    if crate::helder::popup(ctx, t, "templates", HEADING, 460.0, |ui| {
-        ui.label(
-            RichText::new("Een sjabloon is een vaste tekst die je met één klik in een bericht zet, via het menu Sjablonen in het opstelvenster.")
-                .size(12.0)
-                .color(t.text_dim),
-        );
+    if crate::helder::popup(ctx, t, "templates", &heading(), 460.0, |ui| {
+        ui.label(RichText::new(crate::i18n::tr("templates-intro")).size(12.0).color(t.text_dim));
         ui.add_space(6.0);
         if let Some(form) = form_state.as_mut() {
-            ui.label(RichText::new(if form.id.is_some() { "Sjabloon bewerken" } else { NEW }).strong().color(t.text));
+            ui.label(RichText::new(if form.id.is_some() { tr("template-edit") } else { tr("template-new") }).strong().color(t.text));
             ui.horizontal(|ui| {
-                ui.add_sized([60.0, 24.0], egui::Label::new(RichText::new("Naam").color(t.text_dim)));
+                ui.add_sized([60.0, 24.0], egui::Label::new(RichText::new(tr("name")).color(t.text_dim)));
                 ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(360.0));
             });
             ui.horizontal(|ui| {
-                ui.add_sized([60.0, 24.0], egui::Label::new(RichText::new("Tekst").color(t.text_dim)));
+                ui.add_sized([60.0, 24.0], egui::Label::new(RichText::new(tr("text")).color(t.text_dim)));
                 ui.add(egui::TextEdit::multiline(&mut form.text).desired_width(360.0).desired_rows(8));
             });
             if let Some(e) = &form.error {
                 ui.label(RichText::new(e).color(t.flag));
             }
             ui.horizontal(|ui| {
-                if ui.add(crate::helder::primary_text(t, "Opslaan")).clicked() {
+                if ui.add(crate::helder::primary_text(t, &tr("save"))).clicked() {
                     save = true;
                 }
-                if ui.button("Annuleren").clicked() {
+                if ui.button(tr("cancel")).clicked() {
                     cancel = true;
                 }
             });
             return;
         }
-        if ui.add(crate::helder::primary_text(t, NEW)).clicked() {
+        if ui.add(crate::helder::primary_text(t, &new())).clicked() {
             action = Some(Action::New);
         }
         ui.add_space(6.0);
         if templates.is_empty() {
-            ui.label(RichText::new(NONE_YET).color(t.text_dim));
+            ui.label(RichText::new(none_yet()).color(t.text_dim));
         }
         for tpl in &templates {
             egui::Frame::new().fill(t.list).corner_radius(6).inner_margin(8).show(ui, |ui| {
@@ -201,10 +210,10 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 ui.label(RichText::new(&tpl.name).strong().color(t.text));
                 ui.label(RichText::new(tpl.first_line()).size(12.0).color(t.text_dim));
                 ui.horizontal(|ui| {
-                    if ui.button("Bewerken").clicked() {
+                    if ui.button(tr("edit")).clicked() {
                         action = Some(Action::Edit(tpl.id.clone()));
                     }
-                    if ui.button("Sjabloon verwijderen").clicked() {
+                    if ui.button(tr("template-delete")).clicked() {
                         action = Some(Action::Delete(tpl.id.clone()));
                     }
                 });
@@ -212,7 +221,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             ui.add_space(4.0);
         }
         ui.add_space(6.0);
-        if ui.button("Sluiten").clicked() {
+        if ui.button(tr("close")).clicked() {
             close = true;
         }
     }) {

@@ -100,8 +100,8 @@ impl Session {
     fn keep_as_draft(&mut self, id: &str, why: String) {
         let Some(d) = self.drafts.iter_mut().find(|d| d.id == id) else { return };
         d.send_at = None;
-        let subject = if d.subject.is_empty() { "(Geen onderwerp)" } else { d.subject.as_str() };
-        self.scheduled_failures.push(format!("Het uitgestelde bericht \"{subject}\" is niet verzonden en staat weer bij Concepten. {why}"));
+        let subject = if d.subject.is_empty() { merel_i18n::tr("no-subject-capital") } else { d.subject.clone() };
+        self.scheduled_failures.push(merel_i18n::tr_args("scheduled-failed", &[("subject", subject.into()), ("why", why.to_string().into())]));
     }
 
     /// What went wrong with scheduled messages since the last call, for the status bar.

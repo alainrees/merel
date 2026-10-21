@@ -69,16 +69,17 @@ impl Form {
 pub fn describe(q: &QuickStep, folder_name: Option<&str>) -> String {
     let mut actions = Vec::new();
     if q.move_to.is_some() {
-        actions.push(format!("naar {}", folder_name.unwrap_or("een map die er niet meer is")));
+        actions
+            .push(crate::i18n::tr_args("action-move-to", &[("folder", folder_name.map_or_else(|| tr("action-folder-gone"), str::to_string).into())]));
     }
     if q.mark_read {
-        actions.push("markeren als gelezen".to_string());
+        actions.push(tr("action-mark-read"));
     }
     if q.flag {
-        actions.push("vlag zetten".to_string());
+        actions.push(tr("action-flag"));
     }
     if !q.categories.is_empty() {
-        actions.push(format!("categorie {}", q.categories.join(", ")));
+        actions.push(crate::i18n::tr_args("action-categories", &[("names", q.categories.join(", ").into())]));
     }
     actions.join(", ")
 }
@@ -117,27 +118,25 @@ impl MailApp {
 
 fn run_error(e: &CommandError) -> String {
     match e {
-        CommandError::NoSelection => "Selecteer eerst een bericht.".into(),
-        CommandError::Param("move_to") => "De map van deze snelle stap bestaat niet meer; de rest is wel gedaan.".into(),
-        CommandError::Param("id") => "Deze snelle stap hoort bij een ander account.".into(),
+        CommandError::NoSelection => tr("notice-select-message"),
+        CommandError::Param("move_to") => tr("quick-step-folder-gone"),
+        CommandError::Param("id") => tr("quick-step-other-account"),
         e => e.to_string(),
     }
 }
 
 fn save_error(e: &CommandError) -> String {
     match e {
-        CommandError::Param("name") => "Geef de snelle stap een naam van hoogstens 40 tekens.".into(),
-        CommandError::Param("move_to") => {
-            "Kies wat de snelle stap moet doen: verplaatsen, markeren als gelezen, een vlag zetten of een categorie geven.".into()
-        }
-        CommandError::Param("categories") => "Kies categorieën uit de lijst.".into(),
-        CommandError::Param("account_id") => "Kies een account.".into(),
-        CommandError::Store(m) => format!("Opslaan is mislukt: {m}"),
+        CommandError::Param("name") => tr("quick-step-name-rule"),
+        CommandError::Param("move_to") => tr("quick-step-action-rule"),
+        CommandError::Param("categories") => tr("choose-categories"),
+        CommandError::Param("account_id") => tr("choose-account"),
+        CommandError::Store(m) => crate::i18n::tr_args("save-failed", &[("error", m.to_string().into())]),
         e => e.to_string(),
     }
 }
 
-/// The "Snelle stappen" group in the ribbon: a small button per step of the current account
+/// The "Quick steps" group in the ribbon: a small button per step of the current account
 /// (the first nine also answer to Ctrl+Shift+1 to 9) and one to manage them.
 pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let steps: Vec<(String, String)> = app
@@ -175,13 +174,13 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
         ui.add_sized([110.0, 22.0], egui::Label::new(RichText::new(text).color(t.text)));
     };
     ui.horizontal(|ui| {
-        label(ui, "Naam");
-        ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(280.0).hint_text("Bijvoorbeeld: Klaar"));
+        label(ui, &tr("name"));
+        ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(280.0).hint_text(tr("quick-step-name-example")));
     });
     if accounts.len() > 1 {
         let current = accounts.iter().find(|(id, _)| *id == form.account_id).map(|(_, e)| e.as_str()).unwrap_or("");
         ui.horizontal(|ui| {
-            label(ui, "Account");
+            label(ui, &tr("account"));
             egui::ComboBox::from_id_salt("quickstep-account").selected_text(current).width(280.0).show_ui(ui, |ui| {
                 for (id, email) in &accounts {
                     if ui.selectable_value(&mut form.account_id, id.clone(), email).changed() {
@@ -194,9 +193,9 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
     let folders: Vec<(String, String)> =
         app.engine.session.folders.iter().filter(|f| f.account_id == form.account_id).map(|f| (f.id.clone(), f.name.clone())).collect();
     ui.horizontal(|ui| {
-        label(ui, "Doet");
+        label(ui, &tr("quick-step-does"));
         let mut moving = form.move_to.is_some();
-        if ui.checkbox(&mut moving, "verplaatsen naar").changed() {
+        if ui.checkbox(&mut moving, tr("action-move-check")).changed() {
             form.move_to = if moving { folders.first().map(|(id, _)| id.clone()) } else { None };
         }
         let current = form.move_to.as_ref().and_then(|id| folders.iter().find(|(f, _)| f == id)).map(|(_, n)| n.as_str()).unwrap_or("map");
@@ -210,13 +209,13 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
     });
     ui.horizontal(|ui| {
         ui.add_space(114.0);
-        ui.checkbox(&mut form.mark_read, "markeren als gelezen");
-        ui.checkbox(&mut form.flag, "vlag zetten");
+        ui.checkbox(&mut form.mark_read, tr("action-mark-read"));
+        ui.checkbox(&mut form.flag, tr("action-flag"));
     });
     let known: Vec<String> = app.engine.session.categories.iter().map(|c| c.name.clone()).collect();
     if !known.is_empty() {
         ui.horizontal(|ui| {
-            label(ui, "Categorie");
+            label(ui, &tr("category"));
             ui.horizontal_wrapped(|ui| {
                 ui.set_max_width(300.0);
                 for name in &known {
@@ -239,8 +238,8 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
     let mut save = false;
     let mut cancel = false;
     ui.horizontal(|ui| {
-        save = ui.add(crate::helder::primary_text(t, "Snelle stap opslaan")).clicked();
-        cancel = ui.add(egui::Button::new("Annuleren").min_size(vec2(90.0, 26.0))).clicked();
+        save = ui.add(crate::helder::primary_text(t, &tr("quick-step-save"))).clicked();
+        cancel = ui.add(egui::Button::new(crate::i18n::tr("cancel")).min_size(vec2(90.0, 26.0))).clicked();
     });
     (save, cancel)
 }
@@ -265,29 +264,22 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut cancel = false;
     let mut close = false;
     let mut form_state = app.quick_steps.as_mut().and_then(|s| s.form.take());
-    if crate::helder::popup(ctx, t, "quick-steps", "Snelle stappen", 460.0, |ui| {
-        ui.label(
-            RichText::new(format!(
-                "Een snelle stap is een eigen knop op het tabblad Start die in één keer meerdere dingen met het geselecteerde bericht doet; de eerste negen ook met {} tot 9.",
-                key_hint("Shift+1")
-            ))
-            .size(12.0)
-            .color(t.text_dim),
-        );
+    if crate::helder::popup(ctx, t, "quick-steps", &tr("quick-steps"), 460.0, |ui| {
+        ui.label(RichText::new(crate::i18n::tr_args("quick-steps-intro", &[("key", key_hint("Shift+1").into())])).size(12.0).color(t.text_dim));
         ui.add_space(6.0);
         if let Some(form) = form_state.as_mut() {
-            ui.label(RichText::new(if form.id.is_some() { "Snelle stap bewerken" } else { "Nieuwe snelle stap" }).strong().color(t.text));
+            ui.label(RichText::new(tr(if form.id.is_some() { "quick-step-edit" } else { "quick-step-new" })).strong().color(t.text));
             let (s, c) = form_ui(app, ui, t, form);
             save = s;
             cancel = c;
             return;
         }
-        if ui.add(crate::helder::primary_text(t, "Nieuwe snelle stap")).clicked() {
+        if ui.add(crate::helder::primary_text(t, &tr("quick-step-new"))).clicked() {
             action = Some(Action::New);
         }
         ui.add_space(6.0);
         if steps.is_empty() {
-            ui.label(RichText::new("Nog geen snelle stappen.").color(t.text_dim));
+            ui.label(RichText::new(tr("quick-steps-none")).color(t.text_dim));
         }
         for q in &steps {
             egui::Frame::new().fill(t.list).corner_radius(6).inner_margin(8).show(ui, |ui| {
@@ -300,10 +292,10 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 });
                 ui.label(RichText::new(describe(q, q.move_to.as_deref().and_then(folder_name).as_deref())).size(12.0).color(t.text_dim));
                 ui.horizontal(|ui| {
-                    if ui.button("Bewerken").clicked() {
+                    if ui.button(tr("edit")).clicked() {
                         action = Some(Action::Edit(q.id.clone()));
                     }
-                    if ui.button("Snelle stap verwijderen").clicked() {
+                    if ui.button(tr("quick-step-delete")).clicked() {
                         action = Some(Action::Delete(q.id.clone()));
                     }
                 });
@@ -311,7 +303,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             ui.add_space(4.0);
         }
         ui.add_space(6.0);
-        if ui.button("Sluiten").clicked() {
+        if ui.button(tr("close")).clicked() {
             close = true;
         }
     }) {

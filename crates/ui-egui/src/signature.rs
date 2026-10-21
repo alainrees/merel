@@ -1,6 +1,7 @@
 //! The strip over a signed message, as Outlook shows its red ribbon or seal: who signed, or
 //! that the signature does not hold. An encrypted message that opened says so too.
 
+use crate::i18n::tr;
 use egui::{CornerRadius, Margin, RichText, Ui};
 use merel_mime::Encryption;
 use merel_smime::Signature;
@@ -8,11 +9,17 @@ use merel_smime::Signature;
 use crate::Tokens;
 
 /// The button under a signature from an issuer the computer does not know.
-pub const TRUST: &str = "Certificaat vertrouwen";
+pub fn trust_label() -> String {
+    tr("sig-trust")
+}
 
-pub const BROKEN: &str = "⚠ De digitale handtekening klopt niet. Het bericht is na het ondertekenen veranderd, of de handtekening is vervalst.";
+pub fn broken() -> String {
+    tr("sig-broken")
+}
 
-pub const ENCRYPTED: &str = "🔒 Versleuteld bericht. Alleen de ontvangers kunnen het lezen; het onderwerp was onderweg niet versleuteld.";
+pub fn encrypted() -> String {
+    tr("sig-encrypted")
+}
 
 /// The strip over an encrypted message that opened. One that did not open shows why in place
 /// of its text, so it needs no strip.
@@ -22,40 +29,40 @@ pub fn encryption_strip(ui: &mut Ui, t: &Tokens, encryption: &Encryption) {
     }
     egui::Frame::NONE.fill(t.checked).corner_radius(CornerRadius::same(4)).inner_margin(Margin::symmetric(10, 6)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.label(RichText::new(ENCRYPTED).size(12.0).color(t.text));
+        ui.label(RichText::new(encrypted()).size(12.0).color(t.text));
     });
     ui.add_space(8.0);
 }
 
-pub const PGP_BROKEN: &str = "⚠ De OpenPGP-handtekening klopt niet. Het bericht is na het ondertekenen veranderd, of de handtekening is vervalst.";
+pub fn pgp_broken() -> String {
+    tr("sig-pgp-broken")
+}
 
 /// What the strip over an OpenPGP-signed message says, and whether it is a warning.
 pub fn pgp_text(verdict: &merel_pgp::Verdict, from: &str) -> (String, bool) {
     use merel_pgp::Verdict;
     match verdict {
         Verdict::Valid { signer } if signer.covers(from) => (
-            format!(
-                "✔ Ondertekend met de OpenPGP-sleutel van {} <{}> ({}). Het bericht is onderweg niet veranderd.",
-                signer.name,
-                from.to_lowercase(),
-                signer.grouped().rsplit(' ').take(2).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" ")
+            crate::i18n::tr_args(
+                "sig-pgp-valid",
+                &[
+                    ("name", signer.name.as_str().into()),
+                    ("email", from.to_lowercase().into()),
+                    ("key", signer.grouped().rsplit(' ').take(2).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" ").into()),
+                ],
             ),
             false,
         ),
         Verdict::Valid { signer } => (
-            format!(
-                "⚠ Ondertekend met de OpenPGP-sleutel van {}, niet van de afzender {}. Wees voorzichtig.",
-                if signer.emails.is_empty() { signer.name.clone() } else { signer.emails.join(", ") },
-                from
+            crate::i18n::tr_args(
+                "sig-pgp-other",
+                &[("signer", if signer.emails.is_empty() { signer.name.clone() } else { signer.emails.join(", ") }.into()), ("from", from.into())],
             ),
             true,
         ),
-        Verdict::Broken => (PGP_BROKEN.to_string(), true),
-        Verdict::UnknownKey(_) => (
-            "Dit bericht is met OpenPGP ondertekend, maar de sleutel van de afzender is nog niet bekend, dus Merel kan de handtekening niet controleren.".to_string(),
-            false,
-        ),
-        Verdict::Unchecked(reason) => (format!("Dit bericht is met OpenPGP ondertekend, maar Merel kan de handtekening niet controleren: {reason}."), false),
+        Verdict::Broken => (pgp_broken(), true),
+        Verdict::UnknownKey(_) => (tr("sig-pgp-unknown-key"), false),
+        Verdict::Unchecked(reason) => (crate::i18n::tr_args("sig-pgp-unchecked", &[("reason", reason.to_string().into())]), false),
     }
 }
 
@@ -72,10 +79,7 @@ pub fn pgp_strip(ui: &mut Ui, t: &Tokens, verdict: &merel_pgp::Verdict, from: &s
         })
         .response;
     if let merel_pgp::Verdict::Valid { signer } = verdict {
-        response.on_hover_text(format!(
-            "Vingerafdruk {}. Merel kreeg deze sleutel met eerdere mail van dit adres (Autocrypt); vergelijk de vingerafdruk met de afzender als je zeker wilt zijn.",
-            signer.grouped()
-        ));
+        response.on_hover_text(crate::i18n::tr_args("sig-pgp-fingerprint", &[("fingerprint", signer.grouped().into())]));
     }
     ui.add_space(8.0);
 }
@@ -84,29 +88,28 @@ pub fn pgp_strip(ui: &mut Ui, t: &Tokens, verdict: &merel_pgp::Verdict, from: &s
 pub fn text(signature: &Signature, from: &str) -> (String, bool) {
     match signature {
         Signature::Valid { signer, trusted: true, .. } if signer.covers(from) => {
-            (format!("✔ Digitaal ondertekend door {} <{}>. Het bericht is onderweg niet veranderd.", signer.name, from.to_lowercase()), false)
+            (crate::i18n::tr_args("sig-valid", &[("name", signer.name.as_str().into()), ("email", from.to_lowercase().into())]), false)
         }
         Signature::Valid { signer, .. } if signer.covers(from) => (
-            format!(
-                "⚠ Ondertekend als {} <{}>, maar de uitgever ({}) is niet bekend als betrouwbaar. Iedereen kan zo'n certificaat maken; vertrouw het alleen als je weet dat het van deze afzender is.",
-                signer.name,
-                from.to_lowercase(),
-                if signer.issuer.is_empty() { "onbekend" } else { signer.issuer.as_str() }
+            crate::i18n::tr_args(
+                "sig-untrusted-issuer",
+                &[
+                    ("name", signer.name.as_str().into()),
+                    ("email", from.to_lowercase().into()),
+                    ("issuer", if signer.issuer.is_empty() { tr("unknown") } else { signer.issuer.clone() }.into()),
+                ],
             ),
             true,
         ),
         Signature::Valid { signer, .. } => (
-            format!(
-                "⚠ Ondertekend met een certificaat van {}, niet van de afzender {}. Wees voorzichtig.",
-                if signer.emails.is_empty() { signer.name.clone() } else { signer.emails.join(", ") },
-                from
+            crate::i18n::tr_args(
+                "sig-other",
+                &[("signer", if signer.emails.is_empty() { signer.name.clone() } else { signer.emails.join(", ") }.into()), ("from", from.into())],
             ),
             true,
         ),
-        Signature::Broken => (BROKEN.to_string(), true),
-        Signature::Unchecked(reason) => {
-            (format!("Dit bericht is digitaal ondertekend, maar Merel kan de handtekening niet controleren: {reason}."), false)
-        }
+        Signature::Broken => (broken(), true),
+        Signature::Unchecked(reason) => (crate::i18n::tr_args("sig-unchecked", &[("reason", reason.to_string().into())]), false),
     }
 }
 
@@ -124,24 +127,19 @@ pub fn strip(ui: &mut Ui, t: &Tokens, signature: &Signature, from: &str, can_tru
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(RichText::new(line).size(12.0).color(t.text));
-            if offer
-                && ui
-                    .button(TRUST)
-                    .on_hover_text(
-                        "Bewaart dit certificaat voor dit adres: de handtekening telt voortaan als betrouwbaar en je kunt versleuteld terugmailen. Doe dit alleen als je zeker weet dat het van de afzender is, bijvoorbeeld omdat je het hebt nagevraagd.",
-                    )
-                    .clicked()
-            {
+            if offer && ui.button(trust_label()).on_hover_text(tr("sig-trust-hint")).clicked() {
                 trust = true;
             }
         })
         .response;
     if let Signature::Valid { signer, .. } = signature {
-        response.on_hover_text(format!(
-            "Certificaat van {}, uitgegeven door {}, geldig tot {}. Merel controleert niet online of het is ingetrokken.",
-            signer.name,
-            if signer.issuer.is_empty() { "onbekend" } else { signer.issuer.as_str() },
-            crate::dates::day(signer.not_after)
+        response.on_hover_text(crate::i18n::tr_args(
+            "sig-certificate",
+            &[
+                ("name", signer.name.as_str().into()),
+                ("issuer", if signer.issuer.is_empty() { tr("unknown") } else { signer.issuer.clone() }.into()),
+                ("until", crate::dates::day(signer.not_after).into()),
+            ],
         ));
     }
     ui.add_space(8.0);
@@ -171,7 +169,7 @@ mod tests {
         );
         let (line, warning) = text(&valid(), "bank@example.org");
         assert!(warning && line.contains("certificaat van sanne@example.org, niet van de afzender bank@example.org"));
-        assert_eq!(text(&Signature::Broken, "x@y.nl"), (BROKEN.to_string(), true));
+        assert_eq!(text(&Signature::Broken, "x@y.nl"), (broken(), true));
         assert!(!text(&Signature::Unchecked("oud".into()), "x@y.nl").1);
         let Signature::Valid { signer, certificate, issuers, .. } = valid() else { unreachable!() };
         let unknown = Signature::Valid { signer, certificate, issuers, trusted: false };
@@ -192,7 +190,7 @@ mod tests {
         assert_eq!(line, "✔ Ondertekend met de OpenPGP-sleutel van Jij <jij@example.org> (0123 4567). Het bericht is onderweg niet veranderd.");
         assert!(!warning);
         assert!(pgp_text(&Verdict::Valid { signer }, "bank@example.org").1);
-        assert_eq!(pgp_text(&Verdict::Broken, "x@y.nl"), (PGP_BROKEN.to_string(), true));
+        assert_eq!(pgp_text(&Verdict::Broken, "x@y.nl"), (pgp_broken(), true));
         assert!(!pgp_text(&Verdict::UnknownKey("AB".into()), "x@y.nl").1);
     }
 }

@@ -1,6 +1,7 @@
 //! The rules window: the rules for incoming mail per account, a form to make or change one,
 //! and a button to run them over the open folder right away.
 
+use crate::i18n::tr;
 use egui::{RichText, Ui, vec2};
 use serde_json::json;
 
@@ -71,22 +72,38 @@ impl Form {
     }
 }
 
+/// The name of a rule's field in the current language.
+pub fn field_name(field: merel_model::RuleField) -> String {
+    use merel_model::RuleField;
+    tr(match field {
+        RuleField::From => "compose-from",
+        RuleField::To => "compose-to",
+        RuleField::Subject => "compose-subject",
+        RuleField::Any => "compose-body",
+    })
+}
+
 /// One line that says what a rule does: "Van bevat sanne@ → naar Facturen, gelezen".
 pub fn describe(r: &Rule, folder_name: Option<&str>) -> String {
     let mut actions = Vec::new();
     if r.move_to.is_some() {
-        actions.push(format!("naar {}", folder_name.unwrap_or("een map die er niet meer is")));
+        actions
+            .push(crate::i18n::tr_args("action-move-to", &[("folder", folder_name.map_or_else(|| tr("action-folder-gone"), str::to_string).into())]));
     }
     if r.mark_read {
-        actions.push("markeren als gelezen".to_string());
+        actions.push(tr("action-mark-read"));
     }
     if r.flag {
-        actions.push("vlag zetten".to_string());
+        actions.push(tr("action-flag"));
     }
     if !r.categories.is_empty() {
-        actions.push(format!("categorie {}", r.categories.join(", ")));
+        actions.push(crate::i18n::tr_args("action-categories", &[("names", r.categories.join(", ").into())]));
     }
-    format!("{} bevat “{}” → {}", r.field.dutch_name(), r.contains, actions.join(", "))
+    format!(
+        "{} → {}",
+        crate::i18n::tr_args("rule-contains", &[("field", field_name(r.field).into()), ("text", r.contains.as_str().into())]),
+        actions.join(", ")
+    )
 }
 
 impl MailApp {
@@ -98,7 +115,7 @@ impl MailApp {
             let mut form = Form::new(&account);
             form.field = RuleField::From;
             form.contains = m.from.email().to_string();
-            form.name = format!("Mail van {}", m.from.display());
+            form.name = crate::i18n::tr_args("rule-mail-from", &[("name", m.from.display().into())]);
             state.form = Some(form);
         }
         self.rules = Some(state);
@@ -108,13 +125,11 @@ impl MailApp {
 fn save_error(e: &merel_engine::CommandError) -> String {
     use merel_engine::CommandError;
     match e {
-        CommandError::Param("contains") => "Vul in waar de regel op moet letten.".into(),
-        CommandError::Param("move_to") => {
-            "Kies wat de regel moet doen: verplaatsen, markeren als gelezen, een vlag zetten of een categorie geven.".into()
-        }
-        CommandError::Param("categories") => "Kies categorieën uit de lijst.".into(),
-        CommandError::Param("account_id") => "Kies een account.".into(),
-        CommandError::Store(m) => format!("Opslaan is mislukt: {m}"),
+        CommandError::Param("contains") => tr("rule-contains-rule"),
+        CommandError::Param("move_to") => tr("rule-action-rule"),
+        CommandError::Param("categories") => tr("choose-categories"),
+        CommandError::Param("account_id") => tr("choose-account"),
+        CommandError::Store(m) => crate::i18n::tr_args("save-failed", &[("error", m.to_string().into())]),
         e => e.to_string(),
     }
 }
@@ -128,13 +143,13 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
         ui.add_sized([110.0, 22.0], egui::Label::new(RichText::new(text).color(t.text)));
     };
     ui.horizontal(|ui| {
-        label(ui, "Naam");
-        ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(280.0).hint_text("Bijvoorbeeld: Facturen"));
+        label(ui, &tr("name"));
+        ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(280.0).hint_text(tr("rule-name-example")));
     });
     if accounts.len() > 1 {
         let current = accounts.iter().find(|(id, _)| *id == form.account_id).map(|(_, e)| e.as_str()).unwrap_or("");
         ui.horizontal(|ui| {
-            label(ui, "Account");
+            label(ui, &tr("account"));
             egui::ComboBox::from_id_salt("rule-account").selected_text(current).width(280.0).show_ui(ui, |ui| {
                 for (id, email) in &accounts {
                     if ui.selectable_value(&mut form.account_id, id.clone(), email).changed() {
@@ -145,10 +160,10 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
         });
     }
     ui.horizontal(|ui| {
-        label(ui, "Als");
-        egui::ComboBox::from_id_salt("rule-field").selected_text(form.field.dutch_name()).width(110.0).show_ui(ui, |ui| {
+        label(ui, &tr("rule-if"));
+        egui::ComboBox::from_id_salt("rule-field").selected_text(field_name(form.field)).width(110.0).show_ui(ui, |ui| {
             for f in RuleField::ALL {
-                ui.selectable_value(&mut form.field, f, f.dutch_name());
+                ui.selectable_value(&mut form.field, f, field_name(f));
             }
         });
         ui.label(RichText::new("bevat").color(t.text));
@@ -163,9 +178,9 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
         .map(|f| (f.id.clone(), f.name.clone()))
         .collect();
     ui.horizontal(|ui| {
-        label(ui, "Dan");
+        label(ui, &tr("rule-then"));
         let mut moving = form.move_to.is_some();
-        if ui.checkbox(&mut moving, "verplaatsen naar").changed() {
+        if ui.checkbox(&mut moving, tr("action-move-check")).changed() {
             form.move_to = if moving { folders.first().map(|(id, _)| id.clone()) } else { None };
         }
         let current = form.move_to.as_ref().and_then(|id| folders.iter().find(|(f, _)| f == id)).map(|(_, n)| n.as_str()).unwrap_or("map");
@@ -179,13 +194,13 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
     });
     ui.horizontal(|ui| {
         ui.add_space(114.0);
-        ui.checkbox(&mut form.mark_read, "markeren als gelezen");
-        ui.checkbox(&mut form.flag, "vlag zetten");
+        ui.checkbox(&mut form.mark_read, tr("action-mark-read"));
+        ui.checkbox(&mut form.flag, tr("action-flag"));
     });
     let known: Vec<String> = app.engine.session.categories.iter().map(|c| c.name.clone()).collect();
     if !known.is_empty() {
         ui.horizontal(|ui| {
-            label(ui, "Categorie");
+            label(ui, &tr("category"));
             ui.horizontal_wrapped(|ui| {
                 ui.set_max_width(300.0);
                 for name in &known {
@@ -208,8 +223,8 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
     let mut save = false;
     let mut cancel = false;
     ui.horizontal(|ui| {
-        save = ui.add(crate::helder::primary_text(t, "Regel opslaan")).clicked();
-        cancel = ui.add(egui::Button::new("Annuleren").min_size(vec2(90.0, 26.0))).clicked();
+        save = ui.add(crate::helder::primary_text(t, &tr("rule-save"))).clicked();
+        cancel = ui.add(egui::Button::new(crate::i18n::tr("cancel")).min_size(vec2(90.0, 26.0))).clicked();
     });
     (save, cancel)
 }
@@ -239,42 +254,34 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut cancel = false;
     let mut close = false;
     let mut form_state = app.rules.as_mut().and_then(|s| s.form.take());
-    if crate::helder::popup(ctx, t, "rules", "Regels", 460.0, |ui| {
-        ui.label(
-            RichText::new("Regels kijken naar nieuwe mail in het Postvak IN van een account en verplaatsen of markeren wat erop past.")
-                .size(12.0)
-                .color(t.text_dim),
-        );
+    if crate::helder::popup(ctx, t, "rules", &tr("mail-rules"), 460.0, |ui| {
+        ui.label(RichText::new(crate::i18n::tr("rules-intro")).size(12.0).color(t.text_dim));
         ui.add_space(6.0);
         if let Some(form) = form_state.as_mut() {
-            ui.label(RichText::new(if form.id.is_some() { "Regel bewerken" } else { "Nieuwe regel" }).strong().color(t.text));
+            ui.label(RichText::new(tr(if form.id.is_some() { "rule-edit" } else { "rule-new" })).strong().color(t.text));
             let (s, c) = form_ui(app, ui, t, form);
             save = s;
             cancel = c;
             return;
         }
         ui.horizontal(|ui| {
-            if ui.add(crate::helder::primary_text(t, "Nieuwe regel")).clicked() {
+            if ui.add(crate::helder::primary_text(t, &tr("rule-new"))).clicked() {
                 action = Some(Action::New);
             }
-            if ui
-                .add_enabled(has_message, egui::Button::new("Regel voor deze afzender"))
-                .on_hover_text("Een regel voor de afzender van het geselecteerde bericht")
-                .clicked()
-            {
+            if ui.add_enabled(has_message, egui::Button::new(tr("rule-for-sender"))).on_hover_text(tr("rule-for-sender-hint")).clicked() {
                 action = Some(Action::FromMessage);
             }
         });
         ui.add_space(6.0);
         if rules.is_empty() {
-            ui.label(RichText::new("Nog geen regels.").color(t.text_dim));
+            ui.label(RichText::new(tr("rules-none")).color(t.text_dim));
         }
         for r in &rules {
             egui::Frame::new().fill(t.list).corner_radius(6).inner_margin(8).show(ui, |ui| {
                 ui.set_width(440.0);
                 ui.horizontal(|ui| {
                     let mut on = r.enabled;
-                    if ui.checkbox(&mut on, "").on_hover_text(if on { "Regel staat aan" } else { "Regel staat uit" }).changed() {
+                    if ui.checkbox(&mut on, "").on_hover_text(tr(if on { "rule-on" } else { "rule-off" })).changed() {
                         action = Some(Action::Toggle(r.id.clone(), on));
                     }
                     ui.label(RichText::new(&r.name).strong().color(if r.enabled { t.text } else { t.text_dim }));
@@ -284,10 +291,10 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 });
                 ui.label(RichText::new(describe(r, r.move_to.as_deref().and_then(folder_name).as_deref())).size(12.0).color(t.text_dim));
                 ui.horizontal(|ui| {
-                    if ui.button("Bewerken").clicked() {
+                    if ui.button(tr("edit")).clicked() {
                         action = Some(Action::Edit(r.id.clone()));
                     }
-                    if ui.button("Regel verwijderen").clicked() {
+                    if ui.button(tr("rule-delete")).clicked() {
                         action = Some(Action::Delete(r.id.clone()));
                     }
                 });
@@ -296,10 +303,10 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.add_enabled(open_folder.is_some() && !rules.is_empty(), egui::Button::new("Regels nu uitvoeren op deze map")).clicked() {
+            if ui.add_enabled(open_folder.is_some() && !rules.is_empty(), egui::Button::new(tr("rules-run-now"))).clicked() {
                 action = Some(Action::Run);
             }
-            if ui.button("Sluiten").clicked() {
+            if ui.button(tr("close")).clicked() {
                 close = true;
             }
         });
@@ -336,11 +343,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         Some(Action::Run) => {
             app.run("rule.run", serde_json::Value::Null);
             let n = app.engine.session.take_rule_hits();
-            app.notice = Some(if n == 0 {
-                crate::Notice::info("Geen berichten in deze map waar een regel op past.")
-            } else {
-                crate::Notice::success(rule_notice(n))
-            });
+            app.notice = Some(if n == 0 { crate::Notice::info(tr("rules-no-match")) } else { crate::Notice::success(rule_notice(n)) });
         }
         None => {}
     }
@@ -353,7 +356,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
 
 /// "Regels toegepast op 3 berichten."
 pub fn rule_notice(n: usize) -> String {
-    if n == 1 { "Regels toegepast op 1 bericht.".to_string() } else { format!("Regels toegepast op {n} berichten.") }
+    crate::i18n::tr_args("rules-applied", &[("count", n.into())])
 }
 
 #[cfg(test)]

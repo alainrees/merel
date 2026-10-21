@@ -233,8 +233,16 @@ fn wait_for_code(listener: &TcpListener, state: &str, timeout: Duration) -> Resu
     }
 }
 
-const PAGE_OK: &str = "<!doctype html><html lang=\"nl\"><meta charset=\"utf-8\"><title>Merel</title><body style=\"font-family:sans-serif;padding:3em\"><h1>Gelukt</h1><p>Je bent aangemeld. Je kunt dit venster sluiten en teruggaan naar Merel.</p></body></html>";
-const PAGE_ERR: &str = "<!doctype html><html lang=\"nl\"><meta charset=\"utf-8\"><title>Merel</title><body style=\"font-family:sans-serif;padding:3em\"><h1>Niet gelukt</h1><p>Het aanmelden is niet gelukt. Ga terug naar Merel en probeer het opnieuw.</p></body></html>";
+/// The page the browser shows after the redirect, in the app's language.
+fn page(ok: bool) -> String {
+    let (title, text) = if ok { ("oauth-page-ok", "oauth-page-ok-text") } else { ("oauth-page-err", "oauth-page-err-text") };
+    format!(
+        "<!doctype html><html lang=\"{}\"><meta charset=\"utf-8\"><title>Merel</title><body style=\"font-family:sans-serif;padding:3em\"><h1>{}</h1><p>{}</p></body></html>",
+        merel_i18n::current().tag(),
+        merel_i18n::tr(title),
+        merel_i18n::tr(text)
+    )
+}
 
 /// One HTTP request on the loopback listener. `None` means it was not the redirect (a favicon
 /// request, a stray connection) and the wait goes on.
@@ -261,7 +269,7 @@ fn handle(mut stream: TcpStream, state: &str) -> Option<Result<String, OAuthErro
     } else {
         Err(OAuthError::Provider("no code in the redirect".into()))
     };
-    let page = if result.is_ok() { PAGE_OK } else { PAGE_ERR };
+    let page = page(result.is_ok());
     let _ = stream.write_all(
         format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}", page.len())
             .as_bytes(),

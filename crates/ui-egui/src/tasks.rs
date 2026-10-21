@@ -15,7 +15,9 @@ use crate::{MailApp, Tokens};
 
 const DATE_FORMAT: &str = "%d-%m-%Y";
 /// The calendar button beside the due date.
-pub const DUE_PICKER: &str = "Vervaldatum kiezen";
+pub fn due_picker() -> String {
+    tr("tasks-due-picker")
+}
 
 /// Before the title of a repeating task in the list, as the calendar marks a series.
 const REPEAT_MARK: &str = "🔁";
@@ -32,7 +34,9 @@ pub struct State {
 pub(crate) const SEARCH_BOX: &str = "tasks_search_box";
 
 /// The heading over the flagged messages in the list, as Outlook's To-Do list has it.
-pub(crate) const FLAGGED_HEADING: &str = "Gemarkeerde e-mail";
+pub(crate) fn flagged_heading() -> String {
+    tr("tasks-flagged")
+}
 
 /// The flagged messages the list shows under the tasks: those matching `query` (subject or
 /// sender), the ones with a due day first and soonest first, then the newest mail first.
@@ -59,13 +63,13 @@ fn flagged_mail(app: &MailApp, query: &str) -> Vec<(MessageHeader, Option<NaiveD
 /// "vandaag", "morgen", "verlopen op …" or "vóór …" for a follow-up day.
 fn follow_up_label(due: NaiveDate, today: NaiveDate) -> String {
     if due == today {
-        "vandaag".into()
+        tr("tasks-today")
     } else if due < today {
-        format!("verlopen op {}", crate::dates::day_name(due))
+        crate::i18n::tr_args("tasks-overdue", &[("day", crate::dates::day_name(due).into())])
     } else if Some(due) == today.checked_add_days(Days::new(1)) {
-        "morgen".into()
+        tr("tasks-tomorrow")
     } else {
-        format!("vóór {}", crate::dates::day_name(due))
+        crate::i18n::tr_args("tasks-before", &[("day", crate::dates::day_name(due).into())])
     }
 }
 
@@ -113,16 +117,24 @@ impl Default for Editor {
     }
 }
 
-/// The repeat choices of the form, with their names.
-pub const REPEATS: [(Option<Frequency>, &str); 5] = [
-    (None, "Niet"),
-    (Some(Frequency::Daily), "Dagelijks"),
-    (Some(Frequency::Weekly), "Wekelijks"),
-    (Some(Frequency::Monthly), "Maandelijks"),
-    (Some(Frequency::Yearly), "Jaarlijks"),
-];
+/// The repeat choices of the form.
+pub const REPEATS: [Option<Frequency>; 5] =
+    [None, Some(Frequency::Daily), Some(Frequency::Weekly), Some(Frequency::Monthly), Some(Frequency::Yearly)];
 
-pub const REPEAT_NEEDS_DUE: &str = "Een herhalende taak heeft een vervaldatum nodig en blijft op deze computer.";
+/// The name of a repeat choice: "Niet herhalen", "Dagelijks", ….
+fn repeat_name(f: Option<Frequency>) -> String {
+    tr(match f {
+        None => "repeat-never",
+        Some(Frequency::Daily) => "tasks-daily",
+        Some(Frequency::Weekly) => "tasks-weekly",
+        Some(Frequency::Monthly) => "tasks-monthly",
+        Some(Frequency::Yearly) => "tasks-yearly",
+    })
+}
+
+pub fn repeat_needs_due() -> String {
+    tr("tasks-repeat-needs-due")
+}
 
 impl Editor {
     pub fn from_task(t: &Task) -> Self {
@@ -148,14 +160,13 @@ impl Editor {
     /// The `task.save` parameters, or what is wrong with the fields.
     pub fn params(&self) -> Result<serde_json::Value, String> {
         if self.title.trim().is_empty() {
-            return Err("Vul een titel in.".into());
+            return Err(tr("tasks-need-title"));
         }
         let due = if self.due.trim().is_empty() {
             None
         } else {
-            let date = NaiveDate::parse_from_str(self.due.trim(), DATE_FORMAT)
-                .map_err(|_| "Vul een geldige vervaldatum in, bijvoorbeeld 18-10-2026.".to_string())?;
-            Some(to_timestamp(date.and_time(NaiveTime::MIN)).ok_or("Deze datum bestaat niet in deze tijdzone.")?)
+            let date = NaiveDate::parse_from_str(self.due.trim(), DATE_FORMAT).map_err(|_| tr("tasks-bad-due"))?;
+            Some(to_timestamp(date.and_time(NaiveTime::MIN)).ok_or_else(|| tr("tasks-no-such-date"))?)
         };
         let priority = match self.priority {
             Priority::Low => "low",
@@ -163,7 +174,7 @@ impl Editor {
             Priority::High => "high",
         };
         if self.repeat.is_some() && (due.is_none() || !self.account_id.is_empty()) {
-            return Err(REPEAT_NEEDS_DUE.into());
+            return Err(repeat_needs_due());
         }
         let mut p = json!({ "title": self.title, "notes": self.notes, "due": due, "priority": priority, "repeat": self.repeat(), "notes_rich": self.notes_editor.stored(&self.notes) });
         if let Some(id) = &self.id {
@@ -190,10 +201,10 @@ impl MailApp {
 
 fn describe(e: &CommandError) -> String {
     match e {
-        CommandError::Param("title") => "Vul een titel in.".into(),
-        CommandError::Param("repeat") => REPEAT_NEEDS_DUE.into(),
-        CommandError::Store(m) => format!("Opslaan is mislukt: {m}"),
-        CommandError::NotFound => "Deze taak bestaat niet meer.".into(),
+        CommandError::Param("title") => tr("tasks-need-title"),
+        CommandError::Param("repeat") => repeat_needs_due(),
+        CommandError::Store(m) => crate::i18n::tr_args("save-failed-because", &[("error", m.as_str().into())]),
+        CommandError::NotFound => tr("tasks-gone"),
         e => e.to_string(),
     }
 }
@@ -203,22 +214,22 @@ fn due_label(due: i64) -> String {
     let day = to_local(due).date();
     let today = today();
     if day == today {
-        "vandaag".into()
+        tr("tasks-today")
     } else if Some(day) == today.checked_add_days(Days::new(1)) {
-        "morgen".into()
+        tr("tasks-tomorrow")
     } else if Some(day) == today.checked_sub_days(Days::new(1)) {
-        "gisteren".into()
+        tr("tasks-yesterday")
     } else {
         day.format("%d-%m-%Y").to_string()
     }
 }
 
-fn priority_label(p: Priority) -> &'static str {
-    match p {
-        Priority::Low => "Laag",
-        Priority::Normal => "Normaal",
-        Priority::High => "Hoog",
-    }
+fn priority_label(p: Priority) -> String {
+    tr(match p {
+        Priority::Low => "priority-low",
+        Priority::Normal => "priority-normal",
+        Priority::High => "priority-high",
+    })
 }
 
 fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
@@ -230,17 +241,17 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 let width = (ui.available_width() - 40.0).max(60.0);
-                crate::helder::search_field(ui, t, &mut app.tasks.query, egui::Id::new(SEARCH_BOX), "Zoeken in taken", width);
+                crate::helder::search_field(ui, t, &mut app.tasks.query, egui::Id::new(SEARCH_BOX), &tr("tasks-search"), width);
                 if !app.tasks.query.is_empty()
-                    && crate::helder::quiet(ui, t, |ui| crate::helder::icon_button(ui, t, crate::helder::Icon::X, crate::SEARCH_CLEAR)).clicked()
+                    && crate::helder::quiet(ui, t, |ui| crate::helder::icon_button(ui, t, crate::helder::Icon::X, &crate::search_clear())).clicked()
                 {
                     app.tasks.query.clear();
                 }
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                for (label, f) in [("Open", TaskFilter::Open), ("Voltooid", TaskFilter::Done), ("Alles", TaskFilter::All)] {
-                    if crate::helder::chip(ui, t, label, app.tasks.filter == f).clicked() {
+                for (label, f) in [("tasks-open", TaskFilter::Open), ("tasks-done", TaskFilter::Done), ("tasks-all", TaskFilter::All)] {
+                    if crate::helder::chip(ui, t, &tr(label), app.tasks.filter == f).clicked() {
                         app.tasks.filter = f;
                     }
                 }
@@ -250,11 +261,11 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let list: Vec<Task> = app.engine.session.tasks_matching(app.tasks.filter, &app.tasks.query).into_iter().cloned().collect();
             if list.is_empty() {
                 let text = if !app.tasks.query.trim().is_empty() {
-                    "Geen taak gevonden."
+                    tr("tasks-none-found")
                 } else if app.tasks.filter == TaskFilter::Done {
-                    "Nog niets voltooid."
+                    tr("tasks-none-done")
                 } else {
-                    "Geen taken. Lekker rustig."
+                    tr("tasks-none")
                 };
                 ui.label(RichText::new(text).color(t.text_dim));
             }
@@ -279,7 +290,13 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     // The checkbox is its own widget, drawn over the row.
                     let check = egui::Rect::from_center_size(egui::pos2(rect.left() + 10.0, rect.center().y), vec2(18.0, 18.0));
                     let c = ui.interact(check, ui.make_persistent_id(("task-check", &task.id)), Sense::click());
-                    c.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Checkbox, true, format!("{} voltooid", task.title)));
+                    c.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Checkbox,
+                            true,
+                            crate::i18n::tr_args("tasks-done-check", &[("title", task.title.as_str().into())]),
+                        )
+                    });
                     let p = ui.painter();
                     p.rect_stroke(
                         check,
@@ -299,7 +316,7 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         sub.push(due_label(due));
                     }
                     if task.priority == Priority::High {
-                        sub.push("hoge prioriteit".into());
+                        sub.push(tr("tasks-high-priority"));
                     }
                     let sub_color = if task.overdue(today_ts) { t.flag } else { t.text_dim };
                     p.text(egui::pos2(x, rect.center().y + 2.0), Align2::LEFT_TOP, sub.join(" · "), FontId::proportional(11.5), sub_color);
@@ -311,25 +328,31 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 }
                 if !flagged.is_empty() {
                     ui.add_space(12.0);
-                    ui.label(RichText::new(FLAGGED_HEADING).strong().color(t.text));
+                    ui.label(RichText::new(flagged_heading()).strong().color(t.text));
                     ui.add_space(4.0);
                     let today = today();
                     for (m, due) in &flagged {
                         let r =
                             ui.add_sized([ui.available_width(), 40.0], egui::Button::new("").fill(Color32::TRANSPARENT).frame_when_inactive(false));
                         r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &m.subject));
-                        let r = r.on_hover_text("Opent het bericht in E-mail.");
+                        let r = r.on_hover_text(tr("tasks-open-mail-hint"));
                         let rect = r.rect.shrink2(vec2(8.0, 4.0));
                         // The flag is its own widget: a click takes it off, as the checkbox finishes a task.
                         let check = egui::Rect::from_center_size(egui::pos2(rect.left() + 10.0, rect.center().y), vec2(18.0, 18.0));
                         let c = ui.interact(check, ui.make_persistent_id(("mail-flag", &m.id)), Sense::click());
-                        c.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Checkbox, true, format!("Vlag weghalen van {}", m.subject)));
-                        let c = c.on_hover_text("Haalt de vlag (en de datum) weg.");
+                        c.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Checkbox,
+                                true,
+                                crate::i18n::tr_args("tasks-unflag", &[("subject", m.subject.as_str().into())]),
+                            )
+                        });
+                        let c = c.on_hover_text(tr("tasks-unflag-hint"));
                         let p = ui.painter();
                         p.text(check.center(), Align2::CENTER_CENTER, "⚑", FontId::proportional(15.0), t.flag);
                         let x = rect.left() + 28.0;
                         p.text(egui::pos2(x, rect.center().y - 1.0), Align2::LEFT_BOTTOM, &m.subject, FontId::proportional(13.5), t.text);
-                        let mut sub = vec![format!("van {}", m.from.display())];
+                        let mut sub = vec![crate::i18n::tr_args("reminder-from", &[("name", m.from.display().into())])];
                         if let Some(d) = due {
                             sub.push(follow_up_label(*d, today));
                         }
@@ -368,17 +391,17 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 fn detail(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let Some(task) = app.engine.session.selected_task().cloned() else {
         ui.centered_and_justified(|ui| {
-            ui.label(RichText::new("Kies een taak, of maak een nieuwe taak.").color(t.text_dim).size(16.0));
+            ui.label(RichText::new(tr("tasks-pick")).color(t.text_dim).size(16.0));
         });
         return;
     };
     helder::quiet(ui, t, |ui| {
         ui.horizontal(|ui| {
-            if helder::tool_button(ui, t, Icon::Pencil, "Bewerken").clicked() {
+            if helder::tool_button(ui, t, Icon::Pencil, &tr("edit")).clicked() {
                 app.edit_selected_task();
             }
-            let flip = if task.done { "Heropenen" } else { "Voltooien" };
-            if helder::tool_button(ui, t, Icon::SquareCheck, flip).clicked() {
+            let flip = if task.done { tr("tasks-reopen") } else { tr("tasks-complete") };
+            if helder::tool_button(ui, t, Icon::SquareCheck, &flip).clicked() {
                 app.run("task.complete", serde_json::Value::Null);
             }
         });
@@ -389,14 +412,19 @@ fn detail(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let row = |ui: &mut Ui, icon: Icon, label: &str, value: String| {
         helder::icon_row(ui, t, icon, |ui| ui.label(RichText::new(value).size(14.0).color(t.text))).on_hover_text(label);
     };
-    row(ui, Icon::CircleCheck, "Status", if task.done { "Voltooid".into() } else { "Open".into() });
-    row(ui, Icon::Calendar, "Vervaldatum", task.due.map(due_label).unwrap_or_else(|| "Geen vervaldatum".into()));
-    row(ui, Icon::Flag, "Prioriteit", format!("Prioriteit {}", priority_label(task.priority).to_lowercase()));
+    row(ui, Icon::CircleCheck, &tr("tasks-status"), if task.done { tr("tasks-done") } else { tr("tasks-open") });
+    row(ui, Icon::Calendar, &tr("tasks-due"), task.due.map(due_label).unwrap_or_else(|| tr("tasks-no-due")));
+    row(
+        ui,
+        Icon::Flag,
+        &tr("tasks-priority"),
+        crate::i18n::tr_args("tasks-priority-value", &[("priority", priority_label(task.priority).to_lowercase().into())]),
+    );
     if let Some(r) = task.repeat {
-        row(ui, Icon::Repeat, "Herhalen", r.describe());
+        row(ui, Icon::Repeat, &tr("tasks-repeat"), crate::calendar::repeat_text(Some(r.frequency), r.interval));
     }
     if !app.engine.session.item_accounts.is_empty() {
-        row(ui, Icon::Folder, "Opgeslagen in", crate::contacts::store_name(&app.engine.session, task.account_id.as_deref()));
+        row(ui, Icon::Folder, &tr("contacts-stored-in"), crate::contacts::store_name(&app.engine.session, task.account_id.as_deref()));
     }
     if !task.notes.is_empty() {
         helder::rule(ui, t);
@@ -411,18 +439,18 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let mut cancel = false;
     helder::quiet(ui, t, |ui| {
         ui.horizontal(|ui| {
-            save = helder::primary_button(ui, t, Icon::Save, "Opslaan").clicked();
+            save = helder::primary_button(ui, t, Icon::Save, &tr("save")).clicked();
             helder::bar_separator(ui, t);
-            cancel = helder::tool_button(ui, t, Icon::X, "Annuleren").clicked();
+            cancel = helder::tool_button(ui, t, Icon::X, &tr("cancel")).clicked();
         });
     });
     ui.add_space(12.0);
     let width = ui.available_width().min(620.0) - 44.0;
     ui.horizontal(|ui| {
         helder::indent(ui);
-        ui.label(RichText::new(if editor.id.is_some() { "Taak bewerken" } else { "Nieuwe taak" }).size(13.0).color(t.text_dim));
+        ui.label(RichText::new(if editor.id.is_some() { tr("tasks-edit-title") } else { tr("new-task") }).size(13.0).color(t.text_dim));
     });
-    helder::icon_row(ui, t, Icon::Type, |ui| helder::underline_field(ui, t, &mut editor.title, "Titel toevoegen", width, true));
+    helder::icon_row(ui, t, Icon::Type, |ui| helder::underline_field(ui, t, &mut editor.title, &tr("tasks-add-title"), width, true));
     if editor.id.is_none() {
         crate::contacts::store_picker(ui, t, session, &mut editor.account_id);
         if !editor.account_id.is_empty() {
@@ -431,40 +459,33 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         }
     }
     helder::icon_row(ui, t, Icon::Calendar, |ui| {
-        helder::underline_field(ui, t, &mut editor.due, "Vervaldatum (dd-mm-jjjj)", 200.0, false)
-            .on_hover_text("Vervaldatum als dag-maand-jaar, of leeg voor geen deadline.");
-        crate::date_picker::button(ui, t, &mut editor.due, DUE_PICKER);
+        helder::underline_field(ui, t, &mut editor.due, &tr("tasks-due-field"), 200.0, false).on_hover_text(tr("tasks-due-hint"));
+        crate::date_picker::button(ui, t, &mut editor.due, &due_picker());
     });
     helder::icon_row(ui, t, Icon::Flag, |ui| {
-        ui.label(RichText::new("Prioriteit").size(14.0).color(t.text));
+        ui.label(RichText::new(tr("tasks-priority")).size(14.0).color(t.text));
         ui.add_space(4.0);
         for p in [Priority::Low, Priority::Normal, Priority::High] {
-            if helder::chip(ui, t, priority_label(p), editor.priority == p).clicked() {
+            if helder::chip(ui, t, &priority_label(p), editor.priority == p).clicked() {
                 editor.priority = p;
             }
         }
     });
     if editor.account_id.is_empty() {
-        let name = REPEATS.iter().find(|(f, _)| *f == editor.repeat).map(|(_, n)| *n).unwrap_or("Niet");
-        let shown = if editor.repeat.is_none() { "Niet herhalen" } else { name };
+        let shown = repeat_name(editor.repeat);
         helder::icon_row(ui, t, Icon::Repeat, |ui| {
-            helder::select(ui, t, shown, 160.0, |ui| {
-                for (f, name) in REPEATS {
-                    if ui.selectable_label(editor.repeat == f, if f.is_none() { "Niet herhalen" } else { name }).clicked() {
+            helder::select(ui, t, &shown, 160.0, |ui| {
+                for f in REPEATS {
+                    if ui.selectable_label(editor.repeat == f, repeat_name(f)).clicked() {
                         editor.repeat = f;
                         ui.close();
                     }
                 }
             });
             if let Some(f) = editor.repeat {
-                let unit = match f {
-                    Frequency::Daily => "dagen",
-                    Frequency::Weekly => "weken",
-                    Frequency::Monthly => "maanden",
-                    Frequency::Yearly => "jaar",
-                };
+                let unit = crate::calendar::repeat_unit(f, editor.interval);
                 ui.add_space(8.0);
-                ui.label(RichText::new("om de").size(14.0).color(t.text));
+                ui.label(RichText::new(tr("repeat-every").to_lowercase()).size(14.0).color(t.text));
                 let mut text = editor.interval.max(1).to_string();
                 if helder::number_field(ui, t, &mut text, "1").changed()
                     && let Ok(n) = text.trim().parse::<u32>()
@@ -475,7 +496,7 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
         });
         if editor.repeat.is_some() {
-            helder::note(ui, t, "Na Voltooien komt de taak terug met de volgende vervaldatum.");
+            helder::note(ui, t, &tr("tasks-repeat-note"));
         }
     }
     ui.add_space(4.0);
@@ -560,11 +581,11 @@ mod tests {
     #[test]
     fn a_repeat_goes_along_only_with_a_due_day_on_this_computer() {
         let mut e = Editor { title: "Weekrapport".into(), repeat: Some(Frequency::Weekly), interval: 2, ..Editor::default() };
-        assert_eq!(e.params(), Err(REPEAT_NEEDS_DUE.to_string()), "no due day");
+        assert_eq!(e.params(), Err(repeat_needs_due()), "no due day");
         e.due = "19-10-2026".into();
         assert_eq!(e.params().unwrap()["repeat"], json!({ "frequency": "weekly", "interval": 2 }));
         e.account_id = "acc".into();
-        assert_eq!(e.params(), Err(REPEAT_NEEDS_DUE.to_string()), "a server would not know the repeat");
+        assert_eq!(e.params(), Err(repeat_needs_due()), "a server would not know the repeat");
         e.account_id.clear();
         e.repeat = None;
         assert!(e.params().unwrap()["repeat"].is_null());

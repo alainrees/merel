@@ -94,7 +94,7 @@ fn decode(text: &str) -> String {
 /// (`OPENPGP4FPR:…`).
 pub fn parse_invite(text: &str) -> Result<Invite, String> {
     let text = text.trim();
-    let wrong = || "Dit is geen uitnodiging. Een uitnodiging begint met https://i.delta.chat/#.".to_string();
+    let wrong = || merel_i18n::tr("invite-not-a-link");
     let rest = if let Some(rest) = strip_prefix_ignore_case(text, INVITE_LINK) {
         rest
     } else if let Some(rest) = strip_prefix_ignore_case(text, "OPENPGP4FPR:") {
@@ -111,10 +111,7 @@ pub fn parse_invite(text: &str) -> Result<Invite, String> {
         }
     }
     if fields.contains_key("x") {
-        return Err(
-            "Dit is een uitnodiging voor een groep of kanaal. Die kan Merel nog niet aannemen; vraag om een uitnodiging voor een chat met jou."
-                .into(),
-        );
+        return Err(merel_i18n::tr("invite-group"));
     }
     let addr = fields.get("a").and_then(|a| Address::new(None, a.trim()).ok()).ok_or_else(wrong)?.email().to_lowercase();
     let token = |k: &str| fields.get(k).and_then(|v| merel_model::chat_token(v)).ok_or_else(wrong);
@@ -179,7 +176,7 @@ impl Engine {
     /// in Merel or Delta Chat gets a verified chat with the account.
     pub fn invite_link(&mut self, account_id: &str) -> Result<String, String> {
         let info = self.enable_chat(account_id)?;
-        let account = self.session.accounts.iter().find(|a| a.id == account_id).ok_or("Dit account bestaat niet meer.")?;
+        let account = self.session.accounts.iter().find(|a| a.id == account_id).ok_or(merel_i18n::tr("account-gone"))?;
         let (addr, name) = (account.address.email().to_lowercase(), account.address.display().to_string());
         let name = if name.eq_ignore_ascii_case(&addr) { String::new() } else { name };
         let tokens =
@@ -207,7 +204,7 @@ impl Engine {
     fn join(&mut self, account_id: &str, text: &str) -> Result<String, String> {
         let invite = parse_invite(text)?;
         if self.session.accounts.iter().any(|a| a.address.email().eq_ignore_ascii_case(&invite.addr)) {
-            return Err("Dit is een uitnodiging van een van je eigen accounts.".into());
+            return Err(merel_i18n::tr("invite-own-account"));
         }
         let own = self.enable_chat(account_id)?;
         let now = crate::drafts::now();

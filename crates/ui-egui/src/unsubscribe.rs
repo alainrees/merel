@@ -1,9 +1,10 @@
-//! "Afmelden", as Outlook offers it over a newsletter: the `List-Unsubscribe` header of a
+//! "Unsubscribe", as Outlook offers it over a newsletter: the `List-Unsubscribe` header of a
 //! message names a mail address or a web page that takes you off the list. Merel shows a
 //! line over such a message and, after asking, either sends the mail from the account the
 //! message came in on or opens the page in the browser. Nothing happens without the click:
 //! the header is the sender's word, and a visit to the page tells the sender the mail was read.
 
+use crate::i18n::tr;
 use egui::RichText;
 use merel_engine::SendState;
 use merel_model::{Address, Draft};
@@ -79,7 +80,9 @@ fn host(url: &str) -> &str {
 }
 
 /// What the strip over a newsletter says.
-pub(crate) const STRIP: &str = "Nieuwsbrief? Je kunt je bij deze afzender afmelden.";
+pub(crate) fn strip() -> String {
+    tr("unsubscribe-strip")
+}
 
 impl MailApp {
     /// Opens the question for the first way the message offers.
@@ -97,19 +100,19 @@ impl MailApp {
                 let account =
                     self.engine.session.message(&c.message_id).and_then(|m| self.engine.session.folder(&m.folder_id)).map(|f| f.account_id.clone());
                 let Some(account) = account else {
-                    self.notice = Some(crate::Notice::warning("Het bericht is niet meer te vinden."));
+                    self.notice = Some(crate::Notice::warning(tr("message-gone")));
                     return;
                 };
                 let draft = Draft { to: vec![to.clone()], subject: subject.clone(), body: "unsubscribe".to_string(), ..Draft::default() };
                 let id = self.engine.send(&account, draft);
                 self.notice = Some(match self.engine.session.outbox.get(&id) {
                     Some(SendState::Failed(e)) => crate::Notice::error(e.clone()),
-                    _ => crate::Notice::success(format!("Afmeldverzoek verstuurd aan {}.", to.email())),
+                    _ => crate::Notice::success(crate::i18n::tr_args("unsubscribe-sent", &[("email", to.email().into())])),
                 });
             }
             Way::Web(url) => {
                 ctx.open_url(egui::OpenUrl::new_tab(url));
-                self.notice = Some(crate::Notice::info("De afmeldpagina is geopend in de browser."));
+                self.notice = Some(crate::Notice::info(tr("unsubscribe-page-opened")));
             }
         }
     }
@@ -119,23 +122,19 @@ impl MailApp {
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(c) = app.unsubscribe.clone() else { return };
     let text = match &c.way {
-        Way::Mail { to, .. } => format!("Merel stuurt een e-mail aan {} met het verzoek je af te melden bij {}.", to.email(), c.sender),
-        Way::Web(url) => format!(
-            "Merel opent {} in je browser; daar meld je je af bij {}. De afzender kan zo zien dat je het bericht hebt gelezen.",
-            host(url),
-            c.sender
-        ),
+        Way::Mail { to, .. } => crate::i18n::tr_args("unsubscribe-by-mail", &[("email", to.email().into()), ("sender", c.sender.as_str().into())]),
+        Way::Web(url) => crate::i18n::tr_args("unsubscribe-by-web", &[("host", host(url).into()), ("sender", c.sender.as_str().into())]),
     };
     let mut go = false;
     let mut close = false;
-    if crate::helder::popup(ctx, t, "unsubscribe", "Afmelden", 340.0, |ui| {
+    if crate::helder::popup(ctx, t, "unsubscribe", &tr("unsubscribe-title"), 340.0, |ui| {
         ui.label(RichText::new(text).color(t.text));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if ui.add(crate::helder::primary_text(t, "Ja, afmelden")).clicked() {
+            if ui.add(crate::helder::primary_text(t, &tr("unsubscribe-yes"))).clicked() {
                 go = true;
             }
-            if ui.button("Annuleren").clicked() {
+            if ui.button(tr("cancel")).clicked() {
                 close = true;
             }
         });

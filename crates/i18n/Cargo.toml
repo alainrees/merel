@@ -1,0 +1,17 @@
+[package]
+name = "merel-i18n"
+description = "Merel's words in Dutch and English: the Fluent files and the language in use."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+log = { workspace = true }
+fluent-bundle = { workspace = true }
+fluent-syntax = { workspace = true }
+unic-langid = { workspace = true }
+sys-locale = { workspace = true }
+
+[lints]
+workspace = true

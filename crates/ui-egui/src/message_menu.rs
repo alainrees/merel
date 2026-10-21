@@ -4,6 +4,7 @@
 //! met vergaderverzoek" goes one step further, as in Outlook: the appointment window opens with
 //! the sender and the other recipients as attendees, ready to send.
 
+use crate::i18n::tr;
 use chrono::Timelike;
 use egui::Response;
 use merel_engine::Session;
@@ -44,7 +45,9 @@ pub enum Pick {
 const NOTES_CHARS: usize = 2000;
 
 /// Outlook's "Beantwoorden met vergaderverzoek".
-pub const MEETING: &str = "Beantwoorden met vergaderverzoek";
+pub fn meeting() -> String {
+    tr("menu-reply-meeting")
+}
 
 /// The sender and the other recipients of `m`, without `me`, as the "Genodigden" line.
 pub fn attendee_line(m: &MessageHeader, me: &str) -> String {
@@ -58,8 +61,12 @@ pub fn attendee_line(m: &MessageHeader, me: &str) -> String {
 }
 
 /// Outlook's "Sluimeren", the submenu's name.
-pub const SNOOZE: &str = "Sluimeren";
-pub const UNSNOOZE: &str = "Niet meer sluimeren";
+pub fn snooze() -> String {
+    tr("menu-snooze")
+}
+pub fn unsnooze() -> String {
+    tr("menu-unsnooze")
+}
 
 /// Draws the menu on `r` for message `m`; what was clicked comes back once, to be run by
 /// [`MailApp::act_on_message`]. `known_sender` says whether the sender is in the contacts,
@@ -68,30 +75,30 @@ pub const UNSNOOZE: &str = "Niet meer sluimeren";
 pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, ignored: bool, snoozed: bool) -> Option<Pick> {
     let mut pick = None;
     r.context_menu(|ui| {
-        let read = if m.flags.seen { ("Als ongelezen markeren", "message.mark_unread") } else { ("Als gelezen markeren", "message.mark_read") };
-        let sender = if known_sender { "Afzender openen in contacten" } else { "Afzender toevoegen aan contacten" };
-        let junk = if in_junk { ("Geen ongewenst", "junk.trust") } else { ("Afzender blokkeren", "junk.block") };
-        let ignore = if ignored { ("Gesprek niet meer negeren", "conversation.unignore") } else { ("Gesprek negeren", "conversation.ignore") };
-        let items: [(&str, Pick); 19] = [
-            ("Beantwoorden", Pick::Compose(ComposeKind::Reply)),
-            ("Allen beantwoorden", Pick::Compose(ComposeKind::ReplyAll)),
-            ("Doorsturen", Pick::Compose(ComposeKind::Forward)),
-            (crate::eml::FORWARD, Pick::ForwardAttached),
-            (crate::resend::RESEND, Pick::Resend),
-            (MEETING, Pick::Meeting),
-            (read.0, Pick::Command(read.1)),
-            ("Verplaatsen naar…", Pick::Move),
-            ("Archiveren", Pick::Command("message.archive")),
-            ("Ongewenst", Pick::Command("message.junk")),
-            (junk.0, Pick::Command(junk.1)),
-            ("Verwijderen", Pick::Command("message.delete")),
-            (ignore.0, Pick::Command(ignore.1)),
-            ("Gesprek opruimen…", Pick::Cleanup),
-            ("Taak maken van dit bericht", Pick::Task),
-            ("Afspraak maken van dit bericht", Pick::Appointment),
-            (sender, Pick::Sender),
-            ("Alles van deze afzender zoeken", Pick::FromSender),
-            ("Regel maken voor deze afzender…", Pick::Rule),
+        let read = if m.flags.seen { ("menu-mark-unread", "message.mark_unread") } else { ("view-mark-read", "message.mark_read") };
+        let sender = if known_sender { "menu-sender-open" } else { "menu-sender-add" };
+        let junk = if in_junk { ("junk-not-junk", "junk.trust") } else { ("block-sender", "junk.block") };
+        let ignore = if ignored { ("menu-unignore", "conversation.unignore") } else { ("menu-ignore", "conversation.ignore") };
+        let items: [(String, Pick); 19] = [
+            (tr("mail-reply"), Pick::Compose(ComposeKind::Reply)),
+            (tr("mail-reply-all"), Pick::Compose(ComposeKind::ReplyAll)),
+            (tr("mail-forward"), Pick::Compose(ComposeKind::Forward)),
+            (crate::eml::forward(), Pick::ForwardAttached),
+            (crate::resend::resend(), Pick::Resend),
+            (meeting(), Pick::Meeting),
+            (tr(read.0), Pick::Command(read.1)),
+            (tr("menu-move-to"), Pick::Move),
+            (tr("mail-archive"), Pick::Command("message.archive")),
+            (tr("mail-junk"), Pick::Command("message.junk")),
+            (tr(junk.0), Pick::Command(junk.1)),
+            (tr("delete"), Pick::Command("message.delete")),
+            (tr(ignore.0), Pick::Command(ignore.1)),
+            (tr("menu-clean-up-conversation"), Pick::Cleanup),
+            (tr("menu-make-task"), Pick::Task),
+            (tr("menu-make-appointment"), Pick::Appointment),
+            (tr(sender), Pick::Sender),
+            (tr("menu-find-from-sender"), Pick::FromSender),
+            (tr("menu-rule-for-sender"), Pick::Rule),
         ];
         for (i, (label, p)) in items.into_iter().enumerate() {
             if matches!(i, 6 | 14 | 17) {
@@ -99,18 +106,18 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
             }
             if i == 7 {
                 // Outlook's "Opvolgen": the flag with a due day, under its own arrow.
-                ui.menu_button("Opvolgen", |ui| {
-                    for (when, label) in merel_engine::followup::WHEN {
-                        if ui.button(label).clicked() {
+                ui.menu_button(tr("menu-follow-up"), |ui| {
+                    for (when, _) in merel_engine::followup::WHEN {
+                        if ui.button(tr(&format!("followup-when-{when}"))).clicked() {
                             pick = Some(Pick::FollowUp(when));
                         }
                     }
-                    if ui.button("Geen datum").clicked() {
+                    if ui.button(tr("follow-up-no-date")).clicked() {
                         pick = Some(Pick::FollowUp("none"));
                     }
                     if m.flags.flagged {
                         ui.separator();
-                        if ui.button("Vlag weghalen").clicked() {
+                        if ui.button(tr("follow-up-clear")).clicked() {
                             pick = Some(Pick::Command("message.flag"));
                         }
                     }
@@ -119,15 +126,15 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
                     }
                 });
                 // Outlook's "Sluimeren": out of the list until a moment of choice.
-                ui.menu_button(SNOOZE, |ui| {
-                    for (when, label) in merel_engine::snooze::WHEN {
-                        if ui.button(label).clicked() {
+                ui.menu_button(snooze(), |ui| {
+                    for (when, _) in merel_engine::snooze::WHEN {
+                        if ui.button(tr(&format!("snooze-{when}"))).clicked() {
                             pick = Some(Pick::Snooze(when));
                         }
                     }
                     if snoozed {
                         ui.separator();
-                        if ui.button(UNSNOOZE).clicked() {
+                        if ui.button(unsnooze()).clicked() {
                             pick = Some(Pick::Command("message.unsnooze"));
                         }
                     }
@@ -152,7 +159,7 @@ pub fn notes_from(session: &Session, m: &MessageHeader) -> String {
     let from = if name == email { email.to_string() } else { format!("{name} <{email}>") };
     let text = session.bodies.get(&m.id).map(|b| b.text.as_str()).unwrap_or(m.preview.as_str());
     let text: String = text.trim().chars().take(NOTES_CHARS).collect();
-    format!("Van: {from}\nDatum: {}\n\n{text}", dates::long(m.date))
+    format!("{}\n\n{text}", crate::i18n::tr_args("notes-from", &[("from", from.into()), ("date", dates::long(m.date).into())]))
 }
 
 impl MailApp {

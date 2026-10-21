@@ -4,6 +4,7 @@
 //! closes. Every choice in it can be changed later in the same place as always (Bestand, Over
 //! Merel, Beeld).
 
+use crate::i18n::tr;
 use egui::RichText;
 
 use crate::helder::{self, Icon};
@@ -12,13 +13,27 @@ use crate::view::ThemeChoice;
 use crate::{MailApp, Tab};
 
 /// The window's title and buttons, which tests and screen readers find them by.
-pub const WINDOW: &str = "Welkom bij Merel";
-pub const NEXT: &str = "Volgende";
-pub const BACK: &str = "Vorige";
-pub const DONE: &str = "Aan de slag";
-pub const SKIP: &str = "Overslaan";
-pub const ADD_ACCOUNT: &str = "Account toevoegen";
-pub const UPDATES_ON: &str = "Elke dag kijken of er een nieuwe versie is";
+pub fn window_label() -> String {
+    tr("welcome-title")
+}
+pub fn next_label() -> String {
+    tr("welcome-next")
+}
+pub fn back_label() -> String {
+    tr("welcome-back")
+}
+pub fn done() -> String {
+    tr("welcome-done")
+}
+pub fn skip() -> String {
+    tr("welcome-skip")
+}
+pub fn add_account() -> String {
+    tr("account-add-title")
+}
+pub fn updates_on() -> String {
+    tr("welcome-updates-on")
+}
 
 /// The steps, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,13 +88,13 @@ impl Step {
         }
     }
 
-    fn title(self) -> &'static str {
-        match self {
-            Step::Hello => "Mail, agenda, contacten en taken op één plek",
-            Step::Account => "Je mailaccount",
-            Step::Updates => "Nieuwe versies",
-            Step::Look => "Licht of donker",
-        }
+    fn title(self) -> String {
+        tr(match self {
+            Step::Hello => "welcome-hello-title",
+            Step::Account => "welcome-account-title",
+            Step::Updates => "welcome-updates-title",
+            Step::Look => "welcome-look-title",
+        })
     }
 }
 
@@ -88,11 +103,15 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(step) = app.welcome else { return };
     let mut go: Option<Step> = None;
     let mut finish = false;
-    let closed = helder::dialog(ctx, t, WINDOW, 480.0, |ui| {
+    let closed = helder::dialog(ctx, t, &window_label(), 480.0, |ui| {
         helder::card_frame(t).inner_margin(20).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                if step == Step::Hello { helder::app_badge(ui) } else { helder::badge(ui, t, step.icon()) }
+                if step == Step::Hello {
+                    helder::app_badge(ui)
+                } else {
+                    helder::badge(ui, t, step.icon())
+                }
                 ui.add_space(8.0);
                 ui.vertical(|ui| {
                     helder::step_dots(ui, t, step.index(), Step::ALL.len());
@@ -103,37 +122,60 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             ui.add_space(12.0);
             match step {
                 Step::Hello => {
-                    helder::paragraph(ui, t, "Merel werkt zoals Outlook en draait op je eigen computer. Je mail gaat rechtstreeks tussen deze computer en je mailserver; er zit geen dienst van ons tussen.");
+                    helder::paragraph(ui, t, &tr("welcome-hello-1"));
                     ui.add_space(6.0);
-                    helder::paragraph(ui, t, "Afbeeldingen van internet laden pas als je erom vraagt, wachtwoorden staan in de sleutelhanger van het systeem en de offline kopie van je mail is versleuteld.");
+                    helder::paragraph(ui, t, &tr("welcome-hello-2"));
                 }
                 Step::Account => {
-                    helder::paragraph(ui, t, "Voeg je account toe met IMAP en SMTP, Gmail, Microsoft 365 of Exchange. Dat kan ook later, onder Bestand.");
+                    helder::paragraph(ui, t, &tr("welcome-account-text"));
                     ui.add_space(10.0);
                     helder::secondary(ui, t, |ui| {
-                        if ui.add(egui::Button::image_and_text(Icon::UserPlus.image(helder::ICON, t.text), RichText::new(ADD_ACCOUNT).size(14.0).color(t.text))).clicked() {
+                        if ui
+                            .add(egui::Button::image_and_text(
+                                Icon::UserPlus.image(helder::ICON, t.text),
+                                RichText::new(add_account()).size(14.0).color(t.text),
+                            ))
+                            .clicked()
+                        {
                             app.tab = Tab::File;
                             finish = true;
                         }
                     });
                 }
                 Step::Updates => {
-                    helder::paragraph(ui, t, "Merel kan eens per dag bij GitHub nagaan of er een nieuwe versie is en het je dan laten weten. Er gaat niets mee behalve die vraag; GitHub ziet wel het adres van je internetverbinding.");
+                    helder::paragraph(ui, t, &tr("welcome-updates-text"));
                     ui.add_space(10.0);
                     let mut on = app.view.update_check == Some(true);
-                    helder::toggle(ui, t, &mut on, UPDATES_ON);
+                    helder::toggle(ui, t, &mut on, &updates_on());
                     app.view.update_check = Some(on);
-                    ui.add(egui::Label::new(RichText::new("Zelf kijken kan altijd via Help > Updates.").size(12.0).color(t.text_dim)).wrap());
+                    ui.add(egui::Label::new(RichText::new(tr("welcome-updates-self")).size(12.0).color(t.text_dim)).wrap());
                 }
                 Step::Look => {
-                    helder::paragraph(ui, t, "Dit kun je later wijzigen op het tabblad Beeld.");
+                    helder::paragraph(ui, t, &tr("welcome-look-text"));
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         helder::quiet(ui, t, |ui| {
-                            for (choice, icon) in [(ThemeChoice::System, Icon::Monitor), (ThemeChoice::Light, Icon::Sun), (ThemeChoice::Dark, Icon::Moon)] {
-                                if helder::toggle_button(ui, t, icon, &choice.name(), app.view.theme == choice).on_hover_text(choice.hint()).clicked() {
+                            for (choice, icon) in
+                                [(ThemeChoice::System, Icon::Monitor), (ThemeChoice::Light, Icon::Sun), (ThemeChoice::Dark, Icon::Moon)]
+                            {
+                                if helder::toggle_button(ui, t, icon, &choice.name(), app.view.theme == choice).on_hover_text(choice.hint()).clicked()
+                                {
                                     app.view.theme = choice;
                                     ctx.set_theme(choice.preference());
+                                }
+                            }
+                        });
+                    });
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        helder::quiet(ui, t, |ui| {
+                            for choice in crate::i18n::LanguageChoice::ALL {
+                                if helder::toggle_button(ui, t, Icon::Globe, &choice.name(), app.view.language == choice)
+                                    .on_hover_text(choice.hint())
+                                    .clicked()
+                                {
+                                    app.view.language = choice;
+                                    app.apply_language();
                                 }
                             }
                         });
@@ -145,7 +187,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         ui.horizontal(|ui| {
             if step.next().is_some() {
                 helder::quiet(ui, t, |ui| {
-                    if helder::text_button(ui, t, SKIP).on_hover_text("De rest later instellen").clicked() {
+                    if helder::text_button(ui, t, &skip()).on_hover_text(tr("welcome-skip-hint")).clicked() {
                         finish = true;
                     }
                 });
@@ -153,18 +195,18 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             helder::right(ui, |ui| {
                 match step.next() {
                     Some(next) => {
-                        if helder::primary_button(ui, t, Icon::ArrowRight, NEXT).clicked() {
+                        if helder::primary_button(ui, t, Icon::ArrowRight, &next_label()).clicked() {
                             go = Some(next);
                         }
                     }
-                    None => finish |= helder::primary_button(ui, t, Icon::CircleCheck, DONE).clicked(),
+                    None => finish |= helder::primary_button(ui, t, Icon::CircleCheck, &done()).clicked(),
                 }
                 if let Some(back) = step.back() {
                     helder::secondary(ui, t, |ui| {
                         if ui
                             .add(egui::Button::image_and_text(
                                 Icon::ArrowLeft.image(helder::ICON, t.text),
-                                RichText::new(BACK).size(14.0).color(t.text),
+                                RichText::new(back_label()).size(14.0).color(t.text),
                             ))
                             .clicked()
                         {

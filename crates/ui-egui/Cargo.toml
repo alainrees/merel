@@ -31,10 +31,7 @@ open = { workspace = true }
 base64 = { workspace = true }
 merel-sign = { workspace = true }
 merel-notify = { workspace = true }
-fluent-bundle = { workspace = true }
-fluent-syntax = { workspace = true }
-unic-langid = { workspace = true }
-sys-locale = { workspace = true }
+merel-i18n = { workspace = true }
 qrcode = { workspace = true }
 
 [dev-dependencies]

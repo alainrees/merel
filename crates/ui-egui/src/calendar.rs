@@ -10,22 +10,18 @@ use egui::{Align2, Color32, CornerRadius, FontId, Margin, Rect, RichText, Sense,
 use serde_json::json;
 
 use merel_engine::{CommandError, tasks::TaskFilter};
-use merel_model::{Appointment, Attendee, Frequency, Meeting, Recurrence, ShowAs, Task, describe_recurrence};
+use merel_model::{Appointment, Attendee, Frequency, Meeting, Recurrence, ShowAs, Task};
 
 use crate::helder::{self, Icon};
+use crate::i18n::tr;
 use crate::{MailApp, Module, Tokens};
-
-pub const MONTHS: [&str; 12] =
-    ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"];
-pub const WEEKDAYS: [&str; 7] = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"];
-const WEEKDAYS_SHORT: [&str; 7] = ["ma", "di", "wo", "do", "vr", "za", "zo"];
 
 /// The width of the week-number column in the month view, when it is shown.
 const WEEK_GUTTER: f32 = 30.0;
 
 /// The label of the week-number cell left of a week, as Outlook's "Weeknummers weergeven".
 pub(crate) fn week_label(d: NaiveDate) -> String {
-    format!("Week {}", d.iso_week().week())
+    crate::i18n::tr_args("calendar-week-number", &[("week", (d.iso_week().week() as usize).into())])
 }
 
 /// A cell with the week number of the week `d` falls in, named so a screen reader (and the
@@ -40,7 +36,9 @@ fn week_cell(ui: &mut Ui, t: &Tokens, size: egui::Vec2, d: NaiveDate) {
 const REPEAT_MARK: &str = "🔁";
 /// Outlook's "Privé": the lock before a private appointment, and the checkbox in the window.
 const PRIVATE_MARK: &str = "🔒";
-pub const PRIVATE: &str = "Privé";
+pub fn private() -> String {
+    tr("calendar-private")
+}
 /// The search box's widget id, so Ctrl+E can put the cursor there.
 pub(crate) const SEARCH_BOX: &str = "calendar_search_box";
 /// How far a search looks: this many days back and ahead of today.
@@ -55,7 +53,9 @@ const DAY_HEADER: f32 = 50.0;
 const FIRST_HOUR: f32 = 7.0;
 
 /// The checkbox on the Beeld tab that shades the hours outside the working day.
-pub const WORK_HOURS: &str = "Werkuren";
+pub fn work_hours() -> String {
+    tr("calendar-work-hours")
+}
 /// The working day the shading leaves clear: from 8:00 up to 17:00, Monday to Friday, as
 /// Outlook's default.
 pub const WORK_START: u32 = 8;
@@ -68,14 +68,26 @@ pub fn outside_work(d: NaiveDate, hour: u32) -> bool {
 const DATE_FORMAT: &str = "%d-%m-%Y";
 
 /// The ribbon button and window that jump to a typed day, Outlook's "Ga naar datum" (Ctrl+G).
-pub const GOTO: &str = "Ga naar datum";
-pub const GOTO_HINT: &str = "Gebruik dag-maand-jaar, bijvoorbeeld 21-10-2026.";
+pub fn goto() -> String {
+    tr("calendar-goto")
+}
+pub fn goto_hint() -> String {
+    tr("calendar-goto-hint")
+}
 const GOTO_BOX: &str = "calendar_goto_box";
-const GOTO_PICKER: &str = "Dag kiezen";
+fn goto_picker() -> String {
+    tr("calendar-pick-day")
+}
 /// The calendar buttons beside the appointment's dates.
-pub const START_PICKER: &str = "Begindatum kiezen";
-pub const END_PICKER: &str = "Einddatum kiezen";
-pub const UNTIL_PICKER: &str = "Laatste datum van de reeks kiezen";
+pub fn start_picker() -> String {
+    tr("calendar-pick-start")
+}
+pub fn end_picker() -> String {
+    tr("calendar-pick-end")
+}
+pub fn until_picker() -> String {
+    tr("calendar-pick-until")
+}
 
 /// A day typed as dag-maand-jaar, with or without leading zeros.
 pub fn parse_date(text: &str) -> Option<NaiveDate> {
@@ -95,26 +107,26 @@ pub fn goto_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(mut text) = app.calendar.goto.take() else { return };
     let mut go = false;
     let mut close = false;
-    if helder::popup(ctx, t, "goto-date", GOTO, 260.0, |ui| {
-        ui.label(RichText::new("Welke dag wil je zien? (dag-maand-jaar)").color(t.text));
+    if helder::popup(ctx, t, "goto-date", &goto(), 260.0, |ui| {
+        ui.label(RichText::new(crate::i18n::tr("calendar-goto-question")).color(t.text));
         ui.horizontal(|ui| {
             let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0).id(egui::Id::new(GOTO_BOX)));
             if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 go = true;
             }
             // Picking a day from the month goes there at once.
-            if crate::date_picker::button(ui, t, &mut text, GOTO_PICKER).is_some() {
+            if crate::date_picker::button(ui, t, &mut text, &goto_picker()).is_some() {
                 go = true;
             }
         });
         if parse_date(&text).is_none() {
-            ui.label(RichText::new(GOTO_HINT).size(12.0).color(t.flag));
+            ui.label(RichText::new(goto_hint()).size(12.0).color(t.flag));
         }
         ui.horizontal(|ui| {
-            if ui.add(helder::primary_text(t, "Ga")).clicked() {
+            if ui.add(helder::primary_text(t, &tr("calendar-go"))).clicked() {
                 go = true;
             }
-            if ui.button("Annuleren").clicked() {
+            if ui.button(tr("cancel")).clicked() {
                 close = true;
             }
         });
@@ -182,11 +194,11 @@ pub fn today() -> NaiveDate {
 }
 
 pub(crate) fn month_name(m: u32) -> &'static str {
-    MONTHS.get(m.saturating_sub(1) as usize).copied().unwrap_or("")
+    crate::i18n::month_name(m)
 }
 
 pub(crate) fn weekday_name(d: NaiveDate) -> &'static str {
-    WEEKDAYS[d.weekday().num_days_from_monday() as usize]
+    crate::i18n::weekday_name(d.weekday().num_days_from_monday() as usize)
 }
 
 /// The Unix time of a local wall-clock moment; on a DST gap, the earlier reading.
@@ -283,34 +295,33 @@ pub struct Editor {
 }
 
 /// The "Weergeven als" choices of the window, in Outlook's order.
-const SHOW_AS: [(ShowAs, &str); 4] = [(ShowAs::Free, "Vrij"), (ShowAs::Tentative, "Voorlopig"), (ShowAs::Busy, "Bezet"), (ShowAs::Oof, "Afwezig")];
+const SHOW_AS: [ShowAs; 4] = [ShowAs::Free, ShowAs::Tentative, ShowAs::Busy, ShowAs::Oof];
 /// Outlook paints an out-of-office appointment purple, whatever its calendar's colour.
 const OOF_COLOR: Color32 = Color32::from_rgb(122, 86, 170);
 
-pub fn show_as_label(show_as: ShowAs) -> &'static str {
-    SHOW_AS.iter().find(|(s, _)| *s == show_as).map(|(_, label)| *label).unwrap_or("Bezet")
+pub fn show_as_label(show_as: ShowAs) -> String {
+    tr(match show_as {
+        ShowAs::Free => "show-as-free",
+        ShowAs::Tentative => "show-as-tentative",
+        ShowAs::Busy => "show-as-busy",
+        ShowAs::Oof => "show-as-away",
+    })
 }
 
-/// The reminder choices of the window: minutes before the start, and the label.
-const REMINDERS: [(Option<u32>, &str); 10] = [
-    (None, "Geen"),
-    (Some(0), "Op het moment zelf"),
-    (Some(5), "5 minuten ervoor"),
-    (Some(10), "10 minuten ervoor"),
-    (Some(15), "15 minuten ervoor"),
-    (Some(30), "30 minuten ervoor"),
-    (Some(60), "1 uur ervoor"),
-    (Some(120), "2 uur ervoor"),
-    (Some(1440), "1 dag ervoor"),
-    (Some(10_080), "1 week ervoor"),
-];
+/// The reminder choices of the window: minutes before the start.
+const REMINDERS: [Option<u32>; 10] = [None, Some(0), Some(5), Some(10), Some(15), Some(30), Some(60), Some(120), Some(1440), Some(10_080)];
 
-/// The label of a reminder setting, also one the list does not offer.
+/// The label of a reminder setting, also one the list does not offer: "15 minuten ervoor".
 fn reminder_label(reminder: Option<u32>) -> String {
-    match REMINDERS.iter().find(|(r, _)| *r == reminder) {
-        Some((_, label)) => (*label).to_string(),
-        None => format!("{} minuten ervoor", reminder.unwrap_or(0)),
-    }
+    let Some(minutes) = reminder else { return tr("reminder-none") };
+    let (key, count) = match minutes {
+        0 => return tr("reminder-at-start"),
+        m if m % 10_080 == 0 => ("reminder-weeks-before", m / 10_080),
+        m if m % 1440 == 0 => ("reminder-days-before", m / 1440),
+        m if m % 60 == 0 => ("reminder-hours-before", m / 60),
+        m => ("reminder-minutes-before", m),
+    };
+    crate::i18n::tr_args(key, &[("count", (count as usize).into())])
 }
 
 impl Editor {
@@ -412,13 +423,8 @@ impl Editor {
     /// The recurrence the fields describe, or what is wrong with them.
     fn recurrence(&self, start_date: NaiveDate) -> Result<Option<Recurrence>, String> {
         let Some(frequency) = self.repeat else { return Ok(None) };
-        let interval: u32 = self
-            .interval
-            .trim()
-            .parse()
-            .ok()
-            .filter(|n| (1..=merel_model::MAX_INTERVAL).contains(n))
-            .ok_or("Vul in om de hoeveel keer de afspraak terugkomt, van 1 tot 999.")?;
+        let interval: u32 =
+            self.interval.trim().parse().ok().filter(|n| (1..=merel_model::MAX_INTERVAL).contains(n)).ok_or_else(|| tr("calendar-bad-interval"))?;
         let mut weekdays: Vec<u8> = self.weekdays.iter().enumerate().filter(|(_, on)| **on).map(|(i, _)| i as u8).collect();
         if frequency == Frequency::Weekly && weekdays.is_empty() {
             weekdays.push(start_date.weekday().num_days_from_monday() as u8);
@@ -426,17 +432,16 @@ impl Editor {
         let (until, count) = match self.ends {
             Ends::Never => (None, None),
             Ends::OnDate => {
-                let date = NaiveDate::parse_from_str(self.until.trim(), DATE_FORMAT)
-                    .map_err(|_| "Vul een geldige einddatum voor de herhaling in, bijvoorbeeld 31-12-2026.".to_string())?;
-                let next = date.checked_add_days(Days::new(1)).ok_or("De einddatum van de herhaling ligt te ver weg.")?;
-                let last = midnight(next).ok_or("De einddatum van de herhaling bestaat niet in deze tijdzone.")? - 1;
+                let date = NaiveDate::parse_from_str(self.until.trim(), DATE_FORMAT).map_err(|_| tr("calendar-bad-until"))?;
+                let next = date.checked_add_days(Days::new(1)).ok_or_else(|| tr("calendar-until-too-far"))?;
+                let last = midnight(next).ok_or_else(|| tr("calendar-until-no-such"))? - 1;
                 if date < start_date {
-                    return Err("De herhaling eindigt voor de eerste keer.".into());
+                    return Err(tr("calendar-until-before-start"));
                 }
                 (Some(last), None)
             }
             Ends::AfterCount => {
-                let n: u32 = self.count.trim().parse().ok().filter(|n| *n >= 1).ok_or("Vul in na hoeveel keer de herhaling stopt, minstens 1.")?;
+                let n: u32 = self.count.trim().parse().ok().filter(|n| *n >= 1).ok_or_else(|| tr("calendar-bad-count"))?;
                 (None, Some(n))
             }
         };
@@ -446,26 +451,29 @@ impl Editor {
     /// The `appointment.save` parameters, or what is wrong with the fields.
     pub fn params(&self) -> Result<serde_json::Value, String> {
         let date = |s: &str, what: &str| {
-            NaiveDate::parse_from_str(s.trim(), DATE_FORMAT).map_err(|_| format!("Vul een geldige {what} in, bijvoorbeeld 18-10-2026."))
+            NaiveDate::parse_from_str(s.trim(), DATE_FORMAT).map_err(|_| crate::i18n::tr_args(what, &[("example", "18-10-2026".into())]))
         };
         let time = |s: &str, what: &str| {
-            NaiveTime::parse_from_str(s.trim(), TIME_FORMAT).map_err(|_| format!("Vul een geldige {what} in, bijvoorbeeld 14:30."))
+            NaiveTime::parse_from_str(s.trim(), TIME_FORMAT).map_err(|_| crate::i18n::tr_args(what, &[("example", "14:30".into())]))
         };
-        let start_date = date(&self.start_date, "begindatum")?;
-        let end_date = date(&self.end_date, "einddatum")?;
+        let start_date = date(&self.start_date, "calendar-bad-start-date")?;
+        let end_date = date(&self.end_date, "calendar-bad-end-date")?;
         let (start, end) = if self.all_day {
-            let end_date = end_date.checked_add_days(Days::new(1)).ok_or("De einddatum ligt te ver weg.")?;
+            let end_date = end_date.checked_add_days(Days::new(1)).ok_or_else(|| tr("calendar-end-too-far"))?;
             (start_date.and_time(NaiveTime::MIN), end_date.and_time(NaiveTime::MIN))
         } else {
-            (start_date.and_time(time(&self.start_time, "begintijd")?), end_date.and_time(time(&self.end_time, "eindtijd")?))
+            (
+                start_date.and_time(time(&self.start_time, "calendar-bad-start-time")?),
+                end_date.and_time(time(&self.end_time, "calendar-bad-end-time")?),
+            )
         };
-        let start = to_timestamp(start).ok_or("De begintijd bestaat niet in deze tijdzone.")?;
-        let end = to_timestamp(end).ok_or("De eindtijd bestaat niet in deze tijdzone.")?;
+        let start = to_timestamp(start).ok_or_else(|| tr("calendar-start-no-such"))?;
+        let end = to_timestamp(end).ok_or_else(|| tr("calendar-end-no-such"))?;
         if self.title.trim().is_empty() {
-            return Err("Vul een titel in.".into());
+            return Err(tr("tasks-need-title"));
         }
         if end <= start {
-            return Err("Het einde ligt voor het begin.".into());
+            return Err(tr("calendar-end-before-start"));
         }
         let recurrence = self.recurrence(start_date)?;
         let mut p = json!({
@@ -510,7 +518,7 @@ impl MailApp {
     pub fn drop_appointment(&mut self, id: &str, day: NaiveDate, time: Option<NaiveTime>) {
         let Some(a) = self.engine.session.appointment(id) else { return };
         let Some(start) = dropped_start(a, day, time) else {
-            self.notice = Some(crate::Notice::warning("Die tijd bestaat niet in deze tijdzone."));
+            self.notice = Some(crate::Notice::warning(tr("calendar-time-no-such")));
             return;
         };
         if start == a.start {
@@ -615,10 +623,10 @@ fn side_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 ui.label(RichText::new(format!("{} {}", month_name(focus.month()), focus.year())).size(14.0).strong().color(t.text));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     helder::quiet(ui, t, |ui| {
-                        if nav_button(ui, t, Icon::ChevronRight, "Volgende maand").clicked() {
+                        if nav_button(ui, t, Icon::ChevronRight, &tr("calendar-next-month")).clicked() {
                             app.calendar.focus = add_months(focus, 1);
                         }
-                        if nav_button(ui, t, Icon::ChevronLeft, "Vorige maand").clicked() {
+                        if nav_button(ui, t, Icon::ChevronLeft, &tr("calendar-previous-month")).clicked() {
                             app.calendar.focus = add_months(focus, -1);
                         }
                     });
@@ -629,7 +637,7 @@ fn side_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let cell = (ui.available_width() / 7.0).floor().clamp(20.0, 34.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                for d in WEEKDAYS_SHORT {
+                for d in (0..7).map(crate::i18n::weekday_short) {
                     let (rect, _) = ui.allocate_exact_size(vec2(cell, 18.0), Sense::hover());
                     ui.painter().text(rect.center(), Align2::CENTER_CENTER, d, FontId::proportional(11.0), t.text_dim);
                 }
@@ -693,7 +701,9 @@ fn side_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 const SIDE_TASKS: usize = 12;
 
 /// Hover text of a calendar's tick box in the side pane.
-pub const CALENDAR_TICK_HINT: &str = "Vinkje weg verbergt de afspraken van deze agenda in de weergaven; herinneringen komen wel.";
+pub fn calendar_tick_hint() -> String {
+    tr("calendar-tick-hint")
+}
 
 /// The occurrences of calendars whose tick box is on, in the order given.
 pub(crate) fn shown(app: &MailApp, list: Vec<Appointment>) -> Vec<Appointment> {
@@ -708,8 +718,7 @@ fn task_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         return;
     }
     ui.add_space(14.0);
-    ui.label(RichText::new("Taken").size(12.0).strong().color(t.text_dim))
-        .on_hover_text("Sleep een taak naar een dag of uur om er een afspraak voor in te plannen.");
+    ui.label(RichText::new(tr("calendar-tasks")).size(12.0).strong().color(t.text_dim)).on_hover_text(tr("calendar-tasks-hint"));
     ui.add_space(4.0);
     let mut pick = None;
     for task in &tasks {
@@ -881,10 +890,18 @@ pub(crate) enum ChipAction {
 }
 
 /// The right-click menu of an appointment, as Outlook's.
-pub(crate) const OPEN_MENU: &str = "Openen";
-pub(crate) const DELETE_ONE_MENU: &str = "Dit exemplaar verwijderen";
-pub(crate) const DELETE_SERIES_MENU: &str = "Hele reeks verwijderen";
-pub(crate) const CANCEL_MENU: &str = "Vergadering annuleren…";
+pub(crate) fn open_menu() -> String {
+    tr("open")
+}
+pub(crate) fn delete_one_menu() -> String {
+    tr("calendar-delete-one")
+}
+pub(crate) fn delete_series_menu() -> String {
+    tr("calendar-delete-series")
+}
+pub(crate) fn cancel_menu() -> String {
+    tr("calendar-cancel-menu")
+}
 
 /// A clickable block for one appointment, a drag source when `drag` is given, with a menu on
 /// a right click. Returns what a click or the menu asked for.
@@ -919,22 +936,22 @@ fn chip(
     // A meeting with people is called off from its window, where the cancellation is sent.
     let invited = a.meeting.as_ref().is_some_and(|m| !m.attendees.is_empty());
     r.context_menu(|ui| {
-        if ui.button(OPEN_MENU).clicked() {
+        if ui.button(open_menu()).clicked() {
             action = Some(ChipAction::Open);
         }
         ui.separator();
         if invited {
-            if ui.button(CANCEL_MENU).clicked() {
+            if ui.button(cancel_menu()).clicked() {
                 action = Some(ChipAction::Open);
             }
         } else if a.recurrence.is_some() {
-            if ui.button(DELETE_ONE_MENU).clicked() {
+            if ui.button(delete_one_menu()).clicked() {
                 action = Some(ChipAction::Skip);
             }
-            if ui.button(DELETE_SERIES_MENU).clicked() {
+            if ui.button(delete_series_menu()).clicked() {
                 action = Some(ChipAction::Delete);
             }
-        } else if ui.button("Verwijderen").clicked() {
+        } else if ui.button(tr("delete")).clicked() {
             action = Some(ChipAction::Delete);
         }
     });
@@ -979,7 +996,7 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         if week_numbers {
             ui.allocate_exact_size(vec2(gutter, 22.0), Sense::hover());
         }
-        for d in WEEKDAYS_SHORT {
+        for d in (0..7).map(crate::i18n::weekday_short) {
             let (rect, _) = ui.allocate_exact_size(vec2(w, 22.0), Sense::hover());
             ui.painter().text(rect.center(), Align2::CENTER_CENTER, d, FontId::proportional(12.0), t.text_dim);
         }
@@ -1061,7 +1078,7 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         ui.painter().text(
                             pos2(rect.left() + 6.0, y + 9.0),
                             Align2::LEFT_CENTER,
-                            format!("+{} meer", items.len() - shown),
+                            crate::i18n::tr_args("calendar-more", &[("count", (items.len() - shown).into())]),
                             FontId::proportional(11.0),
                             t.text_dim,
                         );
@@ -1104,17 +1121,17 @@ pub(crate) fn panes(app: &MailApp) -> Vec<Option<String>> {
 
 /// The label of a calendar tab's button that puts the calendars side by side.
 pub fn split_label(name: &str) -> String {
-    format!("{name} naast elkaar weergeven")
+    crate::i18n::tr_args("calendar-split", &[("name", name.into())])
 }
 
 /// The label of a calendar tab's button that merges the calendars into one grid again.
 pub fn merge_label(name: &str) -> String {
-    format!("{name} samenvoegen")
+    crate::i18n::tr_args("calendar-merge", &[("name", name.into())])
 }
 
 /// The label of a calendar tab's close button, which unticks the calendar.
 pub fn close_label(name: &str) -> String {
-    format!("{name} sluiten")
+    crate::i18n::tr_args("calendar-close", &[("name", name.into())])
 }
 
 /// The height of the row of calendar tabs.
@@ -1263,7 +1280,13 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
         ui.spacing_mut().item_spacing.x = 0.0;
         let strip_h = 26.0;
         let (g, _) = ui.allocate_exact_size(vec2(gutter, strip_h), Sense::hover());
-        ui.painter().text(g.right_center() - vec2(4.0, 0.0), Align2::RIGHT_CENTER, "hele dag", FontId::proportional(10.5), t.text_dim);
+        ui.painter().text(
+            g.right_center() - vec2(4.0, 0.0),
+            Align2::RIGHT_CENTER,
+            tr("all-day").to_lowercase(),
+            FontId::proportional(10.5),
+            t.text_dim,
+        );
         for pane in &panes {
             for i in 0..days {
                 let d = add_days(first, i);
@@ -1388,7 +1411,13 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                 // The bottom edge stretches or shortens the appointment, by the half hour.
                 let handle = Rect::from_min_max(pos2(block.left(), block.bottom() - RESIZE_HANDLE), block.right_bottom());
                 let h = ui.interact(handle, ui.make_persistent_id(("resize", &a.id)), Sense::drag());
-                h.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Eindtijd van {} verslepen", a.title)));
+                h.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        true,
+                        crate::i18n::tr_args("calendar-drag-end", &[("title", a.title.as_str().into())]),
+                    )
+                });
                 if h.hovered() || h.dragged() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
                 }
@@ -1468,19 +1497,19 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::CentralPanel::default().frame(frame).show(ui, |ui| {
         ui.horizontal(|ui| {
             helder::quiet(ui, t, |ui| {
-                if nav_button(ui, t, Icon::ChevronLeft, "Vorige").clicked() {
+                if nav_button(ui, t, Icon::ChevronLeft, &tr("calendar-previous")).clicked() {
                     app.calendar.focus = step(app.calendar.view, app.calendar.focus, -1);
                 }
-                if nav_button(ui, t, Icon::ChevronRight, "Volgende").clicked() {
+                if nav_button(ui, t, Icon::ChevronRight, &tr("calendar-next")).clicked() {
                     app.calendar.focus = step(app.calendar.view, app.calendar.focus, 1);
                 }
             });
             ui.add_space(8.0);
-            let title = if app.calendar.is_searching() { "Zoekresultaten".to_string() } else { period_title(app.calendar.view, app.calendar.focus) };
+            let title = if app.calendar.is_searching() { tr("calendar-search-results") } else { period_title(app.calendar.view, app.calendar.focus) };
             ui.label(RichText::new(title).size(helder::TITLE_TEXT).strong().color(t.text));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if app.calendar.is_searching()
-                    && crate::helder::quiet(ui, t, |ui| crate::helder::icon_button(ui, t, crate::helder::Icon::X, crate::SEARCH_CLEAR)).clicked()
+                    && crate::helder::quiet(ui, t, |ui| crate::helder::icon_button(ui, t, crate::helder::Icon::X, &crate::search_clear())).clicked()
                 {
                     app.calendar.query.clear();
                 }
@@ -1511,11 +1540,7 @@ fn search_results(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     };
     let list = shown(app, app.engine.session.appointments_matching(app.calendar.query.trim(), from, to));
     let count = list.len();
-    let summary = match count {
-        0 => "Geen afspraak gevonden in het afgelopen jaar en de twee jaar hierna.".to_string(),
-        1 => "1 afspraak gevonden.".to_string(),
-        n => format!("{n} afspraken gevonden, van een jaar terug tot twee jaar vooruit."),
-    };
+    let summary = crate::i18n::tr_args("calendar-found", &[("count", count.into())]);
     ui.label(RichText::new(summary).size(12.0).color(t.text_dim));
     ui.add_space(6.0);
     let selected = app.engine.session.selected_appointment.clone();
@@ -1536,7 +1561,7 @@ fn search_results(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             p.text(pos2(x, rect.top() + 2.0), Align2::LEFT_TOP, chip_title(a), FontId::proportional(13.5), t.text);
             let day = to_local(a.start).date();
             let when = if a.all_day {
-                format!("{} {} {} {} · hele dag", weekday_name(day), day.day(), month_name(day.month()), day.year())
+                format!("{} {} {} {} · {}", weekday_name(day), day.day(), month_name(day.month()), day.year(), tr("all-day").to_lowercase())
             } else {
                 format!("{} {} {} {} · {} – {}", weekday_name(day), day.day(), month_name(day.month()), day.year(), hm(a.start), hm(a.end))
             };
@@ -1555,22 +1580,59 @@ fn search_results(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 }
 
 /// The "Herhalen" choices of the window, as Outlook names them.
-const REPEATS: [(Option<Frequency>, &str); 5] = [
-    (None, "Niet herhalen"),
-    (Some(Frequency::Daily), "Elke dag"),
-    (Some(Frequency::Weekly), "Elke week"),
-    (Some(Frequency::Monthly), "Elke maand"),
-    (Some(Frequency::Yearly), "Elk jaar"),
-];
+const REPEATS: [Option<Frequency>; 5] = [None, Some(Frequency::Daily), Some(Frequency::Weekly), Some(Frequency::Monthly), Some(Frequency::Yearly)];
+
+/// "Elke week", "Om de 2 maanden"; "Niet herhalen" for none.
+pub(crate) fn repeat_text(frequency: Option<Frequency>, interval: u32) -> String {
+    let key = match frequency {
+        None => return tr("repeat-never"),
+        Some(Frequency::Daily) => "repeat-daily",
+        Some(Frequency::Weekly) => "repeat-weekly",
+        Some(Frequency::Monthly) => "repeat-monthly",
+        Some(Frequency::Yearly) => "repeat-yearly",
+    };
+    crate::i18n::tr_args(key, &[("count", (interval.max(1) as usize).into())])
+}
+
+/// The unit after "Om de [n]": "dagen", "weken", ….
+pub(crate) fn repeat_unit(frequency: Frequency, interval: u32) -> String {
+    let key = match frequency {
+        Frequency::Daily => "repeat-unit-daily",
+        Frequency::Weekly => "repeat-unit-weekly",
+        Frequency::Monthly => "repeat-unit-monthly",
+        Frequency::Yearly => "repeat-unit-yearly",
+    };
+    crate::i18n::tr_args(key, &[("count", (interval.max(1) as usize).into())])
+}
+
+/// One line that says how a series repeats: "Elke week op maandag en woensdag, 10 keer".
+pub(crate) fn describe_recurrence(r: &Recurrence) -> String {
+    let mut text = repeat_text(Some(r.frequency), r.interval);
+    if r.frequency == Frequency::Weekly {
+        let names: Vec<&str> = r.weekdays.iter().filter(|d| **d < 7).map(|d| crate::i18n::weekday_name(*d as usize)).collect();
+        let days = match names.len() {
+            0 => String::new(),
+            1 => names[0].to_string(),
+            n => crate::i18n::tr_args("list-and", &[("first", names[..n - 1].join(", ").into()), ("last", names[n - 1].into())]),
+        };
+        if !days.is_empty() {
+            text = crate::i18n::tr_args("repeat-on-days", &[("repeat", text.into()), ("days", days.into())]);
+        }
+    }
+    if let Some(c) = r.count {
+        text = crate::i18n::tr_args("repeat-times", &[("repeat", text.into()), ("count", (c as usize).into())]);
+    }
+    text
+}
 
 /// The "Herhalen" row of the window and, when it repeats, how often, which days, and when it
 /// stops.
 fn repeat_fields(ui: &mut Ui, t: &Tokens, editor: &mut Editor) {
-    let current = REPEATS.iter().find(|(f, _)| *f == editor.repeat).map(|(_, n)| *n).unwrap_or("Niet herhalen");
+    let current = repeat_text(editor.repeat, 1);
     helder::icon_row(ui, t, Icon::Repeat, |ui| {
-        helder::select(ui, t, current, 200.0, |ui| {
-            for (f, n) in REPEATS {
-                if ui.selectable_label(editor.repeat == f, n).clicked() {
+        helder::select(ui, t, &current, 200.0, |ui| {
+            for f in REPEATS {
+                if ui.selectable_label(editor.repeat == f, repeat_text(f, 1)).clicked() {
                     editor.repeat = f;
                     ui.close();
                 }
@@ -1578,16 +1640,11 @@ fn repeat_fields(ui: &mut Ui, t: &Tokens, editor: &mut Editor) {
         });
     });
     let Some(frequency) = editor.repeat else { return };
-    let unit = match frequency {
-        Frequency::Daily => "dagen",
-        Frequency::Weekly => "weken",
-        Frequency::Monthly => "maanden",
-        Frequency::Yearly => "jaar",
-    };
+    let unit = repeat_unit(frequency, editor.interval.trim().parse().unwrap_or(1));
     ui.add_space(2.0);
     row(ui, |ui| {
         helder::indent(ui);
-        ui.label(RichText::new("Om de").size(14.0).color(t.text));
+        ui.label(RichText::new(tr("repeat-every")).size(14.0).color(t.text));
         helder::number_field(ui, t, &mut editor.interval, "1");
         ui.label(RichText::new(unit).size(14.0).color(t.text));
     });
@@ -1596,7 +1653,7 @@ fn repeat_fields(ui: &mut Ui, t: &Tokens, editor: &mut Editor) {
         row(ui, |ui| {
             helder::indent(ui);
             ui.spacing_mut().item_spacing.x = 6.0;
-            for (i, name) in WEEKDAYS_SHORT.iter().enumerate() {
+            for (i, name) in (0..7).map(crate::i18n::weekday_short).enumerate() {
                 if helder::day_toggle(ui, t, name, editor.weekdays[i]).clicked() {
                     editor.weekdays[i] = !editor.weekdays[i];
                 }
@@ -1606,10 +1663,10 @@ fn repeat_fields(ui: &mut Ui, t: &Tokens, editor: &mut Editor) {
     ui.add_space(4.0);
     row(ui, |ui| {
         helder::indent(ui);
-        ui.label(RichText::new("Eindigt").size(14.0).color(t.text));
+        ui.label(RichText::new(tr("repeat-ends")).size(14.0).color(t.text));
         ui.add_space(4.0);
-        for (ends, name) in [(Ends::Never, "Nooit"), (Ends::OnDate, "Op een datum"), (Ends::AfterCount, "Na een aantal keer")] {
-            if helder::chip(ui, t, name, editor.ends == ends).clicked() {
+        for (ends, name) in [(Ends::Never, "repeat-ends-never"), (Ends::OnDate, "repeat-ends-on-date"), (Ends::AfterCount, "repeat-ends-after")] {
+            if helder::chip(ui, t, &tr(name), editor.ends == ends).clicked() {
                 editor.ends = ends;
             }
         }
@@ -1619,16 +1676,16 @@ fn repeat_fields(ui: &mut Ui, t: &Tokens, editor: &mut Editor) {
         Ends::OnDate => {
             row(ui, |ui| {
                 helder::indent(ui);
-                ui.label(RichText::new("Tot en met").size(14.0).color(t.text));
-                crate::date_picker::field(ui, t, &mut editor.until, "31-12-2026", 110.0, UNTIL_PICKER);
+                ui.label(RichText::new(tr("repeat-until")).size(14.0).color(t.text));
+                crate::date_picker::field(ui, t, &mut editor.until, "31-12-2026", 110.0, &until_picker());
             });
         }
         Ends::AfterCount => {
             row(ui, |ui| {
                 helder::indent(ui);
-                ui.label(RichText::new("Na").size(14.0).color(t.text));
+                ui.label(RichText::new(tr("repeat-after")).size(14.0).color(t.text));
                 helder::number_field(ui, t, &mut editor.count, "10");
-                ui.label(RichText::new("keer").size(14.0).color(t.text));
+                ui.label(RichText::new(tr("repeat-times-unit")).size(14.0).color(t.text));
             });
         }
     }
@@ -1638,7 +1695,8 @@ fn repeat_fields(ui: &mut Ui, t: &Tokens, editor: &mut Editor) {
     {
         let mut text = describe_recurrence(&r);
         if let Some(u) = r.until {
-            text.push_str(&format!(", tot en met {}", to_local(u).format(DATE_FORMAT)));
+            text =
+                crate::i18n::tr_args("repeat-until-date", &[("repeat", text.into()), ("date", to_local(u).format(DATE_FORMAT).to_string().into())]);
         }
         helder::note(ui, t, &text);
     }
@@ -1788,13 +1846,17 @@ pub enum MainAction {
 }
 
 /// The line "Deze gebeurtenis vindt plaats in het verleden." over an appointment that is over.
-pub const IN_THE_PAST: &str = "Deze gebeurtenis vindt plaats in het verleden.";
+pub fn in_the_past() -> String {
+    tr("calendar-in-the-past")
+}
 /// The button by a proposed new time that puts it in the fields.
-pub const TAKE_PROPOSAL: &str = "Voorgestelde tijd overnemen";
+pub fn take_proposal() -> String {
+    tr("calendar-take-proposal")
+}
 
 /// The label of the chip button that takes `a` off the meeting.
 pub fn remove_attendee_label(a: &Attendee) -> String {
-    format!("{} verwijderen", a.label())
+    crate::i18n::tr_args("calendar-remove-attendee", &[("name", a.label().into())])
 }
 
 /// One invited person as a chip: the answer's mark, the name, and ✕ to take them off when the
@@ -1818,7 +1880,7 @@ fn attendee_chip(ui: &mut Ui, t: &Tokens, a: &Attendee, removable: bool) -> bool
             let r = ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(t.text_dim)).frame_when_inactive(false).min_size(vec2(18.0, 18.0)));
             let label = remove_attendee_label(a);
             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
-            off = r.on_hover_text("Haalt deze genodigde van de vergadering").clicked();
+            off = r.on_hover_text(tr("calendar-remove-attendee-hint")).clicked();
         } else {
             ui.add_space(4.0);
         }
@@ -1838,14 +1900,14 @@ fn attendee_line(ui: &mut Ui, t: &Tokens, editor: &mut Editor, optional: bool, o
         }
         if organiser {
             let hint = match (optional, editor.invited.iter().any(|a| a.optional == optional)) {
-                (true, _) => "Optionele genodigden toevoegen",
-                (false, false) => "Genodigden toevoegen",
-                (false, true) => "",
+                (true, _) => tr("calendar-add-optional"),
+                (false, false) => tr("calendar-add-attendees"),
+                (false, true) => String::new(),
             };
             let room = (ui.available_width() - if optional { 0.0 } else { 90.0 }).max(160.0);
             let text = if optional { &mut editor.optional } else { &mut editor.attendees };
-            let r = helder::underline_field(ui, t, text, hint, room, false);
-            let r = r.on_hover_text(if optional { crate::meeting::OPTIONAL } else { crate::meeting::FIELD });
+            let r = helder::underline_field(ui, t, text, &hint, room, false);
+            let r = r.on_hover_text(if optional { crate::meeting::optional() } else { crate::meeting::field() });
             let entered = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if r.changed() || entered {
                 editor.chip_typed(optional, entered);
@@ -1856,7 +1918,7 @@ fn attendee_line(ui: &mut Ui, t: &Tokens, editor: &mut Editor, optional: bool, o
         }
         if !optional && organiser && !editor.show_optional {
             helder::right(ui, |ui| {
-                if helder::add_link(ui, t, crate::meeting::OPTIONAL).on_hover_text("Nodigt iemand uit die er niet bij hoeft te zijn").clicked() {
+                if helder::add_link(ui, t, &crate::meeting::optional()).on_hover_text(tr("calendar-optional-hint")).clicked() {
                     editor.show_optional = true;
                 }
             });
@@ -1911,7 +1973,11 @@ fn day_preview(ui: &mut Ui, t: &Tokens, editor: &Editor, day: NaiveDate, busy: &
         }
         None => Vec::new(),
     };
-    let status = if clash.is_empty() { "Je hebt dan nog niets gepland.".to_string() } else { format!("Overlapt met {}.", clash.join(", ")) };
+    let status = if clash.is_empty() {
+        tr("calendar-nothing-planned")
+    } else {
+        crate::i18n::tr_args("calendar-overlaps", &[("titles", clash.join(", ").into())])
+    };
     ui.label(RichText::new(status).size(12.0).color(if clash.is_empty() { t.text_dim } else { t.flag }));
     for b in busy.iter().filter(|b| b.all_day) {
         ui.label(helder::dotted(&b.title, b.color, t));
@@ -1962,7 +2028,7 @@ fn day_preview(ui: &mut Ui, t: &Tokens, editor: &Editor, day: NaiveDate, busy: &
         && let Some(r) = block(y_of(s), y_of(e), new_left, rect.right() - 2.0)
     {
         p.rect(r, CornerRadius::same(6), t.accent, Stroke::new(2.0, t.card), egui::StrokeKind::Outside);
-        let title = if editor.title.trim().is_empty() { "Nieuwe afspraak" } else { editor.title.trim() };
+        let title = if editor.title.trim().is_empty() { tr("new-appointment") } else { editor.title.trim().to_string() };
         label(r, &format!("{title}\n{} – {}", s.format(TIME_FORMAT), e.format(TIME_FORMAT)), t.on_accent);
     }
 }
@@ -1979,9 +2045,15 @@ fn show_as_color(show_as: ShowAs, t: &Tokens) -> Color32 {
 
 /// The menu of an opened time of a series that removes this time or the whole series, and
 /// its two choices.
-pub const DELETE_MENU: &str = "Verwijderen…";
-pub const SKIP_ONE: &str = "Deze keer overslaan";
-pub const DELETE_SERIES: &str = "Hele reeks verwijderen";
+pub fn delete_menu() -> String {
+    tr("calendar-delete-menu")
+}
+pub fn skip_one() -> String {
+    tr("calendar-skip-one")
+}
+pub fn delete_series() -> String {
+    tr("calendar-delete-series")
+}
 
 /// The appointment window, when one is open: a command bar on top, the form in a card, and
 /// the day it falls on beside it.
@@ -2015,50 +2087,50 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut forward = false;
     let mut close = false;
     let title = match (&editor.id, editor.repeat) {
-        (None, _) => "Nieuwe afspraak",
-        (Some(_), Some(_)) => "Herhaalde afspraak",
-        (Some(_), None) => "Afspraak",
+        (None, _) => tr("new-appointment"),
+        (Some(_), Some(_)) => tr("calendar-recurring"),
+        (Some(_), None) => tr("reminder-appointment"),
     };
     let mut open = true;
-    helder::item_window(ctx, t, "appointment-window", title, vec2(980.0, 760.0), &mut open, |ui| {
+    helder::item_window(ctx, t, "appointment-window", &title, vec2(980.0, 760.0), &mut open, |ui| {
         helder::quiet(ui, t, |ui| {
             ui.horizontal(|ui| {
                 let main = match action {
-                    MainAction::Send => helder::primary_button(ui, t, Icon::Send, "Verzenden")
-                        .on_hover_text("Slaat de afspraak op en mailt de genodigden een uitnodiging voor hun agenda."),
-                    MainAction::Update => helder::primary_button(ui, t, Icon::Send, crate::meeting::SEND_UPDATE)
-                        .on_hover_text("Slaat de wijziging op en mailt hem de genodigden; wie eraf is gehaald, krijgt een annulering."),
-                    MainAction::Save => helder::primary_button(ui, t, Icon::Save, "Opslaan"),
+                    MainAction::Send => helder::primary_button(ui, t, Icon::Send, &tr("compose-send")).on_hover_text(tr("calendar-send-hint")),
+                    MainAction::Update => {
+                        helder::primary_button(ui, t, Icon::Send, &crate::meeting::send_update()).on_hover_text(tr("calendar-update-hint"))
+                    }
+                    MainAction::Save => helder::primary_button(ui, t, Icon::Save, &tr("save")),
                 };
                 save = main.clicked();
                 helder::bar_separator(ui, t);
-                helder::menu_button(ui, t, None, helder::dotted(show_as_label(editor.show_as), show_as_color(editor.show_as, t), t), |ui| {
-                    for (s, label) in SHOW_AS {
-                        if ui.add(egui::Button::new(helder::dotted(label, show_as_color(s, t), t)).selected(editor.show_as == s)).clicked() {
+                helder::menu_button(ui, t, None, helder::dotted(&show_as_label(editor.show_as), show_as_color(editor.show_as, t), t), |ui| {
+                    for s in SHOW_AS {
+                        if ui
+                            .add(egui::Button::new(helder::dotted(&show_as_label(s), show_as_color(s, t), t)).selected(editor.show_as == s))
+                            .clicked()
+                        {
                             editor.show_as = s;
                             ui.close();
                         }
                     }
                 })
-                .on_hover_text("Weergeven als");
+                .on_hover_text(tr("calendar-show-as"));
                 helder::menu_button(ui, t, Some(Icon::Bell), RichText::new(reminder_label(editor.reminder)).size(14.0).color(t.text), |ui| {
-                    for (r, label) in REMINDERS {
-                        if ui.selectable_label(editor.reminder == r, label).clicked() {
+                    for r in REMINDERS {
+                        if ui.selectable_label(editor.reminder == r, reminder_label(r)).clicked() {
                             editor.reminder = r;
                             ui.close();
                         }
                     }
                 })
-                .on_hover_text("Herinnering");
-                if helder::toggle_button(ui, t, Icon::Lock, PRIVATE, editor.private)
-                    .on_hover_text("Wie je agenda deelt, ziet alleen dat je bezet bent.")
-                    .clicked()
-                {
+                .on_hover_text(tr("calendar-reminder"));
+                if helder::toggle_button(ui, t, Icon::Lock, &private(), editor.private).on_hover_text(tr("calendar-private-hint")).clicked() {
                     editor.private = !editor.private;
                 }
                 if editor.id.is_some() {
-                    forward = helder::tool_button(ui, t, Icon::Forward, crate::meeting::FORWARD)
-                        .on_hover_text("Opent een nieuw bericht met de afspraak als bijlage, zodat iemand anders hem in zijn agenda kan zetten.")
+                    forward = helder::tool_button(ui, t, Icon::Forward, &crate::meeting::forward_label())
+                        .on_hover_text(tr("calendar-forward-hint"))
                         .clicked();
                 }
                 // The right-hand group keeps its own width, so the bar never draws it over the
@@ -2067,31 +2139,31 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     if editor.id.is_some() {
                         if editor.occurrence.is_some() {
                             // As Outlook's "Verwijderen" of a series: this time, or the whole series.
-                            let r = helder::menu_button(ui, t, Some(Icon::Trash), RichText::new("Verwijderen").size(14.0).color(t.text), |ui| {
+                            let r = helder::menu_button(ui, t, Some(Icon::Trash), RichText::new(tr("delete")).size(14.0).color(t.text), |ui| {
                                 ui.set_min_width(200.0);
                                 if ui
-                                    .add(egui::Button::image_and_text(Icon::CalendarX.image(helder::ICON, t.text), SKIP_ONE))
-                                    .on_hover_text("Alleen deze keer vervalt; de reeks blijft.")
+                                    .add(egui::Button::image_and_text(Icon::CalendarX.image(helder::ICON, t.text), skip_one()))
+                                    .on_hover_text(tr("calendar-skip-hint"))
                                     .clicked()
                                 {
                                     skip = true;
                                     ui.close();
                                 }
-                                if ui.add(egui::Button::image_and_text(Icon::Trash.image(helder::ICON, t.text), DELETE_SERIES)).clicked() {
+                                if ui.add(egui::Button::image_and_text(Icon::Trash.image(helder::ICON, t.text), delete_series())).clicked() {
                                     delete = true;
                                     ui.close();
                                 }
                             });
-                            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, DELETE_MENU));
+                            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, delete_menu()));
                         } else if calls_off {
-                            delete = helder::tool_button(ui, t, Icon::CalendarX, crate::meeting::CANCEL_MEETING)
-                                .on_hover_text("Haalt de vergadering uit je agenda en mailt de genodigden een annulering.")
+                            delete = helder::tool_button(ui, t, Icon::CalendarX, &crate::meeting::cancel_meeting())
+                                .on_hover_text(tr("calendar-cancel-hint"))
                                 .clicked();
                         } else {
-                            delete = helder::tool_button(ui, t, Icon::Trash, "Verwijderen").clicked();
+                            delete = helder::tool_button(ui, t, Icon::Trash, &tr("delete")).clicked();
                         }
                     }
-                    close = helder::tool_button(ui, t, Icon::X, "Annuleren").clicked();
+                    close = helder::tool_button(ui, t, Icon::X, &tr("cancel")).clicked();
                 });
             });
         });
@@ -2195,7 +2267,7 @@ fn save_meeting(
     let old = editor.meeting.clone();
     let account = if people.is_empty() && old.is_none() { None } else { crate::meeting::account_for(&app.engine.session, calendar) };
     if account.is_none() && (!people.is_empty() || action != MainAction::Save) {
-        return Err(crate::meeting::NO_ACCOUNT.to_string());
+        return Err(crate::meeting::no_account());
     }
     // A meeting of an older version gets the UID its invitations went out with.
     let old = match (old, &account, stored) {
@@ -2269,7 +2341,7 @@ fn form(
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.add(Icon::Info.image(helder::ICON, t.text));
-                ui.label(RichText::new(IN_THE_PAST).color(t.text));
+                ui.label(RichText::new(in_the_past()).color(t.text));
             });
         });
         ui.add_space(4.0);
@@ -2289,14 +2361,14 @@ fn form(
                             }
                         }
                     })
-                    .on_hover_text("Agenda");
+                    .on_hover_text(tr("module-calendar"));
                 });
             } else {
                 ui.label(RichText::new(name).size(14.0).color(t.text));
             }
         });
     }
-    helder::icon_row(ui, t, Icon::Type, |ui| helder::underline_field(ui, t, &mut editor.title, "Titel toevoegen", wide, true));
+    helder::icon_row(ui, t, Icon::Type, |ui| helder::underline_field(ui, t, &mut editor.title, &tr("tasks-add-title"), wide, true));
     // The categories as chips that take one off, then the menu that puts them on.
     let mut off = None;
     helder::icon_row(ui, t, Icon::Tag, |ui| {
@@ -2306,7 +2378,7 @@ fn form(
                     let color = crate::categories::color_of(session.category_color(name));
                     let r = ui.add(egui::Button::new(helder::dotted(&format!("{name}  ✕"), color, t)).frame_when_inactive(false));
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, remove_category_label(name)));
-                    if r.on_hover_text("Klik om deze categorie weg te halen").clicked() {
+                    if r.on_hover_text(tr("calendar-remove-category-hint")).clicked() {
                         off = Some(name.clone());
                     }
                 }
@@ -2330,7 +2402,7 @@ fn form(
     if editor.show_optional || editor.invited.iter().any(|a| a.optional) {
         ui.horizontal(|ui| {
             helder::indent(ui);
-            ui.label(RichText::new(crate::meeting::OPTIONAL).size(13.0).color(t.text_dim));
+            ui.label(RichText::new(crate::meeting::optional()).size(13.0).color(t.text_dim));
             off = off.take().or(attendee_line(ui, t, editor, true, organiser, wide - 80.0));
         });
         if organiser && !editor.optional.trim().is_empty() {
@@ -2348,7 +2420,7 @@ fn form(
     if let Some(m) = &editor.meeting
         && !m.attendees.is_empty()
     {
-        helder::note(ui, t, &format!("Reacties: {}.", crate::meeting::tally_line(m)));
+        helder::note(ui, t, &crate::i18n::tr_args("calendar-responses", &[("tally", crate::meeting::tally_line(m).into())]));
     }
     let proposals: Vec<(String, i64, i64)> = editor.invited.iter().filter_map(|a| a.proposed.map(|(s, e)| (a.label().to_string(), s, e))).collect();
     for (who, start, end) in proposals {
@@ -2371,11 +2443,15 @@ fn form(
         });
         ui.horizontal_wrapped(|ui| {
             helder::indent(ui);
-            ui.label(RichText::new(format!("{who} stelt een nieuwe tijd voor: {when}.")).size(12.0).color(t.text));
+            ui.label(
+                RichText::new(crate::i18n::tr_args("calendar-proposal", &[("who", who.as_str().into()), ("when", when.as_str().into())]))
+                    .size(12.0)
+                    .color(t.text),
+            );
             if organiser
                 && ui
-                    .add(egui::Button::new(RichText::new(TAKE_PROPOSAL).size(13.0).color(t.accent_text)).frame_when_inactive(false))
-                    .on_hover_text("Zet deze tijd in het venster; met Update verzenden hoort iedereen het.")
+                    .add(egui::Button::new(RichText::new(take_proposal()).size(13.0).color(t.accent_text)).frame_when_inactive(false))
+                    .on_hover_text(tr("calendar-take-proposal-hint"))
                     .clicked()
             {
                 editor.set_times(start, end);
@@ -2385,7 +2461,7 @@ fn form(
     }
     helder::icon_row(ui, t, Icon::Clock, |ui| {
         let before = parse_date(&editor.start_date);
-        if let Some(start) = crate::date_picker::field(ui, t, &mut editor.start_date, "19-10-2026", 96.0, START_PICKER)
+        if let Some(start) = crate::date_picker::field(ui, t, &mut editor.start_date, "19-10-2026", 96.0, &start_picker())
             && let (Some(before), Some(end)) = (before, parse_date(&editor.end_date))
         {
             // The end moves along, so the appointment keeps its length.
@@ -2397,7 +2473,7 @@ fn form(
             editor.move_start(&time);
         }
         ui.label(RichText::new("tot").color(t.text_dim));
-        crate::date_picker::field(ui, t, &mut editor.end_date, "19-10-2026", 96.0, END_PICKER);
+        crate::date_picker::field(ui, t, &mut editor.end_date, "19-10-2026", 96.0, &end_picker());
         if !editor.all_day
             && let Some(time) = time_field(ui, t, &mut editor.end_time, "end")
         {
@@ -2407,7 +2483,7 @@ fn form(
     // On a row of its own: beside the two dates with their calendar buttons it has no room.
     ui.horizontal(|ui| {
         helder::indent(ui);
-        helder::toggle(ui, t, &mut editor.all_day, "Hele dag");
+        helder::toggle(ui, t, &mut editor.all_day, &tr("all-day"));
     });
     // A calendar on this computer keeps a series as its rule. An account's server owns its
     // own series: a new appointment there can start one, but what comes back is listed and
@@ -2416,22 +2492,18 @@ fn form(
     if local || editor.id.is_none() {
         repeat_fields(ui, t, editor);
         if !local && editor.repeat.is_some() {
-            helder::note(ui, t, "De reeks wordt in het account aangemaakt; daarna toont Merel elke keer apart en bewerk je ze los van elkaar.");
+            helder::note(ui, t, &tr("calendar-account-series-note"));
         }
         if local && let Some(occurrence) = editor.occurrence {
             let when = to_local(occurrence);
-            let text = format!(
-                "Geopend vanaf de keer op {} {} {}. Wijzigingen gelden voor de hele reeks.",
-                weekday_name(when.date()),
-                when.day(),
-                month_name(when.month())
-            );
+            let day = format!("{} {} {}", weekday_name(when.date()), when.day(), month_name(when.month()));
+            let text = crate::i18n::tr_args("calendar-opened-from", &[("day", day.into())]);
             helder::note(ui, t, &text);
         }
     } else {
         editor.repeat = None;
     }
-    helder::icon_row(ui, t, Icon::MapPin, |ui| helder::underline_field(ui, t, &mut editor.location, "Locatie toevoegen", wide, false));
+    helder::icon_row(ui, t, Icon::MapPin, |ui| helder::underline_field(ui, t, &mut editor.location, &tr("calendar-add-location"), wide, false));
     ui.add_space(4.0);
     // The notes with Outlook's formatting bar over them, as in the message window.
     ui.add_space(6.0);
@@ -2451,7 +2523,7 @@ fn form(
 fn category_menu(ui: &mut Ui, t: &Tokens, editor: &mut Editor, session: &merel_engine::Session) {
     let mut names: Vec<String> = session.categories.iter().map(|c| c.name.clone()).collect();
     names.extend(editor.categories.iter().filter(|c| !names.iter().any(|n| n.eq_ignore_ascii_case(c))).cloned().collect::<Vec<_>>());
-    let label = if editor.categories.is_empty() { CATEGORIZE } else { "Nog een categorie" };
+    let label = if editor.categories.is_empty() { categorize() } else { tr("calendar-another-category") };
     let r = helder::menu_button(ui, t, None, RichText::new(label).size(14.0).color(t.text_dim), |ui| {
         for name in &names {
             let on = editor.categories.iter().any(|c| c.eq_ignore_ascii_case(name));
@@ -2465,25 +2537,29 @@ fn category_menu(ui: &mut Ui, t: &Tokens, editor: &mut Editor, session: &merel_e
             }
         }
         if names.is_empty() {
-            ui.label(RichText::new("Nog geen categorieën; maak ze bij E-mail via Categoriseren.").size(12.0).color(t.text_dim));
+            ui.label(RichText::new(tr("calendar-no-categories")).size(12.0).color(t.text_dim));
         }
         ui.separator();
-        if ui.add_enabled(!editor.categories.is_empty(), egui::Button::new(CLEAR_CATEGORIES)).clicked() {
+        if ui.add_enabled(!editor.categories.is_empty(), egui::Button::new(clear_categories())).clicked() {
             editor.categories.clear();
             ui.close();
         }
     });
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, CATEGORIZE));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, categorize()));
 }
 
 /// The appointment window's category menu, as screen readers name it.
-pub const CATEGORIZE: &str = "Categorie toevoegen";
+pub fn categorize() -> String {
+    tr("calendar-categorize")
+}
 /// Its last item.
-pub const CLEAR_CATEGORIES: &str = "Alle categorieën wissen";
+pub fn clear_categories() -> String {
+    tr("calendar-clear-categories")
+}
 
 /// The label of the button that takes `name` off the appointment in its window.
 pub fn remove_category_label(name: &str) -> String {
-    format!("Categorie {name} weghalen")
+    crate::i18n::tr_args("calendar-remove-category", &[("name", name.into())])
 }
 
 /// A failed change as a notice: a store that cannot write is an error, the rest the person can mend.
@@ -2496,14 +2572,12 @@ fn notice(e: &CommandError) -> crate::Notice {
 
 fn describe(e: &CommandError) -> String {
     match e {
-        CommandError::Param("title") => "Vul een titel in.".into(),
-        CommandError::Param("id") => "Een herhalende afspraak versleep je niet; open de reeks om de tijd te veranderen.".into(),
-        CommandError::Param("end") => "Het einde ligt voor het begin.".into(),
-        CommandError::Param("recurrence") => {
-            "De herhaling kan zo niet: een afspraak moet korter zijn dan de tijd tussen twee keren, en herhalen kan alleen in een agenda op deze computer.".into()
-        }
-        CommandError::Store(m) => format!("Opslaan is mislukt: {m}"),
-        CommandError::NotFound => "Deze afspraak bestaat niet meer.".into(),
+        CommandError::Param("title") => tr("tasks-need-title"),
+        CommandError::Param("id") => tr("calendar-no-drag-series"),
+        CommandError::Param("end") => tr("calendar-end-before-start"),
+        CommandError::Param("recurrence") => tr("calendar-bad-repeat"),
+        CommandError::Store(m) => crate::i18n::tr_args("save-failed-because", &[("error", m.as_str().into())]),
+        CommandError::NotFound => tr("calendar-gone"),
         e => e.to_string(),
     }
 }
@@ -2614,7 +2688,10 @@ mod tests {
         assert_eq!(e.params().unwrap()["show_as"], json!("oof"));
         let free = Appointment { show_as: ShowAs::Free, ..a.clone() };
         assert_eq!(Editor::from_appointment(&free, None).show_as, ShowAs::Free);
-        assert_eq!((show_as_label(ShowAs::Free), show_as_label(ShowAs::Tentative), show_as_label(ShowAs::Oof)), ("Vrij", "Voorlopig", "Afwezig"));
+        assert_eq!(
+            (show_as_label(ShowAs::Free), show_as_label(ShowAs::Tentative), show_as_label(ShowAs::Oof)),
+            ("Vrij".into(), "Voorlopig".into(), "Afwezig".into())
+        );
         let blue = Color32::from_rgb(0, 0, 255);
         let t = Tokens::light();
         let free = chip_paint(blue, ShowAs::Free, false, &t);

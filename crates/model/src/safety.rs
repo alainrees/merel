@@ -30,16 +30,18 @@ pub enum Warning {
 }
 
 impl Warning {
-    /// One Dutch sentence for the reading pane.
+    /// One sentence for the reading pane, in the app's language.
     pub fn text(&self) -> String {
         match self {
-            Warning::Impersonation { name } => format!("De afzender noemt zich \"{name}\", maar het adres is een ander dan je van die naam kent."),
-            Warning::LookalikeDomain { domain, like } => format!("Het domein {domain} lijkt op {like}, maar is het niet."),
-            Warning::Unauthenticated { checks } => {
-                format!("Je mailserver kon niet bevestigen dat dit bericht echt van de afzender komt ({checks} mislukt).")
+            Warning::Impersonation { name } => merel_i18n::tr_args("warn-impersonation", &[("name", name.clone().into())]),
+            Warning::LookalikeDomain { domain, like } => {
+                merel_i18n::tr_args("warn-lookalike", &[("domain", domain.clone().into()), ("like", like.clone().into())])
             }
-            Warning::MisleadingLink { shown, host } => format!("Een link toont {shown} maar gaat naar {host}."),
-            Warning::RiskyAttachment { name } => format!("De bijlage {name} is een programma; open die niet."),
+            Warning::Unauthenticated { checks } => merel_i18n::tr_args("warn-unauthenticated", &[("checks", checks.clone().into())]),
+            Warning::MisleadingLink { shown, host } => {
+                merel_i18n::tr_args("warn-misleading-link", &[("shown", shown.clone().into()), ("host", host.clone().into())])
+            }
+            Warning::RiskyAttachment { name } => merel_i18n::tr_args("warn-risky-attachment", &[("name", name.clone().into())]),
         }
     }
 }

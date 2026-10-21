@@ -3337,6 +3337,7 @@ dependencies = [
  "chrono-tz",
  "iana-time-zone",
  "log",
+ "merel-i18n",
  "merel-imap",
  "merel-mailbox",
  "merel-model",
@@ -3358,6 +3359,7 @@ dependencies = [
  "merel-exchange",
  "merel-google",
  "merel-graph",
+ "merel-i18n",
  "merel-imap",
  "merel-mailbox",
  "merel-mime",
@@ -3436,12 +3438,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "merel-i18n"
+version = "0.1.6"
+dependencies = [
+ "fluent-bundle",
+ "fluent-syntax",
+ "log",
+ "sys-locale",
+ "unic-langid",
+]
+
+[[package]]
 name = "merel-imap"
 version = "0.1.6"
 dependencies = [
  "imap",
  "imap-proto",
  "log",
+ "merel-i18n",
  "merel-mailbox",
  "merel-mime",
  "merel-model",
@@ -3469,6 +3483,7 @@ dependencies = [
  "html2text",
  "mail-parser",
  "merel-html",
+ "merel-i18n",
  "merel-model",
  "merel-pgp",
  "merel-smime",
@@ -3481,6 +3496,7 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "chrono-tz",
+ "merel-i18n",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -3507,6 +3523,7 @@ dependencies = [
  "base64 0.23.1",
  "getrandom 0.4.3",
  "log",
+ "merel-i18n",
  "merel-secrets",
  "open",
  "rustls",
@@ -3522,6 +3539,7 @@ name = "merel-pgp"
 version = "0.1.6"
 dependencies = [
  "base64 0.23.1",
+ "merel-i18n",
  "merel-smime",
  "pgp",
  "rand 0.8.8",
@@ -3561,6 +3579,7 @@ dependencies = [
  "cms",
  "der 0.8.2",
  "getrandom 0.4.3",
+ "merel-i18n",
  "p12-keystore",
  "thiserror 2.0.21",
  "x509-cert",
@@ -3572,6 +3591,7 @@ name = "merel-smtp"
 version = "0.1.6"
 dependencies = [
  "lettre",
+ "merel-i18n",
  "merel-mime",
  "merel-model",
  "merel-secrets",
@@ -3586,6 +3606,7 @@ dependencies = [
  "base64 0.23.1",
  "getrandom 0.4.3",
  "log",
+ "merel-i18n",
  "merel-model",
  "merel-secrets",
  "serde",
@@ -3612,13 +3633,12 @@ dependencies = [
  "egui",
  "egui_extras",
  "egui_kittest",
- "fluent-bundle",
- "fluent-syntax",
  "image",
  "log",
  "merel-dav",
  "merel-engine",
  "merel-html",
+ "merel-i18n",
  "merel-mime",
  "merel-model",
  "merel-notify",
@@ -3632,8 +3652,6 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
- "sys-locale",
- "unic-langid",
  "ureq",
  "zeroize",
 ]

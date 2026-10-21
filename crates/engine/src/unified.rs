@@ -67,7 +67,7 @@ impl Session {
         Some(Folder {
             id: id.to_string(),
             account_id: String::new(),
-            name: kind.dutch_name().unwrap_or_default().to_string(),
+            name: kind.local_name().unwrap_or_default(),
             path: String::new(),
             kind,
             unread: members.iter().map(|f| f.unread).fold(0, u32::saturating_add),
@@ -124,6 +124,24 @@ mod tests {
 
     fn remote(path: &str, kind: FolderKind) -> RemoteFolder {
         RemoteFolder { path: path.into(), name: path.into(), kind, selectable: true, parent: None }
+    }
+
+    #[test]
+    fn a_change_of_language_renames_the_standard_folders_and_the_local_calendar_only() {
+        merel_i18n::set_for_thread(merel_i18n::Language::Dutch);
+        let mut s = Session::sample();
+        s.calendars =
+            vec![merel_model::Calendar::local(), merel_model::Calendar { name: "Sport".into(), id: "c2".into(), ..merel_model::Calendar::local() }];
+        let named = |s: &Session, kind| s.folders.iter().find(|f| f.kind == kind).map(|f| f.name.clone());
+        assert_eq!(named(&s, FolderKind::Inbox).as_deref(), Some("Postvak IN"));
+        merel_i18n::set_for_thread(merel_i18n::Language::English);
+        s.relabel();
+        assert_eq!(named(&s, FolderKind::Inbox).as_deref(), Some("Inbox"));
+        assert_eq!(named(&s, FolderKind::Deleted).as_deref(), Some("Deleted Items"));
+        assert_eq!(s.calendars.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["My calendar", "Sport"]);
+        merel_i18n::set_for_thread(merel_i18n::Language::Dutch);
+        s.relabel();
+        assert_eq!(named(&s, FolderKind::Inbox).as_deref(), Some("Postvak IN"));
     }
 
     fn unread(n: u32) -> RemoteHeader {

@@ -8,6 +8,19 @@ use serde_json::json;
 
 use crate::{MailApp, Tokens};
 
+/// The name of a category colour in the current language.
+pub fn color_name(color: CategoryColor) -> String {
+    tr(match color {
+        CategoryColor::Red => "color-red",
+        CategoryColor::Orange => "color-orange",
+        CategoryColor::Yellow => "color-yellow",
+        CategoryColor::Green => "color-green",
+        CategoryColor::Blue => "color-blue",
+        CategoryColor::Purple => "color-purple",
+        CategoryColor::Gray => "color-gray",
+    })
+}
+
 /// The colour of a category, readable on the light and the dark theme.
 pub fn color_of(c: CategoryColor) -> Color32 {
     match c {
@@ -56,7 +69,7 @@ pub fn chips(app: &mut MailApp, ui: &mut Ui, t: &Tokens, message_id: &str, names
             let r = egui::Frame::NONE.fill(color).corner_radius(CornerRadius::same(9)).inner_margin(egui::Margin::symmetric(8, 2)).show(ui, |ui| {
                 ui.label(RichText::new(name).size(12.0).color(Color32::WHITE));
             });
-            let r = ui.interact(r.response.rect, ui.id().with(("chip", name)), Sense::click()).on_hover_text("Klik om deze categorie weg te halen");
+            let r = ui.interact(r.response.rect, ui.id().with(("chip", name)), Sense::click()).on_hover_text(tr("category-remove-hint"));
             if r.clicked() {
                 off = Some(name.clone());
             }
@@ -128,7 +141,7 @@ fn entry(ui: &mut Ui, color: Color32, name: &str, on: bool) -> bool {
     r.clicked()
 }
 
-/// The "Alle categorieën" window: the list with colours, a field for a new one.
+/// The "All categories" window: the list with colours, a field for a new one.
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(mut m) = app.categories.clone() else { return };
     let list: Vec<Category> = app.engine.session.categories.clone();
@@ -136,9 +149,9 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut remove: Option<String> = None;
     let mut add = false;
     let mut close = false;
-    if crate::helder::popup(ctx, t, "categories", "Alle categorieën", 360.0, |ui| {
+    if crate::helder::popup(ctx, t, "categories", &tr("view-all-categories"), 360.0, |ui| {
         if list.is_empty() {
-            ui.label(RichText::new("Nog geen categorieën.").color(t.text_dim));
+            ui.label(RichText::new(tr("categories-none")).color(t.text_dim));
         }
         for c in &list {
             ui.horizontal(|ui| {
@@ -146,29 +159,28 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 ui.painter().rect_filled(rect, CornerRadius::same(3), color_of(c.color));
                 ui.add_sized([150.0, 20.0], egui::Label::new(RichText::new(&c.name).color(t.text)).truncate());
                 let mut color = c.color;
-                egui::ComboBox::from_id_salt(("category-color", &c.name)).selected_text(color.dutch_name()).width(90.0).show_ui(ui, |ui| {
+                egui::ComboBox::from_id_salt(("category-color", &c.name)).selected_text(color_name(color)).width(90.0).show_ui(ui, |ui| {
                     for option in CategoryColor::ALL {
-                        ui.selectable_value(&mut color, option, option.dutch_name());
+                        ui.selectable_value(&mut color, option, color_name(option));
                     }
                 });
                 if color != c.color {
                     recolor = Some((c.name.clone(), color));
                 }
-                if ui.button("Verwijderen").on_hover_text("Berichten houden de naam, in het grijs.").clicked() {
+                if ui.button(tr("delete")).on_hover_text(tr("category-delete-hint")).clicked() {
                     remove = Some(c.name.clone());
                 }
             });
         }
         ui.separator();
         ui.horizontal(|ui| {
-            let field = ui.add(egui::TextEdit::singleline(&mut m.name).desired_width(150.0).hint_text("Nieuwe categorie"));
-            egui::ComboBox::from_id_salt("new-category-color").selected_text(m.color.dutch_name()).width(90.0).show_ui(ui, |ui| {
+            let field = ui.add(egui::TextEdit::singleline(&mut m.name).desired_width(150.0).hint_text(tr("category-new")));
+            egui::ComboBox::from_id_salt("new-category-color").selected_text(color_name(m.color)).width(90.0).show_ui(ui, |ui| {
                 for option in CategoryColor::ALL {
-                    ui.selectable_value(&mut m.color, option, option.dutch_name());
+                    ui.selectable_value(&mut m.color, option, color_name(option));
                 }
             });
-            if ui.add(crate::helder::primary_text(t, "Toevoegen")).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-            {
+            if ui.add(crate::helder::primary_text(t, &tr("add"))).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
                 add = true;
             }
         });
@@ -176,7 +188,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             ui.label(RichText::new(e).color(t.flag));
         }
         ui.add_space(6.0);
-        if ui.button("Sluiten").clicked() {
+        if ui.button(tr("close")).clicked() {
             close = true;
         }
     }) {
@@ -194,7 +206,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 m.name.clear();
                 m.error = None;
             }
-            Err(_) => m.error = Some("Geef de categorie een naam van hoogstens 50 tekens.".to_string()),
+            Err(_) => m.error = Some(tr("category-name-rule").to_string()),
         }
     }
     app.categories = if close { None } else { Some(m) };

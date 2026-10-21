@@ -64,14 +64,14 @@ impl Worker {
                 let detail =
                     panic.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| panic.downcast_ref::<String>().cloned()).unwrap_or_default();
                 log::error!("{id}: the connection thread stopped: {detail}");
-                let what = format!("Merel liep vast bij het verbinden ({}). Herstart Merel; meld het als het blijft gebeuren.", clip(&detail));
+                let what = merel_i18n::tr_args("conn-panic", &[("detail", clip(&detail).into())]);
                 let _ = reporter.send(Event::Failed { account_id: id, what });
             }
         };
         if thread::Builder::new().name(name).spawn(run).is_ok() {
             self.accounts.insert(id, tx);
         } else {
-            let _ = self.events.send(Event::Failed { account_id: id, what: "Kon geen achtergrondtaak starten.".into() });
+            let _ = self.events.send(Event::Failed { account_id: id, what: merel_i18n::tr("conn-no-thread") });
         }
     }
 
@@ -85,32 +85,32 @@ impl Worker {
         let id = job.account_id().to_string();
         if let Some(tx) = self.accounts.get(&id) {
             if tx.send(job).is_err() {
-                let _ = self.events.send(Event::Failed { account_id: id, what: "De verbinding is gestopt.".into() });
+                let _ = self.events.send(Event::Failed { account_id: id, what: merel_i18n::tr("conn-stopped") });
             }
         } else {
-            let _ = self.events.send(Event::Failed { account_id: id, what: "Dit account is niet verbonden.".into() });
+            let _ = self.events.send(Event::Failed { account_id: id, what: merel_i18n::tr("conn-not-connected") });
         }
     }
 }
 
 fn describe(e: &MailboxError) -> String {
     match e {
-        MailboxError::Connect { host, reason } => format!("Kan geen verbinding maken met {host}: {}.", clip(reason)),
-        MailboxError::Login => "De server accepteert de gebruikersnaam of het wachtwoord niet.".into(),
-        MailboxError::AuthScheme(scheme) => format!(
-            "De server eist een aanmeldmethode die Merel nog niet ondersteunt ({scheme}). Vraag de beheerder om Basic-verificatie voor EWS, of gebruik een Microsoft 365-account."
-        ),
-        MailboxError::Protocol(m) => format!("De server gaf een fout: {}", clip(m)),
-        MailboxError::BadName(_) => "Een naam is niet toegestaan.".into(),
+        MailboxError::Connect { host, reason } => {
+            merel_i18n::tr_args("conn-cannot-connect-because", &[("host", host.as_str().into()), ("reason", clip(reason).into())])
+        }
+        MailboxError::Login => merel_i18n::tr("conn-login"),
+        MailboxError::AuthScheme(scheme) => merel_i18n::tr_args("conn-auth-scheme", &[("scheme", scheme.as_str().into())]),
+        MailboxError::Protocol(m) => merel_i18n::tr_args("conn-server-error", &[("error", clip(m).into())]),
+        MailboxError::BadName(_) => merel_i18n::tr("conn-bad-name"),
     }
 }
 
 fn describe_smtp(e: &SmtpError) -> String {
     match e {
         SmtpError::Build(m) => m.clone(),
-        SmtpError::Connect { host, .. } => format!("Kan geen verbinding maken met {host}."),
-        SmtpError::Login => "De uitgaande server accepteert de gebruikersnaam of het wachtwoord niet.".into(),
-        SmtpError::Refused(m) => format!("De server weigerde het bericht: {}", clip(m)),
+        SmtpError::Connect { host, .. } => merel_i18n::tr_args("conn-cannot-connect", &[("host", host.as_str().into())]),
+        SmtpError::Login => merel_i18n::tr("conn-smtp-login"),
+        SmtpError::Refused(m) => merel_i18n::tr_args("conn-refused-message", &[("error", clip(m).into())]),
     }
 }
 
@@ -136,7 +136,7 @@ fn no_connection(account_id: &str, job: &Job, what: String) -> Event {
 /// After a connection: says why the calendar and address book stayed away, when they did.
 fn report_items_error(c: &dyn Mailbox, account_id: &str, events: &Sender<Event>) {
     if let Some(e) = c.items_error() {
-        let what = format!("Agenda en adresboek: {}", describe(e));
+        let what = merel_i18n::tr_args("conn-items-failed", &[("error", describe(e).into())]);
         let _ = events.send(Event::ItemsFailed { account_id: account_id.to_string(), what });
     }
 }
@@ -147,7 +147,7 @@ fn longer(wait: Option<Duration>) -> Option<Duration> {
 
 fn serve(account: Account, mut credentials: Credentials, keys: Keys, jobs: Receiver<Job>, events: Sender<Event>) {
     let Some(server) = account.incoming.clone() else {
-        let _ = events.send(Event::Failed { account_id: account.id, what: "Dit account heeft geen inkomende server.".into() });
+        let _ = events.send(Event::Failed { account_id: account.id, what: merel_i18n::tr("conn-no-incoming") });
         return;
     };
     let mut client: Option<Box<dyn Mailbox>> = None;
@@ -256,7 +256,7 @@ fn serve(account: Account, mut credentials: Credentials, keys: Keys, jobs: Recei
 /// Builds, signs when asked, and sends `draft` over SMTP; returns the bytes that went out, for
 /// the Sent folder.
 fn send_smtp(account: &Account, credentials: &mut Credentials, keys: &Keys, draft: &merel_model::Draft) -> Result<Vec<u8>, String> {
-    let server = account.outgoing.as_ref().ok_or_else(|| "Dit account heeft geen uitgaande server.".to_string())?;
+    let server = account.outgoing.as_ref().ok_or_else(|| merel_i18n::tr("conn-no-outgoing"))?;
     let message = merel_smtp::build(&account.address, draft).map_err(|e| describe_smtp(&e))?;
     let raw = outgoing(keys, account, draft, message.formatted())?;
     let credential = credentials.smtp()?;
@@ -400,7 +400,7 @@ fn run(c: &mut dyn Mailbox, account: &Account, keys: &Keys, job: &Job) -> Result
             let result = match signed {
                 Ok(raw) => match c.send(&raw)? {
                     true => Ok(()),
-                    false => Err("Dit account heeft geen uitgaande server.".to_string()),
+                    false => Err(merel_i18n::tr("conn-no-outgoing")),
                 },
                 Err(e) => Err(e),
             };

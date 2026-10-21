@@ -158,7 +158,7 @@ pub struct MailApp {
     pub quick_steps: Option<quicksteps::State>,
     /// The "Sjablonen" window, when it is open.
     pub templates: Option<templates::State>,
-    /// Whether the "Verplaatsen naar" window for the selected message is open.
+    /// Whether the "Move to" window for the selected message is open.
     pub move_to: bool,
     /// The window for a new, renamed or removed folder, while it is open.
     pub folder_edit: Option<folders::FolderEdit>,
@@ -219,7 +219,9 @@ pub fn window_title(inbox_unread: u32) -> String {
 struct DraggedMessage(String);
 
 /// What the reading pane says while several messages are selected.
-pub(crate) const MULTI_HINT: &str = "Verwijderen, Archiveren, Ongewenst, Verplaatsen, Gelezen of Ongelezen en Vlag gelden voor alle geselecteerde berichten. Klik zonder toets om er weer één te openen.";
+pub(crate) fn multi_hint() -> String {
+    tr("list-multi-hint")
+}
 
 /// One row of the message list: a message, indented when it sits inside an unfolded
 /// conversation, with the fold control when it heads a conversation of several messages.
@@ -278,6 +280,7 @@ impl MailApp {
     pub fn new(mut engine: Engine) -> Self {
         let view = view::ViewPrefs::load(engine.config_path());
         i18n::set(view.language.language());
+        engine.session.relabel();
         engine.session.sort = view.sort;
         let mut app = MailApp {
             engine,
@@ -346,8 +349,8 @@ impl MailApp {
             Err(e) => {
                 log::warn!("{id}: {e}");
                 self.notice = Some(match e {
-                    merel_engine::CommandError::NoSelection => Notice::warning("Selecteer eerst een bericht."),
-                    merel_engine::CommandError::NoFolder(_) => Notice::warning("Dit account heeft die map niet."),
+                    merel_engine::CommandError::NoSelection => Notice::warning(tr("notice-select-message")),
+                    merel_engine::CommandError::NoFolder(_) => Notice::warning(tr("notice-no-folder")),
                     e => Notice::error(e.to_string()),
                 });
             }
@@ -371,9 +374,9 @@ impl MailApp {
         let arrivals = self.engine.session.take_arrivals();
         if !arrivals.is_empty() {
             self.notice = Some(Notice::info(if arrivals.len() == 1 {
-                "1 nieuw bericht ontvangen.".to_string()
+                crate::i18n::tr_args("arrived", &[("count", 1.into())])
             } else {
-                format!("{} nieuwe berichten ontvangen.", arrivals.len())
+                crate::i18n::tr_args("arrived", &[("count", arrivals.len().into())])
             }));
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
             self.alert_new_mail(&ui.ctx().clone(), &arrivals);
@@ -490,9 +493,12 @@ const SEARCH_BOX: &str = "message_search_box";
 
 /// The button under the blocked-pictures notice that puts the sender on the safe senders list,
 /// so their pictures load from then on without asking, as Outlook does for Safe Senders.
-pub(crate) const ALWAYS_FROM_SENDER: &str = "Altijd van deze afzender";
-pub(crate) const SAFE_IMAGES_NOTICE: &str =
-    "🛡 De afbeeldingen van internet worden geladen omdat de afzender op je lijst met veilige afzenders staat.";
+pub(crate) fn always_from_sender() -> String {
+    tr("images-always-from-sender")
+}
+pub(crate) fn safe_images_notice() -> String {
+    tr("images-safe-sender-notice")
+}
 
 /// The two search keys in the calendar, contacts and tasks modules: Ctrl+E (Cmd+E on a Mac)
 /// puts the cursor in the module's search box, and Esc, once no text field has the keyboard,
@@ -680,13 +686,23 @@ const LIST_CHIPS: [merel_engine::view::Filter; 4] = [
 ];
 
 /// The label of the small button that empties a search box.
-pub(crate) const SEARCH_CLEAR: &str = "Zoekopdracht wissen";
+pub(crate) fn search_clear() -> String {
+    tr("search-clear")
+}
 /// The button in the search box that keeps the search as a search folder.
-pub(crate) const SEARCH_FOLDER: &str = "Zoekmap";
+pub(crate) fn search_folder() -> String {
+    tr("search-folder")
+}
 /// Where the search box looks, in its menu.
-pub(crate) const SCOPE_FOLDER: &str = "Deze map";
-pub(crate) const SCOPE_ALL: &str = "Alle mappen";
-const SEARCH_HINT: &str = "Zoeken, bijvoorbeeld van:sanne heeft:bijlage";
+pub(crate) fn scope_folder() -> String {
+    tr("search-scope-folder")
+}
+pub(crate) fn scope_all() -> String {
+    tr("search-scope-all")
+}
+fn search_hint() -> String {
+    tr("search-hint")
+}
 /// The height of the top bar's search box, and of the bar.
 const SEARCH_HEIGHT: f32 = 30.0;
 /// The height of the title bar the app draws itself on macOS, as tall as Outlook's; the window
@@ -696,7 +712,9 @@ pub const TITLE_BAR_HEIGHT: f32 = 52.0;
 const TITLE_SEARCH_HEIGHT: f32 = 32.0;
 
 /// The filter menu's name over the message list.
-pub(crate) const LIST_FILTER: &str = "Filteren";
+pub(crate) fn list_filter() -> String {
+    tr("list-filter")
+}
 
 /// The search bar at the top of the window, as the new Outlook has it: one field for the
 /// mail, with the recent searches, "Alle mappen" and, while searching, the way to keep the
@@ -767,7 +785,7 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                                 egui::TextEdit::singleline(&mut session.search)
                                     .id(egui::Id::new(SEARCH_BOX))
                                     .frame(egui::Frame::NONE)
-                                    .hint_text(RichText::new(SEARCH_HINT).color(t.text_dim))
+                                    .hint_text(RichText::new(search_hint()).color(t.text_dim))
                                     .text_color(t.text)
                                     .desired_width((ui.available_width() - tail).max(80.0))
                                     .margin(Margin::symmetric(4, 4)),
@@ -780,7 +798,7 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                         let start = ui.cursor().min.x;
                         helder::quiet(ui, t, |ui| {
                             ui.spacing_mut().button_padding = vec2(6.0, 3.0);
-                            if searching && box_button(ui, t, helder::Icon::X, SEARCH_CLEAR, height - 4.0).clicked() {
+                            if searching && box_button(ui, t, helder::Icon::X, &search_clear(), height - 4.0).clicked() {
                                 session.search.clear();
                             }
                             if !recents.is_empty() {
@@ -798,39 +816,35 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                                             }
                                         }
                                         ui.separator();
-                                        if ui.button(view::RECENT_CLEAR).clicked() {
+                                        if ui.button(view::recent_clear()).clicked() {
                                             recent_pick = Some(None);
                                             ui.close();
                                         }
                                     })
                                     .0;
-                                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, view::RECENT_MENU));
-                                r.on_hover_text(view::RECENT_MENU);
+                                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, view::recent_menu()));
+                                r.on_hover_text(view::recent_menu());
                             }
                             if searching
-                                && box_button(ui, t, helder::Icon::FolderPlus, SEARCH_FOLDER, height - 4.0)
-                                    .on_hover_text("Deze zoekopdracht bewaren als zoekmap in het mappenvenster")
+                                && box_button(ui, t, helder::Icon::FolderPlus, &search_folder(), height - 4.0)
+                                    .on_hover_text(tr("search-folder-hint"))
                                     .clicked()
                             {
                                 save_search = true;
                             }
                             // Where to search, as Outlook's scope menu in its search box.
-                            let scope = if session.search_all { SCOPE_ALL } else { SCOPE_FOLDER };
+                            let scope = if session.search_all { &scope_all() } else { &scope_folder() };
                             let button = egui::Button::new(RichText::new(scope).size(13.0).color(t.text))
                                 .right_text(helder::Icon::ChevronDown.image(14.0, t.text_dim))
                                 .frame_when_inactive(false)
                                 .corner_radius(helder::CONTROL_RADIUS)
                                 .min_size(vec2(0.0, height - 4.0));
                             egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
-                                if ui.selectable_label(!session.search_all, SCOPE_FOLDER).clicked() {
+                                if ui.selectable_label(!session.search_all, scope_folder()).clicked() {
                                     session.search_all = false;
                                     ui.close();
                                 }
-                                if ui
-                                    .selectable_label(session.search_all, SCOPE_ALL)
-                                    .on_hover_text("Zoek in alle mappen van alle accounts, in de berichten die Merel al heeft opgehaald.")
-                                    .clicked()
-                                {
+                                if ui.selectable_label(session.search_all, scope_all()).on_hover_text(tr("search-all-hint")).clicked() {
                                     session.search_all = true;
                                     ui.close();
                                 }
@@ -1027,13 +1041,13 @@ fn file_menu(app: &mut MailApp) {
         app.tab = Tab::File;
         app.file_page = backstage::Page::Accounts;
     }
-    if menubar::item(&format!("{}…", notifications::PAGE), true, None) {
+    if menubar::item(&format!("{}…", notifications::page_label()), true, None) {
         app.tab = Tab::File;
         app.file_page = backstage::Page::Notifications;
     }
     menubar::separator();
     for action in backstage::FileAction::ALL {
-        if menubar::item(action.label(), true, None) {
+        if menubar::item(&action.label(), true, None) {
             backstage::run(app, action);
         }
     }
@@ -1366,7 +1380,7 @@ fn folder_row(ui: &mut Ui, t: &Tokens, f: &merel_model::Folder, on: bool, place:
     if let Some(open) = open {
         let zone = egui::Rect::from_center_size(egui::pos2(left + 4.0, rect.center().y), vec2(18.0, 24.0));
         let c = ui.interact(zone, ui.id().with(("fold", &f.id)), Sense::click());
-        let what = if open { "Inklappen" } else { "Uitklappen" };
+        let what = tr(if open { "fold-close" } else { "fold-open" });
         c.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{what}: {}", f.name)));
         toggled = c.on_hover_text(what).clicked();
         let chevron = egui::Rect::from_center_size(zone.center(), vec2(12.0, 12.0));
@@ -1434,12 +1448,21 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     // Outlook's "Favorieten": the pinned folders of every account, above the accounts.
     let favorites: Vec<merel_model::Folder> = app.view.favorites.iter().filter_map(|id| app.engine.session.folder(id).cloned()).collect();
     if !favorites.is_empty() {
-        ui.label(RichText::new("★ Favorieten").size(12.0).strong().color(t.text_dim));
+        ui.label(RichText::new(tr("folders-favorites")).size(12.0).strong().color(t.text_dim));
         ui.add_space(4.0);
         for f in &favorites {
             let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
             let account = app.engine.session.accounts.iter().find(|a| a.id == f.account_id).map(|a| a.address.email().to_string());
-            let (r, _) = folder_row(ui, t, f, on, RowPlace { hint: account.map(|a| format!("{} van {a}", f.name)), ..RowPlace::default() });
+            let (r, _) = folder_row(
+                ui,
+                t,
+                f,
+                on,
+                RowPlace {
+                    hint: account.map(|a| crate::i18n::tr_args("folder-of-account", &[("folder", f.name.as_str().into()), ("account", a.into())])),
+                    ..RowPlace::default()
+                },
+            );
             if let Some(dragged) = r.dnd_release_payload::<DraggedMessage>() {
                 drop_on = Some((dragged.0.clone(), f.id.clone()));
             }
@@ -1464,8 +1487,8 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.add_space(4.0);
             for f in &unified {
                 let on = app.engine.session.selected_folder.as_deref() == Some(f.id.as_str());
-                let label = format!("{} (alle accounts)", f.name);
-                let hint = Some(format!("{} van alle accounts samen", f.name));
+                let label = crate::i18n::tr_args("folder-all-accounts", &[("folder", f.name.as_str().into())]);
+                let hint = Some(crate::i18n::tr_args("folder-all-accounts-hint", &[("folder", f.name.as_str().into())]));
                 let (r, _) = folder_row(ui, t, f, on, RowPlace { hint, label: Some(&label), ..RowPlace::default() });
                 if let Some(dragged) = r.dnd_release_payload::<DraggedMessage>()
                     && let Some(target) = app.engine.session.drop_target(&f.id, &dragged.0)
@@ -1476,7 +1499,7 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     pick = Some(f.id.clone());
                 }
                 r.context_menu(|ui| {
-                    if ui.button("Alles als gelezen markeren").clicked() {
+                    if ui.button(tr("folders-mark-all-read")).clicked() {
                         unified_read = Some(f.id.clone());
                         ui.close();
                     }
@@ -1492,14 +1515,14 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         // the design has it, and a dot for the connection.
         let (name, email) = (account.address.display(), account.address.email());
         let heading = if name == email { email.to_string() } else { format!("{name} · {email}") };
-        let status = match app.engine.session.status.get(&account.id) {
-            Some(AccountStatus::Online) => (t.accent, "Verbonden"),
-            Some(AccountStatus::Connecting) => (t.text_dim, "Verbinden…"),
-            Some(AccountStatus::Error(_)) => (t.flag, "Fout, zie de statusbalk"),
-            _ => (t.border, "Niet verbonden"),
+        let (color, status) = match app.engine.session.status.get(&account.id) {
+            Some(AccountStatus::Online) => (t.accent, tr("account-online")),
+            Some(AccountStatus::Connecting) => (t.text_dim, tr("account-connecting")),
+            Some(AccountStatus::Error(_)) => (t.flag, tr("account-error")),
+            _ => (t.border, tr("account-offline")),
         };
         let open = !app.view.closed_accounts.contains(&account.id);
-        if folding_heading(ui, t, &heading, open, Some(status)).clicked() {
+        if folding_heading(ui, t, &heading, open, Some((color, status.as_str()))).clicked() {
             fold_account = Some(account.id.clone());
         }
         if !open {
@@ -1531,12 +1554,12 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 [ui.available_width(), 28.0],
                 egui::Button::new("").fill(if on { t.checked } else { Color32::TRANSPARENT }).frame_when_inactive(on),
             );
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Concepten op deze computer"));
-            let r = r.on_hover_text("Berichten die je opzij hebt gezet; ze staan alleen op deze computer.");
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("drafts-local")));
+            let r = r.on_hover_text(tr("drafts-local-hint"));
             let rect = r.rect.shrink2(vec2(8.0, 0.0));
             let p = ui.painter();
             let font = egui::FontId::proportional(13.5);
-            p.text(rect.left_center(), egui::Align2::LEFT_CENTER, "📝  Concepten (deze computer)", font.clone(), t.text);
+            p.text(rect.left_center(), egui::Align2::LEFT_CENTER, tr("drafts-local-row"), font.clone(), t.text);
             p.text(rect.right_center(), egui::Align2::RIGHT_CENTER, drafts.to_string(), font, t.text_dim);
             if r.clicked() {
                 pick_drafts = Some(account.id.clone());
@@ -1546,7 +1569,7 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.add_space(12.0);
     // Outlook's "Zoekmappen": the saved searches, under the accounts.
     search_folders::section(app, ui, t);
-    if ui.add(egui::Button::new(RichText::new("+ Account toevoegen").color(t.accent_text)).frame(false)).clicked() {
+    if ui.add(egui::Button::new(RichText::new(tr("account-add")).color(t.accent_text)).frame(false)).clicked() {
         open_accounts = true;
     }
     if open_accounts {
@@ -1583,7 +1606,7 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 fn folding_heading(ui: &mut Ui, t: &Tokens, text: &str, open: bool, status: Option<(Color32, &str)>) -> egui::Response {
     let r = ui.add_sized([ui.available_width(), 26.0], egui::Button::new("").frame(false));
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, true, text));
-    let what = if open { "Inklappen" } else { "Uitklappen" };
+    let what = tr(if open { "fold-close" } else { "fold-open" });
     let r = match status {
         Some((_, tip)) => r.on_hover_text(format!("{tip}. {what}.")),
         None => r.on_hover_text(what),
@@ -1606,7 +1629,7 @@ fn folding_heading(ui: &mut Ui, t: &Tokens, text: &str, open: bool, status: Opti
     r
 }
 
-/// The "Verplaatsen naar" window: the folders of the selected message's account.
+/// The "Move to" window: the folders of the selected message's account.
 fn move_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     if !app.move_to {
         return;
@@ -1626,7 +1649,7 @@ fn move_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         .collect();
     let mut target = None;
     let mut close = false;
-    if crate::helder::popup(ctx, t, "move-to", "Verplaatsen naar", 280.0, |ui| {
+    if crate::helder::popup(ctx, t, "move-to", &tr("move-to-title"), 280.0, |ui| {
         ui.label(RichText::new(clip(&m.subject, 48)).size(12.0).color(t.text_dim));
         ui.add_space(4.0);
         egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
@@ -1637,7 +1660,7 @@ fn move_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             }
         });
         ui.add_space(6.0);
-        if ui.button("Annuleren").clicked() {
+        if ui.button(tr("cancel")).clicked() {
             close = true;
         }
     }) {
@@ -1668,49 +1691,49 @@ fn drag_preview(app: &MailApp, ctx: &egui::Context, t: &Tokens) {
 fn drafts_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens, account_id: &str) {
     let drafts: Vec<merel_model::StoredDraft> = app.engine.session.drafts_of(account_id).into_iter().cloned().collect();
     egui::Frame::NONE.inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
-        ui.label(RichText::new(format!("Concepten ({})", drafts.len())).size(18.0).strong().color(t.text));
-        ui.label(
-            RichText::new(
-                "Berichten die je opzij hebt gezet, en berichten die later verzonden worden. Ze staan alleen op deze computer, in de versleutelde offline kopie.",
-            )
-                .size(12.0)
-                .color(t.text_dim),
-        );
+        ui.label(RichText::new(crate::i18n::tr_args("drafts-title", &[("count", drafts.len().into())])).size(18.0).strong().color(t.text));
+        ui.label(RichText::new(tr("drafts-page-hint")).size(12.0).color(t.text_dim));
     });
     let mut open = None;
     let mut delete = None;
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
         if drafts.is_empty() {
             ui.add_space(24.0);
-            ui.vertical_centered(|ui| ui.label(RichText::new("Geen concepten.").color(t.text_dim)));
+            ui.vertical_centered(|ui| ui.label(RichText::new(tr("drafts-none")).color(t.text_dim)));
         }
         for d in &drafts {
             egui::Frame::NONE.inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                let subject = if d.subject.is_empty() { "(Geen onderwerp)" } else { d.subject.as_str() };
+                let no_subject = tr("no-subject");
+                let subject = if d.subject.is_empty() { no_subject.as_str() } else { d.subject.as_str() };
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(clip(subject, 48)).strong().color(t.text));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match d.send_at {
                         Some(ts) => {
-                            ui.label(RichText::new(format!("⏰ Verzenden {}", compose::when_text(ts))).size(12.0).color(t.accent_text))
-                                .on_hover_text("Gaat op dat moment vanzelf weg, als Merel dan draait. Open het concept om dat te veranderen.");
+                            ui.label(
+                                RichText::new(crate::i18n::tr_args("drafts-send-at", &[("when", compose::when_text(ts).into())]))
+                                    .size(12.0)
+                                    .color(t.accent_text),
+                            )
+                            .on_hover_text(tr("drafts-scheduled-hint"));
                         }
                         None => {
                             ui.label(RichText::new(dates::short(d.updated)).size(12.0).color(t.text_dim));
                         }
                     });
                 });
-                let to = if d.to.trim().is_empty() { "(nog geen ontvanger)" } else { d.to.as_str() };
-                ui.label(RichText::new(format!("Aan: {}", clip(to, 56))).size(12.0).color(t.text_dim));
+                let no_recipient = tr("drafts-no-recipient");
+                let to = if d.to.trim().is_empty() { no_recipient.as_str() } else { d.to.as_str() };
+                ui.label(RichText::new(crate::i18n::tr_args("to-line", &[("to", clip(to, 56).into())])).size(12.0).color(t.text_dim));
                 let preview: String = d.body.lines().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
                 if !preview.is_empty() {
                     ui.label(RichText::new(clip(&preview, 72)).size(12.0).color(t.text_dim));
                 }
                 ui.horizontal(|ui| {
-                    if ui.button("Openen").clicked() {
+                    if ui.button(tr("open")).clicked() {
                         open = Some(d.id.clone());
                     }
-                    if ui.button("Concept verwijderen").clicked() {
+                    if ui.button(tr("drafts-delete")).clicked() {
                         delete = Some(d.id.clone());
                     }
                 });
@@ -1741,7 +1764,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let mut filter_pick: Option<merel_engine::view::Filter> = None;
             egui::Frame::NONE.inner_margin(Margin { left: 12, right: 8, top: 12, bottom: 6 }).show(ui, |ui| {
                 let title = match count {
-                    Some(n) => format!("Zoekresultaten ({n})"),
+                    Some(n) => crate::i18n::tr_args("search-results", &[("count", n.into())]),
                     None => folder_name,
                 };
                 let current = app.engine.session.filter;
@@ -1756,14 +1779,14 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                                 .min_size(vec2(32.0, 32.0));
                             let (r, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
                                 for f in merel_engine::view::Filter::ALL {
-                                    if ui.selectable_label(current == f, f.dutch_name()).clicked() {
+                                    if ui.selectable_label(current == f, filter_name(f)).clicked() {
                                         filter_pick = Some(f);
                                         ui.close();
                                     }
                                 }
                             });
-                            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, LIST_FILTER));
-                            r.on_hover_text("Filteren, ook op gesluimerde berichten. De volgorde kies je op het tabblad Beeld.");
+                            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, list_filter()));
+                            r.on_hover_text(tr("list-filter-hint"));
                         });
                     });
                 });
@@ -1772,7 +1795,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 helder::quiet(ui, t, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         for f in LIST_CHIPS {
-                            if helder::chip(ui, t, f.dutch_name(), current == f).clicked() {
+                            if helder::chip(ui, t, &filter_name(f), current == f).clicked() {
                                 filter_pick = Some(f);
                             }
                         }
@@ -1787,23 +1810,22 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         match session.current_hits() {
                             Some(hits) => {
                                 let n = hits.ids.len();
-                                let found = if n == 1 { "1 bericht".to_string() } else { format!("{n} berichten") };
-                                ui.label(RichText::new(format!("De server vond {found} in deze map.")).size(12.0).color(t.text_dim));
+                                ui.label(
+                                    RichText::new(crate::i18n::tr_args("search-server-found", &[("count", n.into())])).size(12.0).color(t.text_dim),
+                                );
                             }
                             None => {
-                                let label = if busy { "Zoeken op de server…" } else { "Zoek op de server" };
-                                if ui
-                                    .add_enabled(!busy, egui::Button::new(label))
-                                    .on_hover_text("Laat de mailserver in deze map zoeken: ook in berichten die Merel nog niet heeft opgehaald en in de tekst van de berichten.")
-                                    .clicked()
-                                {
+                                let label = tr(if busy { "search-server-busy" } else { "search-server" });
+                                if ui.add_enabled(!busy, egui::Button::new(label)).on_hover_text(tr("search-server-hint")).clicked() {
                                     server_search = true;
                                 }
                             }
                         }
                     });
                     if let Some(e) = &session.search_error {
-                        ui.label(RichText::new(format!("Zoeken op de server is mislukt. {e}")).size(12.0).color(t.flag));
+                        ui.label(
+                            RichText::new(crate::i18n::tr_args("search-server-failed", &[("error", e.to_string().into())])).size(12.0).color(t.flag),
+                        );
                     }
                 }
             });
@@ -1821,13 +1843,13 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 if list.is_empty() {
                     ui.add_space(24.0);
                     let msg = if searching && app.engine.session.current_hits().is_some() {
-                        "Geen berichten gevonden, ook niet op de server."
+                        tr("list-none-found-server")
                     } else if searching {
-                        "Geen berichten gevonden. Merel zoekt in de berichten die het al heeft opgehaald."
+                        tr("list-none-found")
                     } else if loading {
-                        "Berichten ophalen…"
+                        tr("list-fetching")
                     } else {
-                        "Deze map is leeg."
+                        tr("list-empty")
                     };
                     ui.vertical_centered(|ui| ui.label(RichText::new(msg).color(t.text_dim)));
                 }
@@ -1845,21 +1867,21 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     app.view.groups && matches!(app.engine.session.sort, merel_engine::view::Sort::Newest | merel_engine::view::Sort::Oldest);
                 let today = chrono::Local::now().date_naive();
                 let now_ts = chrono::Local::now().timestamp();
-                let mut last_group: Option<&str> = None;
+                let mut last_group: Option<String> = None;
                 for row in rows {
                     let m = row.m;
                     if grouped && !row.indent {
                         let group = dates::date_group(m.date, today);
-                        if last_group != Some(group) {
+                        if last_group.as_ref() != Some(&group) {
+                            group_heading(ui, t, &group);
                             last_group = Some(group);
-                            group_heading(ui, t, group);
                         }
                     }
                     let on = selected.as_deref() == Some(m.id.as_str()) || app.engine.session.marked.contains(&m.id);
                     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click_and_drag());
                     r.dnd_set_drag_payload(DraggedMessage(m.id.clone()));
                     let hover = match app.engine.session.follow_up(&m.id).and_then(merel_engine::followup::due_day) {
-                        Some(d) => format!("{}\nOpvolgen vóór {}", m.subject, dates::day_name(d)),
+                        Some(d) => format!("{}\n{}", m.subject, crate::i18n::tr_args("follow-up-before", &[("day", dates::day_name(d).into())])),
                         None => m.subject.clone(),
                     };
                     let r = r.on_hover_text(hover);
@@ -1878,8 +1900,8 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     if let Some(fold) = &row.fold {
                         let box_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 16.0, rect.top() + 14.0), vec2(18.0, 18.0));
                         let c = ui.interact(box_rect, ui.make_persistent_id(("fold", &m.id)), Sense::click());
-                        let label = if fold.open { "Gesprek inklappen" } else { "Gesprek uitvouwen" };
-                        c.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+                        let label = tr(if fold.open { "conversation-close" } else { "conversation-open" });
+                        c.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
                         if c.clicked() {
                             toggle = Some(fold.key.clone());
                         }
@@ -1997,12 +2019,12 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 if !searching && let Some(folder) = selected {
                     if loading && !app.engine.session.visible_messages().is_empty() {
                         ui.add_space(10.0);
-                        ui.vertical_centered(|ui| ui.label(RichText::new("Berichten ophalen…").size(12.0).color(t.text_dim)));
+                        ui.vertical_centered(|ui| ui.label(RichText::new(tr("list-fetching")).size(12.0).color(t.text_dim)));
                         ui.add_space(10.0);
                     } else if app.engine.session.can_load_older(&folder) {
                         ui.add_space(10.0);
                         ui.vertical_centered(|ui| {
-                            if ui.button("Oudere berichten laden").on_hover_text("Haalt de volgende 200 berichten van de server.").clicked() {
+                            if ui.button(tr("list-load-older")).on_hover_text(tr("list-load-older-hint")).clicked() {
                                 older = true;
                             }
                         });
@@ -2031,8 +2053,8 @@ impl MailApp {
         }
         self.run("message.wake_snoozed", Value::Null);
         self.notice = Some(Notice::info(match due.as_slice() {
-            [m] => format!("Gesluimerd bericht is terug: {}", m.subject),
-            list => format!("{} gesluimerde berichten zijn terug.", list.len()),
+            [m] => crate::i18n::tr_args("snoozed-back-one", &[("subject", m.subject.as_str().into())]),
+            list => crate::i18n::tr_args("snoozed-back", &[("count", list.len().into())]),
         }));
     }
 
@@ -2116,7 +2138,7 @@ fn message_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
 
 fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let Some(m) = app.engine.session.selected().cloned() else {
-        ui.centered_and_justified(|ui| ui.label(RichText::new("Selecteer een bericht om het te lezen.").color(t.text_dim).size(15.0)));
+        ui.centered_and_justified(|ui| ui.label(RichText::new(tr("reading-select")).color(t.text_dim).size(15.0)));
         return;
     };
     if !app.engine.session.marked.is_empty() {
@@ -2125,9 +2147,9 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         let n = app.engine.session.marked.len() + 1;
         ui.vertical_centered(|ui| {
             ui.add_space(40.0);
-            ui.label(RichText::new(format!("{n} berichten geselecteerd")).size(18.0).strong().color(t.text));
+            ui.label(RichText::new(crate::i18n::tr_args("selected-count", &[("count", n.into())])).size(18.0).strong().color(t.text));
             ui.add_space(8.0);
-            ui.label(RichText::new(MULTI_HINT).color(t.text_dim));
+            ui.label(RichText::new(multi_hint()).color(t.text_dim));
         });
         return;
     }
@@ -2145,10 +2167,8 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         let mut back = false;
         egui::Frame::new().fill(t.checked).corner_radius(4).inner_margin(8).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    RichText::new(format!("⏰ Gesluimerd tot {}; dan komt het bericht ongelezen terug.", compose::when_text(until))).color(t.text),
-                );
-                back = ui.small_button(message_menu::UNSNOOZE).on_hover_text("Zet het bericht nu terug in de lijst.").clicked();
+                ui.label(RichText::new(crate::i18n::tr_args("snoozed-until", &[("when", compose::when_text(until).into())])).color(t.text));
+                back = ui.small_button(message_menu::unsnooze()).on_hover_text(tr("reading-unsnooze-hint")).clicked();
             });
         });
         ui.add_space(8.0);
@@ -2162,16 +2182,16 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         let today = chrono::Local::now().date_naive();
         let due = app.engine.session.follow_up(&m.id).and_then(merel_engine::followup::due_day);
         let (text, late) = match due {
-            Some(d) if d < today => (format!("Opvolgen: verlopen op {}", dates::day_name(d)), true),
-            Some(d) if d == today => ("Opvolgen: vandaag".to_string(), false),
-            Some(d) => (format!("⚑ Opvolgen vóór {}", dates::day_name(d)), false),
-            None => ("⚑ Gemarkeerd voor opvolging".to_string(), false),
+            Some(d) if d < today => (crate::i18n::tr_args("follow-up-overdue", &[("day", dates::day_name(d).into())]), true),
+            Some(d) if d == today => (tr("follow-up-today"), false),
+            Some(d) => (format!("⚑ {}", crate::i18n::tr_args("follow-up-before", &[("day", dates::day_name(d).into())])), false),
+            None => (tr("follow-up-flagged"), false),
         };
         let mut done = false;
         egui::Frame::new().fill(if late { t.flag.gamma_multiply(0.15) } else { t.checked }).corner_radius(4).inner_margin(8).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(text).color(if late { t.flag } else { t.text }));
-                done = ui.small_button("Voltooid").on_hover_text("Haalt de vlag en de datum weg.").clicked();
+                done = ui.small_button(tr("reading-flag-done")).on_hover_text(tr("reading-flag-done-hint")).clicked();
             });
         });
         ui.add_space(8.0);
@@ -2185,13 +2205,8 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         let mut not_junk = false;
         egui::Frame::new().fill(t.flag.gamma_multiply(0.15)).corner_radius(4).inner_margin(8).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(JUNK_NOTICE).color(t.text));
-                not_junk = ui
-                    .small_button("Geen ongewenst")
-                    .on_hover_text(
-                        "Zet het bericht terug in Postvak IN en maakt de afzender een veilige afzender; links en bijlagen werken dan weer.",
-                    )
-                    .clicked();
+                ui.label(RichText::new(junk_notice()).color(t.text));
+                not_junk = ui.small_button(tr("junk-not-junk")).on_hover_text(tr("junk-not-junk-hint")).clicked();
             });
         });
         ui.add_space(8.0);
@@ -2205,11 +2220,8 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         let mut stop = false;
         egui::Frame::new().fill(t.checked).corner_radius(4).inner_margin(8).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(IGNORED_NOTICE).color(t.text));
-                stop = ui
-                    .small_button("Niet meer negeren")
-                    .on_hover_text("Zet de berichten van dit gesprek terug in Postvak IN; nieuwe berichten erin komen daar weer aan.")
-                    .clicked();
+                ui.label(RichText::new(ignored_notice()).color(t.text));
+                stop = ui.small_button(tr("ignore-stop")).on_hover_text(tr("ignore-stop-hint")).clicked();
             });
         });
         ui.add_space(8.0);
@@ -2232,27 +2244,27 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 }
             });
             let to: Vec<&str> = m.to.iter().map(|a| a.display()).collect();
-            ui.label(RichText::new(format!("Aan: {} · {}", to.join("; "), dates::long(m.date))).size(12.0).color(t.text_dim));
+            ui.label(
+                RichText::new(format!("{} · {}", crate::i18n::tr_args("to-line", &[("to", to.join("; ").into())]), dates::long(m.date)))
+                    .size(12.0)
+                    .color(t.text_dim),
+            );
         });
         // The answers at hand in the message's own header, and the sender's contact card.
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             helder::quiet(ui, t, |ui| {
                 let known = app.engine.session.contact_with_email(m.from.email()).is_some();
                 let (label, hint, icon) = if known {
-                    ("Contact openen", "Deze afzender staat in je contacten; opent de kaart.", helder::Icon::User)
+                    (tr("contact-open"), tr("contact-open-hint"), helder::Icon::User)
                 } else {
-                    (
-                        "Toevoegen aan contacten",
-                        "Maakt een contact met de naam en het adres van deze afzender; je kunt het nog aanvullen voor je opslaat.",
-                        helder::Icon::UserPlus,
-                    )
+                    (tr("contact-add"), tr("contact-add-hint"), helder::Icon::UserPlus)
                 };
-                sender = header_button(ui, t, icon, label).on_hover_text(hint).clicked();
+                sender = header_button(ui, t, icon, &label).on_hover_text(hint).clicked();
                 if !in_junk {
                     for (icon, label, kind) in [
-                        (helder::Icon::Forward, HEADER_FORWARD, ComposeKind::Forward),
-                        (helder::Icon::ReplyAll, HEADER_REPLY_ALL, ComposeKind::ReplyAll),
-                        (helder::Icon::Reply, HEADER_REPLY, ComposeKind::Reply),
+                        (helder::Icon::Forward, &header_forward(), ComposeKind::Forward),
+                        (helder::Icon::ReplyAll, &header_reply_all(), ComposeKind::ReplyAll),
+                        (helder::Icon::Reply, &header_reply(), ComposeKind::Reply),
                     ] {
                         if header_button(ui, t, icon, label).on_hover_text(label).clicked() {
                             reply = Some(kind);
@@ -2292,18 +2304,13 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         egui::Frame::NONE.fill(t.flag.gamma_multiply(0.18)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::symmetric(10, 6)).show(
             ui,
             |ui| {
-                ui.label(RichText::new(PHISHING_TITLE).strong().color(t.text));
+                ui.label(RichText::new(phishing_title()).strong().color(t.text));
                 for w in &warnings {
                     ui.label(RichText::new(format!("• {}", w.text())).size(12.0).color(t.text));
                 }
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new("Klik niet op links, open geen bijlagen en antwoord niet als je twijfelt.").size(12.0).color(t.text_dim));
-                    block = ui
-                        .small_button("Afzender blokkeren")
-                        .on_hover_text(
-                            "Zet het bericht in Ongewenste e-mail en blokkeert de afzender; volgende mail van dit adres gaat daar meteen heen.",
-                        )
-                        .clicked();
+                    ui.label(RichText::new(tr("phishing-advice")).size(12.0).color(t.text_dim));
+                    block = ui.small_button(tr("block-sender")).on_hover_text(tr("block-sender-hint")).clicked();
                 });
             },
         );
@@ -2323,7 +2330,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         && signature::strip(ui, t, sig, m.from.email(), !in_junk)
     {
         match app.engine.trust_certificate(&message_id) {
-            Ok(()) => app.notice = Some(Notice::success("Het certificaat wordt vertrouwd; je kunt deze afzender nu ook versleuteld mailen.")),
+            Ok(()) => app.notice = Some(Notice::success(tr("certificate-trusted"))),
             Err(e) => app.notice = Some(Notice::error(e)),
         }
     }
@@ -2344,11 +2351,8 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         let mut ask = false;
         egui::Frame::new().fill(t.checked).corner_radius(4).inner_margin(8).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(unsubscribe::STRIP).color(t.text));
-                ask = ui
-                    .small_button("Afmelden…")
-                    .on_hover_text("Vraagt eerst wat er gebeurt: een e-mail aan de afzender of een pagina in de browser.")
-                    .clicked();
+                ui.label(RichText::new(unsubscribe::strip()).color(t.text));
+                ask = ui.small_button(tr("unsubscribe")).on_hover_text(tr("unsubscribe-hint")).clicked();
             });
         });
         ui.add_space(8.0);
@@ -2382,11 +2386,11 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     // Privacy: nothing in a message runs or loads; pictures on the internet stay blocked until
     // the person asks for them, for this one message.
     let notice = match (rich, body.as_ref().is_some_and(|b| b.from_html)) {
-        (Some(_), _) if blocked > 0 && allowed && safe_sender => Some(SAFE_IMAGES_NOTICE),
-        (Some(_), _) if blocked > 0 && allowed => Some("🛡 De afbeeldingen van internet in dit bericht worden geladen omdat je daarom vroeg."),
-        (Some(_), _) if blocked > 0 => Some("🛡 Afbeeldingen van internet zijn geblokkeerd om je privacy te beschermen."),
+        (Some(_), _) if blocked > 0 && allowed && safe_sender => Some(safe_images_notice()),
+        (Some(_), _) if blocked > 0 && allowed => Some(tr("images-loaded-on-request")),
+        (Some(_), _) if blocked > 0 => Some(tr("images-blocked")),
         (Some(_), _) => None,
-        (None, true) => Some("🛡 Dit bericht is als tekst weergegeven. Externe afbeeldingen zijn geblokkeerd om je privacy te beschermen."),
+        (None, true) => Some(tr("images-shown-as-text")),
         (None, false) => None,
     };
     if let Some(notice) = notice {
@@ -2396,16 +2400,8 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(notice).size(12.0).color(t.text));
                 if blocked > 0 && !allowed && !in_junk {
-                    load = ui
-                        .small_button("Afbeeldingen laden")
-                        .on_hover_text("Haalt de afbeeldingen van dit ene bericht op van internet. De afzender kan daaraan zien dat je het bericht hebt geopend.")
-                        .clicked();
-                    always = ui
-                        .small_button(ALWAYS_FROM_SENDER)
-                        .on_hover_text(
-                            "Zet de afzender op je lijst met veilige afzenders (venster Ongewenste e-mail) en laadt de afbeeldingen van die afzender voortaan zonder te vragen.",
-                        )
-                        .clicked();
+                    load = ui.small_button(tr("images-load")).on_hover_text(tr("images-load-hint")).clicked();
+                    always = ui.small_button(always_from_sender()).on_hover_text(tr("images-always-hint")).clicked();
                 }
             });
         });
@@ -2435,16 +2431,16 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let label = format!("📎 {}  ({size})", a.name);
                 let r = helder::file_tile(ui, t, &a.name, &size, &label, !in_junk);
                 if in_junk {
-                    r.on_hover_text("Uitgeschakeld in Ongewenste e-mail. Klik op Geen ongewenst als je deze afzender vertrouwt.");
-                } else if r.on_hover_text("Opslaan in je map Downloads. Merel opent bijlagen niet zelf.").clicked() {
+                    r.on_hover_text(tr("attachment-junk-hint"));
+                } else if r.on_hover_text(tr("attachment-save-hint")).clicked() {
                     save = Some(a.clone());
                 }
             }
             // Several attachments: one click saves them all, as Outlook's "Alle bijlagen opslaan".
             if !in_junk && files.len() > 1 {
                 helder::quiet(ui, t, |ui| {
-                    if helder::tool_button(ui, t, helder::Icon::Download, attachments::SAVE_ALL)
-                        .on_hover_text("Zet alle bijlagen van dit bericht in je map Downloads, elk onder zijn eigen naam.")
+                    if helder::tool_button(ui, t, helder::Icon::Download, &attachments::save_all_label())
+                        .on_hover_text(tr("attachments-save-all-hint"))
                         .clicked()
                     {
                         save_all = true;
@@ -2505,7 +2501,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     let text = match (&body, loading, sample) {
         (Some(b), _, _) => b.text.clone(),
-        (None, true, _) => "Bericht ophalen…".to_string(),
+        (None, true, _) => tr("message-fetching"),
         (None, false, true) => m.preview.clone(),
         (None, false, false) => String::new(),
     };
@@ -2515,11 +2511,19 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 }
 
 /// The answer buttons in the reading pane's header; named apart from the ribbon's own.
-pub(crate) const HEADER_REPLY: &str = "Antwoorden";
-pub(crate) const HEADER_REPLY_ALL: &str = "Allen antwoorden";
-pub(crate) const HEADER_FORWARD: &str = "Bericht doorsturen";
+pub(crate) fn header_reply() -> String {
+    tr("header-reply")
+}
+pub(crate) fn header_reply_all() -> String {
+    tr("header-reply-all")
+}
+pub(crate) fn header_forward() -> String {
+    tr("header-forward")
+}
 /// The bar under a message that starts a reply.
-pub(crate) const QUICK_REPLY: &str = "Snel antwoorden";
+pub(crate) fn quick_reply_label() -> String {
+    tr("quick-reply")
+}
 
 /// A quiet square icon button in the reading pane's header.
 fn header_button(ui: &mut Ui, t: &Tokens, icon: helder::Icon, label: &str) -> egui::Response {
@@ -2541,7 +2545,7 @@ fn quick_reply(ui: &mut Ui, t: &Tokens, to: &str) -> bool {
         .frame(egui::Frame::NONE.inner_margin(Margin { left: 0, right: 0, top: 10, bottom: 0 }))
         .show(ui, |ui| {
             let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, QUICK_REPLY));
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, quick_reply_label()));
             let p = ui.painter();
             let fill = if r.hovered() { t.hover } else { t.card };
             p.rect(rect, CornerRadius::same(helder::CONTROL_RADIUS), fill, Stroke::new(1.0, t.control_border), egui::StrokeKind::Inside);
@@ -2551,21 +2555,27 @@ fn quick_reply(ui: &mut Ui, t: &Tokens, to: &str) -> bool {
             p.text(
                 egui::pos2(rect.left() + 38.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
-                format!("Snel antwoorden aan {first}…"),
+                crate::i18n::tr_args("quick-reply-to", &[("name", first.into())]),
                 egui::FontId::proportional(14.0),
                 t.text_dim,
             );
-            r.on_hover_text("Opent een antwoord aan de afzender.").clicked()
+            r.on_hover_text(tr("quick-reply-hint")).clicked()
         })
         .inner
 }
 
 /// The first line of the strip above a message that shows signs of phishing.
-pub(crate) const PHISHING_TITLE: &str = "⚠ Pas op: dit bericht heeft kenmerken van phishing.";
+pub(crate) fn phishing_title() -> String {
+    tr("phishing-title")
+}
 /// The strip above a message of an ignored conversation.
-pub(crate) const IGNORED_NOTICE: &str = "🚫 Dit gesprek wordt genegeerd: nieuwe berichten erin gaan meteen naar Verwijderde items.";
+pub(crate) fn ignored_notice() -> String {
+    tr("ignored-notice")
+}
 /// The strip above a message in the Junk folder.
-pub(crate) const JUNK_NOTICE: &str = "⚠ Dit bericht staat in Ongewenste e-mail. Links, bijlagen en afbeeldingen van internet zijn uitgeschakeld tot je het als Geen ongewenst aanmerkt.";
+pub(crate) fn junk_notice() -> String {
+    tr("junk-notice")
+}
 
 /// What points to phishing in `m`, from its sender (against the contacts and the person's own
 /// addresses) and, once fetched, its body: the server's authentication results, the links and
@@ -2593,6 +2603,18 @@ pub(crate) fn size_text(bytes: usize) -> String {
     }
 }
 
+/// The name of a list filter in the current language.
+fn filter_name(filter: merel_engine::view::Filter) -> String {
+    use merel_engine::view::Filter;
+    tr(match filter {
+        Filter::All => "filter-all",
+        Filter::Unread => "filter-unread",
+        Filter::Flagged => "filter-flagged",
+        Filter::Attachments => "filter-attachments",
+        Filter::Snoozed => "filter-snoozed",
+    })
+}
+
 fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::Panel::bottom("status").show_separator_line(false).frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin::symmetric(12, 4))).show(
         ui,
@@ -2600,28 +2622,31 @@ fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.horizontal(|ui| {
                 let list = app.engine.session.visible_messages();
                 let unread = list.iter().filter(|m| !m.flags.seen).count();
-                ui.label(RichText::new(format!("Items: {}   Ongelezen: {}", list.len(), unread)).size(12.0).color(t.text_dim));
+                ui.label(
+                    RichText::new(crate::i18n::tr_args("status-items", &[("items", list.len().into()), ("unread", unread.into())]))
+                        .size(12.0)
+                        .color(t.text_dim),
+                );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let (txt, col) = if app.engine.session.is_sample() {
-                        ("Voorbeeldmail · offline".to_string(), t.text_dim)
+                        (tr("status-sample"), t.text_dim)
                     } else {
                         let statuses = app.engine.session.status.values();
-                        let mut worst = ("Verbonden".to_string(), t.text_dim);
+                        let mut worst = (tr("account-online"), t.text_dim);
                         for s in statuses {
                             match s {
                                 AccountStatus::Error(e) => worst = (e.clone(), t.flag),
-                                AccountStatus::Connecting if worst.1 != t.flag => worst = ("Verbinden…".to_string(), t.text_dim),
+                                AccountStatus::Connecting if worst.1 != t.flag => worst = (tr("account-connecting"), t.text_dim),
                                 _ => {}
                             }
                         }
                         if app.engine.session.has_pending() && worst.1 != t.flag {
-                            worst.0 = "Bezig…".to_string();
+                            worst.0 = tr("status-busy");
                         }
                         let queued: usize = app.engine.session.queued.values().sum();
                         match queued {
                             0 => {}
-                            1 => worst = ("Geen verbinding; 1 wijziging wacht tot de verbinding terug is".to_string(), t.flag),
-                            n => worst = (format!("Geen verbinding; {n} wijzigingen wachten tot de verbinding terug is"), t.flag),
+                            n => worst = (crate::i18n::tr_args("status-queued", &[("count", n.into())]), t.flag),
                         }
                         worst
                     };
@@ -2684,28 +2709,28 @@ mod tests {
         assert!(h.state().welcome.is_none(), "the sample has no settings folder, so no welcome");
         h.state_mut().welcome = Some(welcome::Step::Hello);
         h.run();
-        assert!(h.query_all_by_label(welcome::WINDOW).count() >= 1);
+        assert!(h.query_all_by_label(&welcome::window_label()).count() >= 1);
         h.get_by_label("Stap 1 van 4");
-        h.get_by_label(welcome::NEXT).click();
+        h.get_by_label(&welcome::next_label()).click();
         h.run();
-        h.get_by_label(welcome::ADD_ACCOUNT);
-        h.get_by_label(welcome::BACK).click();
+        h.get_by_label(&welcome::add_account());
+        h.get_by_label(&welcome::back_label()).click();
         h.run();
         h.get_by_label("Stap 1 van 4");
-        h.get_by_label(welcome::NEXT).click();
+        h.get_by_label(&welcome::next_label()).click();
         h.run();
-        h.get_by_label(welcome::NEXT).click();
+        h.get_by_label(&welcome::next_label()).click();
         h.run();
         assert_eq!(h.state().view.update_check, Some(false), "shown is chosen: no until said otherwise");
-        h.get_by_label(welcome::UPDATES_ON).click();
+        h.get_by_label(&welcome::updates_on()).click();
         h.run();
         assert_eq!(h.state().view.update_check, Some(true));
-        h.get_by_label(welcome::NEXT).click();
+        h.get_by_label(&welcome::next_label()).click();
         h.run();
         h.get_by_label("Donker").click();
         h.run();
         assert_eq!(h.state().view.theme, view::ThemeChoice::Dark);
-        h.get_by_label(welcome::DONE).click();
+        h.get_by_label(&welcome::done()).click();
         h.run();
         assert!(h.state().welcome.is_none());
         assert!(h.state().view.welcomed);
@@ -2717,7 +2742,7 @@ mod tests {
         let mut h = harness();
         h.state_mut().welcome = Some(welcome::Step::Account);
         h.run();
-        h.get_by_label(welcome::ADD_ACCOUNT).click();
+        h.get_by_label(&welcome::add_account()).click();
         h.run();
         assert!(h.state().welcome.is_none());
         assert!(h.state().view.welcomed);
@@ -2732,15 +2757,15 @@ mod tests {
         h.run();
         h.get_by_label("Help").click();
         h.run();
-        h.get_by_label(updates::CHECK);
+        h.get_by_label(&updates::check());
         let release = Release { version: "9.0.0".into(), notes: "Nieuw: van alles.".into() };
         h.state_mut().finish_update_check(Outcome::Newer(release.clone()));
         h.run();
-        assert!(h.query_all_by_label(updates::WINDOW).count() >= 1);
+        assert!(h.query_all_by_label(&updates::window_label()).count() >= 1);
         h.get_by_label("Merel 9.0.0 is beschikbaar.");
         h.get_by_label("Nieuw: van alles.");
-        h.get_by_label(updates::DOWNLOAD);
-        h.get_by_label(updates::SKIP).click();
+        h.get_by_label(&updates::download());
+        h.get_by_label(&updates::skip()).click();
         h.run();
         assert!(h.state().updates.offer.is_none());
         assert_eq!(h.state().view.skipped_version.as_deref(), Some("9.0.0"));
@@ -2750,7 +2775,7 @@ mod tests {
         h.state_mut().finish_update_check(Outcome::Newer(Release { version: "9.1.0".into(), notes: String::new() }));
         assert!(h.state().updates.offer.is_some());
         h.run();
-        h.get_by_label(updates::LATER).click();
+        h.get_by_label(&updates::later()).click();
         h.run();
         assert!(h.state().updates.offer.is_none());
         // Only an answer to the person's own question is spoken.
@@ -2770,15 +2795,15 @@ mod tests {
         h.get_by_label("Merel 9.0.0 downloaden");
         h.get_by_label("12 van 38 MB");
         h.get_by_label("Stap 2 van 4");
-        h.get_by_label(updates::CANCEL).click();
+        h.get_by_label(&updates::cancel()).click();
         h.run();
         assert!(h.state().updates.job.is_none(), "cancelling ends the download");
 
         h.state_mut().updates.job = Some(Job::at("9.0.0", Stage::Ready(Restart::Relaunch("/Applications/Merel.app".into()))));
         h.run();
         h.get_by_label("Merel 9.0.0 is geïnstalleerd");
-        h.get_by_label(updates::RESTART);
-        h.get_by_label(updates::LATER).click();
+        h.get_by_label(&updates::restart_label());
+        h.get_by_label(&updates::later()).click();
         h.run();
         h.run();
         assert!(h.state().updates.job.is_none());
@@ -2786,21 +2811,21 @@ mod tests {
         h.state_mut().updates.job = Some(Job::at("9.0.0", Stage::Installing));
         h.run();
         h.get_by_label("Merel 9.0.0 installeren");
-        h.get_by_label(helder::CLOSE).click();
+        h.get_by_label(&helder::close_label()).click();
         h.run();
         assert!(h.state().updates.job.is_some(), "an install in progress is not closed");
 
         h.state_mut().updates.job = Some(Job::at("9.0.0", Stage::Ready(Restart::Relaunch("/x".into()))));
         h.run();
         h.run();
-        h.get_by_label(updates::LATER).click();
+        h.get_by_label(&updates::later()).click();
         h.run();
         assert!(h.state().updates.job.is_none(), "once installed, Later closes it");
         h.state_mut().updates.job =
             Some(Job::at("9.0.0", Stage::Failed("De handtekening van deze versie klopt niet. Er is niets geïnstalleerd.".into())));
         h.run();
         h.get_by_label("Bijwerken is niet gelukt");
-        h.get_by_label(updates::PAGE);
+        h.get_by_label(&updates::page_label());
         assert!(h.query_by_label_contains("De handtekening van deze versie klopt niet").is_some());
     }
 
@@ -2814,7 +2839,7 @@ mod tests {
         h.run();
         h.get_by_label("Over Merel").click();
         h.run();
-        h.get_by_label(updates::AUTO).click();
+        h.get_by_label(&updates::auto()).click();
         h.run();
         assert_eq!(h.state().view.update_check, Some(true));
         assert!(h.state().updates.running(), "switching it on asks at once");
@@ -2826,8 +2851,8 @@ mod tests {
         h.run();
         h.state_mut().notice = Some(Notice::success("Contact opgeslagen in Downloads: Ravi Kumar.vcf").revealing("/tmp/Ravi Kumar.vcf"));
         h.run();
-        assert!(h.get_by_label(notice::CLOSE).rect().top() < 220.0, "just under the ribbon, where the person looks");
-        h.get_by_label(notice::REVEAL);
+        assert!(h.get_by_label(&notice::close_label()).rect().top() < 220.0, "just under the ribbon, where the person looks");
+        h.get_by_label(&notice::reveal_label());
         for _ in 0..30 {
             h.step();
         }
@@ -2838,8 +2863,8 @@ mod tests {
             h.step();
         }
         assert!(h.state().notice.is_some(), "an error waits to be read");
-        assert!(h.query_by_label(notice::REVEAL).is_none(), "nothing to show in a folder");
-        h.get_by_label(notice::CLOSE).click();
+        assert!(h.query_by_label(&notice::reveal_label()).is_none(), "nothing to show in a folder");
+        h.get_by_label(&notice::close_label()).click();
         h.run();
         assert!(h.state().notice.is_none());
     }
@@ -3045,7 +3070,7 @@ mod tests {
         assert!(h.query_by_label("Zoekresultaten (1)").is_some());
         assert!(h.query_by_label("Planning voor donderdag").is_some());
         assert_eq!(h.state().engine.session.visible_messages().len(), 1);
-        h.get_by_label(SEARCH_CLEAR).click();
+        h.get_by_label(&search_clear()).click();
         h.run();
         assert!(!h.state().engine.session.is_searching());
         assert_eq!(h.state().engine.session.visible_messages().len(), all);
@@ -3278,7 +3303,7 @@ mod tests {
         assert!(h.state().read_timer.is_none());
         h.get_by_label("Beeld").click();
         h.run();
-        h.get_by_label(view::MARK_READ_MENU).click();
+        h.get_by_label(&view::mark_read_menu()).click();
         h.run();
         h.get_all_by_label("Meteen").next().expect("the menu item").click();
         h.run();
@@ -3291,12 +3316,12 @@ mod tests {
         let mut h = harness();
         h.state_mut().module = Module::Calendar;
         h.run();
-        h.get_all_by_label(calendar::GOTO).next().expect("the ribbon button").click();
+        h.get_all_by_label(&calendar::goto()).next().expect("the ribbon button").click();
         h.run();
         assert!(h.state().calendar.goto.is_some());
         *h.state_mut().calendar.goto.as_mut().expect("the window") = "31-02-2027".into();
         h.run();
-        h.get_by_label(calendar::GOTO_HINT);
+        h.get_by_label(&calendar::goto_hint());
         h.get_by_label("Ga").click();
         h.run();
         assert!(h.state().calendar.goto.is_some(), "a day that does not exist keeps the window open");
@@ -3322,7 +3347,7 @@ mod tests {
         assert!(h.state().view.work_hours, "on by default, as in Outlook");
         h.get_by_label("Beeld").click();
         h.run();
-        h.get_by_label(calendar::WORK_HOURS).click();
+        h.get_by_label(&calendar::work_hours()).click();
         h.run();
         assert!(!h.state().view.work_hours);
         h.get_by_label("Start").click();
@@ -3331,7 +3356,7 @@ mod tests {
         h.run();
         h.get_by_label("Beeld").click();
         h.run();
-        h.get_by_label(calendar::WORK_HOURS).click();
+        h.get_by_label(&calendar::work_hours()).click();
         h.run();
         assert!(h.state().view.work_hours, "and back on, with the week view drawing the shade");
     }
@@ -3395,7 +3420,7 @@ mod tests {
         let a = h.state().engine.session.appointments.first().cloned().expect("a sample appointment");
         h.state_mut().open_appointment(&a.id, a.start);
         h.run();
-        h.get_by_label(meeting::FORWARD).click();
+        h.get_by_label(&meeting::forward_label()).click();
         h.run();
         assert!(h.state().calendar.editor.is_none(), "the appointment window closed");
         let c = h.state().compose.as_ref().expect("the compose window");
@@ -3417,14 +3442,14 @@ mod tests {
         let id = e.notes_editor.id();
         h.state_mut().calendar.editor = Some(e);
         h.run();
-        h.get_by_label("Notities").focus();
+        h.get_by_label(&tr("notes")).focus();
         h.run();
         // "Agenda" selected, as dragging over it would.
         let mut state = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
         state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(6))));
         state.store(&h.ctx, id);
         h.run();
-        h.get_by_label(rich_edit::BOLD).click();
+        h.get_by_label(&rich_edit::bold()).click();
         h.run();
         h.get_by_label("Opslaan").click();
         h.run();
@@ -3443,7 +3468,7 @@ mod tests {
         e.end_date = "06-10-2026".into();
         h.state_mut().calendar.editor = Some(e);
         h.run();
-        h.get_by_label(calendar::START_PICKER).click();
+        h.get_by_label(&calendar::start_picker()).click();
         h.run();
         h.get_by_label("oktober 2026");
         h.get_by_label("Volgende maand").click();
@@ -3454,7 +3479,7 @@ mod tests {
         let e = h.state().calendar.editor.as_ref().expect("still open");
         assert_eq!((e.start_date.as_str(), e.end_date.as_str()), ("12-11-2026", "13-11-2026"), "a day long, as before");
         assert!(h.query_by_label("Volgende maand").is_none(), "the month closes once a day is picked");
-        h.get_by_label(calendar::END_PICKER).click();
+        h.get_by_label(&calendar::end_picker()).click();
         h.run();
         h.get_by_label("20 november 2026").click();
         h.run();
@@ -3470,7 +3495,7 @@ mod tests {
         h.run();
         h.state_mut().tasks.editor.as_mut().expect("editor").due = "30-11-2026".into();
         h.run();
-        h.get_by_label(tasks::DUE_PICKER).click();
+        h.get_by_label(&tasks::due_picker()).click();
         h.run();
         h.get_by_label("1 december 2026").click();
         h.run();
@@ -3482,13 +3507,13 @@ mod tests {
         // Selects "Agenda" in the notes of the open form and makes it bold, as a drag and a
         // click on the bar would.
         fn bold_first_word(h: &mut egui_kittest::Harness<'static, MailApp>, id: egui::Id) {
-            h.get_by_label("Notities").focus();
+            h.get_by_label(&tr("notes")).focus();
             h.run();
             let mut state = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
             state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(6))));
             state.store(&h.ctx, id);
             h.run();
-            h.get_by_label(rich_edit::BOLD).click();
+            h.get_by_label(&rich_edit::bold()).click();
             h.run();
             h.get_by_label("Opslaan").click();
             h.run();
@@ -3533,14 +3558,14 @@ mod tests {
         assert!(h.query_by_label("Opslaan").is_none(), "with attendees the button sends");
         h.get_by_label("Verzenden").click();
         h.run();
-        h.get_by_label(meeting::NO_ACCOUNT);
+        h.get_by_label(&meeting::no_account());
         assert!(h.state().calendar.editor.is_some(), "the window stays open");
         assert!(h.state().engine.session.appointments.iter().all(|a| a.title != "Overleg met Sanne"), "nothing was saved");
         h.state_mut().calendar.editor.as_mut().expect("editor").attendees = "sanne@".into();
         h.run();
         h.get_by_label("Verzenden").click();
         h.run();
-        h.get_by_label(meeting::BAD_ADDRESSES);
+        h.get_by_label(&meeting::bad_addresses());
     }
 
     fn with_real_account(h: &mut egui_kittest::Harness<'static, MailApp>) {
@@ -3578,7 +3603,7 @@ mod tests {
             assert_eq!((e.invited.len(), e.attendees.as_str()), (1, ""), "the finished address became a chip");
         }
         h.get_by_label("Alain Tester verwijderen");
-        assert!(h.query_by_label(calendar::IN_THE_PAST).is_none());
+        assert!(h.query_by_label(&calendar::in_the_past()).is_none());
         h.get_by_label("Verzenden").click();
         h.run_steps(3);
         assert!(h.state().calendar.editor.is_none(), "sent and closed");
@@ -3602,7 +3627,7 @@ mod tests {
         // Taking the person off sends them a cancellation with the update.
         h.get_by_label("Alain Tester verwijderen").click();
         h.run_steps(3);
-        h.get_by_label(meeting::SEND_UPDATE).click();
+        h.get_by_label(&meeting::send_update()).click();
         h.run_steps(3);
         assert_eq!(h.state().engine.session.outbox.len(), 2, "the cancellation went out too");
         let a = h.state().engine.session.appointments.iter().find(|a| a.title == "Lunch").cloned().expect("saved");
@@ -3663,7 +3688,7 @@ mod tests {
         e.title = "Gisteren".into();
         h.state_mut().calendar.editor = Some(e);
         h.run();
-        h.get_by_label(calendar::IN_THE_PAST);
+        h.get_by_label(&calendar::in_the_past());
     }
 
     #[test]
@@ -3671,7 +3696,7 @@ mod tests {
         let mut h = harness();
         h.state_mut().module = Module::People;
         h.run();
-        h.get_by_label(groups::NEW).click();
+        h.get_by_label(&groups::new()).click();
         h.run();
         {
             let e = h.state_mut().contacts.group_editor.as_mut().expect("the group window");
@@ -3686,7 +3711,7 @@ mod tests {
         assert!(h.state().contacts.group_editor.is_none());
         assert_eq!(h.state().contacts.group.as_deref(), Some(groups[0].id.as_str()), "the new group is shown");
         h.get_by_label("👥 Team ontwerp (2)");
-        h.get_by_label(groups::MAIL).click();
+        h.get_by_label(&groups::mail_label()).click();
         h.run();
         assert_eq!(h.state().compose.as_ref().map(|c| c.to.as_str()), Some("Sanne <sanne@example.org>; ravi@example.org; "));
         // Typing the group's name in an address field offers its members.
@@ -3727,10 +3752,10 @@ mod tests {
         let mut h = harness();
         h.get_by_label("Planning voor donderdag").click();
         h.run();
-        h.get_by_label(importance::HIGH_STRIP);
+        h.get_by_label(&importance::high_strip());
         h.get_by_label("Re: Offerte drukwerk").click();
         h.run();
-        assert!(h.query_by_label(importance::HIGH_STRIP).is_none() && h.query_by_label(importance::LOW_STRIP).is_none());
+        assert!(h.query_by_label(&importance::high_strip()).is_none() && h.query_by_label(&importance::low_strip()).is_none());
     }
 
     #[test]
@@ -3770,8 +3795,8 @@ mod tests {
         h.state_mut().engine.session.bodies.insert("inbox#phish".into(), body);
         h.state_mut().engine.session.selected_message = Some("inbox#phish".into());
         h.run();
-        h.get_by_label(PHISHING_TITLE);
-        assert!(h.query_by_label(attachments::SAVE_ALL).is_none(), "one attachment needs no save-all button");
+        h.get_by_label(&phishing_title());
+        assert!(h.query_by_label(&attachments::save_all_label()).is_none(), "one attachment needs no save-all button");
         let expected = [
             Warning::Impersonation { name: "Sanne de Vries".into() },
             Warning::LookalikeDomain { domain: "examp1e.org".into(), like: "example.org".into() },
@@ -3791,7 +3816,7 @@ mod tests {
         // An ordinary message has no strip.
         h.state_mut().engine.session.selected_message = Some("m1".into());
         h.run();
-        assert!(h.query_by_label(PHISHING_TITLE).is_none());
+        assert!(h.query_by_label(&phishing_title()).is_none());
     }
 
     #[test]
@@ -3811,7 +3836,7 @@ mod tests {
         h.state_mut().engine.session.selected_message = Some("m3".into());
         h.run();
         h.get_by_label_contains("📎 bon.pdf");
-        h.get_by_label(attachments::SAVE_ALL);
+        h.get_by_label(&attachments::save_all_label());
         assert!(h.query_by_label("Voorbeeld van bon.pdf").is_none(), "a PDF is only saved, never decoded");
         h.get_by_label("foto.png").click();
         h.run();
@@ -3831,12 +3856,12 @@ mod tests {
         h.state_mut().engine.session.selected_message = Some("m1".into());
         h.run();
         h.get_by_label("Afbeeldingen laden");
-        h.get_by_label(ALWAYS_FROM_SENDER).click();
+        h.get_by_label(&always_from_sender()).click();
         h.run();
         let from = h.state().engine.session.message("m1").expect("sample mail").from.email().to_string();
         assert!(h.state().engine.session.junk.is_safe(&from), "the sender is on the safe list");
         assert!(h.state().remote.allowed("m1"));
-        h.get_by_label_contains(SAFE_IMAGES_NOTICE);
+        h.get_by_label_contains(&safe_images_notice());
         // Another message, then back: the pictures load without a click.
         h.state_mut().engine.session.selected_message = Some("m2".into());
         h.run();
@@ -3867,12 +3892,12 @@ mod tests {
         h.state_mut().engine.session.run("junk.block", &json!({ "id": "m3" })).unwrap();
         h.state_mut().engine.session.selected_message = Some("m3".into());
         h.run();
-        h.get_by_label(JUNK_NOTICE);
+        h.get_by_label(&junk_notice());
         assert!(h.get_by_label_contains("bon.pdf").accesskit_node().is_disabled(), "the attachment cannot be saved from here");
         assert!(h.query_by_label("Afbeeldingen laden").is_none(), "pictures on the internet cannot be asked for");
         h.get_by_label("Klik hier").hover();
         h.run();
-        assert!(h.query_by_label_contains(html::LINKS_OFF).is_some(), "the link says why it does nothing");
+        assert!(h.query_by_label_contains(&html::links_off()).is_some(), "the link says why it does nothing");
 
         // "Geen ongewenst" brings the message back, and everything works again.
         h.get_by_label("Geen ongewenst").click();
@@ -3881,11 +3906,11 @@ mod tests {
         // The move dropped the selection, as any move does; back on the message everything works.
         h.state_mut().engine.session.selected_message = Some("m3".into());
         h.run();
-        assert!(h.query_by_label(JUNK_NOTICE).is_none());
+        assert!(h.query_by_label(&junk_notice()).is_none());
         assert!(!h.get_by_label_contains("bon.pdf").accesskit_node().is_disabled());
         // "Geen ongewenst" put the sender on the safe list, so the pictures now load unasked.
         assert!(h.query_by_label("Afbeeldingen laden").is_none());
-        h.get_by_label_contains(SAFE_IMAGES_NOTICE);
+        h.get_by_label_contains(&safe_images_notice());
     }
 
     #[test]
@@ -4011,7 +4036,7 @@ mod tests {
             s.selected_message = Some("m3".into());
         }
         h.run();
-        h.get_by_label(unsubscribe::STRIP);
+        h.get_by_label(&unsubscribe::strip());
         h.get_by_label("Afmelden…").click();
         h.run();
         let c = h.state().unsubscribe.clone().expect("the question is open");
@@ -4042,9 +4067,9 @@ mod tests {
             s.selected_message = Some("m3".into());
         }
         h.run();
-        h.get_by_label(receipt::STRIP);
+        h.get_by_label(&receipt::strip_label());
         assert!(h.state().engine.session.outbox.is_empty(), "nothing goes out by itself");
-        h.get_by_label(receipt::SEND).click();
+        h.get_by_label(&receipt::send_label()).click();
         h.run();
         let s = &h.state().engine.session;
         assert_eq!(s.outbox.len(), 1, "the receipt was handed to the outbox");
@@ -4062,7 +4087,7 @@ mod tests {
             s.selected_message = Some("m3".into());
         }
         h.run();
-        h.get_by_label(signature::BROKEN);
+        h.get_by_label(&signature::broken());
     }
 
     #[test]
@@ -4078,9 +4103,9 @@ mod tests {
         }
         h.run();
         assert_eq!(h.query_all_by_label_contains("is niet bekend als betrouwbaar").count(), 1);
-        h.get_by_label(signature::TRUST).click();
+        h.get_by_label(&signature::trust_label()).click();
         h.run();
-        assert!(h.query_by_label(signature::TRUST).is_none());
+        assert!(h.query_by_label(&signature::trust_label()).is_none());
         assert_eq!(h.query_all_by_label_contains("✔ Digitaal ondertekend door Iemand").count(), 1);
     }
 
@@ -4094,7 +4119,7 @@ mod tests {
             s.selected_message = Some("m3".into());
         }
         h.run();
-        h.get_by_label(signature::ENCRYPTED);
+        h.get_by_label(&signature::encrypted());
     }
 
     #[test]
@@ -4105,11 +4130,11 @@ mod tests {
         h.state_mut().run("message.flag", json!({ "id": "m3" }));
         h.state_mut().module = Module::Tasks;
         h.run();
-        h.get_by_label(tasks::FLAGGED_HEADING);
+        h.get_by_label(&tasks::flagged_heading());
         assert!(h.query_by_label("Planning voor donderdag").is_some() && h.query_by_label("Wat er deze maand speelt").is_some());
         h.get_by_label("Voltooid").click();
         h.run();
-        assert!(h.query_by_label(tasks::FLAGGED_HEADING).is_none(), "the done filter is about tasks; flagged mail is open by nature");
+        assert!(h.query_by_label(&tasks::flagged_heading()).is_none(), "the done filter is about tasks; flagged mail is open by nature");
         h.get_by_label("Open").click();
         h.run();
         h.get_by_label("Vlag weghalen van Wat er deze maand speelt").click();
@@ -4156,7 +4181,7 @@ mod tests {
         h.run();
         assert_eq!(h.state().engine.session.marked, ["m3"]);
         h.get_by_label("2 berichten geselecteerd");
-        h.get_by_label(MULTI_HINT);
+        h.get_by_label(&multi_hint());
 
         // Shift-click selects everything between the selected message and the clicked one.
         let (a, c) = (ids.iter().position(|i| i == "m1").unwrap(), ids.iter().position(|i| i == "m3").unwrap());
@@ -4186,28 +4211,28 @@ mod tests {
     fn recente_zoekopdrachten_offer_the_last_words_typed_and_can_be_cleared() {
         let mut h = harness();
         h.run();
-        assert!(h.query_by_label(view::RECENT_MENU).is_none(), "no menu before anything was searched");
+        assert!(h.query_by_label(&view::recent_menu()).is_none(), "no menu before anything was searched");
         h.state_mut().view.recent_searches = vec!["offerte".into(), "factuur".into()];
         h.run();
-        h.get_by_label(view::RECENT_MENU).click();
+        h.get_by_label(&view::recent_menu()).click();
         h.run();
         h.get_by_label("factuur").click();
         h.run();
         assert_eq!(h.state().engine.session.search, "factuur");
         assert_eq!(h.state().view.recent_searches, ["factuur", "offerte"], "the one picked moves to the top");
-        h.get_by_label(view::RECENT_MENU).click();
+        h.get_by_label(&view::recent_menu()).click();
         h.run();
-        h.get_by_label(view::RECENT_CLEAR).click();
+        h.get_by_label(&view::recent_clear()).click();
         h.run();
         assert!(h.state().view.recent_searches.is_empty());
-        assert!(h.query_by_label(view::RECENT_MENU).is_none());
+        assert!(h.query_by_label(&view::recent_menu()).is_none());
     }
 
     #[test]
     fn a_search_is_saved_as_a_search_folder_and_run_again_from_the_folder_pane() {
         let mut h = harness();
         h.run();
-        assert!(h.query_by_label(search_folders::HEADING).is_none());
+        assert!(h.query_by_label(&search_folders::heading()).is_none());
         {
             let s = &mut h.state_mut().engine.session;
             s.search = "offerte".into();
@@ -4225,7 +4250,7 @@ mod tests {
         let saved = h.state().view.search_folders.clone();
         assert_eq!(saved.len(), 1);
         assert_eq!((saved[0].name.as_str(), saved[0].query.as_str(), saved[0].all_folders), ("Offertes", "offerte", true));
-        h.get_by_label(search_folders::HEADING);
+        h.get_by_label(&search_folders::heading());
 
         h.state_mut().engine.session.search.clear();
         h.state_mut().engine.session.search_all = false;
@@ -4240,7 +4265,7 @@ mod tests {
         h.run();
         h.get_by_label("Zoekmap verwijderen").click();
         h.run();
-        assert!(h.state().view.search_folders.is_empty() && h.query_by_label(search_folders::HEADING).is_none());
+        assert!(h.state().view.search_folders.is_empty() && h.query_by_label(&search_folders::heading()).is_none());
     }
 
     /// Two connected accounts, each with an inbox holding one unread message.
@@ -4453,7 +4478,7 @@ mod tests {
 
         h.state_mut().engine.session.selected_message = Some("m3".into());
         h.run();
-        h.get_by_label(IGNORED_NOTICE);
+        h.get_by_label(&ignored_notice());
         h.get_by_label("Niet meer negeren").click();
         h.run();
         let s = &h.state().engine.session;
@@ -4623,7 +4648,7 @@ mod tests {
         let mut h = harness();
         h.run();
         h.step();
-        let dirs = [concat!(env!("CARGO_MANIFEST_DIR"), "/src"), concat!(env!("CARGO_MANIFEST_DIR"), "/locales")];
+        let dirs = [concat!(env!("CARGO_MANIFEST_DIR"), "/src"), concat!(env!("CARGO_MANIFEST_DIR"), "/../i18n/locales")];
         // The atlas rectangle a character is drawn from. A character no font has gets the
         // replacement box, so the same rectangle as a CJK character means an empty box on screen.
         let drawn = |h: &mut egui_kittest::Harness<'static, MailApp>, c: char| {
@@ -4645,6 +4670,62 @@ mod tests {
             }
         }
         assert!(missing.is_empty(), "these characters would draw as empty boxes: {missing:?}");
+    }
+
+    /// Every label on screen, for the checks that look for words left in the wrong language.
+    fn labels(h: &egui_kittest::Harness<'static, MailApp>) -> Vec<String> {
+        use egui_kittest::kittest::NodeT;
+        h.root().query_all(egui_kittest::kittest::by()).filter_map(|n| n.accesskit_node().label()).filter(|l| !l.trim().is_empty()).collect()
+    }
+
+    #[test]
+    fn the_mail_screens_speak_english_in_english() {
+        let mut h = harness();
+        h.state_mut().view.language = i18n::LanguageChoice::English;
+        h.state_mut().apply_language();
+        h.state_mut().run("message.select", json!({ "id": "m1" }));
+        h.run();
+        h.run();
+        let mut seen = labels(&h);
+        h.state_mut().open_compose(ComposeKind::Reply);
+        h.run();
+        h.run();
+        seen.extend(labels(&h));
+        // A Dutch text from nl.ftl whose English differs must not show; the sample mail itself is
+        // Dutch, so its subjects, names and text are left out.
+        let dutch: std::collections::HashSet<String> = i18n::dutch_only_texts();
+        let sample = ["Planning voor donderdag", "Sanne", "Merel", "Overleg ontwerp", "Voorbeeld"];
+        let left: Vec<&String> = seen.iter().filter(|l| dutch.contains(l.as_str()) && !sample.iter().any(|s| l.contains(s))).collect();
+        assert!(left.is_empty(), "Dutch on the English mail screens: {left:?}");
+    }
+
+    #[test]
+    fn the_calendar_contacts_and_tasks_speak_english_in_english() {
+        let mut h = harness();
+        h.state_mut().view.language = i18n::LanguageChoice::English;
+        h.state_mut().apply_language();
+        let mut seen = Vec::new();
+        let today = chrono::Local::now().date_naive();
+        let screens: [&dyn Fn(&mut MailApp); 6] = [
+            &|app| app.module = Module::Calendar,
+            &|app| app.new_appointment(today, 9),
+            &|app| {
+                app.calendar.editor = None;
+                app.module = Module::People;
+            },
+            &|app| app.new_contact(),
+            &|app| app.module = Module::Tasks,
+            &|app| app.new_task(),
+        ];
+        for screen in screens {
+            screen(h.state_mut());
+            h.run();
+            h.run();
+            seen.extend(labels(&h));
+        }
+        let dutch = i18n::dutch_only_texts();
+        let left: Vec<&String> = seen.iter().filter(|l| dutch.contains(l.as_str())).collect();
+        assert!(left.is_empty(), "Dutch on the English calendar, contacts and tasks: {left:?}");
     }
 
     #[test]
@@ -4790,12 +4871,12 @@ mod tests {
         let start = h.state().engine.session.appointment(&id).unwrap().start;
         h.state_mut().open_appointment(&id, start);
         h.run();
-        h.get_by_label(calendar::CATEGORIZE).click();
+        h.get_by_label(&calendar::categorize()).click();
         h.run();
         h.get_by_label("● Rode categorie").click();
         h.run();
         assert!(h.query_by_label("● Groene categorie").is_none(), "a pick closes the menu");
-        h.get_by_label(calendar::CATEGORIZE).click();
+        h.get_by_label(&calendar::categorize()).click();
         h.run();
         h.get_by_label("● Groene categorie").click();
         h.run();
@@ -4812,9 +4893,9 @@ mod tests {
         let start = h.state().engine.session.appointment(&id).unwrap().start;
         h.state_mut().open_appointment(&id, start);
         h.run();
-        h.get_by_label(calendar::CATEGORIZE).click();
+        h.get_by_label(&calendar::categorize()).click();
         h.run();
-        h.get_by_label(calendar::CLEAR_CATEGORIES).click();
+        h.get_by_label(&calendar::clear_categories()).click();
         h.run();
         assert!(h.state().calendar.editor.as_ref().unwrap().categories.is_empty(), "Alle categorieën wissen empties the list");
     }
@@ -4824,7 +4905,7 @@ mod tests {
         let mut h = harness();
         h.state_mut().module = Module::Calendar;
         h.run();
-        h.get_by_label(calendars::ADD).click();
+        h.get_by_label(&calendars::add()).click();
         h.run();
         h.get_by_label("Kleur Groen").click();
         h.run();
@@ -4859,7 +4940,7 @@ mod tests {
         h.get_by_label("Verwijderen…").click();
         h.run();
         assert!(h.query_by_label_contains("Agenda \"Hardlopen\" verwijderen?").is_some(), "deleting asks first");
-        h.get_by_label(calendars::CONFIRM_DELETE).click();
+        h.get_by_label(&calendars::confirm_delete()).click();
         h.run();
         assert!(h.state().engine.session.calendar(&sport.id).is_none());
         h.get_by_label(&calendars::options_label("Mijn agenda")).click();
@@ -4886,7 +4967,7 @@ mod tests {
             });
         }
         h.run();
-        let local = h.get_by_label(calendars::LOCAL).rect();
+        let local = h.get_by_label(&calendars::local()).rect();
         let mine = h.get_by_label("Mijn agenda").rect();
         let own = h.get_by_label(first.address.email()).rect();
         let work = h.get_by_label("alain@werk.example").rect();
@@ -4988,9 +5069,9 @@ mod tests {
             h.get_by_label("Verzenden").rect(),
             h.get_by_label_contains("Voorlopig").rect(),
             h.get_by_label("Op het moment zelf").rect(),
-            h.get_by_label(calendar::PRIVATE).rect(),
-            h.get_by_label(crate::meeting::FORWARD).rect(),
-            h.get_by_label(calendar::DELETE_MENU).rect(),
+            h.get_by_label(&calendar::private()).rect(),
+            h.get_by_label(&crate::meeting::forward_label()).rect(),
+            h.get_by_label(&calendar::delete_menu()).rect(),
             h.get_by_label("Annuleren").rect(),
         ];
         for pair in rects.windows(2) {
@@ -5018,9 +5099,9 @@ mod tests {
         assert_eq!(editor.repeat, Some(merel_model::Frequency::Weekly));
         let clicked = editor.occurrence.expect("the clicked occurrence is remembered");
         assert!(clicked > series_start && clicked - series_start <= 8 * 86_400, "it is next week's, not the first");
-        h.get_by_label(calendar::DELETE_MENU).click();
+        h.get_by_label(&calendar::delete_menu()).click();
         h.run();
-        h.get_by_label(calendar::SKIP_ONE).click();
+        h.get_by_label(&calendar::skip_one()).click();
         h.run();
         assert!(h.state().calendar.editor.is_none());
         assert!(h.query_all_by_label_contains("Weekstart").next().is_none(), "the skipped time is gone from this week");
@@ -5244,7 +5325,7 @@ mod tests {
         h.get_by_label_contains("Overleg ontwerp\n").click_secondary();
         h.run();
         assert!(h.state().calendar.editor.is_none(), "a right click only shows the menu");
-        h.get_by_label(calendar::OPEN_MENU).click();
+        h.get_by_label(&calendar::open_menu()).click();
         h.run();
         assert_eq!(h.state().calendar.editor.as_ref().and_then(|e| e.id.as_deref()), Some("sample-0"), "Openen opens it");
         h.state_mut().calendar.editor = None;
@@ -5273,12 +5354,12 @@ mod tests {
         h.query_all_by_label_contains("Weekstart").next().expect("a Weekstart").click_secondary();
         h.run();
         assert_eq!(h.query_all_by_label("Verwijderen").count(), 1, "only the ribbon's: a series asks which");
-        h.get_by_label(calendar::DELETE_ONE_MENU).click();
+        h.get_by_label(&calendar::delete_one_menu()).click();
         h.run();
         assert_eq!(series(&h), before - 1, "only that occurrence goes");
         h.query_all_by_label_contains("Weekstart").next().expect("another Weekstart").click_secondary();
         h.run();
-        h.get_by_label(calendar::DELETE_SERIES_MENU).click();
+        h.get_by_label(&calendar::delete_series_menu()).click();
         h.run();
         assert_eq!(series(&h), 0, "the whole series goes");
     }
@@ -5380,7 +5461,7 @@ mod tests {
         h.run();
         h.get_by_label("Beeld").click();
         h.run();
-        h.get_by_label(view::ALL_CATEGORIES).click();
+        h.get_by_label(&view::all_categories()).click();
         h.run();
         h.get_by_label("Groene categorie").click();
         h.run();
@@ -5389,7 +5470,7 @@ mod tests {
         h.get_by_label("Planning voor donderdag");
         h.get_by_label("Groene categorie").click();
         h.run();
-        h.get_by_label(view::ALL_CATEGORIES).click();
+        h.get_by_label(&view::all_categories()).click();
         h.run();
         assert!(h.state().engine.session.category_filter.is_none());
         h.get_by_label("Ongelezen").click();
@@ -5560,16 +5641,16 @@ mod tests {
         h.run();
         h.get_by_label("Bestand").click();
         h.run();
-        h.get_by_label(notifications::PAGE).click();
+        h.get_by_label(&notifications::page_label()).click();
         h.run();
         assert!(h.query_by_label("Toevoegen en verbinden").is_none(), "the accounts page made way");
         assert!(!h.state().view.notifications.details, "private unless asked");
-        h.get_by_label(notifications::DETAILS).click();
-        h.get_by_label(notifications::BADGE).click();
+        h.get_by_label(&notifications::details()).click();
+        h.get_by_label(&notifications::badge()).click();
         h.run();
         assert!(h.state().view.notifications.details);
         assert!(!h.state().view.notifications.badge);
-        h.get_by_label(notifications::TRY).click();
+        h.get_by_label(&notifications::try_label()).click();
         h.run();
         assert_eq!(h.state().alerts.len(), 1);
         assert_eq!(h.state().alerts[0].title, "Merel");
@@ -5595,7 +5676,7 @@ mod tests {
         h.get_by_label("Bestand").click();
         h.run();
         assert!(h.query_by_label("Toevoegen en verbinden").is_some());
-        h.get_by_label(backstage::BACK).click();
+        h.get_by_label(&backstage::back()).click();
         h.run();
         assert!(h.query_by_label("Toevoegen en verbinden").is_none());
     }

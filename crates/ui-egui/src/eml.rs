@@ -2,6 +2,7 @@
 //! `.eml` file, headers and all, so the reader sees it exactly as it arrived. The same source
 //! goes to disk for "Opslaan als…" under Bestand, Outlook's "Save As".
 
+use crate::i18n::tr;
 use std::path::{Path, PathBuf};
 
 use merel_model::{Address, FolderKind, MessageHeader, clean_text};
@@ -9,10 +10,18 @@ use merel_model::{Address, FolderKind, MessageHeader, clean_text};
 use crate::MailApp;
 use crate::compose::{Compose, Kind, prefixed};
 
-pub const FORWARD: &str = "Doorsturen als bijlage";
-pub const NOT_FROM_JUNK: &str = "Uit de map Ongewenst wordt niets doorgestuurd.";
-pub const SAVE_AS: &str = "Opslaan als…";
-pub const NOTHING_TO_SAVE: &str = "Open eerst een bericht om het op te slaan.";
+pub fn forward() -> String {
+    tr("eml-forward")
+}
+pub fn not_from_junk() -> String {
+    tr("eml-not-from-junk")
+}
+pub fn save_as() -> String {
+    tr("eml-save-as")
+}
+pub fn nothing_to_save() -> String {
+    tr("eml-nothing-to-save")
+}
 
 /// The attachment's file name: the subject, without the characters a file name cannot have,
 /// with `.eml`; `bericht.eml` when the subject is empty.
@@ -66,7 +75,7 @@ impl MailApp {
     pub fn forward_as_attachment(&mut self) {
         let Some(m) = self.engine.session.selected().cloned() else { return };
         if self.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Junk) {
-            self.notice = Some(crate::Notice::warning(NOT_FROM_JUNK));
+            self.notice = Some(crate::Notice::warning(not_from_junk()));
             return;
         }
         let bytes = self.source_of(&m);
@@ -85,7 +94,7 @@ impl MailApp {
     /// named after its subject, never over an existing file. A notice says where it went.
     pub fn save_as_file(&mut self) {
         let Some(dir) = crate::attachments::downloads_dir() else {
-            self.notice = Some(crate::Notice::error("Bericht niet opgeslagen: geen map Downloads gevonden."));
+            self.notice = Some(crate::Notice::error(tr("eml-no-downloads")));
             return;
         };
         self.save_as_into(&dir);
@@ -94,17 +103,17 @@ impl MailApp {
     /// Writes the selected message into `dir` as an `.eml` file; the path when it went in.
     pub(crate) fn save_as_into(&mut self, dir: &Path) -> Option<PathBuf> {
         let Some(m) = self.engine.session.selected().cloned() else {
-            self.notice = Some(crate::Notice::warning(NOTHING_TO_SAVE));
+            self.notice = Some(crate::Notice::warning(nothing_to_save()));
             return None;
         };
         let bytes = self.source_of(&m);
         match crate::attachments::save_to(dir, &file_name(&m.subject), &bytes) {
             Ok(path) => {
-                self.notice = Some(crate::attachments::saved("Bericht", &path));
+                self.notice = Some(crate::attachments::saved(&tr("noun-message"), &path));
                 Some(path)
             }
             Err(e) => {
-                self.notice = Some(crate::Notice::error(format!("Bericht niet opgeslagen: {e}")));
+                self.notice = Some(crate::Notice::error(crate::i18n::tr_args("eml-not-saved", &[("error", e.to_string().into())])));
                 None
             }
         }
@@ -124,7 +133,7 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("temp dir");
 
         assert!(app.save_as_into(&dir).is_none(), "nothing is selected yet");
-        assert_eq!(app.notice.as_deref(), Some(NOTHING_TO_SAVE));
+        assert_eq!(app.notice.as_deref(), Some(nothing_to_save().as_str()));
 
         let id = app.engine.session.visible_messages().first().map(|m| m.id.clone()).expect("sample mail");
         app.select_message(&id);

@@ -103,7 +103,7 @@ impl Session {
         let local_id = item.id().to_string();
         let remote = Self::remote_item_id(account_id, &local_id);
         if !is_new && remote.is_none() {
-            return Err(CommandError::Store("dit item wordt nog opgeslagen op de server, probeer het zo opnieuw".into()));
+            return Err(CommandError::Store(merel_i18n::tr("sync-still-saving")));
         }
         item.set_id(remote.unwrap_or_default());
         self.pending.push(Job::SaveItem { account_id: account_id.to_string(), local_id, item: Box::new(item) });

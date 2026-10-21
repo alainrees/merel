@@ -391,13 +391,21 @@ to them, so a colour change that drops below the bar fails the build.
 ## Languages
 
 Merel speaks Dutch and English. It follows the language the computer is set to (Dutch for Dutch,
-English for every other), and View › Taal picks one for good, without a restart. The words live in
-one [Fluent](https://projectfluent.org) file per language, `crates/ui-egui/locales/nl.ftl` and
-`en.ftl`, built into the binary; a text missing from one falls back to English. To add a
-language, copy `en.ftl`, translate the right-hand side of each line and add the language to
-`crates/ui-egui/src/i18n.rs`; a test checks that every file has every text. The move of the
-window's words into these files goes screen by screen: the ribbons, the tabs, the module rail and
-the macOS menu bar speak both languages; the panes and windows follow.
+English for every other), and View › Language picks one for good, without a restart; the welcome
+wizard offers the same choice. Every word on screen is translated: the ribbons and the macOS menu
+bar, mail, the compose window, calendar, contacts, tasks, the wizards and settings, notifications
+and the error messages from the servers, certificates and keys. Dates use the month and day names
+of the language. The standard folders take Outlook's names in that language (Postvak IN or Inbox,
+Verwijderde items or Deleted Items) and so does the calendar every installation starts with
+(Mijn agenda or My calendar); names you chose yourself stay as they are. Replies and forwards
+quote their header in the language Merel speaks.
+
+The words live in one [Fluent](https://projectfluent.org) file per language,
+`crates/i18n/locales/nl.ftl` and `en.ftl`, built into the binary by the `merel-i18n` crate that
+every layer uses; a text missing from one falls back to English. To add a language, copy
+`en.ftl`, translate the right-hand side of each line and add the language to
+`crates/i18n/src/lib.rs`; a test checks that every file has every text, and the ribbon tests check
+that the buttons still fit the window in every language.
 Tests always run in Dutch, whatever the machine is set to.
 
 ## Fonts
@@ -435,8 +443,8 @@ The first start on a computer opens "Welkom bij Merel", four short steps that ca
 any point: what Merel is, adding an account (opens Bestand), whether to check daily for a new
 version, and light or dark. It comes once; every choice stays changeable in its usual place.
 
-On macOS the app menu is Merel's own, in Dutch: "Over Merel" opens the window with the
-version and build, "Zoek naar updates…" checks at once, and Verberg/Stop Merel carry the app's
+On macOS the app menu is Merel's own, in Merel's language: "About Merel" (Over Merel) opens the
+window with the version and build, "Check for updates…" checks at once, and Verberg/Stop Merel carry the app's
 name (built with [muda](https://crates.io/crates/muda); there is no Edit menu, so Cmd+C and Cmd+V
 stay with the text fields).
 

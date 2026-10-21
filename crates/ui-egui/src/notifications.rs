@@ -5,6 +5,7 @@
 //! The notification shows no sender, subject or title unless the person switches that on
 //! ([`Prefs::details`]): a notification can be read off a locked screen or over a shoulder.
 
+use crate::i18n::tr;
 use egui::{RichText, Ui};
 use merel_model::MessageHeader;
 use merel_notify::{Alert, Kind};
@@ -34,13 +35,27 @@ impl Default for Prefs {
     }
 }
 
-pub const PAGE: &str = "Meldingen";
-pub const BADGE: &str = "Aantal ongelezen berichten op het app-icoon";
-pub const MAIL: &str = "Bij nieuwe e-mail in Postvak IN";
-pub const REMINDERS: &str = "Bij herinneringen voor afspraken en taken";
-pub const SOUND: &str = "Geluid afspelen";
-pub const DETAILS: &str = "Afzender, onderwerp en titel in de melding tonen";
-pub const TRY: &str = "Proefmelding sturen";
+pub fn page_label() -> String {
+    tr("notifications-page")
+}
+pub fn badge() -> String {
+    tr("notifications-badge")
+}
+pub fn mail() -> String {
+    tr("notifications-mail")
+}
+pub fn reminders() -> String {
+    tr("notifications-reminders")
+}
+pub fn sound() -> String {
+    tr("notifications-sound")
+}
+pub fn details() -> String {
+    tr("notifications-details")
+}
+pub fn try_label() -> String {
+    tr("notifications-try")
+}
 
 /// More new messages than this at once come as one notification with the count.
 const ONE_BY_ONE: usize = 3;
@@ -49,17 +64,23 @@ const ONE_BY_ONE: usize = 3;
 pub fn mail_alert(prefs: &Prefs, m: &MessageHeader) -> Alert {
     let (title, body) = if prefs.details {
         let from = m.from.display().to_string();
-        let subject = if m.subject.trim().is_empty() { "(geen onderwerp)".to_string() } else { m.subject.clone() };
+        let subject = if m.subject.trim().is_empty() { tr("no-subject") } else { m.subject.clone() };
         (from, subject)
     } else {
-        ("Nieuw bericht".to_string(), "Je hebt een nieuw bericht in Postvak IN.".to_string())
+        (tr("notifications-new-message"), tr("notifications-new-message-body"))
     };
     Alert { id: format!("mail:{}", m.id), title, body, kind: Kind::Mail, sound: prefs.sound }
 }
 
 /// One notification for many new messages at once, which opens the mail.
 pub fn many_alert(prefs: &Prefs, count: usize) -> Alert {
-    Alert { id: "inbox".into(), title: format!("{count} nieuwe berichten"), body: "In Postvak IN.".into(), kind: Kind::Mail, sound: prefs.sound }
+    Alert {
+        id: "inbox".into(),
+        title: crate::i18n::tr_args("notifications-many", &[("count", count.into())]),
+        body: tr("notifications-many-body"),
+        kind: Kind::Mail,
+        sound: prefs.sound,
+    }
 }
 
 /// The notification for a reminder that just came due. `id` is what a click hands back (see
@@ -68,7 +89,7 @@ pub fn reminder_alert(prefs: &Prefs, id: String, kind: &str, title: &str, detail
     let (title, body) = if prefs.details {
         (title.to_string(), if details.is_empty() { kind.to_string() } else { format!("{kind} · {details}") })
     } else {
-        ("Herinnering".to_string(), format!("{kind}: open Merel om te zien wat er is."))
+        (tr("calendar-reminder"), crate::i18n::tr_args("notifications-reminder-body", &[("kind", kind.into())]))
     };
     Alert { id, title, body, kind: Kind::Reminder, sound: prefs.sound }
 }
@@ -159,27 +180,24 @@ pub fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         ui.add_space(10.0);
         ui.label(RichText::new(text).size(14.0).strong().color(t.text));
     };
-    ui.label(RichText::new(PAGE).size(helder::TITLE_TEXT).strong().color(t.text));
-    ui.label(RichText::new("Zoals in Outlook: een teller op het Merel-icoon en een melding van je computer als er iets binnenkomt terwijl Merel op de achtergrond staat.").size(13.0).color(t.text_dim));
+    ui.label(RichText::new(page_label()).size(helder::TITLE_TEXT).strong().color(t.text));
+    ui.label(RichText::new(tr("notifications-intro")).size(13.0).color(t.text_dim));
     let before = app.view.notifications.clone();
     let p = &mut app.view.notifications;
-    section(ui, "Op het app-icoon");
-    helder::toggle(ui, t, &mut p.badge, BADGE);
-    hint(ui, "Alle accounts samen, alleen Postvak IN. De titel van het venster toont het ook: \"Merel (3)\".");
-    section(ui, "Meldingen van je computer");
-    helder::toggle(ui, t, &mut p.mail, MAIL);
-    helder::toggle(ui, t, &mut p.reminders, REMINDERS);
-    helder::toggle(ui, t, &mut p.sound, SOUND);
-    section(ui, "Privacy");
-    helder::toggle(ui, t, &mut p.details, DETAILS);
-    hint(
-        ui,
-        "Uit: de melding zegt alleen \"Nieuw bericht\" of \"Herinnering\", zodat niemand over je schouder of op een vergrendeld scherm meeleest.",
-    );
+    section(ui, &tr("notifications-on-icon"));
+    helder::toggle(ui, t, &mut p.badge, &badge());
+    hint(ui, &tr("notifications-badge-hint"));
+    section(ui, &tr("notifications-system"));
+    helder::toggle(ui, t, &mut p.mail, &mail());
+    helder::toggle(ui, t, &mut p.reminders, &reminders());
+    helder::toggle(ui, t, &mut p.sound, &sound());
+    section(ui, &tr("notifications-privacy"));
+    helder::toggle(ui, t, &mut p.details, &details());
+    hint(ui, &tr("notifications-details-hint"));
     ui.add_space(10.0);
-    let try_it = ui.button(TRY).clicked();
+    let try_it = ui.button(try_label()).clicked();
     #[cfg(target_os = "macos")]
-    hint(ui, "Zie je niets? Kijk in Systeeminstellingen > Berichtgeving > Merel of meldingen aan staan.");
+    hint(ui, &tr("notifications-macos-hint"));
     if app.view.notifications != before {
         if (app.view.notifications.mail || app.view.notifications.reminders)
             && let Some(n) = app.notifier.as_mut()
@@ -190,16 +208,10 @@ pub fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     if try_it {
         let prefs = app.view.notifications.clone();
-        let title = if prefs.details { "Merel" } else { "Nieuw bericht" };
-        let alert = Alert {
-            id: "inbox".into(),
-            title: title.into(),
-            body: "Zo ziet een melding van Merel eruit.".into(),
-            kind: Kind::Mail,
-            sound: prefs.sound,
-        };
+        let title = if prefs.details { "Merel".to_string() } else { tr("notifications-new-message") };
+        let alert = Alert { id: "inbox".into(), title, body: tr("notifications-test-body"), kind: Kind::Mail, sound: prefs.sound };
         app.alert(&ui.ctx().clone(), alert, true);
-        app.notice = Some(crate::Notice::info("Proefmelding verstuurd."));
+        app.notice = Some(crate::Notice::info(tr("notifications-test-sent")));
     }
 }
 

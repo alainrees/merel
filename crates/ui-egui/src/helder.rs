@@ -6,6 +6,7 @@
 //! The icons are Lucide's (ISC licence, `assets/icons/LICENSE-Lucide.txt`), drawn white so a
 //! tint gives them any colour, and embedded in the binary.
 
+use crate::i18n::tr;
 use egui::{
     Align, Color32, CornerRadius, FontId, Frame, Image, InnerResponse, Layout, Margin, Rect, Response, RichText, Sense, Stroke, TextStyle, Ui,
     WidgetInfo, WidgetText, WidgetType, pos2, text::LayoutJob, vec2,
@@ -498,7 +499,7 @@ pub fn notes_box(ui: &mut Ui, t: &Tokens, ed: &mut crate::rich_edit::Editor, tex
         Icon::Notes.image(ICON, t.text_dim).paint_at(ui, Rect::from_center_size(rect.center(), vec2(ICON, ICON)));
         ui.vertical(|ui| {
             ui.set_width(width);
-            crate::rich_edit::edit(ui, t, ed, text, "Notities", "Notities toevoegen", min_height)
+            crate::rich_edit::edit(ui, t, ed, text, &tr("notes"), &tr("notes-add"), min_height)
         })
         .inner
     })
@@ -1122,7 +1123,9 @@ pub fn right<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 }
 
 /// The accessible name of a dialog's close button.
-pub const CLOSE: &str = "Sluiten";
+pub fn close_label() -> String {
+    tr("close")
+}
 
 /// A dialog in the Helder style in a window of its own (see [`popup`]), such as "Over Merel" or
 /// the welcome. Inside the main window (embedded) it keeps a quiet close button of its own, as
@@ -1136,7 +1139,7 @@ pub fn dialog(ctx: &egui::Context, t: &Tokens, title: &str, width: f32, add: imp
             ui.horizontal(|ui| {
                 ui.label(RichText::new(title).size(TITLE_TEXT).strong().color(t.text));
                 right(ui, |ui| {
-                    close = icon_button(ui, t, Icon::X, CLOSE).clicked();
+                    close = icon_button(ui, t, Icon::X, &close_label()).clicked();
                 });
             });
             ui.add_space(8.0);
@@ -1165,7 +1168,7 @@ pub fn app_badge(ui: &mut Ui) {
 /// A row of dots for the steps of a wizard: the steps done and the current one in the app
 /// colour, the current one wider. A screen reader hears "Stap n van m".
 pub fn step_dots(ui: &mut Ui, t: &Tokens, current: usize, count: usize) {
-    let text = format!("Stap {} van {}", current + 1, count);
+    let text = crate::i18n::tr_args("step-of", &[("step", (current + 1).into()), ("count", count.into())]);
     let (rect, r) = ui.allocate_exact_size(vec2(count as f32 * 14.0 + 10.0, 12.0), Sense::hover());
     r.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &text));
     let mut x = rect.left();
@@ -1181,7 +1184,7 @@ pub fn step_dots(ui: &mut Ui, t: &Tokens, current: usize, count: usize) {
 /// band that moves. A screen reader hears the percentage.
 pub fn progress_bar(ui: &mut Ui, t: &Tokens, fraction: Option<f32>) {
     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 8.0), Sense::hover());
-    let text = fraction.map_or_else(|| "Bezig".to_owned(), |f| format!("{:.0}%", f.clamp(0.0, 1.0) * 100.0));
+    let text = fraction.map_or_else(|| tr("busy"), |f| format!("{:.0}%", f.clamp(0.0, 1.0) * 100.0));
     r.widget_info(|| WidgetInfo::labeled(WidgetType::ProgressIndicator, true, &text));
     ui.painter().rect_filled(rect, CornerRadius::same(4), t.control_border);
     let fill = match fraction {

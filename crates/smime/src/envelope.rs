@@ -37,10 +37,8 @@ const SHA256_OID_DER: &[u8] = &[0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 
 const MAX_CONTENT: usize = 64 * 1024 * 1024;
 
 /// The one answer for a message that does not open, whatever the cause.
-const NOT_OPENED: &str = "het bericht kan niet worden ontsleuteld";
-
 fn not_opened() -> SmimeError {
-    SmimeError::Decrypt(NOT_OPENED.into())
+    SmimeError::Decrypt(merel_i18n::tr("smime-not-opened"))
 }
 
 /// Whether `raw` is an encrypted S/MIME message (`application/pkcs7-mime` with enveloped
@@ -185,7 +183,7 @@ pub fn decrypt_message(identity: &Identity, raw: &[u8]) -> Result<Zeroizing<Vec<
         let key = OaepPrivateDecryptingKey::new(private).map_err(|_| not_opened())?;
         key.decrypt(algorithm, mine.enc_key.as_bytes(), &mut cek, None).map_err(|_| not_opened())?.len()
     } else {
-        return Err(SmimeError::Decrypt("de afzender gebruikt een onbekend algoritme".into()));
+        return Err(SmimeError::Decrypt(merel_i18n::tr("crypto-unknown-algorithm")));
     };
     let cek = cek.get(..cek_len).ok_or_else(not_opened)?;
     let content = &data.encrypted_content;
@@ -193,8 +191,8 @@ pub fn decrypt_message(identity: &Identity, raw: &[u8]) -> Result<Zeroizing<Vec<
         o if o == AES128_CBC => &AES_128,
         o if o == AES192_CBC => &AES_192,
         o if o == AES256_CBC => &AES_256,
-        o if o == DES_EDE3_CBC => return Err(SmimeError::Decrypt("de afzender gebruikt het verouderde Triple DES".into())),
-        _ => return Err(SmimeError::Decrypt("de afzender gebruikt een onbekend algoritme".into())),
+        o if o == DES_EDE3_CBC => return Err(SmimeError::Decrypt(merel_i18n::tr("smime-3des"))),
+        _ => return Err(SmimeError::Decrypt(merel_i18n::tr("crypto-unknown-algorithm"))),
     };
     let iv = content.content_enc_alg.parameters.as_ref().and_then(|p| p.decode_as::<OctetString>().ok()).ok_or_else(not_opened)?;
     let iv: [u8; 16] = iv.as_bytes().try_into().map_err(|_| not_opened())?;

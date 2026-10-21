@@ -128,10 +128,11 @@ pub(crate) fn store_picker(ui: &mut Ui, t: &Tokens, session: &merel_engine::Sess
     if accounts.is_empty() {
         return;
     }
-    let name = accounts.iter().find(|(id, _)| id == account_id).map(|(_, n)| n.as_str()).unwrap_or("Op deze computer");
+    let local = crate::calendars::local();
+    let name = accounts.iter().find(|(id, _)| id == account_id).map(|(_, n)| n.as_str()).unwrap_or(&local);
     helder::icon_row(ui, t, Icon::Folder, |ui| {
         helder::select(ui, t, name, 260.0, |ui| {
-            if ui.selectable_label(account_id.is_empty(), "Op deze computer").clicked() {
+            if ui.selectable_label(account_id.is_empty(), &local).clicked() {
                 account_id.clear();
                 ui.close();
             }
@@ -142,7 +143,7 @@ pub(crate) fn store_picker(ui: &mut Ui, t: &Tokens, session: &merel_engine::Sess
                 }
             }
         })
-        .on_hover_text("Opslaan in");
+        .on_hover_text(tr("contacts-store-in"));
     });
 }
 
@@ -151,7 +152,7 @@ pub(crate) fn store_name(session: &merel_engine::Session, account_id: Option<&st
     account_id
         .and_then(|id| session.accounts.iter().find(|a| a.id == id))
         .map(|a| a.address.email().to_string())
-        .unwrap_or_else(|| "Op deze computer".into())
+        .unwrap_or_else(crate::calendars::local)
 }
 
 impl MailApp {
@@ -191,10 +192,10 @@ impl MailApp {
 
 fn describe(e: &CommandError) -> String {
     match e {
-        CommandError::Param("name") => "Vul een naam of een e-mailadres in.".into(),
-        CommandError::Param("emails") => "Een van de e-mailadressen is niet geldig.".into(),
-        CommandError::Store(m) => format!("Opslaan is mislukt: {m}"),
-        CommandError::NotFound => "Dit contact bestaat niet meer.".into(),
+        CommandError::Param("name") => tr("contacts-need-name"),
+        CommandError::Param("emails") => tr("contacts-bad-email"),
+        CommandError::Store(m) => crate::i18n::tr_args("save-failed-because", &[("error", m.as_str().into())]),
+        CommandError::NotFound => tr("contacts-gone"),
         e => e.to_string(),
     }
 }
@@ -207,7 +208,7 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .frame(crate::helder::card_frame(t).inner_margin(Margin::same(12)).outer_margin(Margin { left: 0, right: 6, top: 0, bottom: 12 }))
         .show(ui, |ui| {
             let width = ui.available_width();
-            crate::helder::search_field(ui, t, &mut app.contacts.query, egui::Id::new(SEARCH_BOX), "Zoeken in contacten", width);
+            crate::helder::search_field(ui, t, &mut app.contacts.query, egui::Id::new(SEARCH_BOX), &tr("contacts-search"), width);
             ui.add_space(8.0);
             let selected = app.engine.session.selected_contact.clone();
             let list: Vec<Contact> = app.engine.session.contacts_matching(&app.contacts.query).into_iter().cloned().collect();
@@ -216,7 +217,7 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let mut group_pick = None;
             if list.is_empty() {
                 ui.label(
-                    RichText::new(if app.contacts.query.is_empty() { "Nog geen contacten." } else { "Geen contact gevonden." }).color(t.text_dim),
+                    RichText::new(if app.contacts.query.is_empty() { tr("contacts-none-yet") } else { tr("contacts-none-found") }).color(t.text_dim),
                 );
             }
             let mut pick = None;
@@ -275,20 +276,17 @@ fn row(ui: &mut Ui, t: &Tokens, icon: Icon, value: &str, hint: &str) {
 fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let Some(c) = app.engine.session.selected_contact().cloned() else {
         ui.centered_and_justified(|ui| {
-            ui.label(RichText::new("Kies een contact, of maak een nieuw contact.").color(t.text_dim).size(16.0));
+            ui.label(RichText::new(tr("contacts-pick")).color(t.text_dim).size(16.0));
         });
         return;
     };
     let mut export = false;
     helder::quiet(ui, t, |ui| {
         ui.horizontal(|ui| {
-            if helder::tool_button(ui, t, Icon::Pencil, "Bewerken").clicked() {
+            if helder::tool_button(ui, t, Icon::Pencil, &tr("edit")).clicked() {
                 app.edit_selected_contact();
             }
-            if helder::tool_button(ui, t, Icon::Download, crate::vcard::EXPORT)
-                .on_hover_text("Bewaart dit contact als .vcf-bestand in je map Downloads, om te delen of in een ander programma te openen.")
-                .clicked()
-            {
+            if helder::tool_button(ui, t, Icon::Download, &crate::vcard::export_label()).on_hover_text(tr("contacts-export-hint")).clicked() {
                 export = true;
             }
         });
@@ -311,7 +309,7 @@ fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         helder::icon_row(ui, t, Icon::Mail, |ui| {
             if ui
                 .add(egui::Button::new(RichText::new(e).size(14.0).color(t.accent_text)).frame(false))
-                .on_hover_text("Nieuw bericht aan dit adres")
+                .on_hover_text(tr("contacts-mail-hint"))
                 .clicked()
             {
                 mail = true;
@@ -319,11 +317,11 @@ fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         });
     }
     for p in &c.phones {
-        row(ui, t, Icon::Phone, p, "Telefoon");
+        row(ui, t, Icon::Phone, p, &tr("contacts-phone"));
     }
-    row(ui, t, Icon::Building, &c.company, "Bedrijf");
+    row(ui, t, Icon::Building, &c.company, &tr("contacts-company"));
     if !app.engine.session.item_accounts.is_empty() {
-        row(ui, t, Icon::Folder, &store_name(&app.engine.session, c.account_id.as_deref()), "Opgeslagen in");
+        row(ui, t, Icon::Folder, &store_name(&app.engine.session, c.account_id.as_deref()), &tr("contacts-stored-in"));
     }
     if !c.notes.is_empty() {
         helder::rule(ui, t);
@@ -349,7 +347,12 @@ fn rows(ui: &mut Ui, t: &Tokens, icon: Icon, values: &mut Vec<String>, hint: &st
         ui.push_id((hint, i), |ui| {
             helder::icon_row(ui, t, icon, |ui| {
                 helder::underline_field(ui, t, v, hint, width - 44.0, false);
-                if many && helder::quiet(ui, t, |ui| helder::icon_button(ui, t, Icon::X, &format!("{hint} weghalen"))).clicked() {
+                if many
+                    && helder::quiet(ui, t, |ui| {
+                        helder::icon_button(ui, t, Icon::X, &crate::i18n::tr_args("contacts-remove-row", &[("what", hint.into())]))
+                    })
+                    .clicked()
+                {
                     remove = Some(i);
                 }
             });
@@ -380,9 +383,9 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let mut cancel = false;
     helder::quiet(ui, t, |ui| {
         ui.horizontal(|ui| {
-            save = helder::primary_button(ui, t, Icon::Save, "Opslaan").clicked();
+            save = helder::primary_button(ui, t, Icon::Save, &tr("save")).clicked();
             helder::bar_separator(ui, t);
-            cancel = helder::tool_button(ui, t, Icon::X, "Annuleren").clicked();
+            cancel = helder::tool_button(ui, t, Icon::X, &tr("cancel")).clicked();
         });
     });
     ui.add_space(12.0);
@@ -402,10 +405,10 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.add_space(12.0);
             ui.vertical(|ui| {
                 let field = (width - 108.0).max(200.0);
-                ui.label(RichText::new(if editor.id.is_some() { "Contact bewerken" } else { "Nieuw contact" }).size(13.0).color(t.text_dim));
+                ui.label(RichText::new(if editor.id.is_some() { tr("contacts-edit-title") } else { tr("new-contact") }).size(13.0).color(t.text_dim));
                 ui.spacing_mut().item_spacing.y = 10.0;
-                helder::underline_field(ui, t, &mut editor.first, "Voornaam", field, true);
-                helder::underline_field(ui, t, &mut editor.last, "Achternaam", field, true);
+                helder::underline_field(ui, t, &mut editor.first, &tr("contacts-first-name"), field, true);
+                helder::underline_field(ui, t, &mut editor.last, &tr("contacts-last-name"), field, true);
             });
         });
         ui.add_space(4.0);
@@ -413,14 +416,16 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             store_picker(ui, t, session, &mut editor.account_id);
         }
         helder::rule(ui, t);
-        heading(ui, t, "E-mailadressen");
-        rows(ui, t, Icon::Mail, &mut editor.emails, "E-mailadres", "E-mail toevoegen", width);
+        heading(ui, t, &tr("contacts-emails"));
+        rows(ui, t, Icon::Mail, &mut editor.emails, &tr("contacts-email"), &tr("contacts-add-email"), width);
         helder::rule(ui, t);
-        heading(ui, t, "Telefoonnummers");
-        rows(ui, t, Icon::Phone, &mut editor.phones, "Telefoonnummer", "Nummer toevoegen", width);
+        heading(ui, t, &tr("contacts-phones"));
+        rows(ui, t, Icon::Phone, &mut editor.phones, &tr("contacts-phone-number"), &tr("contacts-add-phone"), width);
         helder::rule(ui, t);
-        heading(ui, t, "Werkgegevens");
-        helder::icon_row(ui, t, Icon::Building, |ui| helder::underline_field(ui, t, &mut editor.company, "Bedrijf", width - 44.0, false));
+        heading(ui, t, &tr("contacts-work"));
+        helder::icon_row(ui, t, Icon::Building, |ui| {
+            helder::underline_field(ui, t, &mut editor.company, &tr("contacts-company"), width - 44.0, false)
+        });
         helder::rule(ui, t);
         helder::notes_box(ui, t, &mut editor.notes_editor, &mut editor.notes, width - 44.0, 100.0);
         if let Some(e) = &editor.error {

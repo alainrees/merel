@@ -9,6 +9,7 @@
 //! cap. The reply is data, never a link to follow: the release page is built from our own
 //! repository address and a tag that must read as a version number.
 
+use crate::i18n::tr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -34,16 +35,36 @@ const GENERATED: [&str; 3] = ["## What's Changed", "## New Contributors", "**Ful
 const NOTES_CHARS: usize = 2000;
 
 /// The window's title and buttons, which tests and screen readers find them by.
-pub const WINDOW: &str = "Nieuwe versie van Merel";
-pub const CHECK: &str = "Updates";
-pub const DOWNLOAD: &str = "Downloaden";
-pub const UPDATE: &str = "Bijwerken";
-pub const RESTART: &str = "Opnieuw starten";
-pub const CANCEL: &str = "Annuleren";
-pub const PAGE: &str = "Downloadpagina openen";
-pub const SKIP: &str = "Deze versie overslaan";
-pub const LATER: &str = "Later";
-pub const AUTO: &str = "Elke dag controleren op een nieuwe versie";
+pub fn window_label() -> String {
+    tr("updates-title")
+}
+pub fn check() -> String {
+    tr("updates-check")
+}
+pub fn download() -> String {
+    tr("updates-download")
+}
+pub fn update() -> String {
+    tr("updates-update")
+}
+pub fn restart_label() -> String {
+    tr("updates-restart")
+}
+pub fn cancel() -> String {
+    tr("cancel")
+}
+pub fn page_label() -> String {
+    tr("updates-page")
+}
+pub fn skip() -> String {
+    tr("updates-skip")
+}
+pub fn later() -> String {
+    tr("updates-later")
+}
+pub fn auto() -> String {
+    tr("updates-auto")
+}
 
 /// A release newer than this build.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -190,15 +211,15 @@ impl MailApp {
                 }
             }
             Outcome::UpToDate if manual => {
-                self.notice = Some(Notice::success(format!("Je hebt de nieuwste versie van Merel ({}).", env!("CARGO_PKG_VERSION"))));
+                self.notice = Some(Notice::success(crate::i18n::tr_args("updates-up-to-date", &[("version", env!("CARGO_PKG_VERSION").into())])));
             }
             Outcome::NoneYet if manual => {
-                self.notice = Some(Notice::info("Er staat nog geen versie van Merel klaar om te downloaden."));
+                self.notice = Some(Notice::info(tr("updates-none-yet")));
             }
             Outcome::Failed(reason) => {
                 log::warn!("update check failed: {reason}");
                 if manual {
-                    self.notice = Some(Notice::warning("Controleren op updates is niet gelukt. Is er verbinding met internet?"));
+                    self.notice = Some(Notice::warning(tr("updates-check-failed")));
                 }
             }
             Outcome::UpToDate | Outcome::NoneYet => {}
@@ -223,7 +244,7 @@ impl MailApp {
 fn open_page(app: &mut MailApp, release: &Release) {
     if let Err(e) = open::that_detached(release.page()) {
         log::warn!("could not open the release page: {e}");
-        app.notice = Some(Notice::error(format!("Openen is niet gelukt: {}", release.page())));
+        app.notice = Some(Notice::error(crate::i18n::tr_args("updates-open-failed", &[("page", release.page().into())])));
     }
 }
 
@@ -235,7 +256,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(release) = app.updates.offer.clone() else { return };
     let here = install::Install::detect().filter(|_| install::SIGNING_KEY.is_some());
     let mut close = false;
-    let closed = helder::dialog(ctx, t, WINDOW, 460.0, |ui| {
+    let closed = helder::dialog(ctx, t, &window_label(), 460.0, |ui| {
         if here.is_some() {
             helder::step_dots(ui, t, 0, STEPS);
             ui.add_space(12.0);
@@ -246,8 +267,17 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 helder::badge(ui, t, Icon::Download);
                 ui.add_space(8.0);
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(format!("Merel {} is beschikbaar.", release.version)).size(18.0).strong().color(t.text));
-                    ui.label(RichText::new(format!("Je gebruikt nu versie {}.", env!("CARGO_PKG_VERSION"))).size(14.0).color(t.text_dim));
+                    ui.label(
+                        RichText::new(crate::i18n::tr_args("updates-available", &[("version", release.version.as_str().into())]))
+                            .size(18.0)
+                            .strong()
+                            .color(t.text),
+                    );
+                    ui.label(
+                        RichText::new(crate::i18n::tr_args("updates-current", &[("version", env!("CARGO_PKG_VERSION").into())]))
+                            .size(14.0)
+                            .color(t.text_dim),
+                    );
                 });
             });
             if !release.notes.is_empty() {
@@ -255,17 +285,13 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| crate::release_notes::show(ui, t, &release.notes));
             }
             ui.add_space(12.0);
-            let how = if here.is_some() {
-                "Bijwerken downloadt de nieuwe versie, controleert de handtekening, installeert hem en start Merel opnieuw. Je accounts en mail blijven bewaard."
-            } else {
-                "Downloaden opent de pagina met de installatiebestanden in je browser. Installeer daarna over deze versie heen; je accounts en mail blijven bewaard."
-            };
+            let how = if here.is_some() { tr("updates-how-update") } else { tr("updates-how-download") };
             ui.add(egui::Label::new(RichText::new(how).size(12.0).color(t.text_dim)).wrap());
         });
         ui.add_space(12.0);
         ui.horizontal(|ui| {
             helder::quiet(ui, t, |ui| {
-                if helder::text_button(ui, t, SKIP).on_hover_text("Niet meer over deze versie beginnen; wel over een nieuwere").clicked() {
+                if helder::text_button(ui, t, &skip()).on_hover_text(tr("updates-skip-hint")).clicked() {
                     app.view.skipped_version = Some(release.version.clone());
                     app.save_view(ctx);
                     close = true;
@@ -274,19 +300,19 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             helder::right(ui, |ui| {
                 match (&here, install::SIGNING_KEY) {
                     (Some(place), Some(key)) => {
-                        if helder::primary_button(ui, t, Icon::Download, UPDATE).clicked() {
+                        if helder::primary_button(ui, t, Icon::Download, &update()).clicked() {
                             app.updates.job = Some(Job::start(ctx, place.clone(), &release.version, key));
                         }
                     }
                     _ => {
-                        if helder::primary_button(ui, t, Icon::Download, DOWNLOAD).clicked() {
+                        if helder::primary_button(ui, t, Icon::Download, &download()).clicked() {
                             open_page(app, &release);
                             close = true;
                         }
                     }
                 }
                 helder::secondary(ui, t, |ui| {
-                    if ui.button(RichText::new(LATER).size(14.0).color(t.text)).clicked() {
+                    if ui.button(RichText::new(later()).size(14.0).color(t.text)).clicked() {
                         close = true;
                     }
                 });
@@ -310,35 +336,25 @@ fn progress(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let version = job.version.clone();
     let release = Release { version: version.clone(), notes: String::new() };
     let (step, icon, title, text) = match &stage {
-        Stage::Downloading { .. } => (1, Icon::Download, format!("Merel {version} downloaden"), String::new()),
-        Stage::Checking => (
-            2,
-            Icon::ShieldCheck,
-            "Handtekening controleren".to_owned(),
-            "Merel controleert of de download van Merel zelf komt en onderweg niet is veranderd.".to_owned(),
-        ),
-        Stage::Installing => (3, Icon::RefreshCw, format!("Merel {version} installeren"), "Even geduld, dit duurt een paar seconden.".to_owned()),
-        Stage::Ready(Restart::Installer(_)) => (
-            3,
-            Icon::CircleCheck,
-            format!("Merel {version} staat klaar"),
-            "Merel sluit af, installeert de nieuwe versie en start daarna vanzelf weer.".to_owned(),
-        ),
-        Stage::Ready(Restart::Relaunch(_)) => (
-            3,
-            Icon::CircleCheck,
-            format!("Merel {version} is geïnstalleerd"),
-            "Start Merel opnieuw om de nieuwe versie te gebruiken. Doe je dat later, dan krijg je hem bij de volgende start.".to_owned(),
-        ),
-        Stage::Failed(reason) => (
-            0,
-            Icon::CircleAlert,
-            "Bijwerken is niet gelukt".to_owned(),
-            format!("{reason} Je kunt de nieuwe versie ook zelf downloaden en installeren."),
-        ),
+        Stage::Downloading { .. } => {
+            (1, Icon::Download, crate::i18n::tr_args("updates-downloading", &[("version", version.as_str().into())]), String::new())
+        }
+        Stage::Checking => (2, Icon::ShieldCheck, tr("updates-checking"), tr("updates-checking-text")),
+        Stage::Installing => {
+            (3, Icon::RefreshCw, crate::i18n::tr_args("updates-installing", &[("version", version.as_str().into())]), tr("updates-installing-text"))
+        }
+        Stage::Ready(Restart::Installer(_)) => {
+            (3, Icon::CircleCheck, crate::i18n::tr_args("updates-ready", &[("version", version.as_str().into())]), tr("updates-ready-text"))
+        }
+        Stage::Ready(Restart::Relaunch(_)) => {
+            (3, Icon::CircleCheck, crate::i18n::tr_args("updates-installed", &[("version", version.as_str().into())]), tr("updates-installed-text"))
+        }
+        Stage::Failed(reason) => {
+            (0, Icon::CircleAlert, tr("updates-failed"), crate::i18n::tr_args("updates-failed-text", &[("reason", reason.as_str().into())]))
+        }
     };
     let mut close = false;
-    let closed = helder::dialog(ctx, t, WINDOW, 460.0, |ui| {
+    let closed = helder::dialog(ctx, t, &window_label(), 460.0, |ui| {
         if !matches!(stage, Stage::Failed(_)) {
             helder::step_dots(ui, t, step, STEPS);
             ui.add_space(12.0);
@@ -357,7 +373,10 @@ fn progress(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 ui.add_space(6.0);
                 let mb = |b: u64| b as f64 / 1_000_000.0;
                 let line = match total {
-                    Some(total) => format!("{:.0} van {:.0} MB", mb(done), mb(total)),
+                    Some(total) => crate::i18n::tr_args(
+                        "updates-progress",
+                        &[("done", format!("{:.0}", mb(done)).into()), ("total", format!("{:.0}", mb(total)).into())],
+                    ),
                     None => format!("{:.0} MB", mb(done)),
                 };
                 ui.label(RichText::new(line).size(12.0).color(t.text_dim));
@@ -370,14 +389,14 @@ fn progress(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             helder::right(ui, |ui| match &stage {
                 Stage::Downloading { .. } => {
                     helder::secondary(ui, t, |ui| {
-                        if ui.button(RichText::new(CANCEL).size(14.0).color(t.text)).clicked() {
+                        if ui.button(RichText::new(cancel()).size(14.0).color(t.text)).clicked() {
                             close = true;
                         }
                     });
                 }
                 Stage::Checking | Stage::Installing => {}
                 Stage::Ready(restart) => {
-                    if helder::primary_button(ui, t, Icon::RefreshCw, RESTART).clicked() {
+                    if helder::primary_button(ui, t, Icon::RefreshCw, &restart_label()).clicked() {
                         let handover = install::hand_over(&app.engine);
                         match restart.start(handover.as_ref()) {
                             Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
@@ -386,24 +405,24 @@ fn progress(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                                 if let Some(key) = &handover {
                                     install::take_back(&app.engine, key);
                                 }
-                                app.notice = Some(Notice::error("Opnieuw starten is niet gelukt. Start Merel zelf opnieuw."));
+                                app.notice = Some(Notice::error(tr("updates-restart-failed")));
                             }
                         }
                         close = true;
                     }
                     helder::secondary(ui, t, |ui| {
-                        if ui.button(RichText::new(LATER).size(14.0).color(t.text)).clicked() {
+                        if ui.button(RichText::new(later()).size(14.0).color(t.text)).clicked() {
                             close = true;
                         }
                     });
                 }
                 Stage::Failed(_) => {
-                    if helder::primary_button(ui, t, Icon::Globe, PAGE).clicked() {
+                    if helder::primary_button(ui, t, Icon::Globe, &page_label()).clicked() {
                         open_page(app, &release);
                         close = true;
                     }
                     helder::secondary(ui, t, |ui| {
-                        if ui.button(RichText::new(helder::CLOSE).size(14.0).color(t.text)).clicked() {
+                        if ui.button(RichText::new(helder::close_label()).size(14.0).color(t.text)).clicked() {
                             close = true;
                         }
                     });

@@ -3,6 +3,7 @@
 //! list filter; choosing it runs that search again over the mail Merel has fetched. The list
 //! lives in `view.json` with the other choices of the Beeld tab.
 
+use crate::i18n::tr;
 use egui::RichText;
 use merel_engine::view::Filter;
 use serde::{Deserialize, Serialize};
@@ -22,7 +23,9 @@ pub struct SearchFolder {
 }
 
 /// The heading over the saved searches in the folder pane.
-pub const HEADING: &str = "🔍 Zoekmappen";
+pub fn heading() -> String {
+    tr("search-folders-heading")
+}
 /// Longest name kept.
 const MAX_NAME: usize = 60;
 
@@ -34,15 +37,15 @@ pub struct Form {
 
 /// What the search folder looks for, for the hover text and the form.
 pub fn describe(f: &SearchFolder) -> String {
-    let where_ = if f.all_folders { "alle mappen" } else { "de huidige map" };
+    let where_ = tr(if f.all_folders { "search-folder-in-all" } else { "search-folder-in-current" });
     let only = match f.filter {
-        Filter::All => "",
-        Filter::Unread => ", alleen ongelezen",
-        Filter::Flagged => ", alleen gevlagd",
-        Filter::Attachments => ", alleen met bijlagen",
-        Filter::Snoozed => ", alleen gesluimerd",
+        Filter::All => String::new(),
+        Filter::Unread => tr("search-folder-only-unread"),
+        Filter::Flagged => tr("search-folder-only-flagged"),
+        Filter::Attachments => tr("search-folder-only-attachments"),
+        Filter::Snoozed => tr("search-folder-only-snoozed"),
     };
-    format!("Zoekt “{}” in {where_}{only}", f.query)
+    format!("{}{only}", crate::i18n::tr_args("search-folder-describe", &[("query", f.query.as_str().into()), ("where", where_.into())]))
 }
 
 impl MailApp {
@@ -98,7 +101,7 @@ pub fn section(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     if app.view.search_folders.is_empty() {
         return;
     }
-    ui.label(RichText::new(HEADING).strong().color(t.text));
+    ui.label(RichText::new(heading()).strong().color(t.text));
     ui.add_space(4.0);
     let mut open = None;
     let mut delete = None;
@@ -116,7 +119,7 @@ pub fn section(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
             open = Some(f.clone());
         }
         r.context_menu(|ui| {
-            if ui.button("Zoekmap verwijderen").clicked() {
+            if ui.button(tr("search-folder-delete")).clicked() {
                 delete = Some(f.name.clone());
                 ui.close();
             }
@@ -140,21 +143,19 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     };
     let mut save = false;
     let mut close = false;
-    if crate::helder::popup(ctx, t, "save-search-folder", "Zoekmap opslaan", 320.0, |ui| {
-        ui.label(
-            RichText::new(format!("{}. De zoekmap komt in het mappenvenster onder Zoekmappen.", describe(&current))).size(12.0).color(t.text_dim),
-        );
+    if crate::helder::popup(ctx, t, "save-search-folder", &tr("search-folder-save"), 320.0, |ui| {
+        ui.label(RichText::new(format!("{}. {}", describe(&current), tr("search-folder-save-hint"))).size(12.0).color(t.text_dim));
         ui.add_space(6.0);
-        let field = ui.add(egui::TextEdit::singleline(&mut form.name).hint_text("Naam van de zoekmap").desired_width(300.0));
+        let field = ui.add(egui::TextEdit::singleline(&mut form.name).hint_text(tr("search-folder-name")).desired_width(300.0));
         if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             save = true;
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.add_enabled(!form.name.trim().is_empty(), crate::helder::primary_text(t, "Opslaan")).clicked() {
+            if ui.add_enabled(!form.name.trim().is_empty(), crate::helder::primary_text(t, &tr("save"))).clicked() {
                 save = true;
             }
-            if ui.button("Annuleren").clicked() {
+            if ui.button(tr("cancel")).clicked() {
                 close = true;
             }
         });

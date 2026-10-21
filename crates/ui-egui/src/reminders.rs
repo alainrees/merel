@@ -2,17 +2,31 @@
 //! follow-up day has come and the tasks whose due day has come, each to open, close or put off. It appears on its own, asks for the
 //! window's attention once per reminder, and goes away when nothing is due.
 
+use crate::i18n::tr;
 use std::collections::HashSet;
 
 use chrono::Datelike;
 use egui::{Align2, RichText, vec2};
 use serde_json::json;
 
-use crate::calendar::{MONTHS, WEEKDAYS, to_local};
+use crate::calendar::to_local;
 use crate::{MailApp, Module, Tokens, helder, notifications};
 
 /// How long a reminder can be put off, as the window offers it: minutes and label.
-const SNOOZES: [(u32, &str); 5] = [(5, "5 minuten"), (15, "15 minuten"), (60, "1 uur"), (240, "4 uur"), (1440, "1 dag")];
+fn snoozes() -> [(u32, String); 5] {
+    [5, 15, 60, 240, 1440].map(|m| (m, amount(i64::from(m) * 60)))
+}
+
+/// "10 minuten", "2 uur", "1 dag": a stretch of time, rounded down to whole minutes, hours or days.
+fn amount(secs: i64) -> String {
+    let secs = secs.abs();
+    let (key, count) = match secs {
+        s if s < 3600 => ("reminder-minutes", (s / 60).max(1)),
+        s if s < 86_400 => ("reminder-hours", s / 3600),
+        s => ("reminder-days", s / 86_400),
+    };
+    crate::i18n::tr_args(key, &[("count", (count as usize).into())])
+}
 
 fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
@@ -21,34 +35,25 @@ fn now() -> i64 {
 /// "Begint over 10 minuten", "Begint nu", "Begon 2 uur geleden".
 pub fn relative(now: i64, start: i64) -> String {
     let diff = start - now;
-    let amount = |secs: i64| -> String {
-        let secs = secs.abs();
-        match secs {
-            s if s < 3600 => {
-                let m = (s / 60).max(1);
-                if m == 1 { "1 minuut".into() } else { format!("{m} minuten") }
-            }
-            s if s < 86_400 => format!("{} uur", s / 3600),
-            s => {
-                let d = s / 86_400;
-                if d == 1 { "1 dag".into() } else { format!("{d} dagen") }
-            }
-        }
-    };
     if diff.abs() < 60 {
-        "Begint nu".into()
+        tr("reminder-now")
     } else if diff > 0 {
-        format!("Begint over {}", amount(diff))
+        crate::i18n::tr_args("reminder-in", &[("time", amount(diff).into())])
     } else {
-        format!("Begon {} geleden", amount(diff))
+        crate::i18n::tr_args("reminder-ago", &[("time", amount(diff).into())])
     }
 }
 
 /// "maandag 19 oktober om 09:00", or "maandag 19 oktober, hele dag".
 fn when(start: i64, all_day: bool) -> String {
     let t = to_local(start);
-    let day = format!("{} {} {}", WEEKDAYS[t.weekday().num_days_from_monday() as usize], t.day(), MONTHS[(t.month0()) as usize]);
-    if all_day { format!("{day}, hele dag") } else { format!("{day} om {}", t.format("%H:%M")) }
+    let day =
+        format!("{} {} {}", crate::i18n::weekday_name(t.weekday().num_days_from_monday() as usize), t.day(), crate::i18n::month_name(t.month()));
+    if all_day {
+        crate::i18n::tr_args("reminder-all-day", &[("day", day.into())])
+    } else {
+        crate::i18n::tr_args("date-at-time", &[("day", day.into()), ("time", t.format("%H:%M").to_string().into())])
+    }
 }
 
 enum Action {
@@ -71,11 +76,11 @@ enum Action {
 /// "Vandaag", "Gisteren" or "Verlopen op …" for a follow-up day seen from `today`.
 fn follow_up_due(due: chrono::NaiveDate, today: chrono::NaiveDate) -> String {
     if due == today {
-        "Vandaag".into()
+        tr("calendar-today")
     } else if Some(due) == today.pred_opt() {
-        "Gisteren".into()
+        tr("date-group-yesterday")
     } else {
-        format!("Verlopen op {}", crate::dates::day_name(due))
+        crate::i18n::tr_args("reminder-overdue", &[("day", crate::dates::day_name(due).into())])
     }
 }
 
@@ -130,8 +135,8 @@ fn card(
 /// The "Uitstellen" menu: how long to put a reminder off for, if one was picked.
 fn snooze(ui: &mut egui::Ui, t: &Tokens) -> Option<u32> {
     let mut picked = None;
-    helder::menu_button(ui, t, Some(helder::Icon::Clock), RichText::new("Uitstellen").size(14.0).color(t.text), |ui| {
-        for (minutes, label) in SNOOZES {
+    helder::menu_button(ui, t, Some(helder::Icon::Clock), RichText::new(tr("reminder-snooze")).size(14.0).color(t.text), |ui| {
+        for (minutes, label) in snoozes() {
             if ui.button(label).clicked() {
                 picked = Some(minutes);
                 ui.close();
@@ -166,18 +171,18 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             if !a.location.is_empty() {
                 details = format!("{details}, {}", a.location);
             }
-            alerts.push(notifications::reminder_alert(&prefs, format!("appt:{}:{}", a.start, a.id), "Afspraak", &a.title, &details));
+            alerts.push(notifications::reminder_alert(&prefs, format!("appt:{}:{}", a.start, a.id), &tr("reminder-appointment"), &a.title, &details));
         }
         for (m, d) in &follow {
             if !app.announced_reminders.contains(&(format!("followup:{}", m.id), i64::from(d.num_days_from_ce()))) {
-                let details = format!("van {}", m.from.display());
-                alerts.push(notifications::reminder_alert(&prefs, format!("mail:{}", m.id), "Opvolgen", &m.subject, &details));
+                let details = crate::i18n::tr_args("reminder-from", &[("name", m.from.display().into())]);
+                alerts.push(notifications::reminder_alert(&prefs, format!("mail:{}", m.id), &tr("reminder-follow-up"), &m.subject, &details));
             }
         }
         for task in &tasks {
             if !app.announced_reminders.contains(&(format!("task:{}", task.id), task.due.unwrap_or(0))) {
                 let day = follow_up_due(to_local(task.due.unwrap_or(now)).date(), today);
-                alerts.push(notifications::reminder_alert(&prefs, format!("task:{}", task.id), "Taak", &task.title, &day));
+                alerts.push(notifications::reminder_alert(&prefs, format!("task:{}", task.id), &tr("reminder-task"), &task.title, &day));
             }
         }
         for alert in alerts {
@@ -189,7 +194,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     ctx.request_repaint_after(std::time::Duration::from_secs(5));
     let mut action: Option<Action> = None;
     let count = due.len() + follow.len() + tasks.len();
-    let title = if count == 1 { "Herinnering".to_string() } else { format!("Herinneringen ({count})") };
+    let title = crate::i18n::tr_args("reminder-title", &[("count", count.into())]);
     egui::Window::new(&title)
         .id(egui::Id::new("reminders"))
         .title_bar(false)
@@ -206,7 +211,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 ui.label(RichText::new(&title).size(16.0).strong().color(t.text));
                 if count > 1 {
                     helder::right(ui, |ui| {
-                        if helder::text_button(ui, t, "Alles sluiten").clicked() {
+                        if helder::text_button(ui, t, &tr("reminder-dismiss-all")).clicked() {
                             action = Some(Action::DismissAll);
                         }
                     });
@@ -218,11 +223,11 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     details.push((helder::Icon::MapPin, a.location.clone()));
                 }
                 let lead = (relative(now, a.start), t.accent_text);
-                card(ui, t, helder::Icon::Calendar, "Afspraak", &a.title, lead, &details, |ui| {
-                    if helder::primary_button(ui, t, helder::Icon::Calendar, "Openen").clicked() {
+                card(ui, t, helder::Icon::Calendar, &tr("reminder-appointment"), &a.title, lead, &details, |ui| {
+                    if helder::primary_button(ui, t, helder::Icon::Calendar, &tr("open")).clicked() {
                         action = Some(Action::Open(a.id.clone(), a.start));
                     }
-                    if helder::tool_button(ui, t, helder::Icon::X, "Sluiten").clicked() {
+                    if helder::tool_button(ui, t, helder::Icon::X, &tr("reminder-dismiss")).clicked() {
                         action = Some(Action::Dismiss(a.id.clone(), a.start));
                     }
                     if let Some(minutes) = snooze(ui, t) {
@@ -234,17 +239,18 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             for (m, day) in &follow {
                 let late = *day < today;
                 let lead = (follow_up_due(*day, today), if late { t.flag } else { t.accent_text });
-                let details = [(helder::Icon::User, format!("van {}", m.from.display()))];
-                card(ui, t, helder::Icon::Flag, "Opvolgen", &m.subject, lead, &details, |ui| {
-                    if helder::primary_button(ui, t, helder::Icon::Mail, "Openen").clicked() {
+                let details = [(helder::Icon::User, crate::i18n::tr_args("reminder-from", &[("name", m.from.display().into())]))];
+                card(ui, t, helder::Icon::Flag, &tr("reminder-follow-up"), &m.subject, lead, &details, |ui| {
+                    if helder::primary_button(ui, t, helder::Icon::Mail, &tr("open")).clicked() {
                         action = Some(Action::OpenMail(m.id.clone()));
                     }
-                    if helder::tool_button(ui, t, helder::Icon::CircleCheck, "Voltooid").on_hover_text("Haalt de vlag en de datum weg.").clicked() {
+                    if helder::tool_button(ui, t, helder::Icon::CircleCheck, &tr("reminder-done"))
+                        .on_hover_text(tr("reminder-done-mail-hint"))
+                        .clicked()
+                    {
                         action = Some(Action::Done(m.id.clone()));
                     }
-                    if helder::tool_button(ui, t, helder::Icon::X, "Sluiten")
-                        .on_hover_text("Sluit de herinnering; de vlag en de datum blijven.")
-                        .clicked()
+                    if helder::tool_button(ui, t, helder::Icon::X, &tr("reminder-dismiss")).on_hover_text(tr("reminder-dismiss-mail-hint")).clicked()
                     {
                         action = Some(Action::DismissMail(m.id.clone()));
                     }
@@ -258,14 +264,18 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 let day = to_local(task.due.unwrap_or(now)).date();
                 let late = day < today;
                 let lead = (follow_up_due(day, today), if late { t.flag } else { t.accent_text });
-                card(ui, t, helder::Icon::SquareCheck, "Taak", &task.title, lead, &[], |ui| {
-                    if helder::primary_button(ui, t, helder::Icon::SquareCheck, "Openen").clicked() {
+                card(ui, t, helder::Icon::SquareCheck, &tr("reminder-task"), &task.title, lead, &[], |ui| {
+                    if helder::primary_button(ui, t, helder::Icon::SquareCheck, &tr("open")).clicked() {
                         action = Some(Action::OpenTask(task.id.clone()));
                     }
-                    if helder::tool_button(ui, t, helder::Icon::CircleCheck, "Voltooid").on_hover_text("Vinkt de taak af.").clicked() {
+                    if helder::tool_button(ui, t, helder::Icon::CircleCheck, &tr("reminder-done"))
+                        .on_hover_text(tr("reminder-done-task-hint"))
+                        .clicked()
+                    {
                         action = Some(Action::DoneTask(task.id.clone()));
                     }
-                    if helder::tool_button(ui, t, helder::Icon::X, "Sluiten").on_hover_text("Sluit de herinnering; de taak blijft open.").clicked() {
+                    if helder::tool_button(ui, t, helder::Icon::X, &tr("reminder-dismiss")).on_hover_text(tr("reminder-dismiss-task-hint")).clicked()
+                    {
                         action = Some(Action::DismissTask(task.id.clone()));
                     }
                     if let Some(minutes) = snooze(ui, t) {

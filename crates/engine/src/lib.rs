@@ -341,7 +341,7 @@ fn message_of(folder_id: &str, h: RemoteHeader) -> Option<MessageHeader> {
         remote_id: h.id,
         from,
         to: h.header.to.clone(),
-        subject: if h.header.subject.is_empty() { "(Geen onderwerp)".into() } else { h.header.subject.clone() },
+        subject: if h.header.subject.is_empty() { merel_i18n::tr("no-subject-capital") } else { h.header.subject.clone() },
         date: h.date,
         preview: String::new(),
         flags: Flags { seen: h.seen, flagged: h.flagged, answered: h.answered },
@@ -494,6 +494,24 @@ pub struct Session {
 }
 
 impl Session {
+    /// Gives the standard folders and the local calendar their names in the app's language,
+    /// after a change of language; a name the user chose stays.
+    pub fn relabel(&mut self) {
+        for f in &mut self.folders {
+            if let Some(name) = f.kind.local_name()
+                && f.kind.is_standard_name(&f.name)
+            {
+                f.name = name;
+            }
+        }
+        let standard = |name: &str| merel_i18n::Language::ALL.iter().any(|&l| merel_i18n::plain(l, "calendar-mine").as_deref() == Some(name));
+        for c in &mut self.calendars {
+            if c.id == "local" && standard(&c.name) {
+                c.name = merel_i18n::tr("calendar-mine");
+            }
+        }
+    }
+
     /// A session with built-in sample mail, for first run and tests. No network.
     pub fn sample() -> Self {
         let mut s = sample::session();
@@ -739,7 +757,7 @@ impl Session {
         self.next_draft_id += 1;
         let draft_id = self.next_draft_id;
         if account_id == SAMPLE_ACCOUNT || !self.accounts.iter().any(|a| a.id == account_id) {
-            self.outbox.insert(draft_id, SendState::Failed("Voeg eerst een echt account toe om te kunnen versturen.".into()));
+            self.outbox.insert(draft_id, SendState::Failed(merel_i18n::tr("send-needs-account")));
             return draft_id;
         }
         let sent_path = self.folder_of_kind(account_id, FolderKind::Sent).map(|f| f.path.clone());
@@ -991,7 +1009,7 @@ impl Session {
             .map(|f| Folder {
                 id: format!("{account_id}/{}", f.path),
                 account_id: account_id.to_string(),
-                name: f.kind.dutch_name().map(str::to_string).unwrap_or_else(|| clean_text(&f.name)),
+                name: f.kind.local_name().unwrap_or_else(|| clean_text(&f.name)),
                 parent: f.parent.filter(|p| listed.contains(p) && *p != f.path).map(|p| format!("{account_id}/{p}")),
                 path: f.path,
                 kind: f.kind,
@@ -1288,7 +1306,7 @@ impl Engine {
         let secret = match self.secrets.get(&account.id) {
             Ok(Some(s)) => s,
             Ok(None) => {
-                self.session.status.insert(account.id, AccountStatus::Error("Geen wachtwoord of aanmelding in de sleutelhanger.".into()));
+                self.session.status.insert(account.id, AccountStatus::Error(merel_i18n::tr("no-credentials")));
                 return;
             }
             Err(e) => {
@@ -1307,7 +1325,7 @@ impl Engine {
     /// `session.sign_in` follows it.
     pub fn sign_in(&mut self, sign_in: signin::SignIn) {
         let Some(worker) = &self.worker else {
-            self.session.sign_in = Some(Some(Err("Aanmelden kan niet in de voorbeeldmodus.".into())));
+            self.session.sign_in = Some(Some(Err(merel_i18n::tr("signin-sample"))));
             return;
         };
         self.session.sign_in = Some(None);
@@ -1318,7 +1336,7 @@ impl Engine {
             let _ = events.send(Event::SignedIn { result });
         });
         if spawned.is_err() {
-            self.session.sign_in = Some(Some(Err("Kon geen achtergrondtaak starten.".into())));
+            self.session.sign_in = Some(Some(Err(merel_i18n::tr("conn-no-thread"))));
         }
     }
 
@@ -1352,14 +1370,10 @@ impl Engine {
     /// password when a new one is given, then connects it again. The id, the signature and the
     /// kind of sign-in stay as they were, so its folders, messages and offline cache stay with it.
     pub fn update_account(&mut self, mut account: Account, password: Option<Secret>) -> Result<(), String> {
-        let existing = self
-            .session
-            .accounts
-            .iter()
-            .find(|a| a.id == account.id && a.id != SAMPLE_ACCOUNT)
-            .ok_or_else(|| "Dit account bestaat niet meer.".to_string())?;
+        let existing =
+            self.session.accounts.iter().find(|a| a.id == account.id && a.id != SAMPLE_ACCOUNT).ok_or_else(|| merel_i18n::tr("account-gone"))?;
         if !matches!(existing.auth, Auth::Password) {
-            return Err("Dit account meldt zich aan via de browser; gebruik Opnieuw aanmelden.".into());
+            return Err(merel_i18n::tr("account-is-oauth"));
         }
         account.signature = existing.signature.clone();
         account.auth = Auth::Password;
@@ -1381,17 +1395,17 @@ impl Engine {
     /// not touched.
     pub fn remove_account(&mut self, account_id: &str) -> Result<(), String> {
         if !self.session.accounts.iter().any(|a| a.id == account_id) || account_id == SAMPLE_ACCOUNT {
-            return Err("Dit account bestaat niet meer.".into());
+            return Err(merel_i18n::tr("account-gone"));
         }
         if let Some(worker) = &mut self.worker {
             worker.stop_account(account_id);
         }
         let mut problems = Vec::new();
         if let Err(e) = self.secrets.delete(account_id) {
-            problems.push(format!("wachtwoord of aanmelding: {e}"));
+            problems.push(merel_i18n::tr_args("remove-keychain-password", &[("error", e.to_string().into())]));
         }
         if let Err(e) = self.secrets.delete(&signin::client_secret_key(account_id)) {
-            problems.push(format!("app-registratie: {e}"));
+            problems.push(merel_i18n::tr_args("remove-keychain-app", &[("error", e.to_string().into())]));
         }
         self.cache.remove(account_id);
         self.remove_certificate(account_id);
@@ -1399,16 +1413,12 @@ impl Engine {
         self.session.remove_account(account_id);
         self.save_accounts()?;
         self.persist().map_err(|e| e.to_string())?;
-        if problems.is_empty() {
-            Ok(())
-        } else {
-            Err(format!("Het account is weg, maar de sleutelhanger gaf een fout bij het {}.", problems.join(" en bij de ")))
-        }
+        if problems.is_empty() { Ok(()) } else { Err(merel_i18n::tr_args("remove-keychain-failed", &[("problems", problems.join("; ").into())])) }
     }
 
     /// Stores the signature of `account_id` and rewrites the accounts file.
     pub fn set_signature(&mut self, account_id: &str, signature: &str) -> Result<(), String> {
-        let account = self.session.accounts.iter_mut().find(|a| a.id == account_id).ok_or_else(|| "Dit account bestaat niet meer.".to_string())?;
+        let account = self.session.accounts.iter_mut().find(|a| a.id == account_id).ok_or_else(|| merel_i18n::tr("account-gone"))?;
         account.signature = merel_model::clean_signature(signature);
         self.save_accounts()
     }
