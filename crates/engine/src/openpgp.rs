@@ -121,6 +121,11 @@ impl Engine {
             let issued = if issued.is_empty() { "geen e-mailadres".to_string() } else { issued };
             return Err(format!("Deze sleutel hoort bij {issued}, niet bij {email}."));
         }
+        self.keep_pgp_key(account_id, key)
+    }
+
+    /// Makes `key` the OpenPGP key of `account_id`, sealed on disk.
+    pub(crate) fn keep_pgp_key(&mut self, account_id: &str, key: SecretKey) -> Result<KeyInfo, String> {
         if !self.cache.has_store() {
             self.cache = crate::cache::Cache::open(self.config_path.as_deref(), &*self.secrets);
         }

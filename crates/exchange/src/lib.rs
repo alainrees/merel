@@ -377,7 +377,7 @@ fn header_of(item: Node<'_, '_>) -> RemoteHeader {
         size: text(item, "Size").and_then(|s| s.parse().ok()).unwrap_or(0),
         has_attachments: text(item, "HasAttachments") == Some("true"),
         categories: categories_of(item),
-        header: merel_mime::ParsedHeader { from, to: Vec::new(), subject, date: Some(date), message_id, importance: importance_of(item) },
+        header: merel_mime::ParsedHeader { from, to: Vec::new(), subject, date: Some(date), message_id, importance: importance_of(item), chat: None },
         date,
     }
 }

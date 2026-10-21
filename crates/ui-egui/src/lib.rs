@@ -3602,6 +3602,7 @@ mod tests {
             message_id: None,
             categories: Vec::new(),
             importance: Default::default(),
+            chat: None,
         };
         let body = merel_engine::Body {
             rich: Some(merel_html::parse(r#"<p><a href="https://evil.example/login">https://www.bank.nl/inloggen</a></p>"#)),

@@ -117,6 +117,16 @@ fn build_message(from: &Address, draft: &Draft, keep_bcc: bool) -> Result<Messag
     if draft.read_receipt {
         b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Disposition-Notification-To"), format!("<{}>", from.email())));
     }
+    // A chat message, Delta Chat's way: the version, and for a group its id and name.
+    if let Some(chat) = &draft.chat {
+        b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Chat-Version"), merel_model::CHAT_VERSION.to_string()));
+        if let Some(id) = &chat.group_id {
+            b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Chat-Group-ID"), id.clone()));
+            if let Some(name) = &chat.group_name {
+                b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Chat-Group-Name"), name.clone()));
+            }
+        }
+    }
     let formatted = draft.rich.as_ref().is_some_and(|r| !r.is_plain());
     if draft.attachments.is_empty() {
         if formatted {
@@ -182,6 +192,21 @@ mod tests {
         let draft = Draft { to: vec![named("Alain Tester")], subject: "test".into(), body: "hoi".into(), ..Draft::default() };
         let raw = String::from_utf8(build(&named("alain@voorbeeld.nl"), &draft).unwrap().formatted()).unwrap();
         assert!(raw.contains("From: alain@voorbeeld.nl\r\n"), "{raw}");
+    }
+
+    #[test]
+    fn a_chat_message_carries_the_chat_headers() {
+        use merel_model::ChatTag;
+        let from = Address::new(None, "jij@example.org").unwrap();
+        let to = vec![Address::new(None, "sanne@example.org").unwrap()];
+        let plain = Draft { to: to.clone(), subject: "Hoi".into(), body: "x".into(), ..Draft::default() };
+        assert!(!String::from_utf8(build(&from, &plain).unwrap().formatted()).unwrap().contains("Chat-"));
+        let one = Draft { chat: Some(ChatTag::default()), ..plain.clone() };
+        let text = String::from_utf8(build(&from, &one).unwrap().formatted()).unwrap();
+        assert!(text.contains("Chat-Version: 1.0\r\n") && !text.contains("Chat-Group"), "{text}");
+        let group = ChatTag { group_id: Some("Ab-9_x".into()), group_name: Some("Familie Rees".into()) };
+        let text = String::from_utf8(build(&from, &Draft { chat: Some(group), ..plain }).unwrap().formatted()).unwrap();
+        assert!(text.contains("Chat-Group-ID: Ab-9_x\r\n") && text.contains("Chat-Group-Name: Familie Rees\r\n"), "{text}");
     }
 
     #[test]

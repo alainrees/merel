@@ -1106,6 +1106,7 @@ mod tests {
             message_id: Some("<x@example.org>".into()),
             categories: Vec::new(),
             importance: Default::default(),
+            chat: None,
         }
     }
 

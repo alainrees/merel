@@ -109,6 +109,15 @@ pub fn outgoing(keys: &Keys, account: &Account, draft: &Draft, raw: Vec<u8>) -> 
     };
     let own = keys.identities.read().ok().and_then(|map| map.get(&account.id).map(|i| i.certificate_der().to_vec()));
     let recipients: Vec<&Address> = draft.to.iter().chain(&draft.cc).chain(&draft.bcc).collect();
+    // A chat message only ever goes out encrypted with OpenPGP, as Delta Chat reads it.
+    if draft.chat.is_some() {
+        let Some(key) = pgp.filter(|_| draft.encrypt) else { return Err("Een chatbericht gaat alleen versleuteld de deur uit.".into()) };
+        let missing = keys.openpgp.missing(recipients.iter().copied(), now());
+        if !missing.is_empty() {
+            return Err(crate::chat::missing_chat_text(&missing));
+        }
+        return pgp_outgoing(keys, &key, draft, &recipients, raw);
+    }
     if let Some(key) = &pgp {
         let by_certificate = own.is_some() && (!draft.encrypt || missing(&keys.people, recipients.iter().copied()).is_empty());
         let by_key = !draft.encrypt || keys.openpgp.missing(recipients.iter().copied(), now()).is_empty();

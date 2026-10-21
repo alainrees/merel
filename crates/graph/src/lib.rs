@@ -211,6 +211,7 @@ fn header_of(m: &Value) -> Option<RemoteHeader> {
                 "low" => Importance::Low,
                 _ => Importance::Normal,
             },
+            chat: None,
         },
         date,
     })

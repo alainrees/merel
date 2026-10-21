@@ -12,6 +12,7 @@ pub mod cache;
 pub mod calendar;
 pub mod categories;
 pub mod certificates;
+pub mod chat;
 pub mod cleanup;
 mod commands;
 pub mod config;
@@ -324,6 +325,7 @@ fn message_of(folder_id: &str, h: RemoteHeader) -> Option<MessageHeader> {
         message_id: h.header.message_id.clone(),
         categories: h.categories,
         importance: h.header.importance,
+        chat: h.header.chat,
     })
 }
 
