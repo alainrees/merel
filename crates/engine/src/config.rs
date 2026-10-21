@@ -170,9 +170,9 @@ mod tests {
     }
 
     #[test]
-    fn the_merel_folder_moves_to_the_new_name_once() {
+    fn the_mailcraft_folder_moves_to_the_new_name_once() {
         let root = std::env::temp_dir().join(format!("merel-settle-{}", std::process::id()));
-        let (old, dir) = (root.join("merel"), root.join("config").join("merel"));
+        let (old, dir) = (root.join("mailcraft"), root.join("config").join("merel"));
         std::fs::create_dir_all(&old).unwrap();
         std::fs::write(old.join("accounts.json"), "[]").unwrap();
         assert_eq!(settle(&dir, Some(&old)), dir);

@@ -547,6 +547,18 @@ impl MailApp {
             self.calendar.editor = Some(Editor::from_appointment(a, Some(start)));
         }
     }
+
+    /// Does what a click on an appointment's block, or its right-click menu, asked for.
+    pub(crate) fn chip_action(&mut self, id: &str, start: i64, action: ChipAction) {
+        match action {
+            ChipAction::Open => self.open_appointment(id, start),
+            ChipAction::Skip => self.run("appointment.skip", json!({ "id": id, "start": start })),
+            ChipAction::Delete => {
+                self.run("appointment.select", json!({ "id": id }));
+                self.run("appointment.delete", serde_json::Value::Null);
+            }
+        }
+    }
 }
 
 /// The title above the view: "oktober 2026", "19 – 25 oktober 2026" (19 – 23 for the work
@@ -857,10 +869,35 @@ fn chip_paint(color: Color32, show_as: ShowAs, hovered: bool, t: &Tokens) -> Chi
 /// The width of the coloured bar at the left of a block.
 const STRIPE: f32 = 3.0;
 
-/// A clickable block for one appointment, a drag source when `drag` is given. Returns true
-/// when clicked.
+/// What a click on an appointment's block, or a choice in its right-click menu, asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChipAction {
+    Open,
+    /// This occurrence of a series only.
+    Skip,
+    Delete,
+}
+
+/// The right-click menu of an appointment, as Outlook's.
+pub(crate) const OPEN_MENU: &str = "Openen";
+pub(crate) const DELETE_ONE_MENU: &str = "Dit exemplaar verwijderen";
+pub(crate) const DELETE_SERIES_MENU: &str = "Hele reeks verwijderen";
+pub(crate) const CANCEL_MENU: &str = "Vergadering annuleren…";
+
+/// A clickable block for one appointment, a drag source when `drag` is given, with a menu on
+/// a right click. Returns what a click or the menu asked for.
 #[allow(clippy::too_many_arguments)]
-fn chip(ui: &mut Ui, rect: Rect, label: &str, fill: Color32, show_as: ShowAs, selected: bool, drag: Option<DraggedAppointment>, t: &Tokens) -> bool {
+fn chip(
+    ui: &mut Ui,
+    rect: Rect,
+    label: &str,
+    a: &Appointment,
+    fill: Color32,
+    selected: bool,
+    drag: Option<DraggedAppointment>,
+    t: &Tokens,
+) -> Option<ChipAction> {
+    let show_as = a.show_as;
     let sense = if drag.is_some() { Sense::click_and_drag() } else { Sense::click() };
     let r = ui.interact(rect, ui.make_persistent_id(("chip", rect.min.x as i32, rect.min.y as i32, label)), sense);
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
@@ -876,7 +913,30 @@ fn chip(ui: &mut Ui, rect: Rect, label: &str, fill: Color32, show_as: ShowAs, se
     let text_rect = rect.shrink2(vec2(if look.stripe.is_some() { 8.0 } else { 6.0 }, 2.0));
     let galley = p.layout(label.to_string(), FontId::proportional(12.0), look.text, text_rect.width());
     p.with_clip_rect(text_rect).galley(text_rect.left_top(), galley, look.text);
-    r.clicked()
+    let mut action = r.clicked().then_some(ChipAction::Open);
+    // A meeting with people is called off from its window, where the cancellation is sent.
+    let invited = a.meeting.as_ref().is_some_and(|m| !m.attendees.is_empty());
+    r.context_menu(|ui| {
+        if ui.button(OPEN_MENU).clicked() {
+            action = Some(ChipAction::Open);
+        }
+        ui.separator();
+        if invited {
+            if ui.button(CANCEL_MENU).clicked() {
+                action = Some(ChipAction::Open);
+            }
+        } else if a.recurrence.is_some() {
+            if ui.button(DELETE_ONE_MENU).clicked() {
+                action = Some(ChipAction::Skip);
+            }
+            if ui.button(DELETE_SERIES_MENU).clicked() {
+                action = Some(ChipAction::Delete);
+            }
+        } else if ui.button("Verwijderen").clicked() {
+            action = Some(ChipAction::Delete);
+        }
+    });
+    action
 }
 
 /// A quiet square button with a chevron, for the previous or next day, week or month.
@@ -925,7 +985,7 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let avail = ui.available_size();
     let w = (avail.x - gutter) / 7.0;
     let h = (avail.y / 6.0).max(60.0);
-    let mut open: Option<(String, i64)> = None;
+    let mut open: Option<(String, i64, ChipAction)> = None;
     let mut pick_day: Option<NaiveDate> = None;
     let mut drop: Option<(String, NaiveDate)> = None;
     let mut task_drop: Option<(String, NaiveDate)> = None;
@@ -988,17 +1048,10 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         let y = rect.top() + 24.0 + i as f32 * 20.0;
                         let chip_rect = Rect::from_min_size(pos2(rect.left() + 3.0, y), vec2(rect.width() - 6.0, 18.0));
                         let label = if a.all_day { chip_title(a) } else { format!("{} {}", hm(a.start), chip_title(a)) };
-                        if chip(
-                            ui,
-                            chip_rect,
-                            &label,
-                            appointment_color(app, a, t),
-                            a.show_as,
-                            selected.as_deref() == Some(a.id.as_str()),
-                            draggable(a),
-                            t,
-                        ) {
-                            open = Some((a.id.clone(), a.start));
+                        if let Some(action) =
+                            chip(ui, chip_rect, &label, a, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), draggable(a), t)
+                        {
+                            open = Some((a.id.clone(), a.start, action));
                         }
                     }
                     if items.len() > shown {
@@ -1020,8 +1073,8 @@ fn month_view(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         app.plan_task(&id, day, None);
     } else if let Some((id, day)) = drop {
         app.drop_appointment(&id, day, None);
-    } else if let Some((id, start)) = open {
-        app.open_appointment(&id, start);
+    } else if let Some((id, start, action)) = open {
+        app.chip_action(&id, start, action);
     } else if let Some(d) = pick_day {
         app.calendar.focus = d;
         app.calendar.view = View::Day;
@@ -1139,7 +1192,7 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
     let today = today();
     let selected = app.engine.session.selected_appointment.clone();
     let gutter = 48.0;
-    let mut open: Option<(String, i64)> = None;
+    let mut open: Option<(String, i64, ChipAction)> = None;
     let mut new_at: Option<(NaiveDate, u32, Option<String>)> = None;
     let mut drop: Option<(String, NaiveDate, Option<NaiveTime>)> = None;
     let mut task_drop: Option<(String, NaiveDate, Option<NaiveTime>)> = None;
@@ -1228,17 +1281,10 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                     if let Some(a) = items.first() {
                         let label = if items.len() > 1 { format!("{} (+{})", chip_title(a), items.len() - 1) } else { chip_title(a) };
                         let chip_rect = rect.shrink2(vec2(2.0, 3.0));
-                        if chip(
-                            ui,
-                            chip_rect,
-                            &label,
-                            appointment_color(app, a, t),
-                            a.show_as,
-                            selected.as_deref() == Some(a.id.as_str()),
-                            draggable(a),
-                            t,
-                        ) {
-                            open = Some((a.id.clone(), a.start));
+                        if let Some(action) =
+                            chip(ui, chip_rect, &label, a, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), draggable(a), t)
+                        {
+                            open = Some((a.id.clone(), a.start, action));
                         }
                     }
                 }
@@ -1329,8 +1375,10 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
                 } else {
                     format!("{}\n{} – {}", chip_title(a), hm(a.start), hm(end))
                 };
-                if chip(ui, block, &label, appointment_color(app, a, t), a.show_as, selected.as_deref() == Some(a.id.as_str()), draggable(a), t) {
-                    open = Some((a.id.clone(), a.start));
+                if let Some(action) =
+                    chip(ui, block, &label, a, appointment_color(app, a, t), selected.as_deref() == Some(a.id.as_str()), draggable(a), t)
+                {
+                    open = Some((a.id.clone(), a.start, action));
                 }
                 if draggable(a).is_none() || a.end > to {
                     continue;
@@ -1381,8 +1429,8 @@ fn time_grid(app: &mut MailApp, ui: &mut Ui, t: &Tokens, days: i64) {
         app.plan_task(&id, day, time);
     } else if let Some((id, day, time)) = drop {
         app.drop_appointment(&id, day, time);
-    } else if let Some((id, start)) = open {
-        app.open_appointment(&id, start);
+    } else if let Some((id, start, action)) = open {
+        app.chip_action(&id, start, action);
     } else if let Some((d, hour, pane)) = new_at {
         app.calendar.focus = d;
         app.new_appointment(d, hour);

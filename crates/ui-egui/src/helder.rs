@@ -860,9 +860,46 @@ pub fn item_window<R>(
     open: &mut bool,
     add: impl FnOnce(&mut Ui) -> R,
 ) -> Option<R> {
-    let viewport = egui::ViewportId::from_hash_of(id);
-    ctx.data_mut(|d| d.get_temp_mut_or_default::<Windows>(egui::Id::new(WINDOWS)).shown.push(viewport));
-    let builder = egui::ViewportBuilder::default().with_title(title).with_visible(true).with_inner_size(size).with_min_inner_size(vec2(480.0, 360.0));
+    // Over the main window, a little in from its corner, as Outlook opens an item: the system
+    // could otherwise put the window where it is not seen, off screen or behind the main one.
+    // Inside the main window (embedded) egui places the window itself.
+    let main = if ctx.embed_viewports() { None } else { ctx.input(|i| i.viewport().outer_rect) };
+    let (viewport, place, new) = ctx.data_mut(|d| {
+        let w = d.get_temp_mut_or_default::<Windows>(egui::Id::new(WINDOWS));
+        // Each opening is a window of its own. Reusing the one just closed, still kept hidden
+        // for a few frames, left it hidden on macOS: the item opened in a window nobody saw.
+        let base = egui::Id::new(id);
+        let open = w.open.iter().find(|(b, v)| *b == base && w.last.contains(v)).map(|(_, v)| *v);
+        let new = open.is_none();
+        let viewport = open.unwrap_or_else(|| {
+            w.next += 1;
+            let v = egui::ViewportId::from_hash_of((id, w.next));
+            w.open.retain(|(b, _)| *b != base);
+            w.open.push((base, v));
+            v
+        });
+        w.shown.push(viewport);
+        let place = match w.placed.iter().find(|(v, _)| *v == viewport) {
+            Some((_, at)) => Some(*at),
+            None => {
+                let at = main.map(|r| r.min + vec2(60.0, 60.0));
+                if let Some(at) = at {
+                    w.placed.push((viewport, at));
+                }
+                at
+            }
+        };
+        (viewport, place, new)
+    });
+    let mut builder =
+        egui::ViewportBuilder::default().with_title(title).with_visible(true).with_inner_size(size).with_min_inner_size(vec2(480.0, 360.0));
+    if let Some(at) = place {
+        builder = builder.with_position(at);
+    }
+    if new && !ctx.embed_viewports() {
+        // A window that just opened comes to the front, above the main window that was clicked.
+        ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::Focus);
+    }
     let mut add = Some(add);
     let mut out = None;
     ctx.show_viewport_immediate(viewport, builder, |ui, class| {
@@ -891,6 +928,11 @@ struct Windows {
     shown: Vec<egui::ViewportId>,
     last: Vec<egui::ViewportId>,
     lingering: Vec<(egui::ViewportId, u32)>,
+    /// Where each open window was put when it opened, so it stays where the user moves it.
+    placed: Vec<(egui::ViewportId, egui::Pos2)>,
+    /// The window each item window's id has now, and the count that makes the next one new.
+    open: Vec<(egui::Id, egui::ViewportId)>,
+    next: u64,
 }
 
 /// Keeps each item window that just closed for a few more frames, hidden, before it is let go.
@@ -912,6 +954,8 @@ pub fn linger_closed_windows(ctx: &egui::Context) {
         }
         w.lingering.retain(|(_, frames)| *frames > 0);
     }
+    w.placed.retain(|(v, _)| w.shown.contains(v));
+    w.open.retain(|(_, v)| w.shown.contains(v));
     w.last = std::mem::take(&mut w.shown);
     ctx.data_mut(|d| d.insert_temp(id, w));
 }
