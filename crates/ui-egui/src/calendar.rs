@@ -2368,6 +2368,7 @@ fn form(
             show_as: ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
+            online: None,
         });
         ui.horizontal_wrapped(|ui| {
             helder::indent(ui);
@@ -2535,6 +2536,7 @@ mod tests {
             show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
+            online: None,
         };
         let moved = to_local(dropped_start(&a, d(2026, 10, 23), None).unwrap());
         assert_eq!((moved.date(), moved.time()), (d(2026, 10, 23), NaiveTime::from_hms_opt(14, 0, 0).unwrap()), "a month drop keeps the time");
@@ -2606,6 +2608,7 @@ mod tests {
             show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
+            online: None,
         };
         assert!(Editor::from_appointment(&a, None).private);
         assert_eq!(chip_title(&a), "🔒 Dokter");
@@ -2719,6 +2722,7 @@ mod tests {
             show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
+            online: None,
         };
         let back = Editor::from_appointment(&a, None);
         assert_eq!((back.start_date.as_str(), back.end_date.as_str()), ("21-10-2026", "21-10-2026"));
@@ -2781,6 +2785,7 @@ mod tests {
             show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
+            online: None,
         };
         let back = Editor::from_appointment(&a, Some(a.start + 86_400 * 61));
         assert_eq!((back.repeat, back.interval.as_str(), back.ends, back.count.as_str()), (Some(Frequency::Monthly), "2", Ends::AfterCount, "8"));

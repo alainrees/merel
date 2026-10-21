@@ -206,9 +206,23 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         show_as: if str_of(e, "transparency") == "transparent" { ShowAs::Free } else { ShowAs::Busy },
         categories: categories_of(e),
         meeting: None,
+        online: online_of(e),
     }
     .validated()
     .ok()
+}
+
+/// The Google Meet link, or the video entry point of another conference added to the event.
+fn online_of(e: &Value) -> Option<String> {
+    let video = || {
+        e.get("conferenceData")?
+            .get("entryPoints")?
+            .as_array()?
+            .iter()
+            .find(|p| str_of(p, "entryPointType") == "video")
+            .map(|p| str_of(p, "uri").to_string())
+    };
+    Some(str_of(e, "hangoutLink").to_string()).filter(|u| !u.is_empty()).or_else(video)
 }
 
 /// Google has no categories; Merel keeps their names in a private extended property, one
@@ -572,6 +586,16 @@ mod tests {
         assert_eq!(url_of("task:MTIz").unwrap(), format!("{TASKS}/MTIz"));
         assert!(matches!(url_of("AAMk"), Err(MailboxError::BadName(_))));
         assert!(matches!(url_of("event:../x"), Ok(u) if u.ends_with("/..%2Fx")));
+    }
+
+    #[test]
+    fn a_meet_link_comes_along() {
+        let times = json!({ "start": { "dateTime": "2026-10-14T19:46:40+02:00" }, "end": { "dateTime": "2026-10-14T20:46:40+02:00" } });
+        let meet = json!({ "id": "e1", "summary": "Overleg", "start": times["start"], "end": times["end"], "hangoutLink": "https://meet.google.com/abc-defg-hij" });
+        assert_eq!(appointment_of(&meet).unwrap().online.as_deref(), Some("https://meet.google.com/abc-defg-hij"));
+        let zoom = json!({ "id": "e2", "summary": "Klant", "start": times["start"], "end": times["end"],
+            "conferenceData": { "entryPoints": [{ "entryPointType": "phone", "uri": "tel:+31-20" }, { "entryPointType": "video", "uri": "https://zoom.us/j/123" }] } });
+        assert_eq!(appointment_of(&zoom).unwrap().online.as_deref(), Some("https://zoom.us/j/123"));
     }
 
     #[test]

@@ -101,6 +101,11 @@ pub struct Appointment {
     /// an appointment of your own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meeting: Option<Meeting>,
+    /// The link to join it online, as the server names it (Microsoft 365's online meeting,
+    /// Google Meet). A link in the location or notes is found without it; see
+    /// [`Appointment::meeting_link`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub online: Option<String>,
 }
 
 /// The most people one meeting invites.
@@ -440,6 +445,16 @@ impl Appointment {
         query.split_whitespace().all(|w| text.contains(&w.to_lowercase()))
     }
 
+    /// The way to join it online: the link the server named, else the first link to a meeting
+    /// service in the location and then the notes.
+    pub fn meeting_link(&self) -> Option<crate::MeetingLink> {
+        self.online
+            .as_deref()
+            .and_then(crate::meeting_link)
+            .or_else(|| crate::find_meeting_link(&self.location))
+            .or_else(|| crate::find_meeting_link(&self.notes))
+    }
+
     /// Cleans the free text and checks the times; what comes back is safe to store and show.
     pub fn validated(mut self) -> Result<Self, AppointmentError> {
         self.title = clean_text(self.title.trim());
@@ -455,6 +470,7 @@ impl Appointment {
         self.reminder = self.reminder.map(|m| m.min(MAX_REMINDER));
         self.categories = crate::clean_categories(std::mem::take(&mut self.categories));
         self.meeting = self.meeting.take().map(Meeting::validated);
+        self.online = self.online.take().and_then(|u| crate::online::meeting_link(&u)).map(|l| l.url);
         if let Some(r) = self.recurrence.take() {
             let r = r.normalized();
             if self.end - self.start > r.shortest_gap() {
@@ -564,6 +580,7 @@ mod tests {
             show_as: ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
+            online: None,
         }
     }
 

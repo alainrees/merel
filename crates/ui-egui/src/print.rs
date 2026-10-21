@@ -383,6 +383,7 @@ mod tests {
             show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
+            online: None,
         };
         let mon = d(2026, 10, 19);
         let tue = d(2026, 10, 20);

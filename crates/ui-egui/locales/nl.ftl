@@ -27,6 +27,7 @@ language-english-hint = Merel in het Engels
 module-mail = E-mail
 module-calendar = Agenda
 module-chat = Chat
+module-meetings = Vergaderen
 module-people = Contacten
 module-tasks = Taken
 tab-file = Bestand
@@ -43,6 +44,7 @@ menu-file = Bestand
 menu-message = Bericht
 menu-calendar = Agenda
 menu-chat = Chat
+menu-meetings = Vergaderen
 menu-people = Contactpersonen
 menu-tasks = Taken
 menu-folder = Map
@@ -239,3 +241,33 @@ chat-accept-sent = Uitnodiging aangenomen. Zodra { $name } antwoordt, staat de c
 chat-pending = Wacht op antwoord van { $name }
 chat-verified = geverifieerd
 chat-show-invite = Uitnodigingslink tonen
+
+## Vergaderen
+
+meet-today = Vandaag
+meet-week = Komende 7 dagen
+meet-plan = Vergadering plannen
+meet-join-link = Deelnemen via link
+meet-none-today = Vandaag staan er geen onlinevergaderingen in je agenda.
+meet-none-week = De komende 7 dagen staan er geen onlinevergaderingen in je agenda.
+meet-found-note = Merel vindt de vergaderlink in je afspraken en uitnodigingen.
+meet-who = { $organizer } · { $count ->
+    [one] 1 persoon
+   *[other] { $count } personen
+}
+meet-starts-in = Begint over { $minutes } min
+meet-now = Nu bezig
+meet-ended = Afgelopen
+meet-join = Deelnemen
+meet-join-named = Deelnemen aan { $title }
+meet-copy = Link kopiëren
+meet-copied = Gekopieerd
+meet-via = Onlinevergadering via { $service }
+meet-via-link = Onlinevergadering via een link
+meet-organizer = { $name } (organisator)
+meet-browser-note = Deelnemen opent de vergadering in je browser. Heb je de app van de dienst, dan neemt die het over.
+meet-title = Vergaderen
+meet-intro = Hier staan de onlinevergaderingen uit je agenda, van Microsoft 365, Zoom, Google Meet en andere diensten. Kies er een om deel te nemen.
+meet-paste-title = Deelnemen via een link
+meet-paste-hint = Plak een vergaderlink (https://…)
+meet-paste-bad = Dat is geen vergaderlink. Een vergaderlink begint met https:// en bevat geen spaties.

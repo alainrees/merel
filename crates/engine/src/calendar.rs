@@ -85,6 +85,18 @@ impl Session {
         list
     }
 
+    /// The occurrences in `[from, to)` that can be joined online, each with its link, earliest
+    /// first; see [`Appointment::meeting_link`].
+    pub fn online_meetings(&self, from: i64, to: i64) -> Vec<(Appointment, merel_model::MeetingLink)> {
+        self.appointments_between(from, to)
+            .into_iter()
+            .filter_map(|a| {
+                let link = a.meeting_link()?;
+                Some((a, link))
+            })
+            .collect()
+    }
+
     /// Whether a command changed the calendar since the last call.
     pub fn take_calendar_dirty(&mut self) -> bool {
         std::mem::take(&mut self.calendar_dirty)
@@ -124,7 +136,9 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 /// left out, an existing appointment keeps its status and a new one is busy. `categories` is
 /// a list of category names; left out, an existing appointment keeps its categories. `meeting`
 /// is a [`merel_model::Meeting`] (organiser, attendees and their answers) or null for an
-/// appointment of your own; left out, an existing appointment keeps its meeting.
+/// appointment of your own; left out, an existing appointment keeps its meeting. `online` is
+/// the link to join it online (an `https` address) or null for none; left out, an existing
+/// appointment keeps its link.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
         Some(id) => Some(s.appointment(id).ok_or(CommandError::NotFound)?.clone()),
@@ -170,6 +184,11 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         Some(Value::Null) => None,
         Some(v) => Some(serde_json::from_value::<merel_model::Meeting>(v.clone()).map_err(|_| CommandError::Param("meeting"))?),
     };
+    let online = match params.get("online") {
+        None => existing.as_ref().and_then(|a| a.online.clone()),
+        Some(Value::Null) => None,
+        Some(v) => Some(v.as_str().and_then(merel_model::meeting_link).ok_or(CommandError::Param("online"))?.url),
+    };
     let id = match (&existing, &account) {
         (Some(a), _) => a.id.clone(),
         (None, Some(account)) => s.pending_id(account),
@@ -192,6 +211,7 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         show_as,
         categories,
         meeting,
+        online,
     }
     .validated()
     .map_err(|e| match e {
@@ -425,6 +445,30 @@ mod tests {
         assert_eq!(titles(s.appointments_matching("WEEK", 0, 3 * week)).len(), 3, "one hit per occurrence in the period");
         assert_eq!(titles(s.appointments_matching("week start", 0, week)), [("Weekstart".to_string(), 10_000)], "every word must occur");
         assert!(s.appointments_matching("lunch", 0, 3 * week).is_empty());
+    }
+
+    #[test]
+    fn online_meetings_are_the_ones_with_a_link_and_an_edit_keeps_it() {
+        let mut s = Session::default();
+        s.set_calendar_data(CalendarFile::default());
+        s.run("appointment.save", &json!({ "title": "Tandarts", "start": 3_600, "end": 7_200, "location": "Centrum" })).unwrap();
+        s.run("appointment.save", &json!({ "title": "Klant", "start": 8_000, "end": 9_000, "notes": "Inbellen: https://zoom.us/j/42" })).unwrap();
+        s.run("appointment.save", &json!({ "title": "Weekstart", "start": 10_000, "end": 11_800, "online": "https://meet.example.org/week" }))
+            .unwrap();
+        let id = s.selected_appointment().unwrap().id.clone();
+        let found = |s: &Session| s.online_meetings(0, 86_400).into_iter().map(|(a, l)| (a.title, l.url)).collect::<Vec<_>>();
+        assert_eq!(
+            found(&s),
+            [("Klant".to_string(), "https://zoom.us/j/42".to_string()), ("Weekstart".to_string(), "https://meet.example.org/week".to_string())]
+        );
+        s.run("appointment.save", &json!({ "id": id, "title": "Weekstart", "start": 10_000, "end": 12_000 })).unwrap();
+        assert_eq!(s.appointment(&id).unwrap().online.as_deref(), Some("https://meet.example.org/week"), "left out, the link stays");
+        assert!(
+            s.run("appointment.save", &json!({ "id": id, "title": "Weekstart", "start": 10_000, "end": 12_000, "online": "http://x.example" }))
+                .is_err()
+        );
+        s.run("appointment.save", &json!({ "id": id, "title": "Weekstart", "start": 10_000, "end": 12_000, "online": null })).unwrap();
+        assert_eq!(found(&s).len(), 1);
     }
 
     #[test]

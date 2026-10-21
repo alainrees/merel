@@ -27,6 +27,7 @@ language-english-hint = Merel in English
 module-mail = Mail
 module-calendar = Calendar
 module-chat = Chat
+module-meetings = Meetings
 module-people = People
 module-tasks = Tasks
 tab-file = File
@@ -43,6 +44,7 @@ menu-file = File
 menu-message = Message
 menu-calendar = Calendar
 menu-chat = Chat
+menu-meetings = Meetings
 menu-people = People
 menu-tasks = Tasks
 menu-folder = Folder
@@ -239,3 +241,33 @@ chat-accept-sent = Invitation accepted. As soon as { $name } answers, the chat i
 chat-pending = Waiting for { $name } to answer
 chat-verified = verified
 chat-show-invite = Show invitation link
+
+## Meetings
+
+meet-today = Today
+meet-week = Next 7 days
+meet-plan = Plan a meeting
+meet-join-link = Join with a link
+meet-none-today = There are no online meetings in your calendar today.
+meet-none-week = There are no online meetings in your calendar in the next 7 days.
+meet-found-note = Merel finds the meeting link in your appointments and invitations.
+meet-who = { $organizer } · { $count ->
+    [one] 1 person
+   *[other] { $count } people
+}
+meet-starts-in = Starts in { $minutes } min
+meet-now = Now
+meet-ended = Ended
+meet-join = Join
+meet-join-named = Join { $title }
+meet-copy = Copy link
+meet-copied = Copied
+meet-via = Online meeting via { $service }
+meet-via-link = Online meeting via a link
+meet-organizer = { $name } (organiser)
+meet-browser-note = Join opens the meeting in your browser. If you have the service's app, it takes over.
+meet-title = Meetings
+meet-intro = Here are the online meetings in your calendar, from Microsoft 365, Zoom, Google Meet and other services. Pick one to join.
+meet-paste-title = Join with a link
+meet-paste-hint = Paste a meeting link (https://…)
+meet-paste-bad = That is not a meeting link. A meeting link starts with https:// and has no spaces.

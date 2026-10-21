@@ -29,6 +29,7 @@ pub mod importance;
 pub mod install;
 pub mod invitation;
 pub mod junk;
+pub mod meet;
 pub mod meeting;
 pub mod menubar;
 pub mod message_menu;
@@ -73,18 +74,20 @@ pub enum Module {
     Mail,
     Calendar,
     Chat,
+    Meet,
     People,
     Tasks,
 }
 
 impl Module {
-    const ALL: [Module; 5] = [Module::Mail, Module::Calendar, Module::Chat, Module::People, Module::Tasks];
+    const ALL: [Module; 6] = [Module::Mail, Module::Calendar, Module::Chat, Module::Meet, Module::People, Module::Tasks];
 
     fn label(self) -> String {
         tr(match self {
             Module::Mail => "module-mail",
             Module::Calendar => "module-calendar",
             Module::Chat => "module-chat",
+            Module::Meet => "module-meetings",
             Module::People => "module-people",
             Module::Tasks => "module-tasks",
         })
@@ -95,6 +98,7 @@ impl Module {
             Module::Mail => helder::Icon::Mail,
             Module::Calendar => helder::Icon::Calendar,
             Module::Chat => helder::Icon::MessagesSquare,
+            Module::Meet => helder::Icon::Video,
             Module::People => helder::Icon::User,
             Module::Tasks => helder::Icon::CircleCheck,
         }
@@ -138,6 +142,7 @@ pub struct MailApp {
     pub contacts: contacts::State,
     pub tasks: tasks::State,
     pub chat: chat::State,
+    pub meet: meet::State,
     /// What the last action has to say, shown at the top of the window (see [`notice`]).
     notice: Option<notice::Notice>,
     /// The message whose body is on screen; when it changes, its pictures leave the cache.
@@ -290,6 +295,7 @@ impl MailApp {
             contacts: contacts::State::default(),
             tasks: tasks::State::default(),
             chat: chat::State::default(),
+            meet: meet::State::default(),
             notice: None,
             unsubscribe: None,
             receipts_sent: Default::default(),
@@ -477,6 +483,8 @@ impl MailApp {
             calendar::show(self, ui, &t);
         } else if self.module == Module::Chat {
             chat::show(self, ui, &t);
+        } else if self.module == Module::Meet {
+            meet::show(self, ui, &t);
         } else if self.module == Module::People {
             contacts::show(self, ui, &t);
         } else {
@@ -514,7 +522,7 @@ fn module_shortcuts(app: &mut MailApp, ctx: &egui::Context) {
         return;
     }
     let (box_id, query) = match app.module {
-        Module::Mail => return,
+        Module::Mail | Module::Meet => return,
         Module::Calendar => (calendar::SEARCH_BOX, &mut app.calendar.query),
         Module::Chat => (chat::SEARCH_BOX, &mut app.chat.query),
         Module::People => (contacts::SEARCH_BOX, &mut app.contacts.query),
@@ -928,6 +936,7 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         match app.tab {
                             Tab::Home if app.module == Module::Calendar => calendar_ribbon(app, ui, t),
                             Tab::Home if app.module == Module::Chat => chat::ribbon(app, ui, t),
+                            Tab::Home if app.module == Module::Meet => meet::ribbon(app, ui, t),
                             Tab::Home if app.module == Module::People => contacts::ribbon(app, ui, t),
                             Tab::Home if app.module == Module::Tasks => tasks::ribbon(app, ui, t),
                             Tab::Home => mail_ribbon(app, ui, t),
@@ -974,6 +983,7 @@ fn menu_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         Module::Mail => "menu-message",
         Module::Calendar => "menu-calendar",
         Module::Chat => "menu-chat",
+        Module::Meet => "menu-meetings",
         Module::People => "menu-people",
         Module::Tasks => "menu-tasks",
     });
@@ -981,6 +991,7 @@ fn menu_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         Module::Mail => mail_ribbon(app, ui, t),
         Module::Calendar => calendar_ribbon(app, ui, t),
         Module::Chat => chat::ribbon(app, ui, t),
+        Module::Meet => meet::ribbon(app, ui, t),
         Module::People => contacts::ribbon(app, ui, t),
         Module::Tasks => tasks::ribbon(app, ui, t),
     });
@@ -3177,6 +3188,35 @@ mod tests {
         h.run_steps(3);
         h.get_by_label("Uitnodiging aangenomen. Zodra Bob antwoordt, staat de chat klaar.");
         h.get_by_label("Wacht op antwoord van Bob (bob@example.org)");
+    }
+
+    #[test]
+    fn the_meetings_module_lists_online_meetings_and_joins_them() {
+        let mut h = harness();
+        let now = chrono::Local::now().timestamp();
+        let params = serde_json::json!({ "title": "Kwartaaloverleg", "start": now - 60, "end": now + 3_600, "notes": "Inbellen: https://us02web.zoom.us/j/8812345?pwd=xyz" });
+        h.state_mut().engine.run("appointment.save", &params).unwrap();
+        h.state_mut().module = Module::Meet;
+        h.run();
+        h.get_by_label_contains("Kwartaaloverleg, ").click();
+        h.run();
+        h.get_by_label("Onlinevergadering via Zoom");
+        h.get_by_label("Link kopiëren").click();
+        h.run();
+        h.get_by_label("Gekopieerd");
+        h.get_by_label("Deelnemen aan Kwartaaloverleg");
+
+        h.state_mut().meet.selected = None;
+        h.state_mut().meet.paste = "http://zoom.us/j/1".into();
+        h.run();
+        h.get_all_by_label("Deelnemen").last().unwrap().click();
+        h.run();
+        assert!(h.state().meet.paste_error.is_some(), "only an https link is taken");
+        h.state_mut().meet.paste = "https://meet.jit.si/merel-test".into();
+        h.run();
+        h.get_all_by_label("Deelnemen").last().unwrap().click();
+        h.run();
+        assert!(h.state().meet.paste.is_empty() && h.state().meet.paste_error.is_none());
     }
 
     #[test]
