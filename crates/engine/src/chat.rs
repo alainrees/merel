@@ -18,6 +18,8 @@ use crate::{Engine, SAMPLE_ACCOUNT, Session};
 pub const CHAT_SUBJECT: &str = "Chatbericht";
 /// Most people in a group chat Merel starts.
 pub const MAX_CHAT_PEOPLE: usize = 50;
+/// How many of a chat's latest messages are fetched when it opens.
+pub const CHAT_LOAD: usize = 100;
 
 /// A conversation of chat messages.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -136,6 +138,33 @@ impl Session {
         self.chats().into_iter().find(|c| c.id == id)
     }
 
+    /// Opens the chat `id`: asks for the text of its latest messages and marks them read.
+    pub fn open_chat(&mut self, id: &str) {
+        let Some(chat) = self.chat(id) else { return };
+        for message in chat.messages.iter().rev().take(CHAT_LOAD) {
+            self.request_body(message);
+            let _ = crate::commands::set_seen_one(self, message, true);
+        }
+    }
+
+    /// The text of the chat message `id`, once fetched: without the status line Delta Chat
+    /// puts under `-- `, and without trailing blank lines.
+    pub fn chat_text(&self, id: &str) -> Option<String> {
+        let text = self.bodies.get(id)?.text.replace("\r\n", "\n");
+        let text = match text.find("\n-- \n") {
+            Some(cut) => &text[..cut],
+            None => text.strip_prefix("-- \n").map(|_| "").unwrap_or(&text),
+        };
+        Some(text.trim_end().to_string())
+    }
+
+    /// Whether the chat message `id` came from the account it is listed under.
+    pub fn chat_is_mine(&self, id: &str) -> bool {
+        let Some(m) = self.message(id) else { return false };
+        let account = self.folder(&m.folder_id).and_then(|f| self.accounts.iter().find(|a| a.id == f.account_id));
+        account.is_some_and(|a| a.address.email().eq_ignore_ascii_case(m.from.email()))
+    }
+
     /// A chat message with `text` for `chat`, as an answer to its last message.
     pub fn chat_reply(&self, chat: &Chat, text: &str) -> Draft {
         let last = chat.messages.last().and_then(|id| self.messages.iter().find(|m| &m.id == id)).and_then(|m| m.message_id.clone());
@@ -183,7 +212,19 @@ fn chat_draft(people: Vec<Address>, tag: ChatTag, text: &str, in_reply_to: Optio
     }
 }
 
+/// Whether `account` lists the chat headers: an IMAP account. Microsoft 365, Exchange and
+/// Gmail list mail through their own interfaces, which do not hand them over yet.
+pub fn can_chat(account: &merel_model::Account) -> bool {
+    account.protocol == merel_model::Protocol::ImapSmtp && account.id != SAMPLE_ACCOUNT
+}
+
 impl Engine {
+    /// Opens the chat `id`; see [`Session::open_chat`].
+    pub fn open_chat(&mut self, id: &str) {
+        self.session.open_chat(id);
+        self.dispatch();
+    }
+
     /// Whether `account_id` can chat: it has an OpenPGP key.
     pub fn chat_ready(&self, account_id: &str) -> bool {
         self.pgp_key(account_id).is_some()
@@ -349,6 +390,22 @@ mod tests {
         assert_eq!(tag.group_id.map(|g| g.len()), Some(16));
         let named = new_chat(&[addr("ravi@example.org")], "Kwartaal", "Hoi").unwrap();
         assert_eq!(named.chat.and_then(|t| t.group_name).as_deref(), Some("Kwartaal"), "a name makes a group");
+    }
+
+    #[test]
+    fn opening_a_chat_marks_it_read_and_its_text_drops_the_status_line() {
+        let mut s = session();
+        let id = person_chat_id("a1", "sanne@example.org");
+        s.open_chat(&id);
+        assert_eq!(s.chat(&id).unwrap().unread, 0);
+        assert!(s.loading.contains("m1") && s.loading.contains("m2"), "the texts are fetched");
+        s.bodies.insert("m1".into(), merel_mime::Body { text: "Tot straks\r\n\r\n-- \r\nVerstuurd met Delta Chat\r\n".into(), ..Default::default() });
+        assert_eq!(s.chat_text("m1").as_deref(), Some("Tot straks"));
+        assert_eq!(s.chat_text("m2"), None, "not fetched yet");
+        assert!(s.chat_is_mine("m2") && !s.chat_is_mine("m1"));
+        s.selected_folder = Some("in".into());
+        assert!(s.visible_messages().iter().all(|m| m.chat.is_none()), "chat stays out of the mail list");
+        assert!(s.visible_messages().iter().any(|m| m.id == "m5"));
     }
 
     #[test]

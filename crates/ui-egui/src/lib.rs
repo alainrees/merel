@@ -11,6 +11,7 @@ pub mod calendar;
 pub mod calendars;
 pub mod categories;
 mod certificate;
+pub mod chat;
 pub mod cleanup;
 mod compose;
 pub mod contacts;
@@ -71,17 +72,19 @@ pub use theme::{APP_COLOR, Tokens};
 pub enum Module {
     Mail,
     Calendar,
+    Chat,
     People,
     Tasks,
 }
 
 impl Module {
-    const ALL: [Module; 4] = [Module::Mail, Module::Calendar, Module::People, Module::Tasks];
+    const ALL: [Module; 5] = [Module::Mail, Module::Calendar, Module::Chat, Module::People, Module::Tasks];
 
     fn label(self) -> String {
         tr(match self {
             Module::Mail => "module-mail",
             Module::Calendar => "module-calendar",
+            Module::Chat => "module-chat",
             Module::People => "module-people",
             Module::Tasks => "module-tasks",
         })
@@ -91,6 +94,7 @@ impl Module {
         match self {
             Module::Mail => helder::Icon::Mail,
             Module::Calendar => helder::Icon::Calendar,
+            Module::Chat => helder::Icon::MessagesSquare,
             Module::People => helder::Icon::User,
             Module::Tasks => helder::Icon::CircleCheck,
         }
@@ -133,6 +137,7 @@ pub struct MailApp {
     pub calendar: calendar::State,
     pub contacts: contacts::State,
     pub tasks: tasks::State,
+    pub chat: chat::State,
     /// What the last action has to say, shown at the top of the window (see [`notice`]).
     notice: Option<notice::Notice>,
     /// The message whose body is on screen; when it changes, its pictures leave the cache.
@@ -284,6 +289,7 @@ impl MailApp {
             calendar: calendar::State::default(),
             contacts: contacts::State::default(),
             tasks: tasks::State::default(),
+            chat: chat::State::default(),
             notice: None,
             unsubscribe: None,
             receipts_sent: Default::default(),
@@ -469,6 +475,8 @@ impl MailApp {
             }
         } else if self.module == Module::Calendar {
             calendar::show(self, ui, &t);
+        } else if self.module == Module::Chat {
+            chat::show(self, ui, &t);
         } else if self.module == Module::People {
             contacts::show(self, ui, &t);
         } else {
@@ -508,6 +516,7 @@ fn module_shortcuts(app: &mut MailApp, ctx: &egui::Context) {
     let (box_id, query) = match app.module {
         Module::Mail => return,
         Module::Calendar => (calendar::SEARCH_BOX, &mut app.calendar.query),
+        Module::Chat => (chat::SEARCH_BOX, &mut app.chat.query),
         Module::People => (contacts::SEARCH_BOX, &mut app.contacts.query),
         Module::Tasks => (tasks::SEARCH_BOX, &mut app.tasks.query),
     };
@@ -918,6 +927,7 @@ fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         ui.spacing_mut().button_padding = vec2(5.0, 4.0);
                         match app.tab {
                             Tab::Home if app.module == Module::Calendar => calendar_ribbon(app, ui, t),
+                            Tab::Home if app.module == Module::Chat => chat::ribbon(app, ui, t),
                             Tab::Home if app.module == Module::People => contacts::ribbon(app, ui, t),
                             Tab::Home if app.module == Module::Tasks => tasks::ribbon(app, ui, t),
                             Tab::Home => mail_ribbon(app, ui, t),
@@ -963,12 +973,14 @@ fn menu_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let module_menu = tr(match app.module {
         Module::Mail => "menu-message",
         Module::Calendar => "menu-calendar",
+        Module::Chat => "menu-chat",
         Module::People => "menu-people",
         Module::Tasks => "menu-tasks",
     });
     add(app, ui, module_menu, &|app, ui| match app.module {
         Module::Mail => mail_ribbon(app, ui, t),
         Module::Calendar => calendar_ribbon(app, ui, t),
+        Module::Chat => chat::ribbon(app, ui, t),
         Module::People => contacts::ribbon(app, ui, t),
         Module::Tasks => tasks::ribbon(app, ui, t),
     });
@@ -3052,6 +3064,90 @@ mod tests {
         h.run();
         assert!(h.state().engine.session.selected().is_none());
         assert!(h.state().engine.session.visible_messages().iter().all(|m| m.subject != subject));
+    }
+
+    /// An IMAP account `a1` with one unread chat message from Sanne in its inbox.
+    fn with_a_chat(app: &mut MailApp) {
+        use merel_model::{Account, Address, Auth, ChatTag, Flags, Folder, MessageHeader, Protocol, Server, Tls};
+        let s = &mut app.engine.session;
+        let me = Address::new(Some("Alain Rees"), "alain@voorbeeld.nl").unwrap();
+        s.accounts.push(Account {
+            id: "a1".into(),
+            name: "Alain Rees".into(),
+            address: me.clone(),
+            username: "alain@voorbeeld.nl".into(),
+            protocol: Protocol::ImapSmtp,
+            auth: Auth::Password,
+            incoming: Some(Server { host: "127.0.0.1".into(), port: 1, tls: Tls::Implicit }),
+            outgoing: None,
+            dav: None,
+            signature: String::new(),
+        });
+        s.folders.push(Folder {
+            id: "a1/INBOX".into(),
+            account_id: "a1".into(),
+            name: "Postvak IN".into(),
+            path: "INBOX".into(),
+            kind: FolderKind::Inbox,
+            unread: 1,
+            parent: None,
+        });
+        s.messages.push(MessageHeader {
+            id: "a1/INBOX#1".into(),
+            folder_id: "a1/INBOX".into(),
+            remote_id: "1".into(),
+            from: Address::new(Some("Sanne de Vries"), "sanne@example.org").unwrap(),
+            to: vec![me],
+            subject: "Chatbericht".into(),
+            date: 1_792_000_000,
+            preview: String::new(),
+            flags: Flags { seen: false, flagged: false, answered: false },
+            has_attachments: false,
+            message_id: Some("<c1@example.org>".into()),
+            categories: Vec::new(),
+            importance: merel_model::Importance::Normal,
+            chat: Some(ChatTag::default()),
+        });
+        s.bodies.insert("a1/INBOX#1".into(), merel_engine::Body { text: "Zie ik je om tien uur?".into(), ..Default::default() });
+    }
+
+    #[test]
+    fn the_chat_module_lists_a_chat_opens_it_and_sends_only_encrypted() {
+        let mut h = harness();
+        with_a_chat(h.state_mut());
+        h.state_mut().module = Module::Chat;
+        h.run();
+        h.get_by_label("Chat staat uit voor alain@voorbeeld.nl.");
+        h.get_by_label("Sanne de Vries, 1 ongelezen").click();
+        h.run();
+        let id = merel_engine::chat::person_chat_id("a1", "sanne@example.org");
+        assert_eq!(h.state().chat.selected.as_deref(), Some(id.as_str()));
+        assert_eq!(h.state().engine.session.chat(&id).unwrap().unread, 0, "opening reads it");
+        h.get_by_label("Zie ik je om tien uur?");
+        h.state_mut().chat.input = "Ja, tot dan".into();
+        h.run();
+        h.get_by_label("Verzenden").click();
+        h.run();
+        assert_eq!(h.state().chat.error.as_deref(), Some("Zet eerst chat aan voor dit account."));
+        assert_eq!(h.state().chat.input, "Ja, tot dan", "what was typed stays");
+        assert!(h.state().engine.session.outbox.is_empty(), "nothing went out");
+
+        h.get_by_label("Nieuwe chat").click();
+        h.run();
+        assert_eq!(h.state().chat.new.as_ref().map(|f| f.account_id.as_str()), Some("a1"));
+        h.get_by_label("Annuleren").click();
+        h.run();
+        assert!(h.state().chat.new.is_none());
+    }
+
+    #[test]
+    fn chat_messages_stay_out_of_the_mail_list() {
+        let mut h = harness();
+        with_a_chat(h.state_mut());
+        h.state_mut().engine.session.selected_folder = Some("a1/INBOX".into());
+        h.run();
+        assert!(h.query_by_label("Zie ik je om tien uur?").is_none());
+        assert!(h.state().engine.session.visible_messages().is_empty());
     }
 
     #[test]

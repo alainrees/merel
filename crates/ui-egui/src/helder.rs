@@ -594,7 +594,7 @@ pub fn ribbon_icon_only(label: &str) -> bool {
 /// Whether a ribbon button is its ribbon's blue main button: making something new.
 pub fn ribbon_primary(label: &str) -> bool {
     let label = &*crate::i18n::dutch(label);
-    matches!(label, "Nieuwe e-mail" | "Nieuwe afspraak" | "Nieuw contact" | "Nieuwe taak")
+    matches!(label, "Nieuwe e-mail" | "Nieuwe afspraak" | "Nieuw contact" | "Nieuwe taak" | "Nieuwe chat")
 }
 
 /// The icon of a ribbon button, by its label, else by the glyph it had before the Helder style.
@@ -633,7 +633,8 @@ pub fn ribbon_icon(label: &str, glyph: &str) -> Option<Icon> {
         "Onder" => Icon::PanelBottom,
         "Uit" => Icon::EyeOff,
         "Compact" => Icon::Rows,
-        "Gesprekken" => Icon::MessagesSquare,
+        "Gesprekken" | "Nieuwe chat" => Icon::MessagesSquare,
+        "Alle chats" => Icon::ArrowLeft,
         "Groepen" => Icon::ListTree,
         "Weeknummers" => Icon::Hash,
         "Werkuren" => Icon::Clock,
