@@ -3368,6 +3368,7 @@ dependencies = [
  "merel-smime",
  "merel-smtp",
  "merel-store",
+ "rand 0.8.8",
  "rustls-native-certs",
  "serde",
  "serde_json",

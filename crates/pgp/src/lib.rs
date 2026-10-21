@@ -42,6 +42,8 @@ pub enum PgpError {
     Sign,
     #[error("Het bericht kan niet met OpenPGP worden versleuteld.")]
     Encrypt,
+    #[error("Er kan geen nieuwe OpenPGP-sleutel worden gemaakt.")]
+    Generate,
 }
 
 /// What a key says about its holder.
@@ -145,6 +147,35 @@ impl SecretKey {
     /// in the clear and is wiped when dropped.
     pub fn to_stored(&self) -> Zeroizing<Vec<u8>> {
         Zeroizing::new(self.key.to_bytes().unwrap_or_default())
+    }
+
+    /// A new key for `email`, made the way Delta Chat makes one so its users can write back:
+    /// an Ed25519 key that signs and certifies, with a Curve25519 subkey that encrypts, no
+    /// passphrase (Merel seals it on disk itself) and no expiry.
+    pub fn generate(name: &str, email: &str) -> Result<SecretKey, PgpError> {
+        use pgp::composed::{EncryptionCaps, KeyType, SecretKeyParamsBuilder, SubkeyParamsBuilder};
+        use pgp::crypto::ecc_curve::ECCCurve;
+        use pgp::crypto::hash::HashAlgorithm;
+        use pgp::crypto::sym::SymmetricKeyAlgorithm;
+        let name: String = name.chars().filter(|c| !c.is_control() && !matches!(c, '<' | '>')).collect();
+        let user = if name.trim().is_empty() { format!("<{email}>") } else { format!("{} <{email}>", name.trim()) };
+        let sub = SubkeyParamsBuilder::default()
+            .key_type(KeyType::ECDH(ECCCurve::Curve25519Legacy))
+            .can_encrypt(EncryptionCaps::All)
+            .build()
+            .map_err(|_| PgpError::Generate)?;
+        let params = SecretKeyParamsBuilder::default()
+            .key_type(KeyType::Ed25519Legacy)
+            .can_certify(true)
+            .can_sign(true)
+            .primary_user_id(user)
+            .preferred_symmetric_algorithms([SymmetricKeyAlgorithm::AES256, SymmetricKeyAlgorithm::AES128].into_iter().collect())
+            .preferred_hash_algorithms([HashAlgorithm::Sha256, HashAlgorithm::Sha512].into_iter().collect())
+            .subkey(sub)
+            .build()
+            .map_err(|_| PgpError::Generate)?;
+        let key = params.generate(rand::rngs::OsRng).map_err(|_| PgpError::Generate)?;
+        SecretKey::assemble(key)
     }
 
     /// The key [`SecretKey::to_stored`] wrote.
@@ -391,6 +422,26 @@ mod tests {
         assert!(decrypt_message(&again, include_bytes!("../testdata/encrypted-gpg.eml"), &[]).is_ok());
         let rsa = SecretKey::import(include_bytes!("../testdata/rsa-secret.asc"), "geheim").unwrap();
         assert_eq!(rsa.info().emails, vec!["rsa@example.org".to_string()]);
+    }
+
+    #[test]
+    fn a_new_key_is_made_that_signs_encrypts_and_is_kept() {
+        let key = SecretKey::generate("Alain <Rees>", "alain@voorbeeld.nl").unwrap();
+        assert_eq!(key.info().name, "Alain Rees");
+        assert_eq!(key.info().emails, vec!["alain@voorbeeld.nl".to_string()]);
+        assert!(key.public().can_encrypt(0x7000_0000), "no expiry");
+        let again = SecretKey::from_stored(&key.to_stored()).unwrap();
+        assert_eq!(again.info(), key.info());
+        let other = SecretKey::generate("", "jij@example.org").unwrap();
+        assert_eq!(other.info().emails, vec!["jij@example.org".to_string()]);
+        assert_ne!(other.info().fingerprint, key.info().fingerprint);
+
+        // A message encrypted to the new key opens with it, and its signature checks out.
+        let raw = b"From: jij@example.org\r\nTo: alain@voorbeeld.nl\r\nSubject: Hoi\r\nContent-Type: text/plain\r\n\r\nTot straks\r\n";
+        let sent = encrypt_message(&other, raw, &[key.public()], true, 1_800_000_000).unwrap();
+        let (plain, verdict) = decrypt_message(&key, &sent, &[other.public()]).unwrap();
+        assert!(plain.windows(10).any(|w| w == b"Tot straks"));
+        assert!(matches!(verdict, Some(Verdict::Valid { .. })), "{verdict:?}");
     }
 
     #[test]

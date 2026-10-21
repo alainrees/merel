@@ -143,6 +143,7 @@ mod tests {
             message_id: None,
             categories: Vec::new(),
             importance: Default::default(),
+            chat: None,
         }
     }
 

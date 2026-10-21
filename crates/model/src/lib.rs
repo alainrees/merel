@@ -7,6 +7,7 @@
 mod address;
 mod calendar;
 mod categories;
+mod chat;
 mod contact;
 mod groups;
 mod junk;
@@ -23,6 +24,7 @@ pub use calendar::{
     MAX_OCCURRENCES, MAX_REMINDER, Meeting, Recurrence, Response, ShowAs, describe_recurrence,
 };
 pub use categories::{Category, CategoryColor, MAX_CATEGORY_NAME, MAX_ITEM_CATEGORIES, category_keyword, clean_categories};
+pub use chat::{CHAT_VERSION, ChatTag, MAX_GROUP_ID, MAX_GROUP_NAME as MAX_CHAT_GROUP_NAME};
 pub use contact::{Contact, ContactError};
 pub use groups::{ContactGroup, ContactGroupError, MAX_GROUP_MEMBERS, MAX_GROUP_NAME, mailbox};
 pub use junk::{JunkLevel, JunkLists, MAX_JUNK_ENTRY, entry_covers, junk_entry};
@@ -291,6 +293,9 @@ pub struct MessageHeader {
     /// How urgent the sender said the message is.
     #[serde(default, skip_serializing_if = "Importance::is_normal")]
     pub importance: Importance,
+    /// Set on a chat message (Delta Chat's chat over e-mail); see [`ChatTag`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat: Option<ChatTag>,
 }
 
 /// How urgent a message is, as the sender marked it: Outlook's "Hoge urgentie" and "Lage
@@ -343,6 +348,10 @@ pub struct Draft {
     /// The formatting over `body`; with it the message goes out as HTML with the text beside it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rich: Option<rich::Rich>,
+    /// Sends the draft as a chat message: with `Chat-Version` (and the group's headers), and
+    /// only end-to-end encrypted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat: Option<ChatTag>,
 }
 
 impl Draft {
@@ -452,6 +461,7 @@ impl StoredDraft {
             sign: self.sign,
             encrypt: self.encrypt,
             rich: rich.filter(|r| !r.is_plain()),
+            chat: None,
         })
     }
 

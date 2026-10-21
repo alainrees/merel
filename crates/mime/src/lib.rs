@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use mail_parser::{MessageParser, MimeHeaders};
 use merel_html::Document;
-use merel_model::{Address, Importance, clean_text, parse_address_list};
+use merel_model::{Address, ChatTag, Importance, clean_text, parse_address_list};
 
 /// Longest message body (bytes) that is parsed; the rest is dropped with a note.
 pub const MAX_BODY: usize = 8 * 1024 * 1024;
@@ -29,6 +29,8 @@ pub struct ParsedHeader {
     pub message_id: Option<String>,
     /// From the `Importance` header, else `X-Priority`.
     pub importance: Importance,
+    /// From `Chat-Version`, `Chat-Group-ID` and `Chat-Group-Name`: set on a chat message.
+    pub chat: Option<ChatTag>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -102,7 +104,19 @@ pub fn parse_header(bytes: &[u8]) -> ParsedHeader {
         date: m.date().map(|d| d.to_timestamp()),
         message_id: m.message_id().map(|id| format!("<{}>", clean_text(id.trim_matches(['<', '>'])))),
         importance: importance_of(&m),
+        chat: chat_of(&m),
     }
+}
+
+/// The chat headers Delta Chat writes. The group name is free text that may be RFC 2047
+/// encoded; mail-parser leaves headers it does not know raw, so it is decoded as a subject.
+fn chat_of(m: &mail_parser::Message<'_>) -> Option<ChatTag> {
+    let raw = |name: &str| m.headers_raw().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_string());
+    let name = raw("Chat-Group-Name").and_then(|v| {
+        let wrapped = format!("Subject: {v}\r\n\r\n");
+        MessageParser::default().parse(wrapped.as_bytes()).and_then(|w| w.subject().map(str::to_string))
+    });
+    ChatTag::from_headers(raw("Chat-Version").as_deref(), raw("Chat-Group-ID").as_deref(), name.as_deref())
 }
 
 /// `Importance: High|Low` wins; else `X-Priority` 1–2 is high and 4–5 is low, as mail programs

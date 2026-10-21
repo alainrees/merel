@@ -89,6 +89,7 @@ fn build() -> Option<Session> {
                 message_id: Some(format!("<sample-{i}@example.org>")),
                 categories: if i == 1 { vec!["Groene categorie".into()] } else { Vec::new() },
                 importance: if i == 1 { merel_model::Importance::High } else { merel_model::Importance::Normal },
+                chat: None,
             })
         })
         .collect();

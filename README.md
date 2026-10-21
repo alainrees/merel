@@ -317,6 +317,15 @@ and the sender (`multipart/encrypted`, signed inside, AES-256), once every recip
 both an S/MIME certificate and an OpenPGP key signs with S/MIME, and encrypts with OpenPGP only when that reaches every
 recipient and S/MIME does not.
 
+Chat over e-mail, the way Delta Chat does it, so a chat needs no server of its own and the other side can use Delta
+Chat on any device: a chat message is an ordinary message with a `Chat-Version: 1.0` header (and `Chat-Group-ID` and
+`Chat-Group-Name` for a group), which the IMAP listing fetches with the other headers. The engine makes chats from
+those messages, one per group and else one per person, with the copy in Verzonden items counted once and nothing from
+Junk or Verwijderde items. Turning chat on for an account keeps its OpenPGP key or makes one (Ed25519 with a
+Curve25519 subkey, as Delta Chat makes them), which from then on goes along with its mail in the `Autocrypt` header.
+A chat message only ever goes out encrypted and signed with OpenPGP; to someone whose key Merel does not have yet it
+does not go out at all, and Merel says to send an invitation first. The chat module in the window follows.
+
 A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
 hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the
 list until then and comes back unread, with a notice; the "Gesluimerd" filter on the Beeld tab shows
