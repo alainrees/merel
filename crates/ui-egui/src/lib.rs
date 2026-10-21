@@ -1854,8 +1854,8 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         let today = chrono::Local::now().date_naive();
         let due = app.engine.session.follow_up(&m.id).and_then(merel_engine::followup::due_day);
         let (text, late) = match due {
-            Some(d) if d < today => (format!("⚑ Opvolgen: verlopen op {}", dates::day_name(d)), true),
-            Some(d) if d == today => ("⚑ Opvolgen: vandaag".to_string(), false),
+            Some(d) if d < today => (format!("Opvolgen: verlopen op {}", dates::day_name(d)), true),
+            Some(d) if d == today => ("Opvolgen: vandaag".to_string(), false),
             Some(d) => (format!("⚑ Opvolgen vóór {}", dates::day_name(d)), false),
             None => ("⚑ Gemarkeerd voor opvolging".to_string(), false),
         };
@@ -3407,12 +3407,12 @@ mod tests {
         let mut h = harness();
         h.state_mut().run("message.follow_up", json!({ "when": "today", "id": "m3" }));
         h.run();
-        h.get_by_label("⚑ Opvolgen: Wat er deze maand speelt");
+        h.get_by_label("Opvolgen: Wat er deze maand speelt");
         h.get_by_label("Vandaag");
         assert!(h.state().announced_reminders.iter().any(|(k, _)| k == "followup:m3"), "the window asked for attention once");
         h.get_by_label("Sluiten").click();
         h.run();
-        assert!(h.query_by_label("⚑ Opvolgen: Wat er deze maand speelt").is_none(), "closed; the flag stays");
+        assert!(h.query_by_label("Opvolgen: Wat er deze maand speelt").is_none(), "closed; the flag stays");
         assert!(h.state().engine.session.message("m3").unwrap().flags.flagged);
         assert!(h.state().engine.session.follow_ups.iter().any(|f| f.dismissed));
     }
@@ -3427,7 +3427,7 @@ mod tests {
         let due = Local.from_local_datetime(&yesterday.and_time(NaiveTime::MIN)).earliest().unwrap().timestamp();
         h.state_mut().run("task.save", json!({ "title": "Belastingaangifte", "due": due }));
         h.run();
-        h.get_by_label("☑ Taak: Belastingaangifte");
+        h.get_by_label("Taak: Belastingaangifte");
         h.get_by_label("Gisteren");
         assert!(h.state().announced_reminders.iter().any(|(k, _)| k.starts_with("task:")), "the window asked for attention once");
         h.get_by_label("Openen").click();
@@ -3436,7 +3436,7 @@ mod tests {
         assert_eq!(h.state().engine.session.selected_task().map(|t| t.title.as_str()), Some("Belastingaangifte"));
         h.get_by_label("Sluiten").click();
         h.run();
-        assert!(h.query_by_label("☑ Taak: Belastingaangifte").is_none(), "closed; the task stays open");
+        assert!(h.query_by_label("Taak: Belastingaangifte").is_none(), "closed; the task stays open");
         assert!(h.state().engine.session.tasks.iter().any(|t| t.title == "Belastingaangifte" && !t.done));
         let id = h.state().engine.session.tasks.iter().find(|t| t.title == "Belastingaangifte").map(|t| t.id.clone()).unwrap();
         assert!(h.state().engine.session.tasks_data().dismissed.iter().any(|k| k.id == id && k.due == due), "closing is kept for this due day");
@@ -3445,10 +3445,10 @@ mod tests {
         h.state_mut().module = Module::Mail;
         h.state_mut().run("task.save", json!({ "title": "Verslag", "due": due }));
         h.run();
-        h.get_by_label("☑ Taak: Verslag");
+        h.get_by_label("Taak: Verslag");
         h.get_by_label("Voltooid").click();
         h.run();
-        assert!(h.query_by_label("☑ Taak: Verslag").is_none());
+        assert!(h.query_by_label("Taak: Verslag").is_none());
         assert!(h.state().engine.session.tasks.iter().any(|t| t.title == "Verslag" && t.done), "Voltooid ticks the task off");
     }
 
