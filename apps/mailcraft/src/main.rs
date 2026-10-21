@@ -42,7 +42,27 @@ const MACOS_WINDOW_BUTTONS: f32 = 72.0;
 /// The app icon for the window, the Dock and the taskbar; the installers carry the same picture.
 const ICON: &[u8] = include_bytes!("../../../packaging/icon-256.png");
 
+/// Writes warnings and errors to the terminal, so a window that fails to open says why.
+struct Stderr;
+
+impl log::Log for Stderr {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Warn
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            eprintln!("[{} {}] {}", record.level(), record.target(), record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
 fn main() -> eframe::Result {
+    if log::set_logger(&Stderr).is_ok() {
+        log::set_max_level(log::LevelFilter::Warn);
+    }
     mailcraft_oauth::install_crypto();
     mailcraft_touch_bar::guard();
     let mut viewport = egui::ViewportBuilder::default()
@@ -64,8 +84,13 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Mailcraft",
         options,
-        Box::new(|#[cfg_attr(not(target_os = "macos"), allow(unused_variables))] cc| {
+        Box::new(|cc| {
             let engine = Engine::load(Arc::new(Keychain), config::default_path());
+            // MAILCRAFT_EMBEDDED_WINDOWS=1 opens items inside the main window, should windows
+            // of their own not work on a system.
+            if std::env::var_os("MAILCRAFT_EMBEDDED_WINDOWS").is_some() {
+                cc.egui_ctx.set_embed_viewports(true);
+            }
             let mut app = MailApp::new(engine);
             if cfg!(target_os = "macos") {
                 app.title_bar_inset = MACOS_WINDOW_BUTTONS;

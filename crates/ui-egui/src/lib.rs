@@ -4482,6 +4482,67 @@ mod tests {
     }
 
     #[test]
+    fn an_appointment_in_the_day_view_opens_with_a_double_click_and_from_its_right_click_menu() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.state_mut().calendar.view = calendar::View::Day;
+        h.state_mut().calendar.focus = calendar::today();
+        h.run();
+        // A double click, as in Outlook, opens the appointment in its window.
+        let block = h.get_by_label_contains("Overleg ontwerp\n");
+        block.click();
+        block.click();
+        h.run();
+        let e = h.state().calendar.editor.as_ref().expect("a double click opens the appointment");
+        assert_eq!((e.id.as_deref(), e.title.as_str()), (Some("sample-0"), "Overleg ontwerp"));
+        assert!(h.query_by_label("Opslaan").is_some(), "the window shows");
+        h.state_mut().calendar.editor = None;
+        h.run();
+
+        // A right click offers Openen and Verwijderen.
+        h.get_by_label_contains("Overleg ontwerp\n").click_secondary();
+        h.run();
+        assert!(h.state().calendar.editor.is_none(), "a right click only shows the menu");
+        h.get_by_label(calendar::OPEN_MENU).click();
+        h.run();
+        assert_eq!(h.state().calendar.editor.as_ref().and_then(|e| e.id.as_deref()), Some("sample-0"), "Openen opens it");
+        h.state_mut().calendar.editor = None;
+        h.run();
+
+        let block = h.get_by_label_contains("Overleg ontwerp\n").rect();
+        h.get_by_label_contains("Overleg ontwerp\n").click_secondary();
+        h.run();
+        // The menu's, not the ribbon's, under the block where it was clicked.
+        h.query_all_by_label("Verwijderen").find(|n| n.rect().top() > block.top()).expect("Verwijderen in the menu").click();
+        h.run();
+        assert!(h.state().engine.session.appointment("sample-0").is_none(), "Verwijderen deletes it");
+        assert!(h.state().calendar.editor.is_none());
+    }
+
+    #[test]
+    fn the_right_click_menu_of_a_series_deletes_one_occurrence_or_all() {
+        let mut h = harness();
+        h.state_mut().module = Module::Calendar;
+        h.state_mut().calendar.view = calendar::View::Month;
+        h.state_mut().calendar.focus = calendar::today();
+        h.run();
+        let series = |h: &egui_kittest::Harness<'static, MailApp>| h.query_all_by_label_contains("Weekstart").count();
+        let before = series(&h);
+        assert!(before > 1, "the weekly sample shows more than once in the month");
+        h.query_all_by_label_contains("Weekstart").next().expect("a Weekstart").click_secondary();
+        h.run();
+        assert_eq!(h.query_all_by_label("Verwijderen").count(), 1, "only the ribbon's: a series asks which");
+        h.get_by_label(calendar::DELETE_ONE_MENU).click();
+        h.run();
+        assert_eq!(series(&h), before - 1, "only that occurrence goes");
+        h.query_all_by_label_contains("Weekstart").next().expect("another Weekstart").click_secondary();
+        h.run();
+        h.get_by_label(calendar::DELETE_SERIES_MENU).click();
+        h.run();
+        assert_eq!(series(&h), 0, "the whole series goes");
+    }
+
+    #[test]
     fn dragging_the_bottom_edge_of_an_appointment_changes_its_end() {
         let mut h = harness();
         h.state_mut().module = Module::Calendar;
