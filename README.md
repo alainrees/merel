@@ -324,7 +324,10 @@ those messages, one per group and else one per person, with the copy in Verzonde
 Junk or Verwijderde items. Turning chat on for an account keeps its OpenPGP key or makes one (Ed25519 with a
 Curve25519 subkey, as Delta Chat makes them), which from then on goes along with its mail in the `Autocrypt` header.
 A chat message only ever goes out encrypted and signed with OpenPGP; to someone whose key Merel does not have yet it
-does not go out at all, and Merel says to send an invitation first. The chat module in the window follows.
+does not go out at all, and Merel says to send an invitation first. The Chat module, between Agenda and Personen,
+lists the chats with search and the chips Alle, Ongelezen and Groepen, shows a conversation with one's own messages on
+the right and a line to type in, and starts a chat with one person or a group. Chat messages stay out of the mail
+folders' lists.
 
 A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
 hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the

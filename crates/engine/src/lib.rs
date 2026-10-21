@@ -656,6 +656,8 @@ impl Session {
             // filter shows.
             .filter(|m| (self.filter == view::Filter::Snoozed) == self.snoozed_until(m, now).is_some())
             .filter(|m| self.category_filter.as_deref().is_none_or(|c| m.categories.iter().any(|x| x.eq_ignore_ascii_case(c))))
+            // Chat messages are read in the chat module, as Gmail keeps its chat apart.
+            .filter(|m| m.chat.is_none())
             .collect();
         list.sort_by(|a, b| self.sort.order(a, b));
         list
