@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+merel-i18n = { workspace = true }
 merel-model = { workspace = true }
 merel-mime = { workspace = true }
 merel-mailbox = { workspace = true }

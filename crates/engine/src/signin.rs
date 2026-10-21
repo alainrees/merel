@@ -77,12 +77,12 @@ impl Credentials {
 
 pub fn describe(e: &OAuthError) -> String {
     match e {
-        OAuthError::Listen(_) => "Kon geen poort openen voor het aanmelden.".into(),
-        OAuthError::Browser(_) => "Kon de browser niet openen.".into(),
-        OAuthError::Cancelled => "Het aanmelden is afgebroken of duurde te lang.".into(),
-        OAuthError::State => "Het aanmelden kwam verkeerd terug; probeer het opnieuw.".into(),
-        OAuthError::Provider(m) => format!("De aanbieder weigerde: {}", merel_model::clean_text(m)),
-        OAuthError::Http(_) => "Kon de aanbieder niet bereiken.".into(),
+        OAuthError::Listen(_) => merel_i18n::tr("signin-no-port"),
+        OAuthError::Browser(_) => merel_i18n::tr("signin-no-browser"),
+        OAuthError::Cancelled => merel_i18n::tr("signin-cancelled"),
+        OAuthError::State => merel_i18n::tr("signin-state"),
+        OAuthError::Provider(m) => merel_i18n::tr_args("signin-refused", &[("error", merel_model::clean_text(m).into())]),
+        OAuthError::Http(_) => merel_i18n::tr("signin-unreachable"),
     }
 }
 
@@ -96,12 +96,10 @@ pub struct SignIn {
 /// Runs the browser sign-in on the calling thread and stores what it yields.
 pub fn run(secrets: &Arc<dyn SecretStore>, sign_in: SignIn) -> Result<Account, String> {
     let Some(client) = oauth_client(&sign_in.account, sign_in.client_secret.clone()) else {
-        return Err("Dit account gebruikt geen aanmelding via de browser.".into());
+        return Err(merel_i18n::tr("signin-not-oauth"));
     };
     let tokens = client.sign_in(true).map_err(|e| describe(&e))?;
-    let refresh = tokens
-        .refresh_token
-        .ok_or_else(|| "De aanbieder gaf geen vernieuwingstoken; probeer opnieuw en geef toestemming voor offline toegang.".to_string())?;
+    let refresh = tokens.refresh_token.ok_or_else(|| merel_i18n::tr("signin-no-refresh"))?;
     secrets.set(&sign_in.account.id, &refresh).map_err(|e| e.to_string())?;
     if let Some(cs) = &sign_in.client_secret {
         secrets.set(&client_secret_key(&sign_in.account.id), cs).map_err(|e| e.to_string())?;
@@ -116,14 +114,14 @@ pub fn account(protocol: Protocol, name: &str, email: &str, client_id: &str) -> 
 }
 
 fn account_with(protocol: Protocol, name: &str, email: &str, client_id: &str, builtin: Option<&str>) -> Result<Account, String> {
-    let preset = protocol.preset().ok_or_else(|| "Kies Gmail of Microsoft 365.".to_string())?;
-    let address = merel_model::Address::new(Some(name.trim()), email.trim()).map_err(|_| "Vul een geldig e-mailadres in.".to_string())?;
+    let preset = protocol.preset().ok_or_else(|| merel_i18n::tr("signin-pick-provider"))?;
+    let address = merel_model::Address::new(Some(name.trim()), email.trim()).map_err(|_| merel_i18n::tr("account-bad-email"))?;
     let client_id = match client_id.trim() {
         "" => builtin.unwrap_or_default(),
         own => own,
     };
     if client_id.is_empty() || client_id.chars().any(|c| c.is_control() || c.is_whitespace()) {
-        return Err("Vul de client-ID in die je bij de aanbieder hebt aangemaakt.".into());
+        return Err(merel_i18n::tr("signin-need-client-id"));
     }
     let id = format!(
         "{}-{}",

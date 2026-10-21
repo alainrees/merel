@@ -1465,3 +1465,208 @@ account-add-title = Account toevoegen
 
 search-recent = Recente zoekopdrachten
 search-recent-clear = Lijst wissen
+
+## Connections
+
+conn-no-thread = Kon geen achtergrondtaak starten.
+conn-stopped = De verbinding is gestopt.
+conn-not-connected = Dit account is niet verbonden.
+conn-login = De server accepteert de gebruikersnaam of het wachtwoord niet.
+conn-bad-name = Een naam is niet toegestaan.
+conn-smtp-login = De uitgaande server accepteert de gebruikersnaam of het wachtwoord niet.
+conn-no-incoming = Dit account heeft geen inkomende server.
+conn-no-outgoing = Dit account heeft geen uitgaande server.
+conn-panic = Merel liep vast bij het verbinden ({ $detail }). Herstart Merel; meld het als het blijft gebeuren.
+conn-cannot-connect-because = Kan geen verbinding maken met { $host }: { $reason }.
+conn-auth-scheme = De server eist een aanmeldmethode die Merel nog niet ondersteunt ({ $scheme }). Vraag de beheerder om Basic-verificatie voor EWS, of gebruik een Microsoft 365-account.
+conn-server-error = De server gaf een fout: { $error }
+conn-cannot-connect = Kan geen verbinding maken met { $host }.
+conn-refused-message = De server weigerde het bericht: { $error }
+conn-items-failed = Agenda en adresboek: { $error }
+
+## Browser sign-in
+
+signin-no-port = Kon geen poort openen voor het aanmelden.
+signin-no-browser = Kon de browser niet openen.
+signin-cancelled = Het aanmelden is afgebroken of duurde te lang.
+signin-state = Het aanmelden kwam verkeerd terug; probeer het opnieuw.
+signin-unreachable = Kon de aanbieder niet bereiken.
+signin-not-oauth = Dit account gebruikt geen aanmelding via de browser.
+signin-no-refresh = De aanbieder gaf geen vernieuwingstoken; probeer opnieuw en geef toestemming voor offline toegang.
+signin-pick-provider = Kies Gmail of Microsoft 365.
+signin-need-client-id = Vul de client-ID in die je bij de aanbieder hebt aangemaakt.
+signin-refused = De aanbieder weigerde: { $error }
+
+## Engine
+
+no-subject-capital = (Geen onderwerp)
+send-needs-account = Voeg eerst een echt account toe om te kunnen versturen.
+no-credentials = Geen wachtwoord of aanmelding in de sleutelhanger.
+signin-sample = Aanmelden kan niet in de voorbeeldmodus.
+account-gone = Dit account bestaat niet meer.
+account-is-oauth = Dit account meldt zich aan via de browser; gebruik Opnieuw aanmelden.
+remove-keychain-password = wachtwoord of aanmelding: { $error }
+remove-keychain-app = app-registratie: { $error }
+remove-keychain-failed = Het account is weg, maar de sleutelhanger gaf een fout ({ $problems }).
+
+## Signing and encryption
+
+sign-no-cert = Dit account heeft geen certificaat om mee te ondertekenen. Importeer er een onder Bestand, of zet Ondertekenen uit.
+chat-encrypted-only = Een chatbericht gaat alleen versleuteld de deur uit.
+encrypt-no-key = Dit account heeft geen certificaat of OpenPGP-sleutel. Importeer er een onder Bestand om versleuteld te mailen, of zet Versleutelen uit.
+decrypt-no-cert = Dit bericht is versleuteld, maar je hebt voor dit account geen certificaat met privésleutel. Importeer het onder Bestand om het te lezen.
+message-gone-short = Dit bericht is er niet meer.
+cert-from-junk = Een certificaat uit Ongewenste e-mail wordt niet vertrouwd.
+cert-no-signature = Dit bericht heeft geen geldige handtekening.
+cert-too-big = Dit bestand is te groot voor een certificaat.
+cert-not-stored = Het certificaat kan niet worden bewaard.
+certs-unreadable = De certificaten kunnen niet worden gelezen.
+sign-cert-unusable = { $error } Importeer een nieuw certificaat onder Bestand, of zet Ondertekenen uit.
+encrypt-missing = Van { $who } is nog geen certificaat of sleutel bekend, dus het bericht kan niet versleuteld naar { $count ->
+    [one] die ontvanger
+   *[other] deze ontvangers
+} worden gestuurd. Vraag om eerst een ondertekend bericht te sturen.
+cert-not-sender = Dit certificaat is niet van de afzender { $from }.
+no-email-address = geen e-mailadres
+cert-wrong-address = Dit certificaat is uitgegeven voor { $issued }, niet voor { $email }.
+cert-not-stored-because = Het certificaat kan niet worden bewaard: { $error }
+
+## Chat errors
+
+chat-pick-someone = Kies ten minste één persoon om mee te chatten.
+chat-type-first = Typ eerst een bericht.
+chat-turn-on-first = Zet eerst chat aan voor dit account.
+chat-too-many = Een chat kan met hoogstens { $max } personen.
+chat-not-yet = Met { $who } kun je nog niet versleuteld chatten. Stuur eerst een uitnodiging.
+
+## Scheduled sending
+
+scheduled-failed = Het uitgestelde bericht "{ $subject }" is niet verzonden en staat weer bij Concepten. { $why }
+
+## OpenPGP keys
+
+decrypt-no-pgp = Dit bericht is met OpenPGP versleuteld, maar je hebt voor dit account geen OpenPGP-sleutel. Importeer die onder Bestand om het te lezen.
+pgp-not-stored = De sleutel kan niet worden bewaard.
+pgp-wrong-address = Deze sleutel hoort bij { $issued }, niet bij { $email }.
+pgp-not-stored-because = De sleutel kan niet worden bewaard: { $error }
+
+## Sync
+
+sync-still-saving = dit item wordt nog opgeslagen op de server, probeer het zo opnieuw
+
+## IMAP connection problems
+
+imap-no-answer-tls = de server reageert niet; klopt de keuze tussen TLS en STARTTLS bij deze poort?
+imap-refused = de server weigert de verbinding; klopt de poort?
+imap-tls-dropped = de server verbrak de beveiligde verbinding; klopt de keuze tussen TLS en STARTTLS bij deze poort?
+imap-no-longer-answers = de server reageert niet meer
+imap-host-not-found = de servernaam is niet gevonden; klopt hij?
+imap-host-invalid = de servernaam is niet geldig
+imap-dropped = de server verbrak de verbinding; klopt de keuze tussen TLS en STARTTLS bij deze poort?
+imap-not-imap = de server stuurt iets anders dan IMAP; klopt de poort?
+imap-no-starttls = de server weigert STARTTLS; kies TLS of een andere poort
+imap-untrusted-cert = het certificaat van de server wordt niet vertrouwd ({ $detail })
+imap-tls-failed-port = de beveiligde verbinding mislukte ({ $detail }); klopt de keuze tussen TLS en STARTTLS bij deze poort?
+imap-timeout = de server reageert niet (na { $seconds } seconden opgegeven); klopt de servernaam en de poort?
+imap-tls-setup = de beveiliging kon niet worden ingesteld ({ $detail })
+tls-failed = de beveiligde verbinding mislukte ({ $detail })
+
+## Calendar and address book servers
+
+dav-needs-password = CalDAV/CardDAV werkt met een wachtwoord, niet met een browser-aanmelding
+dav-no-answer = de server reageert niet
+dav-host-not-found = de servernaam is niet gevonden; klopt het adres?
+dav-refused = de server weigert de verbinding
+dav-needs-https = de DAV-server moet via https bereikbaar zijn
+dav-gone = Dit item bestaat niet meer op de server.
+dav-changed = Dit item is op de server gewijzigd; vernieuw en probeer het opnieuw.
+dav-unreadable = Dit item is niet leesbaar.
+dav-no-address-book = Geen adresboek gevonden op de server.
+dav-contact-unreadable = Dit contact is niet leesbaar.
+dav-recurring = Herhalende afspraken kun je nog niet bewerken in Merel; doe dat in de agenda van je aanbieder.
+dav-no-calendar-at = Geen agenda gevonden op { $host }.
+dav-address-book-at = Adresboek op { $host }: { $error }
+dav-no-principal = { $host } noemt geen gebruikersprincipal
+dav-no-prop = { $host } noemt geen { $prop }
+dav-no-tasks = Deze server bewaart geen taken.
+dav-no-calendar = Geen agenda gevonden.
+
+## S/MIME
+
+smime-pkcs12 = Het wachtwoord klopt niet, of dit is geen PKCS#12-bestand (.p12 of .pfx).
+smime-no-key = Dit bestand bevat geen privésleutel met certificaat.
+smime-rsa-only = Merel ondersteunt voorlopig alleen certificaten met een RSA-sleutel.
+smime-key-mismatch = De privésleutel hoort niet bij het certificaat.
+smime-not-email = Dit certificaat is niet bedoeld voor e-mail.
+smime-not-yet-valid = Dit certificaat is nog niet geldig.
+smime-expired = Dit certificaat is verlopen.
+smime-cert-unreadable = Het certificaat kan niet worden gelezen.
+smime-sign-failed = Het bericht kan niet worden ondertekend.
+smime-recipient-key = Het certificaat van een ontvanger is niet geschikt om naar te versleutelen.
+smime-encrypt-failed = Het bericht kan niet worden versleuteld.
+smime-not-for-me = Het bericht is niet voor jouw certificaat versleuteld.
+sig-unreadable = de handtekening kan niet worden gelezen
+sig-no-signer = er staat geen ondertekenaar in
+sig-no-cert = het certificaat van de afzender zit er niet bij
+sig-sha1 = de afzender gebruikt het verouderde SHA-1
+crypto-unknown-algorithm = de afzender gebruikt een onbekend algoritme
+sig-unknown-key = de afzender gebruikt een onbekend soort sleutel
+sig-cert-unreadable = het certificaat van de afzender kan niet worden gelezen
+sig-not-smime = het is geen S/MIME-handtekening
+sig-malformed = het bericht is niet goed opgebouwd
+smime-decrypt = Dit bericht is versleuteld, maar { $reason }.
+
+## S/MIME envelopes
+
+smime-3des = de afzender gebruikt het verouderde Triple DES
+smime-not-opened = het bericht kan niet worden ontsleuteld
+
+## OpenPGP
+
+pgp-not-a-key = Dit is geen OpenPGP-sleutel (een .asc- of .gpg-bestand met een privésleutel).
+pgp-revoked = Deze sleutel is ingetrokken.
+pgp-no-decrypt-key = Deze sleutel heeft geen deel om berichten mee te openen.
+pgp-not-for-me = Het bericht is niet voor jouw sleutel versleuteld.
+pgp-decrypt-failed = Dit bericht is versleuteld, maar het kan niet worden geopend.
+pgp-sign-failed = Het bericht kan niet met je OpenPGP-sleutel worden ondertekend.
+pgp-encrypt-failed = Het bericht kan niet met OpenPGP worden versleuteld.
+pgp-generate-failed = Er kan geen nieuwe OpenPGP-sleutel worden gemaakt.
+
+## Local store
+
+store-crypto = de cache kan niet worden versleuteld
+store-bad-key = de cachesleutel in de sleutelhanger is ongeldig
+store-keychain = de sleutelhanger is niet beschikbaar: { $detail }
+store-io = de cache kan niet worden geschreven: { $detail }
+
+## Sending
+
+smtp-too-big = De bijlagen zijn samen te groot; maximaal { $mb } MB.
+
+## Reading messages
+
+mime-truncated = Bericht afgekapt: te groot om volledig te tonen.
+
+## Drafts
+
+draft-check-to = Controleer de adressen bij Aan.
+draft-check-cc = Controleer de adressen bij CC.
+draft-check-bcc = Controleer de adressen bij BCC.
+draft-need-to = Vul ten minste één ontvanger in bij Aan.
+
+## Safety warnings
+
+warn-impersonation = De afzender noemt zich "{ $name }", maar het adres is een ander dan je van die naam kent.
+warn-lookalike = Het domein { $domain } lijkt op { $like }, maar is het niet.
+warn-unauthenticated = Je mailserver kon niet bevestigen dat dit bericht echt van de afzender komt ({ $checks } mislukt).
+warn-misleading-link = Een link toont { $shown } maar gaat naar { $host }.
+warn-risky-attachment = De bijlage { $name } is een programma; open die niet.
+
+## Browser sign-in
+
+oauth-page-ok = Gelukt
+oauth-page-ok-text = Je bent aangemeld. Je kunt dit venster sluiten en teruggaan naar Merel.
+oauth-page-err = Niet gelukt
+oauth-page-err-text = Het aanmelden is niet gelukt. Ga terug naar Merel en probeer het opnieuw.
+
+pgp-wrong-passphrase = De wachtwoordzin klopt niet.

@@ -4607,7 +4607,7 @@ mod tests {
         let mut h = harness();
         h.run();
         h.step();
-        let dirs = [concat!(env!("CARGO_MANIFEST_DIR"), "/src"), concat!(env!("CARGO_MANIFEST_DIR"), "/locales")];
+        let dirs = [concat!(env!("CARGO_MANIFEST_DIR"), "/src"), concat!(env!("CARGO_MANIFEST_DIR"), "/../i18n/locales")];
         // The atlas rectangle a character is drawn from. A character no font has gets the
         // replacement box, so the same rectangle as a CJK character means an empty box on screen.
         let drawn = |h: &mut egui_kittest::Harness<'static, MailApp>, c: char| {

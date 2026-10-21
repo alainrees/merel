@@ -76,7 +76,7 @@ impl PgpKeys {
         let people = self.people();
         let opened = match key {
             Some(key) => merel_pgp::decrypt_message(&key, raw, &people).map_err(|e| e.to_string()),
-            None => Err("Dit bericht is met OpenPGP versleuteld, maar je hebt voor dit account geen OpenPGP-sleutel. Importeer die onder Bestand om het te lezen.".to_string()),
+            None => Err(merel_i18n::tr("decrypt-no-pgp")),
         };
         match opened {
             Ok((plain, inner)) => {
@@ -108,18 +108,14 @@ impl Engine {
     /// OpenPGP key of `account_id`, unlocked with `passphrase`, replacing the one it had. One
     /// of the key's addresses must be the account's.
     pub fn import_pgp_key(&mut self, account_id: &str, bytes: &[u8], passphrase: &str) -> Result<KeyInfo, String> {
-        let account = self
-            .session
-            .accounts
-            .iter()
-            .find(|a| a.id == account_id && a.id != SAMPLE_ACCOUNT)
-            .ok_or_else(|| "Dit account bestaat niet meer.".to_string())?;
+        let account =
+            self.session.accounts.iter().find(|a| a.id == account_id && a.id != SAMPLE_ACCOUNT).ok_or_else(|| merel_i18n::tr("account-gone"))?;
         let key = SecretKey::import(bytes, passphrase).map_err(|e| e.to_string())?;
         let email = account.address.email().to_string();
         if !key.info().covers(&email) {
             let issued = key.info().emails.join(", ");
-            let issued = if issued.is_empty() { "geen e-mailadres".to_string() } else { issued };
-            return Err(format!("Deze sleutel hoort bij {issued}, niet bij {email}."));
+            let issued = if issued.is_empty() { merel_i18n::tr("no-email-address") } else { issued };
+            return Err(merel_i18n::tr_args("pgp-wrong-address", &[("issued", issued.into()), ("email", email.to_string().into())]));
         }
         self.keep_pgp_key(account_id, key)
     }
@@ -129,9 +125,11 @@ impl Engine {
         if !self.cache.has_store() {
             self.cache = crate::cache::Cache::open(self.config_path.as_deref(), &*self.secrets);
         }
-        self.cache.save_identity(account_id, KeyKind::OpenPgp, &key.to_stored()).map_err(|e| format!("De sleutel kan niet worden bewaard: {e}"))?;
+        self.cache
+            .save_identity(account_id, KeyKind::OpenPgp, &key.to_stored())
+            .map_err(|e| merel_i18n::tr_args("pgp-not-stored-because", &[("error", e.to_string().into())]))?;
         let info = key.info().clone();
-        self.keys.openpgp.own.write().map_err(|_| "De sleutel kan niet worden bewaard.".to_string())?.insert(account_id.to_string(), Arc::new(key));
+        self.keys.openpgp.own.write().map_err(|_| merel_i18n::tr("pgp-not-stored"))?.insert(account_id.to_string(), Arc::new(key));
         Ok(info)
     }
 

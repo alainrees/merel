@@ -57,31 +57,31 @@ const MAX_CHAIN: usize = 8;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum SmimeError {
-    #[error("Het wachtwoord klopt niet, of dit is geen PKCS#12-bestand (.p12 of .pfx).")]
+    #[error("{}", merel_i18n::tr("smime-pkcs12"))]
     Pkcs12,
-    #[error("Dit bestand bevat geen privésleutel met certificaat.")]
+    #[error("{}", merel_i18n::tr("smime-no-key"))]
     NoKey,
-    #[error("Merel ondersteunt voorlopig alleen certificaten met een RSA-sleutel.")]
+    #[error("{}", merel_i18n::tr("smime-rsa-only"))]
     KeyType,
-    #[error("De privésleutel hoort niet bij het certificaat.")]
+    #[error("{}", merel_i18n::tr("smime-key-mismatch"))]
     Mismatch,
-    #[error("Dit certificaat is niet bedoeld voor e-mail.")]
+    #[error("{}", merel_i18n::tr("smime-not-email"))]
     Usage,
-    #[error("Dit certificaat is nog niet geldig.")]
+    #[error("{}", merel_i18n::tr("smime-not-yet-valid"))]
     NotYetValid,
-    #[error("Dit certificaat is verlopen.")]
+    #[error("{}", merel_i18n::tr("smime-expired"))]
     Expired,
-    #[error("Het certificaat kan niet worden gelezen.")]
+    #[error("{}", merel_i18n::tr("smime-cert-unreadable"))]
     Certificate,
-    #[error("Het bericht kan niet worden ondertekend.")]
+    #[error("{}", merel_i18n::tr("smime-sign-failed"))]
     Sign,
-    #[error("Het certificaat van een ontvanger is niet geschikt om naar te versleutelen.")]
+    #[error("{}", merel_i18n::tr("smime-recipient-key"))]
     RecipientKey,
-    #[error("Het bericht kan niet worden versleuteld.")]
+    #[error("{}", merel_i18n::tr("smime-encrypt-failed"))]
     Encrypt,
-    #[error("Het bericht is niet voor jouw certificaat versleuteld.")]
+    #[error("{}", merel_i18n::tr("smime-not-for-me"))]
     NotForMe,
-    #[error("Dit bericht is versleuteld, maar {0}.")]
+    #[error("{}", merel_i18n::tr_args("smime-decrypt", &[("reason", _0.clone().into())]))]
     Decrypt(String),
 }
 
@@ -364,19 +364,19 @@ const SECP384R1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34")
 const ECDSA_WITH_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
 const ECDSA_WITH_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3");
 
-fn unchecked(reason: &str) -> Signature {
-    Signature::Unchecked(reason.to_string())
+fn unchecked(key: &str) -> Signature {
+    Signature::Unchecked(merel_i18n::tr(key))
 }
 
 /// Checks a detached signature `p7s` (CMS SignedData, RFC 5652) over `content`. Only the
 /// signature itself is checked; whether the certificate's issuer is trusted is
 /// [`issued_by_trusted`]'s question.
 pub fn verify_detached(content: &[u8], p7s: &[u8]) -> Signature {
-    let Ok(info) = ContentInfo::from_der(p7s) else { return unchecked("de handtekening kan niet worden gelezen") };
+    let Ok(info) = ContentInfo::from_der(p7s) else { return unchecked("sig-unreadable") };
     if info.content_type != ID_SIGNED_DATA {
-        return unchecked("de handtekening kan niet worden gelezen");
+        return unchecked("sig-unreadable");
     }
-    let Ok(data) = info.content.decode_as::<SignedData>() else { return unchecked("de handtekening kan niet worden gelezen") };
+    let Ok(data) = info.content.decode_as::<SignedData>() else { return unchecked("sig-unreadable") };
     let certs: Vec<&Certificate> = data
         .certificates
         .as_ref()
@@ -390,7 +390,7 @@ pub fn verify_detached(content: &[u8], p7s: &[u8]) -> Signature {
                 .collect()
         })
         .unwrap_or_default();
-    let Some(signer) = data.signer_infos.0.iter().next() else { return unchecked("er staat geen ondertekenaar in") };
+    let Some(signer) = data.signer_infos.0.iter().next() else { return unchecked("sig-no-signer") };
     let found = certs.iter().find(|c| match &signer.sid {
         SignerIdentifier::IssuerAndSerialNumber(isn) => {
             c.tbs_certificate().issuer() == &isn.issuer && c.tbs_certificate().serial_number() == &isn.serial_number
@@ -399,13 +399,13 @@ pub fn verify_detached(content: &[u8], p7s: &[u8]) -> Signature {
             matches!(c.tbs_certificate().get_extension::<x509_cert::ext::pkix::SubjectKeyIdentifier>(), Ok(Some((_, own))) if own == *ski)
         }
     });
-    let Some(cert) = found else { return unchecked("het certificaat van de afzender zit er niet bij") };
+    let Some(cert) = found else { return unchecked("sig-no-cert") };
     let (hash, sha) = match signer.digest_alg.oid {
         o if o == ID_SHA256 => (&digest::SHA256, 256),
         o if o == ID_SHA384 => (&digest::SHA384, 384),
         o if o == ID_SHA512 => (&digest::SHA512, 512),
-        o if o == ID_SHA1 => return unchecked("de afzender gebruikt het verouderde SHA-1"),
-        _ => return unchecked("de afzender gebruikt een onbekend algoritme"),
+        o if o == ID_SHA1 => return unchecked("sig-sha1"),
+        _ => return unchecked("crypto-unknown-algorithm"),
     };
     let digest = digest::digest(hash, content);
     // With signed attributes the signature covers them, and they carry the content's digest;
@@ -420,11 +420,11 @@ pub fn verify_detached(content: &[u8], p7s: &[u8]) -> Signature {
             match claimed {
                 Some(c) if c.as_bytes() == digest.as_ref() => {}
                 Some(_) => return Signature::Broken,
-                None => return unchecked("de handtekening kan niet worden gelezen"),
+                None => return unchecked("sig-unreadable"),
             }
             match attrs.to_der() {
                 Ok(der) => der,
-                Err(_) => return unchecked("de handtekening kan niet worden gelezen"),
+                Err(_) => return unchecked("sig-unreadable"),
             }
         }
         None => content.to_vec(),
@@ -439,7 +439,7 @@ pub fn verify_detached(content: &[u8], p7s: &[u8]) -> Signature {
             _ => &signature::RSA_PKCS1_2048_8192_SHA512,
         };
         if ![RSA_ENCRYPTION, SHA256_WITH_RSA, SHA384_WITH_RSA, SHA512_WITH_RSA].contains(&sig_alg) {
-            return unchecked("de afzender gebruikt een onbekend algoritme");
+            return unchecked("crypto-unknown-algorithm");
         }
         UnparsedPublicKey::new(algorithm, key).verify(&signed, signer.signature.as_bytes()).is_ok()
     } else if spki.algorithm.oid == EC_PUBLIC_KEY {
@@ -449,14 +449,14 @@ pub fn verify_detached(content: &[u8], p7s: &[u8]) -> Signature {
             (Some(c), 384) if c == SECP256R1 => &signature::ECDSA_P256_SHA384_ASN1,
             (Some(c), 256) if c == SECP384R1 => &signature::ECDSA_P384_SHA256_ASN1,
             (Some(c), 384) if c == SECP384R1 => &signature::ECDSA_P384_SHA384_ASN1,
-            _ => return unchecked("de afzender gebruikt een onbekend algoritme"),
+            _ => return unchecked("crypto-unknown-algorithm"),
         };
         if ![EC_PUBLIC_KEY, ECDSA_WITH_SHA256, ECDSA_WITH_SHA384].contains(&sig_alg) {
-            return unchecked("de afzender gebruikt een onbekend algoritme");
+            return unchecked("crypto-unknown-algorithm");
         }
         UnparsedPublicKey::new(algorithm, key).verify(&signed, signer.signature.as_bytes()).is_ok()
     } else {
-        return unchecked("de afzender gebruikt een onbekend soort sleutel");
+        return unchecked("sig-unknown-key");
     };
     if !ok {
         return Signature::Broken;
@@ -464,7 +464,7 @@ pub fn verify_detached(content: &[u8], p7s: &[u8]) -> Signature {
     let issuers = certs.iter().filter(|c| **c != *cert).filter_map(|c| c.to_der().ok()).collect();
     match (cert_info(cert), cert.to_der()) {
         (Ok(signer), Ok(certificate)) => Signature::Valid { signer, certificate, issuers, trusted: false },
-        _ => unchecked("het certificaat van de afzender kan niet worden gelezen"),
+        _ => unchecked("sig-cert-unreadable"),
     }
 }
 
@@ -479,10 +479,10 @@ pub fn check_message(raw: &[u8]) -> Option<Signature> {
         return None;
     }
     if !lower.contains("pkcs7-signature") {
-        return Some(unchecked("het is geen S/MIME-handtekening"));
+        return Some(unchecked("sig-not-smime"));
     }
-    let Some(boundary) = parameter(&kind, "boundary") else { return Some(unchecked("het bericht is niet goed opgebouwd")) };
-    let Some((content, p7s)) = signed_parts(body, boundary.as_bytes()) else { return Some(unchecked("het bericht is niet goed opgebouwd")) };
+    let Some(boundary) = parameter(&kind, "boundary") else { return Some(unchecked("sig-malformed")) };
+    let Some((content, p7s)) = signed_parts(body, boundary.as_bytes()) else { return Some(unchecked("sig-malformed")) };
     Some(verify_detached(content, &p7s))
 }
 

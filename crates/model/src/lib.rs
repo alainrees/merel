@@ -438,11 +438,11 @@ pub struct StoredDraft {
 impl StoredDraft {
     /// The message as it would go out: the address lines parsed, at least one recipient.
     pub fn to_draft(&self) -> Result<Draft, String> {
-        let to = parse_address_list(&self.to).map_err(|_| "Controleer de adressen bij Aan.".to_string())?;
-        let cc = parse_address_list(&self.cc).map_err(|_| "Controleer de adressen bij CC.".to_string())?;
-        let bcc = parse_address_list(&self.bcc).map_err(|_| "Controleer de adressen bij BCC.".to_string())?;
+        let to = parse_address_list(&self.to).map_err(|_| merel_i18n::tr("draft-check-to"))?;
+        let cc = parse_address_list(&self.cc).map_err(|_| merel_i18n::tr("draft-check-cc"))?;
+        let bcc = parse_address_list(&self.bcc).map_err(|_| merel_i18n::tr("draft-check-bcc"))?;
         if to.is_empty() {
-            return Err("Vul ten minste één ontvanger in bij Aan.".into());
+            return Err(merel_i18n::tr("draft-need-to"));
         }
         let rich = self.rich.clone().map(|mut r| {
             r.fit(&self.body);

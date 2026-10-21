@@ -32,11 +32,11 @@ const KEY_LEN: usize = 32;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
-    #[error("de sleutelhanger is niet beschikbaar: {0}")]
+    #[error("{}", merel_i18n::tr_args("store-keychain", &[("detail", _0.clone().into())]))]
     Keychain(String),
-    #[error("de cache kan niet worden geschreven: {0}")]
+    #[error("{}", merel_i18n::tr_args("store-io", &[("detail", _0.to_string().into())]))]
     Io(#[from] std::io::Error),
-    #[error("de cache kan niet worden versleuteld")]
+    #[error("{}", merel_i18n::tr("store-crypto"))]
     Crypto,
 }
 
@@ -105,7 +105,7 @@ impl Store {
     /// Opens the cache in `dir`, fetching the key from `secrets` or minting one on first use.
     pub fn open(dir: PathBuf, secrets: &dyn SecretStore) -> Result<Store, StoreError> {
         let key = match secrets.get(KEY_NAME).map_err(|e| StoreError::Keychain(e.to_string()))? {
-            Some(s) => decode_key(s.expose()).ok_or_else(|| StoreError::Keychain("de cachesleutel in de sleutelhanger is ongeldig".into()))?,
+            Some(s) => decode_key(s.expose()).ok_or_else(|| StoreError::Keychain(merel_i18n::tr("store-bad-key")))?,
             None => {
                 let mut key = Zeroizing::new([0u8; KEY_LEN]);
                 getrandom::fill(key.as_mut_slice()).map_err(|_| StoreError::Crypto)?;

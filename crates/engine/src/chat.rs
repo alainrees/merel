@@ -182,10 +182,10 @@ pub fn new_chat(people: &[Address], name: &str, text: &str) -> Result<Draft, Str
         }
     }
     if unique.is_empty() {
-        return Err("Kies ten minste één persoon om mee te chatten.".into());
+        return Err(merel_i18n::tr("chat-pick-someone"));
     }
     if unique.len() > MAX_CHAT_PEOPLE {
-        return Err(format!("Een chat kan met hoogstens {MAX_CHAT_PEOPLE} personen."));
+        return Err(merel_i18n::tr_args("chat-too-many", &[("max", MAX_CHAT_PEOPLE.into())]));
     }
     let name = merel_model::clean_text(name.trim()).chars().take(merel_model::MAX_CHAT_GROUP_NAME).collect::<String>();
     let tag = if unique.len() > 1 || !name.is_empty() {
@@ -237,12 +237,8 @@ impl Engine {
         if let Some(info) = self.pgp_key(account_id) {
             return Ok(info);
         }
-        let account = self
-            .session
-            .accounts
-            .iter()
-            .find(|a| a.id == account_id && a.id != SAMPLE_ACCOUNT)
-            .ok_or_else(|| "Dit account bestaat niet meer.".to_string())?;
+        let account =
+            self.session.accounts.iter().find(|a| a.id == account_id && a.id != SAMPLE_ACCOUNT).ok_or_else(|| merel_i18n::tr("account-gone"))?;
         let key = SecretKey::generate(&account.name, account.address.email()).map_err(|e| e.to_string())?;
         self.keep_pgp_key(account_id, key)
     }
@@ -251,13 +247,13 @@ impl Engine {
     /// the account's own key or a key for each person, it does not go out and says why.
     pub fn send_chat(&mut self, account_id: &str, draft: Draft) -> Result<u64, String> {
         if draft.chat.is_none() || !draft.encrypt {
-            return Err("Een chatbericht gaat alleen versleuteld de deur uit.".into());
+            return Err(merel_i18n::tr("chat-encrypted-only"));
         }
         if draft.body.trim().is_empty() && draft.attachments.is_empty() {
-            return Err("Typ eerst een bericht.".into());
+            return Err(merel_i18n::tr("chat-type-first"));
         }
         if !self.chat_ready(account_id) {
-            return Err("Zet eerst chat aan voor dit account.".into());
+            return Err(merel_i18n::tr("chat-turn-on-first"));
         }
         let missing = self.keys.openpgp.missing(draft.to.iter(), crate::drafts::now());
         if !missing.is_empty() {
@@ -270,8 +266,8 @@ impl Engine {
 /// Says with whom no encrypted chat is possible yet.
 pub(crate) fn missing_chat_text(missing: &[String]) -> String {
     match missing {
-        [one] => format!("Met {one} kun je nog niet versleuteld chatten. Stuur eerst een uitnodiging."),
-        many => format!("Met {} kun je nog niet versleuteld chatten. Stuur eerst een uitnodiging.", many.join(", ")),
+        [one] => merel_i18n::tr_args("chat-not-yet", &[("who", one.as_str().into())]),
+        many => merel_i18n::tr_args("chat-not-yet", &[("who", many.join(", ").into())]),
     }
 }
 
@@ -421,7 +417,7 @@ mod tests {
         let mut e = Engine::sample();
         e.add_account(account(), Secret::new("x")).unwrap();
         let draft = new_chat(&[addr("jij@example.org")], "", "Hoi").unwrap();
-        assert_eq!(e.send_chat("a1", draft.clone()).unwrap_err(), "Zet eerst chat aan voor dit account.");
+        assert_eq!(e.send_chat("a1", draft.clone()).unwrap_err(), merel_i18n::tr("chat-turn-on-first"));
         assert!(!e.chat_ready("a1"));
         let info = e.enable_chat("a1").unwrap();
         assert_eq!(info.emails, vec!["alain@voorbeeld.nl".to_string()]);
@@ -429,7 +425,7 @@ mod tests {
         assert!(e.chat_ready("a1"));
         assert_eq!(e.enable_chat("a1").unwrap(), info, "the key stays");
 
-        assert_eq!(e.send_chat("a1", Draft { encrypt: false, ..draft.clone() }).unwrap_err(), "Een chatbericht gaat alleen versleuteld de deur uit.");
+        assert_eq!(e.send_chat("a1", Draft { encrypt: false, ..draft.clone() }).unwrap_err(), merel_i18n::tr("chat-encrypted-only"));
         assert_eq!(
             e.send_chat("a1", draft.clone()).unwrap_err(),
             "Met jij@example.org kun je nog niet versleuteld chatten. Stuur eerst een uitnodiging."

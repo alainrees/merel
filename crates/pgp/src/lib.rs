@@ -26,23 +26,23 @@ const MAX_CONTENT: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PgpError {
-    #[error("Dit is geen OpenPGP-sleutel (een .asc- of .gpg-bestand met een privésleutel).")]
+    #[error("{}", merel_i18n::tr("pgp-not-a-key"))]
     NotAKey,
-    #[error("De wachtwoordzin klopt niet.")]
+    #[error("{}", merel_i18n::tr("pgp-wrong-passphrase"))]
     Passphrase,
-    #[error("Deze sleutel is ingetrokken.")]
+    #[error("{}", merel_i18n::tr("pgp-revoked"))]
     Revoked,
-    #[error("Deze sleutel heeft geen deel om berichten mee te openen.")]
+    #[error("{}", merel_i18n::tr("pgp-no-decrypt-key"))]
     NoEncryptionKey,
-    #[error("Het bericht is niet voor jouw sleutel versleuteld.")]
+    #[error("{}", merel_i18n::tr("pgp-not-for-me"))]
     NotForMe,
-    #[error("Dit bericht is versleuteld, maar het kan niet worden geopend.")]
+    #[error("{}", merel_i18n::tr("pgp-decrypt-failed"))]
     Decrypt,
-    #[error("Het bericht kan niet met je OpenPGP-sleutel worden ondertekend.")]
+    #[error("{}", merel_i18n::tr("pgp-sign-failed"))]
     Sign,
-    #[error("Het bericht kan niet met OpenPGP worden versleuteld.")]
+    #[error("{}", merel_i18n::tr("pgp-encrypt-failed"))]
     Encrypt,
-    #[error("Er kan geen nieuwe OpenPGP-sleutel worden gemaakt.")]
+    #[error("{}", merel_i18n::tr("pgp-generate-failed"))]
     Generate,
 }
 
@@ -254,15 +254,15 @@ fn hex(id: impl AsRef<[u8]>) -> String {
     id.as_ref().iter().map(|b| format!("{b:02X}")).collect()
 }
 
-fn unchecked(reason: &str) -> Verdict {
-    Verdict::Unchecked(reason.to_string())
+fn unchecked(key: &str) -> Verdict {
+    Verdict::Unchecked(merel_i18n::tr(key))
 }
 
 /// Checks the detached signature `signature` (armored or binary) over `content` against
 /// `keys`.
 pub fn verify_detached(content: &[u8], signature: &[u8], keys: &[PublicKey]) -> Verdict {
     let Ok((sig, _)) = DetachedSignature::from_reader_single(Cursor::new(signature)) else {
-        return unchecked("de handtekening kan niet worden gelezen");
+        return unchecked("sig-unreadable");
     };
     let fingerprints: Vec<String> = sig.signature.issuer_fingerprint().iter().map(|f| format!("{f:X}")).collect();
     let key_ids: Vec<String> = sig.signature.issuer_key_id().iter().map(hex).collect();
@@ -286,7 +286,7 @@ pub fn check_message(raw: &[u8], keys: &[PublicKey]) -> Option<Verdict> {
     if !lower.starts_with("multipart/signed") || !lower.contains("application/pgp-signature") {
         return None;
     }
-    let broken = || Some(unchecked("het bericht is niet goed opgebouwd"));
+    let broken = || Some(unchecked("sig-malformed"));
     let Some(boundary) = parameter(&kind, "boundary") else { return broken() };
     let Some((content, second)) = two_parts(body, boundary.as_bytes()) else { return broken() };
     let (_, signature) = split_entity(second);

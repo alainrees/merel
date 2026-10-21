@@ -156,7 +156,7 @@ pub fn parse_body(bytes: &[u8]) -> Body {
     };
     let rich = html.map(merel_html::parse).filter(|d| !d.is_empty());
     if truncated {
-        text.push_str("\n\n[Bericht afgekapt: te groot om volledig te tonen.]");
+        text.push_str(&format!("\n\n[{}]", merel_i18n::tr("mime-truncated")));
     }
     let wanted = rich.as_ref().map(Document::inline_image_ids).unwrap_or_default();
     let cid_of = |p: &mail_parser::MessagePart<'_>| p.content_id().map(|c| c.trim().trim_matches(['<', '>']).to_string());

@@ -1480,3 +1480,208 @@ account-add-title = Add account
 
 search-recent = Recent searches
 search-recent-clear = Clear list
+
+## Connections
+
+conn-no-thread = Could not start a background task.
+conn-stopped = The connection has stopped.
+conn-not-connected = This account is not connected.
+conn-login = The server does not accept the user name or the password.
+conn-bad-name = A name is not allowed.
+conn-smtp-login = The outgoing server does not accept the user name or the password.
+conn-no-incoming = This account has no incoming server.
+conn-no-outgoing = This account has no outgoing server.
+conn-panic = Merel got stuck while connecting ({ $detail }). Restart Merel; report it if it keeps happening.
+conn-cannot-connect-because = Cannot connect to { $host }: { $reason }.
+conn-auth-scheme = The server requires a sign-in method Merel does not support yet ({ $scheme }). Ask the administrator for Basic authentication for EWS, or use a Microsoft 365 account.
+conn-server-error = The server returned an error: { $error }
+conn-cannot-connect = Cannot connect to { $host }.
+conn-refused-message = The server refused the message: { $error }
+conn-items-failed = Calendar and address book: { $error }
+
+## Browser sign-in
+
+signin-no-port = Could not open a port for signing in.
+signin-no-browser = Could not open the browser.
+signin-cancelled = Signing in was stopped or took too long.
+signin-state = Signing in came back wrong; please try again.
+signin-unreachable = Could not reach the provider.
+signin-not-oauth = This account does not sign in through the browser.
+signin-no-refresh = The provider gave no refresh token; try again and allow offline access.
+signin-pick-provider = Choose Gmail or Microsoft 365.
+signin-need-client-id = Fill in the client ID you created with the provider.
+signin-refused = The provider refused: { $error }
+
+## Engine
+
+no-subject-capital = (No subject)
+send-needs-account = First add a real account to be able to send.
+no-credentials = No password or sign-in in the keychain.
+signin-sample = Signing in is not possible in sample mode.
+account-gone = This account no longer exists.
+account-is-oauth = This account signs in through the browser; use Sign in again.
+remove-keychain-password = password or sign-in: { $error }
+remove-keychain-app = app registration: { $error }
+remove-keychain-failed = The account is gone, but the keychain returned an error ({ $problems }).
+
+## Signing and encryption
+
+sign-no-cert = This account has no certificate to sign with. Import one under File, or turn Sign off.
+chat-encrypted-only = A chat message only goes out encrypted.
+encrypt-no-key = This account has no certificate or OpenPGP key. Import one under File to send encrypted mail, or turn Encrypt off.
+decrypt-no-cert = This message is encrypted, but you have no certificate with a private key for this account. Import it under File to read it.
+message-gone-short = This message is no longer there.
+cert-from-junk = A certificate from Junk Email is not trusted.
+cert-no-signature = This message has no valid signature.
+cert-too-big = This file is too large for a certificate.
+cert-not-stored = The certificate cannot be stored.
+certs-unreadable = The certificates cannot be read.
+sign-cert-unusable = { $error } Import a new certificate under File, or turn Sign off.
+encrypt-missing = No certificate or key is known yet for { $who }, so the message cannot be sent encrypted to { $count ->
+    [one] that recipient
+   *[other] these recipients
+}. Ask them to send a signed message first.
+cert-not-sender = This certificate is not from the sender { $from }.
+no-email-address = no email address
+cert-wrong-address = This certificate was issued for { $issued }, not for { $email }.
+cert-not-stored-because = The certificate cannot be stored: { $error }
+
+## Chat errors
+
+chat-pick-someone = Choose at least one person to chat with.
+chat-type-first = Type a message first.
+chat-turn-on-first = Turn on chat for this account first.
+chat-too-many = A chat can have at most { $max } people.
+chat-not-yet = You cannot chat encrypted with { $who } yet. Send an invitation first.
+
+## Scheduled sending
+
+scheduled-failed = The scheduled message "{ $subject }" was not sent and is back in Drafts. { $why }
+
+## OpenPGP keys
+
+decrypt-no-pgp = This message is encrypted with OpenPGP, but you have no OpenPGP key for this account. Import it under File to read it.
+pgp-not-stored = The key cannot be stored.
+pgp-wrong-address = This key belongs to { $issued }, not to { $email }.
+pgp-not-stored-because = The key cannot be stored: { $error }
+
+## Sync
+
+sync-still-saving = this item is still being saved on the server, try again in a moment
+
+## IMAP connection problems
+
+imap-no-answer-tls = the server does not answer; is the choice between TLS and STARTTLS right for this port?
+imap-refused = the server refuses the connection; is the port right?
+imap-tls-dropped = the server dropped the secure connection; is the choice between TLS and STARTTLS right for this port?
+imap-no-longer-answers = the server no longer answers
+imap-host-not-found = the server name was not found; is it right?
+imap-host-invalid = the server name is not valid
+imap-dropped = the server dropped the connection; is the choice between TLS and STARTTLS right for this port?
+imap-not-imap = the server sends something other than IMAP; is the port right?
+imap-no-starttls = the server refuses STARTTLS; choose TLS or another port
+imap-untrusted-cert = the server's certificate is not trusted ({ $detail })
+imap-tls-failed-port = the secure connection failed ({ $detail }); is the choice between TLS and STARTTLS right for this port?
+imap-timeout = the server does not answer (gave up after { $seconds } seconds); are the server name and the port right?
+imap-tls-setup = security could not be set up ({ $detail })
+tls-failed = the secure connection failed ({ $detail })
+
+## Calendar and address book servers
+
+dav-needs-password = CalDAV/CardDAV works with a password, not with a browser sign-in
+dav-no-answer = the server does not answer
+dav-host-not-found = the server name was not found; is the address right?
+dav-refused = the server refuses the connection
+dav-needs-https = the DAV server must be reachable over https
+dav-gone = This item no longer exists on the server.
+dav-changed = This item was changed on the server; refresh and try again.
+dav-unreadable = This item cannot be read.
+dav-no-address-book = No address book found on the server.
+dav-contact-unreadable = This contact cannot be read.
+dav-recurring = Recurring appointments cannot be edited in Merel yet; do that in your provider's calendar.
+dav-no-calendar-at = No calendar found on { $host }.
+dav-address-book-at = Address book on { $host }: { $error }
+dav-no-principal = { $host } names no user principal
+dav-no-prop = { $host } names no { $prop }
+dav-no-tasks = This server does not keep tasks.
+dav-no-calendar = No calendar found.
+
+## S/MIME
+
+smime-pkcs12 = The password is wrong, or this is not a PKCS#12 file (.p12 or .pfx).
+smime-no-key = This file holds no private key with a certificate.
+smime-rsa-only = For now Merel only supports certificates with an RSA key.
+smime-key-mismatch = The private key does not belong to the certificate.
+smime-not-email = This certificate is not meant for email.
+smime-not-yet-valid = This certificate is not valid yet.
+smime-expired = This certificate has expired.
+smime-cert-unreadable = The certificate cannot be read.
+smime-sign-failed = The message cannot be signed.
+smime-recipient-key = A recipient's certificate is not suitable for encrypting to.
+smime-encrypt-failed = The message cannot be encrypted.
+smime-not-for-me = The message is not encrypted for your certificate.
+sig-unreadable = the signature cannot be read
+sig-no-signer = it names no signer
+sig-no-cert = the sender's certificate is not included
+sig-sha1 = the sender uses the outdated SHA-1
+crypto-unknown-algorithm = the sender uses an unknown algorithm
+sig-unknown-key = the sender uses an unknown kind of key
+sig-cert-unreadable = the sender's certificate cannot be read
+sig-not-smime = it is not an S/MIME signature
+sig-malformed = the message is not put together properly
+smime-decrypt = This message is encrypted, but { $reason }.
+
+## S/MIME envelopes
+
+smime-3des = the sender uses the outdated Triple DES
+smime-not-opened = the message cannot be decrypted
+
+## OpenPGP
+
+pgp-not-a-key = This is not an OpenPGP key (an .asc or .gpg file with a private key).
+pgp-revoked = This key has been revoked.
+pgp-no-decrypt-key = This key has no part for opening messages.
+pgp-not-for-me = The message is not encrypted for your key.
+pgp-decrypt-failed = This message is encrypted, but it cannot be opened.
+pgp-sign-failed = The message cannot be signed with your OpenPGP key.
+pgp-encrypt-failed = The message cannot be encrypted with OpenPGP.
+pgp-generate-failed = No new OpenPGP key can be made.
+
+## Local store
+
+store-crypto = the cache cannot be encrypted
+store-bad-key = the cache key in the keychain is not valid
+store-keychain = the keychain is not available: { $detail }
+store-io = the cache cannot be written: { $detail }
+
+## Sending
+
+smtp-too-big = The attachments are too large together; { $mb } MB at most.
+
+## Reading messages
+
+mime-truncated = Message cut short: too large to show in full.
+
+## Drafts
+
+draft-check-to = Check the addresses in To.
+draft-check-cc = Check the addresses in Cc.
+draft-check-bcc = Check the addresses in Bcc.
+draft-need-to = Fill in at least one recipient in To.
+
+## Safety warnings
+
+warn-impersonation = The sender calls themselves "{ $name }", but the address is not the one you know for that name.
+warn-lookalike = The domain { $domain } looks like { $like }, but it is not.
+warn-unauthenticated = Your mail server could not confirm that this message really comes from the sender ({ $checks } failed).
+warn-misleading-link = A link shows { $shown } but goes to { $host }.
+warn-risky-attachment = The attachment { $name } is a program; do not open it.
+
+## Browser sign-in
+
+oauth-page-ok = Done
+oauth-page-ok-text = You are signed in. You can close this window and go back to Merel.
+oauth-page-err = That did not work
+oauth-page-err-text = Signing in did not work. Go back to Merel and try again.
+
+pgp-wrong-passphrase = The passphrase is wrong.
