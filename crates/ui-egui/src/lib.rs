@@ -24,6 +24,7 @@ pub mod helder;
 pub mod help;
 mod html;
 pub mod importance;
+pub mod install;
 pub mod invitation;
 pub mod junk;
 pub mod meeting;
@@ -2422,6 +2423,50 @@ mod tests {
         assert!(h.state().notice.is_none());
         h.state_mut().finish_update_check(Outcome::Failed("offline".into()));
         assert!(h.state().notice.is_none());
+    }
+
+    #[test]
+    fn the_update_wizard_shows_each_stage_and_never_walks_away_from_an_install() {
+        use install::{Job, Restart, Stage};
+        let mut h = harness();
+        h.run();
+        h.state_mut().updates.job = Some(Job::at("9.0.0", Stage::Downloading { done: 12_000_000, total: Some(38_000_000) }));
+        h.run();
+        h.get_by_label("Merel 9.0.0 downloaden");
+        h.get_by_label("12 van 38 MB");
+        h.get_by_label("Stap 2 van 4");
+        h.get_by_label(updates::CANCEL).click();
+        h.run();
+        assert!(h.state().updates.job.is_none(), "cancelling ends the download");
+
+        h.state_mut().updates.job = Some(Job::at("9.0.0", Stage::Ready(Restart::Relaunch("/Applications/Merel.app".into()))));
+        h.run();
+        h.get_by_label("Merel 9.0.0 is geïnstalleerd");
+        h.get_by_label(updates::RESTART);
+        h.get_by_label(updates::LATER).click();
+        h.run();
+        h.run();
+        assert!(h.state().updates.job.is_none());
+
+        h.state_mut().updates.job = Some(Job::at("9.0.0", Stage::Installing));
+        h.run();
+        h.get_by_label("Merel 9.0.0 installeren");
+        h.get_by_label(helder::CLOSE).click();
+        h.run();
+        assert!(h.state().updates.job.is_some(), "an install in progress is not closed");
+
+        h.state_mut().updates.job = Some(Job::at("9.0.0", Stage::Ready(Restart::Relaunch("/x".into()))));
+        h.run();
+        h.run();
+        h.get_by_label(updates::LATER).click();
+        h.run();
+        assert!(h.state().updates.job.is_none(), "once installed, Later closes it");
+        h.state_mut().updates.job =
+            Some(Job::at("9.0.0", Stage::Failed("De handtekening van deze versie klopt niet. Er is niets geïnstalleerd.".into())));
+        h.run();
+        h.get_by_label("Bijwerken is niet gelukt");
+        h.get_by_label(updates::PAGE);
+        assert!(h.query_by_label_contains("De handtekening van deze versie klopt niet").is_some());
     }
 
     #[test]

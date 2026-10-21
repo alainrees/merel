@@ -387,8 +387,21 @@ stay with the text fields).
 Merel tells you when a newer release is out: "Updates" on the Help tab asks GitHub right
 away, and "Elke dag controleren op een nieuwe versie" in "Over Merel" asks once a day (off
 until you switch it on). A newer version opens a small window with its release notes,
-"Downloaden" (the release page in the browser), "Deze versie overslaan" and "Later". Nothing is
-downloaded or installed by the app itself, and the question carries no account or identifier.
+"Bijwerken", "Deze versie overslaan" and "Later"; the question carries no account or identifier.
+
+"Bijwerken" is a short wizard: it downloads the installer for this platform from the release,
+checks it, installs it and offers "Opnieuw starten". On macOS the `.dmg` is mounted read-only
+and its `Merel.app` swapped in for the running one; on Windows the installer runs silently and
+starts Merel again; on Linux a new AppImage replaces the running one. Nothing is opened or run
+before two checks pass: the release's `SHA256SUMS.txt` carries an Ed25519 signature
+(`SHA256SUMS.txt.sig`) under the key in `crates/ui-egui/src/install.rs`, and the download
+matches its line in that list. When Merel cannot replace itself (run with `cargo`, installed
+from the `.deb`) or a check fails, the button opens the release page instead.
+
+The release key is made once with `cargo run -p merel-sign -- keygen`: the secret half goes into
+the repository's Actions secret `MEREL_SIGNING_KEY` (the release workflow signs with it), the
+public half into `SIGNING_KEY` in `install.rs`. A release without the secret is published
+unsigned, and the app then offers only the release page.
 
 The packaging files live in `packaging/`: the app icon, `macos/bundle.sh` with `Info.plist`,
 `windows/merel.iss` for Inno Setup and `linux/` with the desktop entry and the AppImage script.

@@ -1,6 +1,7 @@
 //! "Controleren op updates": asks GitHub which Merel release is the newest and, when it is
-//! newer than this build, says so in a small window with a button to the release page. Nothing
-//! is downloaded or installed here; the person downloads the installer in the browser.
+//! newer than this build, says so in a small window. "Bijwerken" there downloads, checks and
+//! installs it and starts Merel again ([`crate::install`]); where Merel cannot replace itself
+//! (run from source, from a `.deb`) the button opens the release page instead.
 //!
 //! The question goes out only when the person asks (Help tab) or has switched on the daily
 //! check, because it shows GitHub this computer's address and that Merel runs. It carries
@@ -16,6 +17,7 @@ use serde_json::Value;
 
 use crate::helder::{self, Icon};
 use crate::help::REPOSITORY;
+use crate::install::{self, Job, Restart, Stage};
 use crate::theme::Tokens;
 use crate::{MailApp, Notice};
 
@@ -32,6 +34,10 @@ const NOTES_CHARS: usize = 600;
 pub const WINDOW: &str = "Nieuwe versie van Merel";
 pub const CHECK: &str = "Updates";
 pub const DOWNLOAD: &str = "Downloaden";
+pub const UPDATE: &str = "Bijwerken";
+pub const RESTART: &str = "Opnieuw starten";
+pub const CANCEL: &str = "Annuleren";
+pub const PAGE: &str = "Downloadpagina openen";
 pub const SKIP: &str = "Deze versie overslaan";
 pub const LATER: &str = "Later";
 pub const AUTO: &str = "Elke dag controleren op een nieuwe versie";
@@ -75,6 +81,8 @@ pub struct Updates {
     last: Option<Instant>,
     /// The newer release the window shows, while it is open.
     pub offer: Option<Release>,
+    /// The update that is downloading or installing, once the person chose "Bijwerken".
+    pub job: Option<Job>,
 }
 
 impl Updates {
@@ -206,11 +214,27 @@ impl MailApp {
     }
 }
 
-/// The window that offers a newer release.
+/// Opens a release's page in the browser, saying so when that does not work.
+fn open_page(app: &mut MailApp, release: &Release) {
+    if let Err(e) = open::that_detached(release.page()) {
+        log::warn!("could not open the release page: {e}");
+        app.notice = Some(Notice::error(format!("Openen is niet gelukt: {}", release.page())));
+    }
+}
+
+/// The window that offers a newer release, and then walks through the update.
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    if app.updates.job.is_some() {
+        return progress(app, ctx, t);
+    }
     let Some(release) = app.updates.offer.clone() else { return };
+    let here = install::Install::detect().filter(|_| install::SIGNING_KEY.is_some());
     let mut close = false;
     let closed = helder::dialog(ctx, t, WINDOW, 460.0, |ui| {
+        if here.is_some() {
+            helder::step_dots(ui, t, 0, STEPS);
+            ui.add_space(12.0);
+        }
         helder::card_frame(t).inner_margin(20).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -226,14 +250,12 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| helder::paragraph(ui, t, &release.notes));
             }
             ui.add_space(12.0);
-            ui.add(
-                egui::Label::new(
-                    RichText::new("Downloaden opent de pagina met de installatiebestanden in je browser. Installeer daarna over deze versie heen; je accounts en mail blijven bewaard.")
-                        .size(12.0)
-                        .color(t.text_dim),
-                )
-                .wrap(),
-            );
+            let how = if here.is_some() {
+                "Bijwerken downloadt de nieuwe versie, controleert de handtekening, installeert hem en start Merel opnieuw. Je accounts en mail blijven bewaard."
+            } else {
+                "Downloaden opent de pagina met de installatiebestanden in je browser. Installeer daarna over deze versie heen; je accounts en mail blijven bewaard."
+            };
+            ui.add(egui::Label::new(RichText::new(how).size(12.0).color(t.text_dim)).wrap());
         });
         ui.add_space(12.0);
         ui.horizontal(|ui| {
@@ -245,12 +267,18 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 }
             });
             helder::right(ui, |ui| {
-                if helder::primary_button(ui, t, Icon::Download, DOWNLOAD).clicked() {
-                    if let Err(e) = open::that_detached(release.page()) {
-                        log::warn!("could not open the release page: {e}");
-                        app.notice = Some(Notice::error(format!("Openen is niet gelukt: {}", release.page())));
+                match (&here, install::SIGNING_KEY) {
+                    (Some(place), Some(key)) => {
+                        if helder::primary_button(ui, t, Icon::Download, UPDATE).clicked() {
+                            app.updates.job = Some(Job::start(ctx, place.clone(), &release.version, key));
+                        }
                     }
-                    close = true;
+                    _ => {
+                        if helder::primary_button(ui, t, Icon::Download, DOWNLOAD).clicked() {
+                            open_page(app, &release);
+                            close = true;
+                        }
+                    }
                 }
                 helder::secondary(ui, t, |ui| {
                     if ui.button(RichText::new(LATER).size(14.0).color(t.text)).clicked() {
@@ -262,6 +290,124 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     });
     close |= closed;
     if close {
+        app.updates.offer = None;
+    }
+}
+
+/// The steps the wizard shows as dots: offer, download, check, install.
+const STEPS: usize = 4;
+
+/// The update under way: a progress bar while it downloads, then the check, the install and
+/// the button that starts the new version; or what went wrong, with the release page.
+fn progress(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    let Some(job) = &app.updates.job else { return };
+    let stage = job.stage();
+    let version = job.version.clone();
+    let release = Release { version: version.clone(), notes: String::new() };
+    let (step, icon, title, text) = match &stage {
+        Stage::Downloading { .. } => (1, Icon::Download, format!("Merel {version} downloaden"), String::new()),
+        Stage::Checking => (
+            2,
+            Icon::ShieldCheck,
+            "Handtekening controleren".to_owned(),
+            "Merel controleert of de download van Merel zelf komt en onderweg niet is veranderd.".to_owned(),
+        ),
+        Stage::Installing => (3, Icon::RefreshCw, format!("Merel {version} installeren"), "Even geduld, dit duurt een paar seconden.".to_owned()),
+        Stage::Ready(Restart::Installer(_)) => (
+            3,
+            Icon::CircleCheck,
+            format!("Merel {version} staat klaar"),
+            "Merel sluit af, installeert de nieuwe versie en start daarna vanzelf weer.".to_owned(),
+        ),
+        Stage::Ready(Restart::Relaunch(_)) => (
+            3,
+            Icon::CircleCheck,
+            format!("Merel {version} is geïnstalleerd"),
+            "Start Merel opnieuw om de nieuwe versie te gebruiken. Doe je dat later, dan krijg je hem bij de volgende start.".to_owned(),
+        ),
+        Stage::Failed(reason) => (
+            0,
+            Icon::CircleAlert,
+            "Bijwerken is niet gelukt".to_owned(),
+            format!("{reason} Je kunt de nieuwe versie ook zelf downloaden en installeren."),
+        ),
+    };
+    let mut close = false;
+    let closed = helder::dialog(ctx, t, WINDOW, 460.0, |ui| {
+        if !matches!(stage, Stage::Failed(_)) {
+            helder::step_dots(ui, t, step, STEPS);
+            ui.add_space(12.0);
+        }
+        helder::card_frame(t).inner_margin(20).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                helder::badge(ui, t, icon);
+                ui.add_space(8.0);
+                ui.label(RichText::new(&title).size(18.0).strong().color(t.text));
+            });
+            ui.add_space(12.0);
+            if let Stage::Downloading { done, total } = stage {
+                let fraction = total.filter(|t| *t > 0).map(|t| done as f32 / t as f32);
+                helder::progress_bar(ui, t, fraction);
+                ui.add_space(6.0);
+                let mb = |b: u64| b as f64 / 1_000_000.0;
+                let line = match total {
+                    Some(total) => format!("{:.0} van {:.0} MB", mb(done), mb(total)),
+                    None => format!("{:.0} MB", mb(done)),
+                };
+                ui.label(RichText::new(line).size(12.0).color(t.text_dim));
+            } else {
+                helder::paragraph(ui, t, &text);
+            }
+        });
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            helder::right(ui, |ui| match &stage {
+                Stage::Downloading { .. } => {
+                    helder::secondary(ui, t, |ui| {
+                        if ui.button(RichText::new(CANCEL).size(14.0).color(t.text)).clicked() {
+                            close = true;
+                        }
+                    });
+                }
+                Stage::Checking | Stage::Installing => {}
+                Stage::Ready(restart) => {
+                    if helder::primary_button(ui, t, Icon::RefreshCw, RESTART).clicked() {
+                        match restart.start() {
+                            Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                            Err(e) => {
+                                log::warn!("could not start the new version: {e}");
+                                app.notice = Some(Notice::error("Opnieuw starten is niet gelukt. Start Merel zelf opnieuw."));
+                            }
+                        }
+                        close = true;
+                    }
+                    helder::secondary(ui, t, |ui| {
+                        if ui.button(RichText::new(LATER).size(14.0).color(t.text)).clicked() {
+                            close = true;
+                        }
+                    });
+                }
+                Stage::Failed(_) => {
+                    if helder::primary_button(ui, t, Icon::Globe, PAGE).clicked() {
+                        open_page(app, &release);
+                        close = true;
+                    }
+                    helder::secondary(ui, t, |ui| {
+                        if ui.button(RichText::new(helder::CLOSE).size(14.0).color(t.text)).clicked() {
+                            close = true;
+                        }
+                    });
+                }
+            });
+        });
+    });
+    // While it installs the window stays: half an install must not be walked away from.
+    let busy = matches!(stage, Stage::Checking | Stage::Installing);
+    if (close || closed) && !busy {
+        if let Some(job) = app.updates.job.take() {
+            job.cancel();
+        }
         app.updates.offer = None;
     }
 }
