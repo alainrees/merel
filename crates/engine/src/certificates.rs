@@ -109,6 +109,11 @@ pub fn outgoing(keys: &Keys, account: &Account, draft: &Draft, raw: Vec<u8>) -> 
     };
     let own = keys.identities.read().ok().and_then(|map| map.get(&account.id).map(|i| i.certificate_der().to_vec()));
     let recipients: Vec<&Address> = draft.to.iter().chain(&draft.cc).chain(&draft.bcc).collect();
+    // The first step of an invitation goes out as it is: it carries a key and nothing secret,
+    // and the other side has no key to encrypt to yet.
+    if draft.chat.as_ref().and_then(|c| c.handshake.as_ref()).is_some_and(|h| h.step == "vc-request") {
+        return if pgp.is_some() && !draft.encrypt { Ok(raw) } else { Err("Zet eerst chat aan voor dit account.".into()) };
+    }
     // A chat message only ever goes out encrypted with OpenPGP, as Delta Chat reads it.
     if draft.chat.is_some() {
         let Some(key) = pgp.filter(|_| draft.encrypt) else { return Err("Een chatbericht gaat alleen versleuteld de deur uit.".into()) };
@@ -155,7 +160,9 @@ fn pgp_outgoing(keys: &Keys, key: &merel_pgp::SecretKey, draft: &Draft, recipien
         let people = keys.openpgp.keys_of(recipients.iter().copied());
         // In a group chat everyone learns everyone's key, as Delta Chat does it.
         let mut raw = raw;
-        if draft.chat.is_some() && recipients.len() > 1 {
+        // A step of an invitation shows the other side its own key too, as Delta Chat checks.
+        let handshake = draft.chat.as_ref().is_some_and(|c| c.handshake.is_some());
+        if draft.chat.is_some() && (recipients.len() > 1 || handshake) {
             for (a, k) in recipients.iter().zip(&people) {
                 raw = merel_pgp::with_header(&raw, &k.gossip_header(a.email()));
             }

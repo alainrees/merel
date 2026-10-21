@@ -35,6 +35,7 @@ fluent-bundle = { workspace = true }
 fluent-syntax = { workspace = true }
 unic-langid = { workspace = true }
 sys-locale = { workspace = true }
+qrcode = { workspace = true }
 
 [dev-dependencies]
 egui_kittest = { workspace = true }

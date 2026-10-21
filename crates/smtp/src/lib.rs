@@ -126,6 +126,25 @@ fn build_message(from: &Address, draft: &Draft, keep_bcc: bool) -> Result<Messag
                 b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Chat-Group-Name"), name.clone()));
             }
         }
+        // A step of an invitation's handshake; the engine encrypts all but the first, which
+        // then carries nothing secret.
+        if let Some(h) = &chat.handshake {
+            b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Secure-Join"), h.step.clone()));
+            for (name, value) in
+                [("Secure-Join-Invitenumber", &h.invitenumber), ("Secure-Join-Auth", &h.auth), ("Secure-Join-Fingerprint", &h.fingerprint)]
+            {
+                if let Some(v) = value {
+                    b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str(name), v.clone()));
+                }
+            }
+            // The first step goes out unencrypted, and chatmail servers only let it through
+            // in this one shape: a multipart/mixed with the step as its only, plain part.
+            if h.step == "vc-request" {
+                return b
+                    .multipart(MultiPart::mixed().singlepart(SinglePart::plain(draft.body.clone())))
+                    .map_err(|e| SmtpError::Build(e.to_string()));
+            }
+        }
     }
     let formatted = draft.rich.as_ref().is_some_and(|r| !r.is_plain());
     if draft.attachments.is_empty() {
@@ -204,9 +223,16 @@ mod tests {
         let one = Draft { chat: Some(ChatTag::default()), ..plain.clone() };
         let text = String::from_utf8(build(&from, &one).unwrap().formatted()).unwrap();
         assert!(text.contains("Chat-Version: 1.0\r\n") && !text.contains("Chat-Group"), "{text}");
-        let group = ChatTag { group_id: Some("Ab-9_x".into()), group_name: Some("Familie Rees".into()) };
-        let text = String::from_utf8(build(&from, &Draft { chat: Some(group), ..plain }).unwrap().formatted()).unwrap();
+        let group = ChatTag { group_id: Some("Ab-9_x".into()), group_name: Some("Familie Rees".into()), handshake: None };
+        let text = String::from_utf8(build(&from, &Draft { chat: Some(group), ..plain.clone() }).unwrap().formatted()).unwrap();
         assert!(text.contains("Chat-Group-ID: Ab-9_x\r\n") && text.contains("Chat-Group-Name: Familie Rees\r\n"), "{text}");
+
+        // The first step of an invitation: its token, and the one shape chatmail servers let pass.
+        let step = merel_model::Handshake { step: "vc-request".into(), invitenumber: Some("abc123".into()), ..Default::default() };
+        let request = Draft { chat: Some(ChatTag { handshake: Some(step), ..ChatTag::default() }), body: "Secure-Join: vc-request".into(), ..plain };
+        let text = String::from_utf8(build(&from, &request).unwrap().formatted()).unwrap();
+        assert!(text.contains("Secure-Join: vc-request\r\n") && text.contains("Secure-Join-Invitenumber: abc123\r\n"), "{text}");
+        assert!(text.contains("multipart/mixed") && text.matches("Content-Type: text/plain").count() == 1, "{text}");
     }
 
     #[test]

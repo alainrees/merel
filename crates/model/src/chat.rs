@@ -22,6 +22,54 @@ pub struct ChatTag {
     pub group_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_name: Option<String>,
+    /// Set on a step of an invitation's handshake, which is no message to show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handshake: Option<Handshake>,
+}
+
+/// A step of the handshake that makes an invitation link into a verified chat (Delta Chat's
+/// Secure-Join, setup-contact): `vc-request`, `vc-auth-required`, `vc-request-with-auth`
+/// and `vc-contact-confirm`, with the tokens from the link and the joiner's fingerprint.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Handshake {
+    pub step: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invitenumber: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<String>,
+    /// Upper-case hex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
+}
+
+/// Most characters a handshake token may have; Delta Chat makes them about 24.
+pub const MAX_TOKEN: usize = 100;
+
+impl Handshake {
+    /// The handshake step these `Secure-Join` header values make; `None` without a step. A
+    /// field that is not a plain token is left out.
+    pub fn from_headers(step: Option<&str>, invitenumber: Option<&str>, auth: Option<&str>, fingerprint: Option<&str>) -> Option<Handshake> {
+        let step = step.map(str::trim).filter(|s| !s.is_empty() && s.len() <= 40 && s.chars().all(|c| c.is_ascii_lowercase() || c == '-'))?;
+        Some(Handshake {
+            step: step.to_string(),
+            invitenumber: invitenumber.and_then(token),
+            auth: auth.and_then(token),
+            fingerprint: fingerprint.and_then(fingerprint_of),
+        })
+    }
+}
+
+/// `value` when it is a plain token: letters, digits, `-` and `_`.
+pub fn token(value: &str) -> Option<String> {
+    let v = value.trim();
+    (!v.is_empty() && v.len() <= MAX_TOKEN && v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))).then(|| v.to_string())
+}
+
+/// An OpenPGP fingerprint in upper-case hex without spaces, from one written with or without
+/// them; `None` for anything else.
+pub fn fingerprint_of(value: &str) -> Option<String> {
+    let hex: String = value.chars().filter(|c| !c.is_whitespace() && *c != ':').collect();
+    (matches!(hex.len(), 40 | 64) && hex.chars().all(|c| c.is_ascii_hexdigit())).then(|| hex.to_ascii_uppercase())
 }
 
 impl ChatTag {
@@ -38,7 +86,7 @@ impl ChatTag {
             .and(group_name)
             .map(|n| clean_text(n.trim()).chars().take(MAX_GROUP_NAME).collect::<String>())
             .filter(|n| !n.is_empty());
-        Some(ChatTag { group_id, group_name })
+        Some(ChatTag { group_id, group_name, handshake: None })
     }
 
     /// A new group id: 16 characters from `random`, of the alphabet Delta Chat uses.
@@ -69,5 +117,18 @@ mod tests {
         let id = ChatTag::new_group_id([255; 16]);
         assert_eq!(id.len(), 16);
         assert!(ChatTag::from_headers(Some("1.0"), Some(&id), None).unwrap().group_id.is_some());
+    }
+
+    #[test]
+    fn a_handshake_keeps_only_plain_tokens_and_a_real_fingerprint() {
+        assert_eq!(Handshake::from_headers(None, Some("x"), None, None), None);
+        let h = Handshake::from_headers(Some(" vc-request "), Some("Ab_9-x"), Some("a b"), Some("1234 5678 9abc def0 1234 5678 9ABC DEF0 1234 5678"))
+            .unwrap();
+        assert_eq!(h.step, "vc-request");
+        assert_eq!(h.invitenumber.as_deref(), Some("Ab_9-x"));
+        assert_eq!(h.auth, None, "not a token");
+        assert_eq!(h.fingerprint.as_deref(), Some("123456789ABCDEF0123456789ABCDEF012345678"));
+        assert_eq!(Handshake::from_headers(Some("VC;x"), None, None, None), None);
+        assert_eq!(fingerprint_of("abc"), None);
     }
 }
