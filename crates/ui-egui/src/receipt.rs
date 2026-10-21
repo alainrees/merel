@@ -2,6 +2,7 @@
 //! strip over a message whose sender asked for one. Nothing goes back by itself: the person
 //! presses the button, or does not, and the sender learns nothing otherwise.
 
+use crate::i18n::tr;
 use egui::{RichText, Ui};
 use merel_engine::SendState;
 use merel_model::{Address, Draft, MessageHeader};
@@ -9,23 +10,34 @@ use merel_model::{Address, Draft, MessageHeader};
 use crate::{MailApp, Tokens};
 
 /// The checkbox in the compose window.
-pub const ASK: &str = "Leesbevestiging vragen";
+pub fn ask() -> String {
+    tr("receipt-ask")
+}
 /// The strip over a message that asks for one.
-pub const STRIP: &str = "De afzender vraagt een leesbevestiging.";
-pub const SEND: &str = "Leesbevestiging sturen";
+pub fn strip_label() -> String {
+    tr("receipt-strip")
+}
+pub fn send_label() -> String {
+    tr("receipt-send")
+}
 /// What the strip says once the receipt went out.
-pub const SENT: &str = "Leesbevestiging verstuurd.";
+pub fn sent_text() -> String {
+    tr("receipt-sent")
+}
 
 /// The receipt as a plain message any mail program can show: which message, and when it was
 /// read. It answers the message, so it lands in the sender's conversation.
 pub fn draft(m: &MessageHeader, to: &Address, read_at: i64) -> Draft {
     let subject = m.subject.trim();
     let body = format!(
-        "Dit is een leesbevestiging voor je bericht \"{subject}\" van {sent}.\n\nHet bericht is gelezen op {read}.\n\nDeze bevestiging zegt alleen dat het bericht is geopend, niet dat het is beantwoord.\n",
-        sent = crate::compose::when_text(m.date),
-        read = crate::compose::when_text(read_at),
+        "{}\n",
+        crate::i18n::tr_args(
+            "receipt-body",
+            &[("subject", subject.into()), ("sent", crate::compose::when_text(m.date).into()), ("read", crate::compose::when_text(read_at).into()),],
+        )
     );
-    Draft { to: vec![to.clone()], subject: format!("Gelezen: {subject}"), body, in_reply_to: m.message_id.clone(), ..Draft::default() }
+    let subject = crate::i18n::tr_args("receipt-subject", &[("subject", subject.into())]);
+    Draft { to: vec![to.clone()], subject, body, in_reply_to: m.message_id.clone(), ..Draft::default() }
 }
 
 /// The strip over the message; true when the person asks for the receipt to go out.
@@ -34,16 +46,11 @@ pub fn strip(ui: &mut Ui, t: &Tokens, to: &Address, sent: bool) -> bool {
     egui::Frame::new().fill(t.checked).corner_radius(4).inner_margin(8).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             if sent {
-                ui.label(RichText::new(SENT).color(t.text));
+                ui.label(RichText::new(sent_text()).color(t.text));
             } else {
-                ui.label(RichText::new(STRIP).color(t.text));
-                send = ui
-                    .small_button(SEND)
-                    .on_hover_text(format!(
-                        "Stuurt een korte e-mail aan {} dat je dit bericht hebt gelezen. Er gaat nooit iets vanzelf; als je dit niet doet, merkt de afzender niets.",
-                        to.email()
-                    ))
-                    .clicked();
+                ui.label(RichText::new(strip_label()).color(t.text));
+                send =
+                    ui.small_button(send_label()).on_hover_text(crate::i18n::tr_args("receipt-send-hint", &[("email", to.email().into())])).clicked();
             }
         });
     });
@@ -55,7 +62,7 @@ impl MailApp {
     /// Sends the receipt the sender asked for, from the account the message came in on.
     pub fn send_read_receipt(&mut self, message_id: &str) {
         let Some(m) = self.engine.session.message(message_id).cloned() else {
-            self.notice = Some(crate::Notice::warning("Het bericht is niet meer te vinden."));
+            self.notice = Some(crate::Notice::warning(tr("message-gone")));
             return;
         };
         let Some(to) = self.engine.session.bodies.get(message_id).and_then(|b| b.receipt_to.clone()) else { return };
@@ -65,7 +72,7 @@ impl MailApp {
             Some(SendState::Failed(e)) => self.notice = Some(crate::Notice::error(e.clone())),
             _ => {
                 self.receipts_sent.insert(message_id.to_string());
-                self.notice = Some(crate::Notice::success(format!("Leesbevestiging verstuurd aan {}.", to.email())));
+                self.notice = Some(crate::Notice::success(crate::i18n::tr_args("receipt-sent-to", &[("email", to.email().into())])));
             }
         }
     }

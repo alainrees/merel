@@ -221,6 +221,23 @@ pub fn dutch(text: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
+/// The Dutch texts that differ from their English, for the tests that look for Dutch left on an
+/// English screen.
+#[cfg(test)]
+pub(crate) fn dutch_only_texts() -> std::collections::HashSet<String> {
+    let Ok(resource) = FluentResource::try_new(Language::Dutch.source().to_string()) else { return Default::default() };
+    resource
+        .entries()
+        .filter_map(|e| match e {
+            fluent_syntax::ast::Entry::Message(m) => Some(m.id.name),
+            _ => None,
+        })
+        .filter_map(|key| Some((plain(Language::Dutch, key)?, plain(Language::English, key)?)))
+        .filter(|(nl, en)| nl != en)
+        .map(|(nl, _)| nl)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,6 +287,22 @@ mod tests {
         assert!(ribbon_icon_only(&tr("delete")) && ribbon_icon_only(&tr("theme-dark")));
         assert!(ribbon_primary(&tr("new-mail")) && !ribbon_primary(&tr("mail-reply")));
         assert_eq!(dutch("Reply"), "Beantwoorden");
+        set(Language::Dutch);
+    }
+
+    #[test]
+    fn the_engines_choices_have_their_words() {
+        for language in Language::ALL {
+            set(language);
+            for (when, _) in merel_engine::followup::WHEN {
+                let key = format!("followup-when-{when}");
+                assert_ne!(tr(&key), key);
+            }
+            for (when, _) in merel_engine::snooze::WHEN {
+                let key = format!("snooze-{when}");
+                assert_ne!(tr(&key), key);
+            }
+        }
         set(Language::Dutch);
     }
 

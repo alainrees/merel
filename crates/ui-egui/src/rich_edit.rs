@@ -10,6 +10,7 @@
 //! Ctrl/⌘+B, I and U switch bold, italic and underline, Ctrl/⌘+Z and Ctrl/⌘+Y (or ⇧Z) undo and
 //! redo text and formatting together.
 
+use crate::i18n::tr;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -20,53 +21,103 @@ use merel_model::rich::{Align, DEFAULT_SIZE, Face, List, Para, Rgb, Rich, SIZES,
 use crate::Tokens;
 use crate::helder::{self, Icon};
 
-pub const UNDO: &str = "Ongedaan maken";
-pub const REDO: &str = "Opnieuw";
-pub const UNDO_MORE: &str = "Meer ongedaan maken";
-pub const PASTE: &str = "Plakken";
-pub const FACE: &str = "Lettertype";
-pub const SIZE: &str = "Tekengrootte";
-pub const CLEAR: &str = "Opmaak wissen";
-pub const COLOR: &str = "Tekstkleur";
-pub const COLOR_MENU: &str = "Tekstkleur kiezen";
-pub const HIGHLIGHT: &str = "Markeren";
-pub const HIGHLIGHT_MENU: &str = "Markeerkleur kiezen";
-pub const BOLD: &str = "Vet";
-pub const ITALIC: &str = "Cursief";
-pub const UNDERLINE: &str = "Onderstrepen";
-pub const STRIKE: &str = "Doorhalen";
-pub const BULLETS: &str = "Opsommingstekens";
-pub const NUMBERING: &str = "Nummering";
-pub const MORE: &str = "Meer opmaakopties";
-pub const INDENT_MORE: &str = "Inspringing vergroten";
-pub const INDENT_LESS: &str = "Inspringing verkleinen";
-pub const ALIGN_LEFT: &str = "Links uitlijnen";
-pub const ALIGN_CENTER: &str = "Centreren";
-pub const ALIGN_RIGHT: &str = "Rechts uitlijnen";
-pub const AUTOMATIC: &str = "Automatisch";
-pub const NO_HIGHLIGHT: &str = "Geen markering";
+pub fn undo() -> String {
+    tr("format-undo")
+}
+pub fn redo() -> String {
+    tr("format-redo")
+}
+pub fn undo_more() -> String {
+    tr("format-undo-more")
+}
+pub fn paste() -> String {
+    tr("format-paste")
+}
+pub fn face() -> String {
+    tr("format-face")
+}
+pub fn size() -> String {
+    tr("format-size")
+}
+pub fn clear() -> String {
+    tr("format-clear")
+}
+pub fn color_label() -> String {
+    tr("format-color")
+}
+pub fn color_menu() -> String {
+    tr("format-color-menu")
+}
+pub fn highlight() -> String {
+    tr("format-highlight")
+}
+pub fn highlight_menu() -> String {
+    tr("format-highlight-menu")
+}
+pub fn bold() -> String {
+    tr("format-bold")
+}
+pub fn italic() -> String {
+    tr("format-italic")
+}
+pub fn underline() -> String {
+    tr("format-underline")
+}
+pub fn strike() -> String {
+    tr("format-strike")
+}
+pub fn bullets() -> String {
+    tr("format-bullets")
+}
+pub fn numbering() -> String {
+    tr("format-numbering")
+}
+pub fn more_label() -> String {
+    tr("format-more")
+}
+pub fn indent_more() -> String {
+    tr("format-indent-more")
+}
+pub fn indent_less() -> String {
+    tr("format-indent-less")
+}
+pub fn align_left() -> String {
+    tr("format-align-left")
+}
+pub fn align_center() -> String {
+    tr("format-align-center")
+}
+pub fn align_right() -> String {
+    tr("format-align-right")
+}
+pub fn automatic() -> String {
+    tr("format-automatic")
+}
+pub fn no_highlight() -> String {
+    tr("format-no-highlight")
+}
 
 /// Outlook's standard text colours.
 pub const TEXT_COLORS: [(&str, Rgb); 10] = [
-    ("Donkerrood", Rgb(0xC0, 0x00, 0x00)),
-    ("Rood", Rgb(0xFF, 0x00, 0x00)),
-    ("Oranje", Rgb(0xFF, 0xC0, 0x00)),
-    ("Geel", Rgb(0xFF, 0xFF, 0x00)),
-    ("Lichtgroen", Rgb(0x92, 0xD0, 0x50)),
-    ("Groen", Rgb(0x00, 0xB0, 0x50)),
-    ("Lichtblauw", Rgb(0x00, 0xB0, 0xF0)),
-    ("Blauw", Rgb(0x00, 0x70, 0xC0)),
-    ("Donkerblauw", Rgb(0x00, 0x20, 0x60)),
-    ("Paars", Rgb(0x70, 0x30, 0xA0)),
+    ("color-dark-red", Rgb(0xC0, 0x00, 0x00)),
+    ("color-red", Rgb(0xFF, 0x00, 0x00)),
+    ("color-orange", Rgb(0xFF, 0xC0, 0x00)),
+    ("color-yellow", Rgb(0xFF, 0xFF, 0x00)),
+    ("color-light-green", Rgb(0x92, 0xD0, 0x50)),
+    ("color-green", Rgb(0x00, 0xB0, 0x50)),
+    ("color-light-blue", Rgb(0x00, 0xB0, 0xF0)),
+    ("color-blue", Rgb(0x00, 0x70, 0xC0)),
+    ("color-dark-blue", Rgb(0x00, 0x20, 0x60)),
+    ("color-purple", Rgb(0x70, 0x30, 0xA0)),
 ];
 
 /// The marker colours; light enough for dark text on top.
 pub const HIGHLIGHTS: [(&str, Rgb); 5] = [
-    ("Geel markeren", Rgb(0xFF, 0xF1, 0x00)),
-    ("Groen markeren", Rgb(0x7F, 0xFF, 0x7F)),
-    ("Turkoois markeren", Rgb(0x7F, 0xFF, 0xFF)),
-    ("Roze markeren", Rgb(0xFF, 0xA8, 0xE0)),
-    ("Grijs markeren", Rgb(0xD9, 0xD9, 0xD9)),
+    ("highlight-yellow", Rgb(0xFF, 0xF1, 0x00)),
+    ("highlight-green", Rgb(0x7F, 0xFF, 0x7F)),
+    ("highlight-turquoise", Rgb(0x7F, 0xFF, 0xFF)),
+    ("highlight-pink", Rgb(0xFF, 0xA8, 0xE0)),
+    ("highlight-gray", Rgb(0xD9, 0xD9, 0xD9)),
 ];
 
 /// Pixels per indentation step, and the room a list marker takes.
@@ -590,21 +641,21 @@ pub fn bar(ui: &mut Ui, t: &Tokens, ed: &mut Editor, text: &mut String) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
             ui.add_enabled_ui(!ed.undo.is_empty(), |ui| {
-                if bar_button(ui, t, Icon::Undo, UNDO, false).clicked() {
+                if bar_button(ui, t, Icon::Undo, &undo(), false).clicked() {
                     command = Some(Command::Undo);
                 }
             });
-            chevron(ui, t, UNDO_MORE, |ui| {
-                if ui.add_enabled(!ed.redo.is_empty(), egui::Button::image_and_text(Icon::Redo.image(16.0, t.text), REDO)).clicked() {
+            chevron(ui, t, &undo_more(), |ui| {
+                if ui.add_enabled(!ed.redo.is_empty(), egui::Button::image_and_text(Icon::Redo.image(16.0, t.text), redo())).clicked() {
                     command = Some(Command::Redo);
                     ui.close();
                 }
             });
-            if bar_button(ui, t, Icon::Paste, PASTE, false).clicked() {
+            if bar_button(ui, t, Icon::Paste, &paste(), false).clicked() {
                 command = Some(Command::Paste);
             }
             helder::bar_separator(ui, t);
-            pill(ui, t, current.face.name(), 150.0, FACE, |ui| {
+            pill(ui, t, current.face.name(), 150.0, &face(), |ui| {
                 let loaded = loaded(ui.ctx());
                 for face in Face::ALL {
                     let (family, _) = family(loaded, face, false, false);
@@ -615,7 +666,7 @@ pub fn bar(ui: &mut Ui, t: &Tokens, ed: &mut Editor, text: &mut String) {
                     }
                 }
             });
-            pill(ui, t, &current.points().to_string(), 40.0, SIZE, |ui| {
+            pill(ui, t, &current.points().to_string(), 40.0, &size(), |ui| {
                 for size in SIZES {
                     if ui.selectable_label(current.points() == size, size.to_string()).clicked() {
                         command = Some(Command::Size(size));
@@ -623,25 +674,25 @@ pub fn bar(ui: &mut Ui, t: &Tokens, ed: &mut Editor, text: &mut String) {
                     }
                 }
             });
-            if bar_button(ui, t, Icon::ClearFormat, CLEAR, false).clicked() {
+            if bar_button(ui, t, Icon::ClearFormat, &clear(), false).clicked() {
                 command = Some(Command::Clear);
             }
             // Text colour: the button puts on the last colour picked, shown in the bar under the A.
             let ink = ui.ctx().data(|d| d.get_temp::<Rgb>(ed.id.with("ink"))).unwrap_or(TEXT_COLORS[1].1);
-            let r = bar_button(ui, t, Icon::TextColor, COLOR, false);
+            let r = bar_button(ui, t, Icon::TextColor, &color_label(), false);
             ui.painter().rect_filled(egui::Rect::from_center_size(r.rect.center_bottom() - vec2(0.0, 6.0), vec2(16.0, 3.0)), 1, color(ink));
             if r.clicked() {
                 command = Some(Command::Color(Some(ink)));
             }
-            chevron(ui, t, COLOR_MENU, |ui| {
-                if ui.button(AUTOMATIC).clicked() {
+            chevron(ui, t, &color_menu(), |ui| {
+                if ui.button(automatic()).clicked() {
                     command = Some(Command::Color(None));
                     ui.close();
                 }
                 ui.horizontal_wrapped(|ui| {
                     ui.set_max_width(140.0);
                     for (name, c) in TEXT_COLORS {
-                        if swatch(ui, t, name, c) {
+                        if swatch(ui, t, &tr(name), c) {
                             ui.ctx().data_mut(|d| d.insert_temp(ed.id.with("ink"), c));
                             command = Some(Command::Color(Some(c)));
                             ui.close();
@@ -650,20 +701,20 @@ pub fn bar(ui: &mut Ui, t: &Tokens, ed: &mut Editor, text: &mut String) {
                 });
             });
             let marker = ui.ctx().data(|d| d.get_temp::<Rgb>(ed.id.with("marker"))).unwrap_or(HIGHLIGHTS[0].1);
-            let r = bar_button(ui, t, Icon::Highlighter, HIGHLIGHT, current.highlight.is_some());
+            let r = bar_button(ui, t, Icon::Highlighter, &highlight(), current.highlight.is_some());
             ui.painter().rect_filled(egui::Rect::from_center_size(r.rect.center_bottom() - vec2(0.0, 6.0), vec2(16.0, 3.0)), 1, color(marker));
             if r.clicked() {
                 command = Some(Command::Highlight(if current.highlight.is_some() { None } else { Some(marker) }));
             }
-            chevron(ui, t, HIGHLIGHT_MENU, |ui| {
-                if ui.button(NO_HIGHLIGHT).clicked() {
+            chevron(ui, t, &highlight_menu(), |ui| {
+                if ui.button(no_highlight()).clicked() {
                     command = Some(Command::Highlight(None));
                     ui.close();
                 }
                 ui.horizontal_wrapped(|ui| {
                     ui.set_max_width(140.0);
                     for (name, c) in HIGHLIGHTS {
-                        if swatch(ui, t, name, c) {
+                        if swatch(ui, t, &tr(name), c) {
                             ui.ctx().data_mut(|d| d.insert_temp(ed.id.with("marker"), c));
                             command = Some(Command::Highlight(Some(c)));
                             ui.close();
@@ -672,30 +723,30 @@ pub fn bar(ui: &mut Ui, t: &Tokens, ed: &mut Editor, text: &mut String) {
                 });
             });
             for (icon, label, on, c) in [
-                (Icon::Bold, BOLD, current.bold, Command::Bold),
-                (Icon::Italic, ITALIC, current.italic, Command::Italic),
-                (Icon::Underline, UNDERLINE, current.underline, Command::Underline),
+                (Icon::Bold, &bold(), current.bold, Command::Bold),
+                (Icon::Italic, &italic(), current.italic, Command::Italic),
+                (Icon::Underline, &underline(), current.underline, Command::Underline),
             ] {
                 if bar_button(ui, t, icon, label, on).clicked() {
                     command = Some(c);
                 }
             }
             helder::bar_separator(ui, t);
-            if bar_button(ui, t, Icon::BulletList, BULLETS, para.list == List::Bullet).clicked() {
+            if bar_button(ui, t, Icon::BulletList, &bullets(), para.list == List::Bullet).clicked() {
                 command = Some(Command::List(List::Bullet));
             }
-            if bar_button(ui, t, Icon::NumberList, NUMBERING, para.list == List::Number).clicked() {
+            if bar_button(ui, t, Icon::NumberList, &numbering(), para.list == List::Number).clicked() {
                 command = Some(Command::List(List::Number));
             }
             let more = egui::Button::image(Icon::Ellipsis.image(helder::ICON, t.text)).frame_when_inactive(false).min_size(vec2(32.0, 32.0));
             let (r, _) = egui::containers::menu::MenuButton::from_button(more).ui(ui, |ui| {
                 for (icon, label, on, c) in [
-                    (Icon::Strikethrough, STRIKE, current.strike, Command::Strike),
-                    (Icon::IndentMore, INDENT_MORE, false, Command::Indent(true)),
-                    (Icon::IndentLess, INDENT_LESS, false, Command::Indent(false)),
-                    (Icon::AlignLeft, ALIGN_LEFT, para.align == Align::Left, Command::Align(Align::Left)),
-                    (Icon::AlignCenter, ALIGN_CENTER, para.align == Align::Center, Command::Align(Align::Center)),
-                    (Icon::AlignRight, ALIGN_RIGHT, para.align == Align::Right, Command::Align(Align::Right)),
+                    (Icon::Strikethrough, &strike(), current.strike, Command::Strike),
+                    (Icon::IndentMore, &indent_more(), false, Command::Indent(true)),
+                    (Icon::IndentLess, &indent_less(), false, Command::Indent(false)),
+                    (Icon::AlignLeft, &align_left(), para.align == Align::Left, Command::Align(Align::Left)),
+                    (Icon::AlignCenter, &align_center(), para.align == Align::Center, Command::Align(Align::Center)),
+                    (Icon::AlignRight, &align_right(), para.align == Align::Right, Command::Align(Align::Right)),
                 ] {
                     let color = if on { t.accent_text } else { t.text };
                     let b = egui::Button::image_and_text(icon.image(16.0, color), RichText::new(label).color(color)).selected(on);
@@ -705,8 +756,8 @@ pub fn bar(ui: &mut Ui, t: &Tokens, ed: &mut Editor, text: &mut String) {
                     }
                 }
             });
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, MORE));
-            let _ = r.on_hover_text(MORE);
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, more_label()));
+            let _ = r.on_hover_text(more_label());
         });
     });
     if let Some(c) = command {
@@ -753,19 +804,19 @@ mod tests {
         let mut h = harness("Hallo wereld");
         h.run();
         select(&mut h, 0..5);
-        h.get_by_label(BOLD).click();
+        h.get_by_label(&bold()).click();
         h.run();
         assert!(h.state().ed.rich.style_of(0).bold && !h.state().ed.rich.style_of(6).bold);
         assert!(h.state().ed.current().bold, "the bar shows it is on");
-        h.get_by_label(BOLD).click();
+        h.get_by_label(&bold()).click();
         h.run();
         assert!(h.state().ed.rich.is_plain(), "a second click takes it off");
-        h.get_by_label(UNDO).click();
+        h.get_by_label(&undo()).click();
         h.run();
         assert!(h.state().ed.rich.style_of(0).bold, "undo puts the bold back");
-        h.get_by_label(UNDO_MORE).click();
+        h.get_by_label(&undo_more()).click();
         h.run();
-        h.get_by_label(REDO).click();
+        h.get_by_label(&redo()).click();
         h.run();
         assert!(h.state().ed.rich.is_plain(), "and redo takes it off again");
     }
@@ -775,24 +826,24 @@ mod tests {
         let mut h = harness("Rood en groot");
         h.run();
         select(&mut h, 0..4);
-        h.get_by_label(COLOR_MENU).click();
+        h.get_by_label(&color_menu()).click();
         h.run();
         h.get_by_label("Groen").click();
         h.run();
-        h.get_by_label(SIZE).click();
+        h.get_by_label(&size()).click();
         h.run();
         h.get_by_label("18").click();
         h.run();
-        h.get_by_label(FACE).click();
+        h.get_by_label(&face()).click();
         h.run();
         h.get_by_label("DejaVu Serif").click();
         h.run();
-        h.get_by_label(HIGHLIGHT).click();
+        h.get_by_label(&highlight()).click();
         h.run();
         let s = h.state().ed.rich.style_of(0);
         assert_eq!((s.color, s.size, s.face, s.highlight), (Some(Rgb(0x00, 0xB0, 0x50)), Some(18), Face::Serif, Some(HIGHLIGHTS[0].1)));
         assert_eq!(h.state().ed.rich.style_of(5), Style::default());
-        h.get_by_label(CLEAR).click();
+        h.get_by_label(&clear()).click();
         h.run();
         assert!(h.state().ed.rich.is_plain());
     }
@@ -802,21 +853,21 @@ mod tests {
         let mut h = harness("een\ntwee\ndrie");
         h.run();
         select(&mut h, 1..6);
-        h.get_by_label(NUMBERING).click();
+        h.get_by_label(&numbering()).click();
         h.run();
         let lists: Vec<List> = h.state().ed.rich.paras.iter().map(|p| p.list).collect();
         assert_eq!(lists, [List::Number, List::Number, List::None]);
-        h.get_by_label(MORE).click();
+        h.get_by_label(&more_label()).click();
         h.run();
-        h.get_by_label(INDENT_MORE).click();
+        h.get_by_label(&indent_more()).click();
         h.run();
-        h.get_by_label(MORE).click();
+        h.get_by_label(&more_label()).click();
         h.run();
-        h.get_by_label(ALIGN_CENTER).click();
+        h.get_by_label(&align_center()).click();
         h.run();
         let p = h.state().ed.rich.paras[1];
         assert_eq!((p.indent, p.align), (1, Align::Center));
-        h.get_by_label(NUMBERING).click();
+        h.get_by_label(&numbering()).click();
         h.run();
         assert!(h.state().ed.rich.paras.iter().all(|p| p.list == List::None), "a second click ends the list");
     }
@@ -826,7 +877,7 @@ mod tests {
         let mut h = harness("Hoi ");
         h.run();
         select(&mut h, 4..4);
-        h.get_by_label(ITALIC).click();
+        h.get_by_label(&italic()).click();
         h.run();
         h.state_mut().ed.selection = 4..4;
         h.state_mut().ed.pending = Some((4, Style { italic: true, ..Style::default() }));
@@ -857,12 +908,12 @@ mod tests {
         let mut h = harness("links\nmidden");
         h.run();
         select(&mut h, 7..7);
-        h.get_by_label(MORE).click();
+        h.get_by_label(&more_label()).click();
         h.run();
-        h.get_by_label(ALIGN_RIGHT).click();
+        h.get_by_label(&align_right()).click();
         h.run();
         select(&mut h, 0..0);
-        h.get_by_label(BULLETS).click();
+        h.get_by_label(&bullets()).click();
         h.run();
         let rich = h.state().ed.rich.clone();
         let out = std::sync::Arc::new(std::sync::Mutex::new(None));

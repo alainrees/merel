@@ -1478,7 +1478,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.label(RichText::new(title).size(helder::TITLE_TEXT).strong().color(t.text));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if app.calendar.is_searching()
-                    && crate::helder::quiet(ui, t, |ui| crate::helder::icon_button(ui, t, crate::helder::Icon::X, crate::SEARCH_CLEAR)).clicked()
+                    && crate::helder::quiet(ui, t, |ui| crate::helder::icon_button(ui, t, crate::helder::Icon::X, &crate::search_clear())).clicked()
                 {
                     app.calendar.query.clear();
                 }

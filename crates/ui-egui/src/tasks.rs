@@ -232,7 +232,7 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let width = (ui.available_width() - 40.0).max(60.0);
                 crate::helder::search_field(ui, t, &mut app.tasks.query, egui::Id::new(SEARCH_BOX), "Zoeken in taken", width);
                 if !app.tasks.query.is_empty()
-                    && crate::helder::quiet(ui, t, |ui| crate::helder::icon_button(ui, t, crate::helder::Icon::X, crate::SEARCH_CLEAR)).clicked()
+                    && crate::helder::quiet(ui, t, |ui| crate::helder::icon_button(ui, t, crate::helder::Icon::X, &crate::search_clear())).clicked()
                 {
                     app.tasks.query.clear();
                 }

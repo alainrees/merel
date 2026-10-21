@@ -1,5 +1,6 @@
 //! The Backstage (the File tab): accounts, and the form that adds one.
 
+use crate::i18n::tr;
 use egui::{Margin, RichText, Ui, vec2};
 use zeroize::Zeroize;
 
@@ -223,11 +224,11 @@ pub(crate) enum FileAction {
 impl FileAction {
     pub(crate) const ALL: [FileAction; 3] = [FileAction::Print, FileAction::SaveAs, FileAction::Junk];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            FileAction::Print => "Afdrukken",
-            FileAction::SaveAs => crate::eml::SAVE_AS,
-            FileAction::Junk => "Ongewenste e-mail",
+            FileAction::Print => tr("file-print"),
+            FileAction::SaveAs => crate::eml::save_as(),
+            FileAction::Junk => tr("file-junk"),
         }
     }
 
@@ -287,7 +288,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 app.file_page = Page::Notifications;
             }
             for action in FileAction::ALL {
-                if helder::nav_item(ui, t, action.icon(), action.label(), false).clicked() {
+                if helder::nav_item(ui, t, action.icon(), &action.label(), false).clicked() {
                     run(app, action);
                 }
             }

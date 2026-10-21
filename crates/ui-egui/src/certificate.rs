@@ -264,13 +264,13 @@ mod tests {
         // New mail from the account is signed, and the box can be unticked for one message.
         harness.state_mut().open_compose(crate::compose::Kind::New);
         harness.run();
-        harness.get_by_label(crate::compose::SIGN).click();
+        harness.get_by_label(&crate::compose::sign()).click();
         harness.run();
         assert_eq!(harness.state().compose.as_ref().and_then(|c| c.sign), Some(false));
         assert_eq!(harness.state().compose.as_ref().map(|c| c.as_stored().sign), Some(Some(false)), "kept with the draft");
 
         // Encrypting waits for the recipient's certificate, and says whose is missing.
-        harness.get_by_label(crate::compose::ENCRYPT).click();
+        harness.get_by_label(&crate::compose::encrypt()).click();
         if let Some(c) = harness.state_mut().compose.as_mut() {
             c.to = "jij@example.org".into();
             c.subject = "Contract".into();
@@ -292,7 +292,7 @@ mod tests {
         harness.get_by_label(IMPORT);
         harness.state_mut().open_compose(crate::compose::Kind::New);
         harness.run();
-        assert!(harness.query_by_label(crate::compose::SIGN).is_none(), "without a certificate there is nothing to tick");
+        assert!(harness.query_by_label(&crate::compose::sign()).is_none(), "without a certificate there is nothing to tick");
     }
 
     #[test]
@@ -319,8 +319,8 @@ mod tests {
         // New mail can be signed and encrypted with the key.
         harness.state_mut().open_compose(crate::compose::Kind::New);
         harness.run();
-        harness.get_by_label(crate::compose::SIGN);
-        harness.get_by_label(crate::compose::ENCRYPT).click();
+        harness.get_by_label(&crate::compose::sign());
+        harness.get_by_label(&crate::compose::encrypt()).click();
         if let Some(c) = harness.state_mut().compose.as_mut() {
             c.to = "jij@example.org".into();
         }
