@@ -53,7 +53,8 @@ impl MailApp {
     /// Opens the window for a new folder under `parent`, else under the selected folder, else
     /// at the top of the current account.
     pub fn new_folder(&mut self, parent: Option<String>) {
-        let parent = parent.or_else(|| self.engine.session.selected_folder.clone());
+        // An "Alle accounts" folder is no place for a new one.
+        let parent = parent.or_else(|| self.engine.session.selected_folder.clone()).filter(|p| self.engine.session.folder(p).is_some());
         let account_id = match parent.as_deref().and_then(|p| self.engine.session.folder(p)) {
             Some(f) => f.account_id.clone(),
             None => match self.engine.session.current_account() {

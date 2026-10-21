@@ -9,7 +9,7 @@ use egui::{Align2, RichText, vec2};
 use serde_json::json;
 
 use crate::calendar::{MONTHS, WEEKDAYS, to_local};
-use crate::{MailApp, Module, Tokens, helder};
+use crate::{MailApp, Module, Tokens, helder, notifications};
 
 /// How long a reminder can be put off, as the window offers it: minutes and label.
 const SNOOZES: [(u32, &str); 5] = [(5, "5 minuten"), (15, "15 minuten"), (60, "1 uur"), (240, "4 uur"), (1440, "1 dag")];
@@ -157,6 +157,32 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     keys.extend(tasks.iter().map(|t| (format!("task:{}", t.id), t.due.unwrap_or(0))));
     if keys.iter().any(|k| !app.announced_reminders.contains(k)) {
         ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
+    }
+    if app.view.notifications.reminders {
+        let prefs = app.view.notifications.clone();
+        let mut alerts = Vec::new();
+        for a in due.iter().filter(|a| !app.announced_reminders.contains(&(a.id.clone(), a.start))) {
+            let mut details = relative(now, a.start);
+            if !a.location.is_empty() {
+                details = format!("{details}, {}", a.location);
+            }
+            alerts.push(notifications::reminder_alert(&prefs, format!("appt:{}:{}", a.start, a.id), "Afspraak", &a.title, &details));
+        }
+        for (m, d) in &follow {
+            if !app.announced_reminders.contains(&(format!("followup:{}", m.id), i64::from(d.num_days_from_ce()))) {
+                let details = format!("van {}", m.from.display());
+                alerts.push(notifications::reminder_alert(&prefs, format!("mail:{}", m.id), "Opvolgen", &m.subject, &details));
+            }
+        }
+        for task in &tasks {
+            if !app.announced_reminders.contains(&(format!("task:{}", task.id), task.due.unwrap_or(0))) {
+                let day = follow_up_due(to_local(task.due.unwrap_or(now)).date(), today);
+                alerts.push(notifications::reminder_alert(&prefs, format!("task:{}", task.id), "Taak", &task.title, &day));
+            }
+        }
+        for alert in alerts {
+            app.alert(ctx, alert, false);
+        }
     }
     app.announced_reminders = keys;
     // The soonest reminder decides when to look again, so the window shows up on time.

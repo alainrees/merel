@@ -107,6 +107,15 @@ fn main() -> eframe::Result {
             {
                 app.native_menu = menu.is_some();
             }
+            // The count on the app icon and the computer's notifications; a click on one
+            // wakes the window so it can open what the notification was about.
+            let ctx = cc.egui_ctx.clone();
+            merel_notify::set_waker(move || ctx.request_repaint());
+            let mut notifier = merel_notify::Notifier::new();
+            if app.view.notifications.mail || app.view.notifications.reminders {
+                notifier.prepare();
+            }
+            app.notifier = Some(notifier);
             Ok(Box::new(App {
                 app,
                 #[cfg(target_os = "macos")]
