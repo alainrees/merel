@@ -1210,3 +1210,258 @@ notes = Notities
 notes-add = Notities toevoegen
 step-of = Stap { $step } van { $count }
 busy = Bezig
+
+## Accounts page
+
+backstage-back = Terug
+account-bad-port = Vul een geldige poort in voor { $what } (1 tot 65535).
+account-bad-host = Vul een geldige servernaam in voor { $what }, bijvoorbeeld imap.voorbeeld.nl.
+account-bad-email = Vul een geldig e-mailadres in.
+account-bad-username = De gebruikersnaam bevat tekens die niet zijn toegestaan.
+account-need-password = Vul het wachtwoord in.
+account-incoming-what = ontvangen (IMAP)
+account-outgoing-what = verzenden (SMTP)
+account-bad-dav = Vul voor agenda en adresboek een https-adres in, bijvoorbeeld https://caldav.fastmail.com/.
+account-need-caldav = Vul ook het agenda-adres (CalDAV) in; het adresboek alleen is niet genoeg.
+print-open-first = Open eerst een bericht om af te drukken.
+accounts = Accounts
+account-signed-in-again = Opnieuw aangemeld; het account verbindt opnieuw.
+account-none-yet = Er is nog geen account. Je ziet voorbeeldmail.
+account-waiting-browser = Wacht op de browser…
+account-sign-in-again = Opnieuw aanmelden
+account-sign-in-again-hint = Log opnieuw in via de browser, bijvoorbeeld om toestemming te geven voor agenda, contacten en taken.
+account-edit = Account bewerken
+account-edit-hint = Verander de naam, de servers, de gebruikersnaam of het wachtwoord; het account verbindt daarna opnieuw.
+account-signature = Handtekening
+account-signature-placeholder = Met vriendelijke groet,
+    …
+account-signature-hint = Komt onder elk nieuw bericht, antwoord en doorgestuurd bericht van dit account.
+account-signature-save = Handtekening opslaan
+account-signature-line = Handtekening: { $line }
+account-signature-set = Handtekening instellen
+account-signature-edit = Handtekening bewerken
+account-remove-question = Dit account, het wachtwoord en de offline kopie verdwijnen van deze computer. Je mail blijft op de server.
+account-remove = Account verwijderen
+account-remove-hint = Haalt het account van deze computer; vraagt eerst om bevestiging.
+account-signature-saved = De handtekening is opgeslagen.
+account-removed = Het account is verwijderd.
+account-edit-heading = Account bewerken: { $email }
+account-edit-help = Verander wat nodig is en sla op; het account verbindt daarna opnieuw met de nieuwe gegevens.
+account-add-help = IMAP en SMTP. Je wachtwoord gaat in de sleutelhanger van je computer, niet in een bestand.
+account-name-is-address = Vul je echte naam in, geen e-mailadres: een adres als naam laat je mail op nep lijken en Outlook zet er "Niet-geverifieerd" bij.
+account-name-hint = De naam die ontvangers bij je mail zien, bijvoorbeeld Sanne de Vries.
+account-encryption = Versleuteling
+account-kind = Soort account
+account-exchange-help = Voor Exchange Server 2013 of nieuwer, via Exchange Web Services (EWS) over HTTPS. Verzenden gaat via dezelfde server. Zie docs/accounts.md.
+account-suggest = Servers invullen op basis van het adres
+account-username = Gebruikersnaam
+account-password = Wachtwoord
+account-keep-password = Laat leeg om het huidige wachtwoord te houden.
+account-exchange-server = Exchange-server
+account-server = Server
+account-exchange-server-help = Bijvoorbeeld mail.bedrijf.nl; Merel gebruikt https://<server>/EWS/Exchange.asmx. Gebruikersnaam als DOMEIN\naam of als e-mailadres.
+account-incoming = Ontvangen (IMAP)
+account-port = Poort
+account-outgoing = Verzenden (SMTP)
+account-dav = Agenda en adresboek (CalDAV/CardDAV), optioneel
+account-address-book = Adresboek
+account-dav-help = Het https-adres van de server, bijvoorbeeld https://caldav.fastmail.com/ of https://cloud.voorbeeld.nl/remote.php/dav/. Laat het adresboek leeg als het op dezelfde server staat.
+account-save-reconnect = Opslaan en opnieuw verbinden
+account-add-connect = Toevoegen en verbinden
+account-saved = Het account is opgeslagen en verbindt opnieuw.
+account-google-help = Maak in de Google Cloud Console een OAuth-client van het type Desktop app en vul de client-ID en het client-secret in. Zie docs/accounts.md.
+account-microsoft-help = Vul je naam en e-mailadres in en log in bij Microsoft in je browser. Merel ziet je wachtwoord niet.
+account-microsoft-own-help = Registreer de app in Microsoft Entra (public client, redirect http://localhost, Microsoft Graph-machtigingen) en vul de Application (client) ID in. Zie docs/accounts.md.
+account-own-client-id = Eigen client-ID (optioneel)
+account-sign-in-with = Inloggen bij { $provider }
+account-browser-open = Log in in het browservenster dat is geopend. Daarna verschijnt het account hier vanzelf.
+account-need-secret = Vul het client-secret in dat Google bij de OAuth-client toonde.
+
+## Welcome
+
+welcome-title = Welkom bij Merel
+welcome-next = Volgende
+welcome-back = Vorige
+welcome-done = Aan de slag
+welcome-skip = Overslaan
+welcome-updates-on = Elke dag kijken of er een nieuwe versie is
+welcome-hello-title = Mail, agenda, contacten en taken op één plek
+welcome-account-title = Je mailaccount
+welcome-updates-title = Nieuwe versies
+welcome-look-title = Uiterlijk en taal
+welcome-hello-1 = Merel werkt zoals Outlook en draait op je eigen computer. Je mail gaat rechtstreeks tussen deze computer en je mailserver; er zit geen dienst van ons tussen.
+welcome-hello-2 = Afbeeldingen van internet laden pas als je erom vraagt, wachtwoorden staan in de sleutelhanger van het systeem en de offline kopie van je mail is versleuteld.
+welcome-account-text = Voeg je account toe met IMAP en SMTP, Gmail, Microsoft 365 of Exchange. Dat kan ook later, onder Bestand.
+welcome-updates-text = Merel kan eens per dag bij GitHub nagaan of er een nieuwe versie is en het je dan laten weten. Er gaat niets mee behalve die vraag; GitHub ziet wel het adres van je internetverbinding.
+welcome-updates-self = Zelf kijken kan altijd via Help > Updates.
+welcome-look-text = Dit kun je later wijzigen op het tabblad Beeld, onder Thema en Taal.
+welcome-skip-hint = De rest later instellen
+
+## Notices
+
+notice-close = Melding sluiten
+tone-success = Gelukt
+tone-info = Informatie
+tone-warning = Let op
+tone-error = Fout
+reveal-finder = Toon in Finder
+reveal-explorer = Toon in Verkenner
+reveal-folder = Toon in map
+reveal-failed = { $what } is niet gelukt.
+
+## Notifications
+
+notifications-page = Meldingen
+notifications-badge = Aantal ongelezen berichten op het app-icoon
+notifications-mail = Bij nieuwe e-mail in Postvak IN
+notifications-reminders = Bij herinneringen voor afspraken en taken
+notifications-sound = Geluid afspelen
+notifications-details = Afzender, onderwerp en titel in de melding tonen
+notifications-try = Proefmelding sturen
+notifications-new-message = Nieuw bericht
+notifications-new-message-body = Je hebt een nieuw bericht in Postvak IN.
+notifications-many = { $count } nieuwe berichten
+notifications-many-body = In Postvak IN.
+notifications-reminder-body = { $kind }: open Merel om te zien wat er is.
+notifications-intro = Zoals in Outlook: een teller op het Merel-icoon en een melding van je computer als er iets binnenkomt terwijl Merel op de achtergrond staat.
+notifications-on-icon = Op het app-icoon
+notifications-badge-hint = Alle accounts samen, alleen Postvak IN. De titel van het venster toont het ook: "Merel (3)".
+notifications-system = Meldingen van je computer
+notifications-privacy = Privacy
+notifications-details-hint = Uit: de melding zegt alleen "Nieuw bericht" of "Herinnering", zodat niemand over je schouder of op een vergrendeld scherm meeleest.
+notifications-macos-hint = Zie je niets? Kijk in Systeeminstellingen > Berichtgeving > Merel of meldingen aan staan.
+notifications-test-body = Zo ziet een melding van Merel eruit.
+notifications-test-sent = Proefmelding verstuurd.
+
+## Updates
+
+updates-title = Nieuwe versie van Merel
+updates-check = Updates
+updates-download = Downloaden
+updates-update = Bijwerken
+updates-restart = Opnieuw starten
+updates-page = Downloadpagina openen
+updates-skip = Deze versie overslaan
+updates-later = Later
+updates-auto = Elke dag controleren op een nieuwe versie
+updates-up-to-date = Je hebt de nieuwste versie van Merel ({ $version }).
+updates-none-yet = Er staat nog geen versie van Merel klaar om te downloaden.
+updates-check-failed = Controleren op updates is niet gelukt. Is er verbinding met internet?
+updates-open-failed = Openen is niet gelukt: { $page }
+updates-available = Merel { $version } is beschikbaar.
+updates-current = Je gebruikt nu versie { $version }.
+updates-how-update = Bijwerken downloadt de nieuwe versie, controleert de handtekening, installeert hem en start Merel opnieuw. Je accounts en mail blijven bewaard.
+updates-how-download = Downloaden opent de pagina met de installatiebestanden in je browser. Installeer daarna over deze versie heen; je accounts en mail blijven bewaard.
+updates-skip-hint = Niet meer over deze versie beginnen; wel over een nieuwere
+updates-downloading = Merel { $version } downloaden
+updates-checking = Handtekening controleren
+updates-checking-text = Merel controleert of de download van Merel zelf komt en onderweg niet is veranderd.
+updates-installing = Merel { $version } installeren
+updates-installing-text = Even geduld, dit duurt een paar seconden.
+updates-ready = Merel { $version } staat klaar
+updates-ready-text = Merel sluit af, installeert de nieuwe versie en start daarna vanzelf weer.
+updates-installed = Merel { $version } is geïnstalleerd
+updates-installed-text = Start Merel opnieuw om de nieuwe versie te gebruiken. Doe je dat later, dan krijg je hem bij de volgende start.
+updates-failed = Bijwerken is niet gelukt
+updates-failed-text = { $reason } Je kunt de nieuwe versie ook zelf downloaden en installeren.
+updates-progress = { $done } van { $total } MB
+updates-restart-failed = Opnieuw starten is niet gelukt. Start Merel zelf opnieuw.
+
+## Installing updates
+install-interrupted = Bijwerken is onderbroken.
+install-no-dir = Er is geen map om de download in te zetten.
+install-dir-failed = De downloadmap kon niet worden gemaakt: { $error }
+install-download-failed = Downloaden is niet gelukt ({ $error }).
+install-unsigned = Deze versie heeft geen handtekening, dus Merel installeert hem niet zelf.
+install-bad-signature = De handtekening van deze versie klopt niet. Er is niets geïnstalleerd.
+install-mismatch = De download komt niet overeen met de ondertekende versie. Er is niets geïnstalleerd.
+install-cancelled = Geannuleerd.
+install-too-big = Het installatiebestand is groter dan verwacht. Er is niets geïnstalleerd.
+install-failed-because = Installeren is niet gelukt ({ $error }).
+install-failed = Installeren is niet gelukt.
+install-replace-failed-where = Merel kon zichzelf niet vervangen ({ $error }). Staat Merel in de map Programma's?
+install-replace-failed = Merel kon zichzelf niet vervangen ({ $error }).
+install-program-failed = Installeren is niet gelukt ({ $program } gaf { $status }).
+
+## Help
+shortcut-1 = Vorig of volgend bericht in de lijst
+shortcut-2 = Geselecteerd bericht in een eigen venster openen
+shortcut-3 = Meer berichten selecteren, los of als reeks; de acties gelden dan voor alle
+shortcut-4 = Alle berichten in de lijst selecteren
+shortcut-5 = Geselecteerd bericht verwijderen
+shortcut-6 = Gesprek negeren: dit en volgende berichten erin naar Verwijderde items
+shortcut-7 = Geselecteerd bericht archiveren
+shortcut-8 = Nieuwe e-mail
+shortcut-9 = Nieuwe e-mail, vanuit elke module
+shortcut-10 = Nieuwe afspraak, vanuit elke module
+shortcut-11 = Nieuw contact, vanuit elke module
+shortcut-12 = Nieuwe taak, vanuit elke module
+shortcut-13 = Beantwoorden
+shortcut-14 = Allen beantwoorden
+shortcut-15 = Beantwoorden met vergaderverzoek
+shortcut-16 = Doorsturen
+shortcut-17 = Doorsturen als bijlage (het bericht gaat mee als .eml-bestand)
+shortcut-18 = Verplaatsen naar een map
+shortcut-19 = Afdrukken via de browser (in de agenda: de open dag, week of maand)
+shortcut-20 = Opslaan als .eml-bestand in de map Downloads
+shortcut-21 = Ga naar datum (in de agenda)
+shortcut-22 = Markeren als gelezen
+shortcut-23 = Markeren als ongelezen
+shortcut-24 = Naar het zoekveld (ook in agenda, contacten en taken)
+shortcut-25 = Zoekwoorden in het zoekveld, zoals in Outlook; ook heeft:bijlage, is:ongelezen en is:gemarkeerd
+shortcut-26 = Snelle stap 1 tot 9 van het account
+shortcut-27 = Berichtvenster sluiten, anders zoekopdracht wissen (ook in agenda, contacten en taken)
+shortcut-28 = Map vernieuwen
+help-open-settings = Instellingenmap openen
+version-plain = Versie { $version }
+version-build = Versie { $version } (build { $commit })
+version-build-date = Versie { $version } (build { $commit } van { $date })
+key-enter-double-click = Enter / dubbelklik
+key-click = klik
+search-keywords = van: aan: onderwerp:
+help-shortcuts-where = In de mailmodule, zolang je niet in een tekstveld typt.
+help-copy = Kopiëren
+help-copy-hint = De versie naar het klembord, handig bij een foutmelding
+help-about-1 = Mail, agenda, contacten en taken voor de desktop, met de werkwijze van Outlook. Geschreven in Rust met egui; één programma voor macOS, Windows en Linux.
+help-about-2 = Veiligheid en privacy voorop: mail kan geen scripts uitvoeren, afbeeldingen van internet worden pas geladen als je erom vraagt, verbindingen lopen altijd over TLS, wachtwoorden staan in de sleutelhanger van het systeem en de offline cache is versleuteld.
+help-auto-hint = Merel vraagt dan eens per dag bij GitHub naar de nieuwste versie; er gaat niets anders mee dan die vraag
+help-settings-hint = De map met je accounts, agenda, regels en de versleutelde cache
+
+## Certificates and OpenPGP keys
+
+cert-import = Certificaat importeren…
+cert-replace = Ander certificaat…
+cert-remove = Certificaat verwijderen
+cert-confirm = Importeren
+cert-password = Wachtwoord van het bestand
+pgp-import = OpenPGP-sleutel importeren…
+pgp-replace = Andere OpenPGP-sleutel…
+pgp-remove = OpenPGP-sleutel verwijderen
+pgp-passphrase = Wachtwoordzin van de sleutel
+cert-line = Nieuwe mail wordt digitaal ondertekend als { $name } <{ $emails }>. Uitgegeven door { $issuer }, geldig tot { $until }.
+cert-none = Met een certificaat onderteken je mail digitaal: de ontvanger ziet dat het bericht van jou komt en onderweg niet is veranderd.
+pgp-line = Sleutel van { $name } <{ $emails }>, vingerafdruk { $fingerprint }. Mail die met OpenPGP aan je versleuteld is, gaat ermee open.
+pgp-none = Gebruik je OpenPGP (GnuPG, Thunderbird, Proton)? Importeer je sleutel om versleutelde mail te lezen. Exporteer hem eerst als .asc-bestand.
+cert-title = Certificaat (S/MIME)
+pgp-title = OpenPGP-sleutel
+cert-file = Bestand: { $file }
+cert-import-hint = Kies een .p12- of .pfx-bestand met je certificaat en privésleutel, van je organisatie of een certificaatverstrekker.
+cert-remove-hint = Mail van dit account wordt niet meer ondertekend. Het bestand waaruit je importeerde blijft bestaan.
+pgp-import-hint = Kies je geëxporteerde privésleutel (.asc, .gpg of .key), bijvoorbeeld uit gpg --export-secret-keys --armor of Kleopatra.
+pgp-remove-hint = Met OpenPGP versleutelde mail aan dit account gaat niet meer open. Het bestand waaruit je importeerde blijft bestaan.
+cert-pick = Certificaat kiezen
+cert-filter = Certificaat met sleutel
+pgp-pick = OpenPGP-sleutel kiezen
+cert-imported = Het certificaat van { $name } is geïmporteerd; nieuwe mail van dit account wordt ondertekend.
+pgp-imported = De OpenPGP-sleutel van { $name } is geïmporteerd; met OpenPGP versleutelde mail gaat nu open.
+cert-removed = Het certificaat is verwijderd; mail van dit account wordt niet meer ondertekend.
+pgp-removed = De OpenPGP-sleutel is verwijderd.
+cert-unreadable = Dit bestand kan niet worden gelezen, of is te groot voor een sleutel.
+
+compose-pick-attachments = Bijlagen kiezen
+account-add-title = Account toevoegen
+
+## Recent searches
+
+search-recent = Recente zoekopdrachten
+search-recent-clear = Lijst wissen

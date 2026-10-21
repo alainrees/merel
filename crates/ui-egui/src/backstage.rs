@@ -83,7 +83,7 @@ impl Drop for AccountForm {
 }
 
 fn port(s: &str, what: &str) -> Result<u16, String> {
-    s.trim().parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| format!("Vul een geldige poort in voor {what} (1 tot 65535)."))
+    s.trim().parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| crate::i18n::tr_args("account-bad-port", &[("what", what.into())]))
 }
 
 fn host(s: &str, what: &str) -> Result<String, String> {
@@ -93,7 +93,7 @@ fn host(s: &str, what: &str) -> Result<String, String> {
         && h.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
         && !h.starts_with('.')
         && !h.ends_with('.');
-    if ok { Ok(h) } else { Err(format!("Vul een geldige servernaam in voor {what}, bijvoorbeeld imap.voorbeeld.nl.")) }
+    if ok { Ok(h) } else { Err(crate::i18n::tr_args("account-bad-host", &[("what", what.into())])) }
 }
 
 impl AccountForm {
@@ -152,37 +152,38 @@ impl AccountForm {
 
     /// The account the form describes, or what is wrong with it. The password stays out.
     pub fn account(&self) -> Result<Account, String> {
-        let address = Address::new(Some(self.name.trim()), self.email.trim()).map_err(|_| "Vul een geldig e-mailadres in.".to_string())?;
+        let address = Address::new(Some(self.name.trim()), self.email.trim()).map_err(|_| tr("account-bad-email"))?;
         let username = if self.username.trim().is_empty() { address.email().to_string() } else { self.username.trim().to_string() };
         // Exchange logs in as DOMAIN\user; IMAP quotes the name, so a backslash stays out there.
         let backslash_ok = self.kind == Protocol::Exchange;
         if username.chars().any(|c| c.is_control() || c == '"' || (c == '\\' && !backslash_ok)) {
-            return Err("De gebruikersnaam bevat tekens die niet zijn toegestaan.".into());
+            return Err(tr("account-bad-username"));
         }
         if self.password.is_empty() && self.editing.is_none() {
-            return Err("Vul het wachtwoord in.".into());
+            return Err(tr("account-need-password"));
         }
         let (protocol, incoming, outgoing) = if self.kind == Protocol::Exchange {
             (Protocol::Exchange, Server { host: host(&self.imap_host, "Exchange")?, port: 443, tls: Tls::Implicit }, None)
         } else {
             (
                 Protocol::ImapSmtp,
-                Server { host: host(&self.imap_host, "ontvangen (IMAP)")?, port: port(&self.imap_port, "ontvangen (IMAP)")?, tls: self.imap_tls },
+                Server {
+                    host: host(&self.imap_host, &tr("account-incoming-what"))?,
+                    port: port(&self.imap_port, &tr("account-incoming-what"))?,
+                    tls: self.imap_tls,
+                },
                 Some(Server {
-                    host: host(&self.smtp_host, "verzenden (SMTP)")?,
-                    port: port(&self.smtp_port, "verzenden (SMTP)")?,
+                    host: host(&self.smtp_host, &tr("account-outgoing-what"))?,
+                    port: port(&self.smtp_port, &tr("account-outgoing-what"))?,
                     tls: self.smtp_tls,
                 }),
             )
         };
         let dav = if protocol == Protocol::ImapSmtp && !self.dav_calendar.trim().is_empty() {
-            Some(
-                Dav::new(&self.dav_calendar, &self.dav_contacts)
-                    .map_err(|_| "Vul voor agenda en adresboek een https-adres in, bijvoorbeeld https://caldav.fastmail.com/.".to_string())?,
-            )
+            Some(Dav::new(&self.dav_calendar, &self.dav_contacts).map_err(|_| tr("account-bad-dav"))?)
         } else {
             if !self.dav_contacts.trim().is_empty() && protocol == Protocol::ImapSmtp {
-                return Err("Vul ook het agenda-adres (CalDAV) in; het adresboek alleen is niet genoeg.".into());
+                return Err(tr("account-need-caldav"));
             }
             None
         };
@@ -210,7 +211,9 @@ impl AccountForm {
 }
 
 /// The text of the side menu's way back to the mail.
-pub const BACK: &str = "Terug";
+pub fn back() -> String {
+    tr("backstage-back")
+}
 
 /// What the side menu of the Bestand page does besides Accounts; the Bestand menu of the macOS
 /// menu bar holds the same.
@@ -251,7 +254,7 @@ pub(crate) fn run(app: &mut MailApp, action: FileAction) {
             } else if app.can_print() {
                 app.print_selected();
             } else {
-                app.notice = Some(crate::Notice::warning("Open eerst een bericht om af te drukken."));
+                app.notice = Some(crate::Notice::warning(tr("print-open-first")));
             }
         }
         // Outlook's "Opslaan als": the open message as an .eml file in Downloads; Ctrl+S too.
@@ -277,14 +280,14 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .show_separator_line(false)
         .frame(egui::Frame::NONE.fill(t.window).inner_margin(Margin { left: 12, right: 8, top: 8, bottom: 12 }))
         .show(ui, |ui| {
-            if helder::nav_item(ui, t, Icon::ChevronLeft, BACK, false).clicked() {
+            if helder::nav_item(ui, t, Icon::ChevronLeft, &back(), false).clicked() {
                 app.tab = Tab::Home;
             }
             ui.add_space(8.0);
-            if helder::nav_item(ui, t, Icon::User, "Accounts", app.file_page == Page::Accounts).clicked() {
+            if helder::nav_item(ui, t, Icon::User, &tr("accounts"), app.file_page == Page::Accounts).clicked() {
                 app.file_page = Page::Accounts;
             }
-            if helder::nav_item(ui, t, Icon::Bell, crate::notifications::PAGE, app.file_page == Page::Notifications).clicked() {
+            if helder::nav_item(ui, t, Icon::Bell, &crate::notifications::page_label(), app.file_page == Page::Notifications).clicked() {
                 app.file_page = Page::Notifications;
             }
             for action in FileAction::ALL {
@@ -308,13 +311,13 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.label(RichText::new("Accounts").size(helder::TITLE_TEXT).strong().color(t.text));
+            ui.label(RichText::new(tr("accounts")).size(helder::TITLE_TEXT).strong().color(t.text));
             ui.add_space(12.0);
             // A sign-in started from this list reports here; the OAuth form consumes its own.
             let oauth_form = matches!(app.form.kind, Protocol::Gmail | Protocol::Microsoft365);
             if !oauth_form {
                 match app.engine.session.sign_in.take() {
-                    Some(Some(Ok(()))) => app.form.notice = Some(crate::Notice::success("Opnieuw aangemeld; het account verbindt opnieuw.")),
+                    Some(Some(Ok(()))) => app.form.notice = Some(crate::Notice::success(tr("account-signed-in-again"))),
                     Some(Some(Err(e))) => app.form.notice = Some(crate::Notice::error(e)),
                     Some(None) => app.engine.session.sign_in = Some(None),
                     None => {}
@@ -338,7 +341,7 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 })
                 .collect();
             if app.engine.session.is_sample() {
-                ui.label(RichText::new("Er is nog geen account. Je ziet voorbeeldmail.").color(t.text_dim));
+                ui.label(RichText::new(tr("account-none-yet")).color(t.text_dim));
             }
             if let Some(n) = &app.form.notice {
                 crate::notice::inline(ui, t, n);
@@ -359,9 +362,9 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ui.label(RichText::new(name).strong().color(t.text));
                     ui.label(RichText::new(email).color(t.text_dim));
                     let (txt, col) = match status {
-                        AccountStatus::Online => ("Verbonden".to_string(), t.accent_text),
-                        AccountStatus::Connecting => ("Verbinden…".to_string(), t.text_dim),
-                        AccountStatus::Offline => ("Niet verbonden".to_string(), t.text_dim),
+                        AccountStatus::Online => (tr("account-online"), t.accent_text),
+                        AccountStatus::Connecting => (tr("account-connecting"), t.text_dim),
+                        AccountStatus::Offline => (tr("account-offline"), t.text_dim),
                         AccountStatus::Error(e) => (e, t.flag),
                     };
                     ui.label(RichText::new(txt).size(12.0).color(col));
@@ -371,17 +374,13 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     }
                     ui.add_space(4.0);
                     if oauth {
-                        let label = if busy { "Wacht op de browser…" } else { "Opnieuw aanmelden" };
-                        if ui
-                            .add_enabled(!busy, egui::Button::new(label))
-                            .on_hover_text("Log opnieuw in via de browser, bijvoorbeeld om toestemming te geven voor agenda, contacten en taken.")
-                            .clicked()
-                        {
+                        let label = if busy { tr("account-waiting-browser") } else { tr("account-sign-in-again") };
+                        if ui.add_enabled(!busy, egui::Button::new(label)).on_hover_text(tr("account-sign-in-again-hint")).clicked() {
                             again = Some(id.clone());
                         }
                     } else if ui
-                        .add_enabled(app.form.editing.as_deref() != Some(id.as_str()), egui::Button::new("Account bewerken"))
-                        .on_hover_text("Verander de naam, de servers, de gebruikersnaam of het wachtwoord; het account verbindt daarna opnieuw.")
+                        .add_enabled(app.form.editing.as_deref() != Some(id.as_str()), egui::Button::new(tr("account-edit")))
+                        .on_hover_text(tr("account-edit-hint"))
                         .clicked()
                     {
                         edit = Some(id.clone());
@@ -389,30 +388,36 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ui.add_space(6.0);
                     let editing = app.form.signature_edit.as_ref().is_some_and(|(e, _)| *e == id);
                     if editing {
-                        ui.label(RichText::new("Handtekening").strong().color(t.text));
+                        ui.label(RichText::new(tr("account-signature")).strong().color(t.text));
                         if let Some((_, text)) = app.form.signature_edit.as_mut() {
                             ui.add(
-                                egui::TextEdit::multiline(text).desired_rows(4).desired_width(f32::INFINITY).hint_text("Met vriendelijke groet,\n…"),
+                                egui::TextEdit::multiline(text)
+                                    .desired_rows(4)
+                                    .desired_width(f32::INFINITY)
+                                    .hint_text(tr("account-signature-placeholder")),
                             );
                         }
-                        ui.label(
-                            RichText::new("Komt onder elk nieuw bericht, antwoord en doorgestuurd bericht van dit account.")
-                                .size(12.0)
-                                .color(t.text_dim),
-                        );
+                        ui.label(RichText::new(tr("account-signature-hint")).size(12.0).color(t.text_dim));
                         ui.horizontal(|ui| {
-                            if ui.button("Handtekening opslaan").clicked() {
+                            if ui.button(tr("account-signature-save")).clicked() {
                                 save_signature = app.form.signature_edit.take();
                             }
-                            if ui.button("Annuleren").clicked() {
+                            if ui.button(tr("cancel")).clicked() {
                                 app.form.signature_edit = None;
                             }
                         });
                     } else {
                         if !signature.is_empty() {
-                            ui.label(RichText::new(format!("Handtekening: {}", signature.lines().next().unwrap_or(""))).size(12.0).color(t.text_dim));
+                            ui.label(
+                                RichText::new(crate::i18n::tr_args(
+                                    "account-signature-line",
+                                    &[("line", signature.lines().next().unwrap_or("").into())],
+                                ))
+                                .size(12.0)
+                                .color(t.text_dim),
+                            );
                         }
-                        if ui.button(if signature.is_empty() { "Handtekening instellen" } else { "Handtekening bewerken" }).clicked() {
+                        if ui.button(if signature.is_empty() { tr("account-signature-set") } else { tr("account-signature-edit") }).clicked() {
                             app.form.signature_edit = Some((id.clone(), signature.clone()));
                         }
                     }
@@ -426,29 +431,23 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     }
                     ui.add_space(4.0);
                     if confirming.as_deref() == Some(id.as_str()) {
-                        ui.label(
-                            RichText::new(
-                                "Dit account, het wachtwoord en de offline kopie verdwijnen van deze computer. Je mail blijft op de server.",
-                            )
-                            .size(12.0)
-                            .color(t.text),
-                        );
+                        ui.label(RichText::new(tr("account-remove-question")).size(12.0).color(t.text));
                         ui.horizontal(|ui| {
                             if ui
-                                .add(egui::Button::new(RichText::new("Ja, verwijderen").color(t.on_accent)).fill(t.flag).stroke(egui::Stroke::NONE))
+                                .add(
+                                    egui::Button::new(RichText::new(tr("calendars-confirm-delete")).color(t.on_accent))
+                                        .fill(t.flag)
+                                        .stroke(egui::Stroke::NONE),
+                                )
                                 .clicked()
                             {
                                 remove = Some(id.clone());
                             }
-                            if ui.button("Annuleren").clicked() {
+                            if ui.button(tr("cancel")).clicked() {
                                 app.form.confirm_remove = None;
                             }
                         });
-                    } else if ui
-                        .button("Account verwijderen")
-                        .on_hover_text("Haalt het account van deze computer; vraagt eerst om bevestiging.")
-                        .clicked()
-                    {
+                    } else if ui.button(tr("account-remove")).on_hover_text(tr("account-remove-hint")).clicked() {
                         app.form.confirm_remove = Some(id.clone());
                     }
                 });
@@ -466,7 +465,7 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
             if let Some((id, text)) = save_signature {
                 app.form.notice = match app.engine.set_signature(&id, &text) {
-                    Ok(()) => Some(crate::Notice::success("De handtekening is opgeslagen.")),
+                    Ok(()) => Some(crate::Notice::success(tr("account-signature-saved"))),
                     Err(e) => Some(crate::Notice::error(e)),
                 };
             }
@@ -476,18 +475,15 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 }
                 app.form.confirm_remove = None;
                 app.form.notice = Some(match app.engine.remove_account(&id) {
-                    Ok(()) => crate::Notice::success("Het account is verwijderd."),
+                    Ok(()) => crate::Notice::success(tr("account-removed")),
                     Err(e) => crate::Notice::error(e),
                 });
             }
             ui.add_space(16.0);
             let (heading, help) = if app.form.editing.is_some() {
-                (
-                    format!("Account bewerken: {}", app.form.email),
-                    "Verander wat nodig is en sla op; het account verbindt daarna opnieuw met de nieuwe gegevens.",
-                )
+                (crate::i18n::tr_args("account-edit-heading", &[("email", app.form.email.as_str().into())]), tr("account-edit-help"))
             } else {
-                ("Account toevoegen".to_string(), "IMAP en SMTP. Je wachtwoord gaat in de sleutelhanger van je computer, niet in een bestand.")
+                (tr("account-add-title"), tr("account-add-help"))
             };
             let heading = ui.label(RichText::new(heading).size(18.0).strong().color(t.text));
             if std::mem::take(&mut app.form.scroll_to_form) {
@@ -506,11 +502,7 @@ const LABEL_WIDTH: f32 = 150.0;
 /// A form row: its label, then an underlined field.
 /// Under the name field: what the name is for, and why an address there is no good.
 fn name_hint(ui: &mut Ui, t: &Tokens, name: &str) {
-    let (text, color) = if name.contains('@') {
-        ("Vul je echte naam in, geen e-mailadres: een adres als naam laat je mail op nep lijken en Outlook zet er \"Niet-geverifieerd\" bij.", t.flag)
-    } else {
-        ("De naam die ontvangers bij je mail zien, bijvoorbeeld Sanne de Vries.", t.text_dim)
-    };
+    let (text, color) = if name.contains('@') { (tr("account-name-is-address"), t.flag) } else { (tr("account-name-hint"), t.text_dim) };
     ui.horizontal(|ui| {
         ui.add_space(LABEL_WIDTH + ui.spacing().item_spacing.x);
         ui.label(RichText::new(text).size(12.0).color(color));
@@ -557,14 +549,14 @@ fn chips<V: PartialEq + Copy>(ui: &mut Ui, t: &Tokens, value: &mut V, options: &
 
 fn tls_picker(ui: &mut Ui, t: &Tokens, id: &str, tls: &mut Tls) {
     ui.horizontal(|ui| {
-        caption(ui, t, "Versleuteling");
+        caption(ui, t, &tr("account-encryption"));
         ui.push_id(id, |ui| chips(ui, t, tls, &[(Tls::Implicit, "TLS"), (Tls::StartTls, "STARTTLS")]));
     });
 }
 
 fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.horizontal(|ui| {
-        caption(ui, t, "Soort account");
+        caption(ui, t, &tr("account-kind"));
         if app.form.editing.is_some() {
             // The kind of an account is fixed; its servers and sign-in are what change.
             ui.label(RichText::new(if app.form.kind == Protocol::Exchange { "Exchange" } else { "IMAP/SMTP" }).color(t.text));
@@ -593,69 +585,61 @@ fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let f = &mut app.form;
     let exchange = f.kind == Protocol::Exchange;
     if exchange {
-        ui.label(
-            RichText::new("Voor Exchange Server 2013 of nieuwer, via Exchange Web Services (EWS) over HTTPS. Verzenden gaat via dezelfde server. Zie docs/accounts.md.")
-                .size(12.0)
-                .color(t.text_dim),
-        );
+        ui.label(RichText::new(tr("account-exchange-help")).size(12.0).color(t.text_dim));
         ui.add_space(6.0);
     }
-    field(ui, t, "Naam", &mut f.name, false);
+    field(ui, t, &tr("name"), &mut f.name, false);
     name_hint(ui, t, &f.name);
-    field(ui, t, "E-mailadres", &mut f.email, false);
+    field(ui, t, &tr("contacts-email"), &mut f.email, false);
     if !exchange {
         ui.horizontal(|ui| {
             ui.add_space(LABEL_WIDTH + ui.spacing().item_spacing.x);
-            if helder::quiet(ui, t, |ui| helder::tool_button(ui, t, Icon::Sparkles, "Servers invullen op basis van het adres")).clicked() {
+            if helder::quiet(ui, t, |ui| helder::tool_button(ui, t, Icon::Sparkles, &tr("account-suggest"))).clicked() {
                 f.suggest();
             }
         });
     }
-    field(ui, t, "Gebruikersnaam", &mut f.username, false);
-    field(ui, t, "Wachtwoord", &mut f.password, true);
+    field(ui, t, &tr("account-username"), &mut f.username, false);
+    field(ui, t, &tr("account-password"), &mut f.password, true);
     if f.editing.is_some() {
         ui.horizontal(|ui| {
             ui.add_space(LABEL_WIDTH + ui.spacing().item_spacing.x);
-            ui.label(RichText::new("Laat leeg om het huidige wachtwoord te houden.").size(12.0).color(t.text_dim));
+            ui.label(RichText::new(tr("account-keep-password")).size(12.0).color(t.text_dim));
         });
     }
     ui.add_space(8.0);
     if exchange {
-        section(ui, t, "Exchange-server");
-        field(ui, t, "Server", &mut f.imap_host, false);
-        ui.label(RichText::new("Bijvoorbeeld mail.bedrijf.nl; Merel gebruikt https://<server>/EWS/Exchange.asmx. Gebruikersnaam als DOMEIN\\naam of als e-mailadres.").size(12.0).color(t.text_dim));
+        section(ui, t, &tr("account-exchange-server"));
+        field(ui, t, &tr("account-server"), &mut f.imap_host, false);
+        ui.label(RichText::new(tr("account-exchange-server-help")).size(12.0).color(t.text_dim));
     } else {
-        section(ui, t, "Ontvangen (IMAP)");
-        field(ui, t, "Server", &mut f.imap_host, false);
-        field(ui, t, "Poort", &mut f.imap_port, false);
+        section(ui, t, &tr("account-incoming"));
+        field(ui, t, &tr("account-server"), &mut f.imap_host, false);
+        field(ui, t, &tr("account-port"), &mut f.imap_port, false);
         tls_picker(ui, t, "imap_tls", &mut f.imap_tls);
         ui.add_space(8.0);
-        section(ui, t, "Verzenden (SMTP)");
-        field(ui, t, "Server", &mut f.smtp_host, false);
-        field(ui, t, "Poort", &mut f.smtp_port, false);
+        section(ui, t, &tr("account-outgoing"));
+        field(ui, t, &tr("account-server"), &mut f.smtp_host, false);
+        field(ui, t, &tr("account-port"), &mut f.smtp_port, false);
         tls_picker(ui, t, "smtp_tls", &mut f.smtp_tls);
         ui.add_space(8.0);
-        section(ui, t, "Agenda en adresboek (CalDAV/CardDAV), optioneel");
-        field(ui, t, "Agenda", &mut f.dav_calendar, false);
-        field(ui, t, "Adresboek", &mut f.dav_contacts, false);
-        ui.label(
-            RichText::new("Het https-adres van de server, bijvoorbeeld https://caldav.fastmail.com/ of https://cloud.voorbeeld.nl/remote.php/dav/. Laat het adresboek leeg als het op dezelfde server staat.")
-                .size(12.0)
-                .color(t.text_dim),
-        );
+        section(ui, t, &tr("account-dav"));
+        field(ui, t, &tr("module-calendar"), &mut f.dav_calendar, false);
+        field(ui, t, &tr("account-address-book"), &mut f.dav_contacts, false);
+        ui.label(RichText::new(tr("account-dav-help")).size(12.0).color(t.text_dim));
     }
     ui.add_space(12.0);
     if let Some(e) = &f.error {
         ui.label(RichText::new(e).color(t.flag));
     }
     let editing = f.editing.is_some();
-    let label = if editing { "Opslaan en opnieuw verbinden" } else { "Toevoegen en verbinden" };
+    let label = if editing { tr("account-save-reconnect") } else { tr("account-add-connect") };
     let mut save = false;
     let mut cancel = false;
     ui.horizontal(|ui| {
-        save = helder::primary_button(ui, t, Icon::Send, label).clicked();
+        save = helder::primary_button(ui, t, Icon::Send, &label).clicked();
         if editing {
-            cancel = ui.button("Annuleren").clicked();
+            cancel = ui.button(tr("cancel")).clicked();
         }
     });
     ui.add_space(4.0);
@@ -671,7 +655,7 @@ fn password_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 match app.engine.update_account(account, password) {
                     Ok(()) => {
                         app.form = AccountForm::default();
-                        app.form.notice = Some(crate::Notice::success("Het account is opgeslagen en verbindt opnieuw."));
+                        app.form.notice = Some(crate::Notice::success(tr("account-saved")));
                     }
                     Err(e) => app.form.error = Some(e),
                 }
@@ -707,26 +691,18 @@ fn oauth_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     // With Merel's own registration the client ID is only for those who bring their own.
     let builtin = app.form.kind.builtin_client_id().is_some();
     let (provider, secret_needed, help) = match app.form.kind {
-        Protocol::Gmail => (
-            "Google",
-            true,
-            "Maak in de Google Cloud Console een OAuth-client van het type Desktop app en vul de client-ID en het client-secret in. Zie docs/accounts.md.",
-        ),
-        _ if builtin => ("Microsoft", false, "Vul je naam en e-mailadres in en log in bij Microsoft in je browser. Merel ziet je wachtwoord niet."),
-        _ => (
-            "Microsoft",
-            false,
-            "Registreer de app in Microsoft Entra (public client, redirect http://localhost, Microsoft Graph-machtigingen) en vul de Application (client) ID in. Zie docs/accounts.md.",
-        ),
+        Protocol::Gmail => ("Google", true, tr("account-google-help")),
+        _ if builtin => ("Microsoft", false, tr("account-microsoft-help")),
+        _ => ("Microsoft", false, tr("account-microsoft-own-help")),
     };
     ui.label(RichText::new(help).size(12.0).color(t.text_dim));
     ui.add_space(6.0);
     let f = &mut app.form;
     ui.add_enabled_ui(!busy, |ui| {
-        field(ui, t, "Naam", &mut f.name, false);
-        field(ui, t, "E-mailadres", &mut f.email, false);
+        field(ui, t, &tr("name"), &mut f.name, false);
+        field(ui, t, &tr("contacts-email"), &mut f.email, false);
         if builtin {
-            egui::CollapsingHeader::new("Eigen client-ID (optioneel)").default_open(!f.client_id.is_empty()).show(ui, |ui| {
+            egui::CollapsingHeader::new(tr("account-own-client-id")).default_open(!f.client_id.is_empty()).show(ui, |ui| {
                 field(ui, t, "Client-ID", &mut f.client_id, false);
             });
         } else {
@@ -740,19 +716,17 @@ fn oauth_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if let Some(e) = &f.error {
         ui.label(RichText::new(e).color(t.flag));
     }
-    let label = if busy { "Wacht op de browser…".to_string() } else { format!("Inloggen bij {provider}") };
+    let label = if busy { tr("account-waiting-browser") } else { crate::i18n::tr_args("account-sign-in-with", &[("provider", provider.into())]) };
     let click = ui.add_enabled_ui(!busy, |ui| helder::primary_button(ui, t, Icon::Globe, &label)).inner.clicked();
     if busy {
-        ui.label(
-            RichText::new("Log in in het browservenster dat is geopend. Daarna verschijnt het account hier vanzelf.").size(12.0).color(t.text_dim),
-        );
+        ui.label(RichText::new(tr("account-browser-open")).size(12.0).color(t.text_dim));
     }
     if click {
         match signin::account(app.form.kind, &app.form.name, &app.form.email, &app.form.client_id) {
             Ok(account) => {
                 let client_secret = (secret_needed && !app.form.client_secret.trim().is_empty()).then(|| Secret::new(app.form.client_secret.trim()));
                 if secret_needed && client_secret.is_none() {
-                    app.form.error = Some("Vul het client-secret in dat Google bij de OAuth-client toonde.".into());
+                    app.form.error = Some(tr("account-need-secret"));
                     return;
                 }
                 app.form.error = None;

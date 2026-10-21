@@ -815,14 +815,14 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                                             }
                                         }
                                         ui.separator();
-                                        if ui.button(view::RECENT_CLEAR).clicked() {
+                                        if ui.button(view::recent_clear()).clicked() {
                                             recent_pick = Some(None);
                                             ui.close();
                                         }
                                     })
                                     .0;
-                                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, view::RECENT_MENU));
-                                r.on_hover_text(view::RECENT_MENU);
+                                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, view::recent_menu()));
+                                r.on_hover_text(view::recent_menu());
                             }
                             if searching
                                 && box_button(ui, t, helder::Icon::FolderPlus, &search_folder(), height - 4.0)
@@ -1040,7 +1040,7 @@ fn file_menu(app: &mut MailApp) {
         app.tab = Tab::File;
         app.file_page = backstage::Page::Accounts;
     }
-    if menubar::item(&format!("{}…", notifications::PAGE), true, None) {
+    if menubar::item(&format!("{}…", notifications::page_label()), true, None) {
         app.tab = Tab::File;
         app.file_page = backstage::Page::Notifications;
     }
@@ -2706,28 +2706,28 @@ mod tests {
         assert!(h.state().welcome.is_none(), "the sample has no settings folder, so no welcome");
         h.state_mut().welcome = Some(welcome::Step::Hello);
         h.run();
-        assert!(h.query_all_by_label(welcome::WINDOW).count() >= 1);
+        assert!(h.query_all_by_label(&welcome::window_label()).count() >= 1);
         h.get_by_label("Stap 1 van 4");
-        h.get_by_label(welcome::NEXT).click();
+        h.get_by_label(&welcome::next_label()).click();
         h.run();
-        h.get_by_label(welcome::ADD_ACCOUNT);
-        h.get_by_label(welcome::BACK).click();
+        h.get_by_label(&welcome::add_account());
+        h.get_by_label(&welcome::back_label()).click();
         h.run();
         h.get_by_label("Stap 1 van 4");
-        h.get_by_label(welcome::NEXT).click();
+        h.get_by_label(&welcome::next_label()).click();
         h.run();
-        h.get_by_label(welcome::NEXT).click();
+        h.get_by_label(&welcome::next_label()).click();
         h.run();
         assert_eq!(h.state().view.update_check, Some(false), "shown is chosen: no until said otherwise");
-        h.get_by_label(welcome::UPDATES_ON).click();
+        h.get_by_label(&welcome::updates_on()).click();
         h.run();
         assert_eq!(h.state().view.update_check, Some(true));
-        h.get_by_label(welcome::NEXT).click();
+        h.get_by_label(&welcome::next_label()).click();
         h.run();
         h.get_by_label("Donker").click();
         h.run();
         assert_eq!(h.state().view.theme, view::ThemeChoice::Dark);
-        h.get_by_label(welcome::DONE).click();
+        h.get_by_label(&welcome::done()).click();
         h.run();
         assert!(h.state().welcome.is_none());
         assert!(h.state().view.welcomed);
@@ -2739,7 +2739,7 @@ mod tests {
         let mut h = harness();
         h.state_mut().welcome = Some(welcome::Step::Account);
         h.run();
-        h.get_by_label(welcome::ADD_ACCOUNT).click();
+        h.get_by_label(&welcome::add_account()).click();
         h.run();
         assert!(h.state().welcome.is_none());
         assert!(h.state().view.welcomed);
@@ -2754,15 +2754,15 @@ mod tests {
         h.run();
         h.get_by_label("Help").click();
         h.run();
-        h.get_by_label(updates::CHECK);
+        h.get_by_label(&updates::check());
         let release = Release { version: "9.0.0".into(), notes: "Nieuw: van alles.".into() };
         h.state_mut().finish_update_check(Outcome::Newer(release.clone()));
         h.run();
-        assert!(h.query_all_by_label(updates::WINDOW).count() >= 1);
+        assert!(h.query_all_by_label(&updates::window_label()).count() >= 1);
         h.get_by_label("Merel 9.0.0 is beschikbaar.");
         h.get_by_label("Nieuw: van alles.");
-        h.get_by_label(updates::DOWNLOAD);
-        h.get_by_label(updates::SKIP).click();
+        h.get_by_label(&updates::download());
+        h.get_by_label(&updates::skip()).click();
         h.run();
         assert!(h.state().updates.offer.is_none());
         assert_eq!(h.state().view.skipped_version.as_deref(), Some("9.0.0"));
@@ -2772,7 +2772,7 @@ mod tests {
         h.state_mut().finish_update_check(Outcome::Newer(Release { version: "9.1.0".into(), notes: String::new() }));
         assert!(h.state().updates.offer.is_some());
         h.run();
-        h.get_by_label(updates::LATER).click();
+        h.get_by_label(&updates::later()).click();
         h.run();
         assert!(h.state().updates.offer.is_none());
         // Only an answer to the person's own question is spoken.
@@ -2792,15 +2792,15 @@ mod tests {
         h.get_by_label("Merel 9.0.0 downloaden");
         h.get_by_label("12 van 38 MB");
         h.get_by_label("Stap 2 van 4");
-        h.get_by_label(updates::CANCEL).click();
+        h.get_by_label(&updates::cancel()).click();
         h.run();
         assert!(h.state().updates.job.is_none(), "cancelling ends the download");
 
         h.state_mut().updates.job = Some(Job::at("9.0.0", Stage::Ready(Restart::Relaunch("/Applications/Merel.app".into()))));
         h.run();
         h.get_by_label("Merel 9.0.0 is geïnstalleerd");
-        h.get_by_label(updates::RESTART);
-        h.get_by_label(updates::LATER).click();
+        h.get_by_label(&updates::restart_label());
+        h.get_by_label(&updates::later()).click();
         h.run();
         h.run();
         assert!(h.state().updates.job.is_none());
@@ -2815,14 +2815,14 @@ mod tests {
         h.state_mut().updates.job = Some(Job::at("9.0.0", Stage::Ready(Restart::Relaunch("/x".into()))));
         h.run();
         h.run();
-        h.get_by_label(updates::LATER).click();
+        h.get_by_label(&updates::later()).click();
         h.run();
         assert!(h.state().updates.job.is_none(), "once installed, Later closes it");
         h.state_mut().updates.job =
             Some(Job::at("9.0.0", Stage::Failed("De handtekening van deze versie klopt niet. Er is niets geïnstalleerd.".into())));
         h.run();
         h.get_by_label("Bijwerken is niet gelukt");
-        h.get_by_label(updates::PAGE);
+        h.get_by_label(&updates::page_label());
         assert!(h.query_by_label_contains("De handtekening van deze versie klopt niet").is_some());
     }
 
@@ -2836,7 +2836,7 @@ mod tests {
         h.run();
         h.get_by_label("Over Merel").click();
         h.run();
-        h.get_by_label(updates::AUTO).click();
+        h.get_by_label(&updates::auto()).click();
         h.run();
         assert_eq!(h.state().view.update_check, Some(true));
         assert!(h.state().updates.running(), "switching it on asks at once");
@@ -2848,8 +2848,8 @@ mod tests {
         h.run();
         h.state_mut().notice = Some(Notice::success("Contact opgeslagen in Downloads: Ravi Kumar.vcf").revealing("/tmp/Ravi Kumar.vcf"));
         h.run();
-        assert!(h.get_by_label(notice::CLOSE).rect().top() < 220.0, "just under the ribbon, where the person looks");
-        h.get_by_label(notice::REVEAL);
+        assert!(h.get_by_label(&notice::close_label()).rect().top() < 220.0, "just under the ribbon, where the person looks");
+        h.get_by_label(&notice::reveal_label());
         for _ in 0..30 {
             h.step();
         }
@@ -2860,8 +2860,8 @@ mod tests {
             h.step();
         }
         assert!(h.state().notice.is_some(), "an error waits to be read");
-        assert!(h.query_by_label(notice::REVEAL).is_none(), "nothing to show in a folder");
-        h.get_by_label(notice::CLOSE).click();
+        assert!(h.query_by_label(&notice::reveal_label()).is_none(), "nothing to show in a folder");
+        h.get_by_label(&notice::close_label()).click();
         h.run();
         assert!(h.state().notice.is_none());
     }
@@ -3263,7 +3263,7 @@ mod tests {
         assert!(h.state().read_timer.is_none());
         h.get_by_label("Beeld").click();
         h.run();
-        h.get_by_label(view::MARK_READ_MENU).click();
+        h.get_by_label(&view::mark_read_menu()).click();
         h.run();
         h.get_all_by_label("Meteen").next().expect("the menu item").click();
         h.run();
@@ -4170,21 +4170,21 @@ mod tests {
     fn recente_zoekopdrachten_offer_the_last_words_typed_and_can_be_cleared() {
         let mut h = harness();
         h.run();
-        assert!(h.query_by_label(view::RECENT_MENU).is_none(), "no menu before anything was searched");
+        assert!(h.query_by_label(&view::recent_menu()).is_none(), "no menu before anything was searched");
         h.state_mut().view.recent_searches = vec!["offerte".into(), "factuur".into()];
         h.run();
-        h.get_by_label(view::RECENT_MENU).click();
+        h.get_by_label(&view::recent_menu()).click();
         h.run();
         h.get_by_label("factuur").click();
         h.run();
         assert_eq!(h.state().engine.session.search, "factuur");
         assert_eq!(h.state().view.recent_searches, ["factuur", "offerte"], "the one picked moves to the top");
-        h.get_by_label(view::RECENT_MENU).click();
+        h.get_by_label(&view::recent_menu()).click();
         h.run();
-        h.get_by_label(view::RECENT_CLEAR).click();
+        h.get_by_label(&view::recent_clear()).click();
         h.run();
         assert!(h.state().view.recent_searches.is_empty());
-        assert!(h.query_by_label(view::RECENT_MENU).is_none());
+        assert!(h.query_by_label(&view::recent_menu()).is_none());
     }
 
     #[test]
@@ -5431,7 +5431,7 @@ mod tests {
         h.run();
         h.get_by_label("Beeld").click();
         h.run();
-        h.get_by_label(view::ALL_CATEGORIES).click();
+        h.get_by_label(&view::all_categories()).click();
         h.run();
         h.get_by_label("Groene categorie").click();
         h.run();
@@ -5440,7 +5440,7 @@ mod tests {
         h.get_by_label("Planning voor donderdag");
         h.get_by_label("Groene categorie").click();
         h.run();
-        h.get_by_label(view::ALL_CATEGORIES).click();
+        h.get_by_label(&view::all_categories()).click();
         h.run();
         assert!(h.state().engine.session.category_filter.is_none());
         h.get_by_label("Ongelezen").click();
@@ -5611,16 +5611,16 @@ mod tests {
         h.run();
         h.get_by_label("Bestand").click();
         h.run();
-        h.get_by_label(notifications::PAGE).click();
+        h.get_by_label(&notifications::page_label()).click();
         h.run();
         assert!(h.query_by_label("Toevoegen en verbinden").is_none(), "the accounts page made way");
         assert!(!h.state().view.notifications.details, "private unless asked");
-        h.get_by_label(notifications::DETAILS).click();
-        h.get_by_label(notifications::BADGE).click();
+        h.get_by_label(&notifications::details()).click();
+        h.get_by_label(&notifications::badge()).click();
         h.run();
         assert!(h.state().view.notifications.details);
         assert!(!h.state().view.notifications.badge);
-        h.get_by_label(notifications::TRY).click();
+        h.get_by_label(&notifications::try_label()).click();
         h.run();
         assert_eq!(h.state().alerts.len(), 1);
         assert_eq!(h.state().alerts[0].title, "Merel");
@@ -5646,7 +5646,7 @@ mod tests {
         h.get_by_label("Bestand").click();
         h.run();
         assert!(h.query_by_label("Toevoegen en verbinden").is_some());
-        h.get_by_label(backstage::BACK).click();
+        h.get_by_label(&backstage::back()).click();
         h.run();
         assert!(h.query_by_label("Toevoegen en verbinden").is_none());
     }

@@ -858,7 +858,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     }
     if pick {
         // The computer's own dialog; it blocks until the person has chosen or cancelled.
-        if let Some(paths) = rfd::FileDialog::new().set_title("Bijlagen kiezen").pick_files() {
+        if let Some(paths) = rfd::FileDialog::new().set_title(tr("compose-pick-attachments")).pick_files() {
             c.error = None;
             c.add_files(paths);
         }

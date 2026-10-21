@@ -1225,3 +1225,258 @@ notes = Notes
 notes-add = Add notes
 step-of = Step { $step } of { $count }
 busy = Working
+
+## Accounts page
+
+backstage-back = Back
+account-bad-port = Fill in a valid port for { $what } (1 to 65535).
+account-bad-host = Fill in a valid server name for { $what }, for example imap.example.com.
+account-bad-email = Fill in a valid email address.
+account-bad-username = The user name contains characters that are not allowed.
+account-need-password = Fill in the password.
+account-incoming-what = incoming (IMAP)
+account-outgoing-what = outgoing (SMTP)
+account-bad-dav = Fill in an https address for calendar and address book, for example https://caldav.fastmail.com/.
+account-need-caldav = Also fill in the calendar address (CalDAV); the address book alone is not enough.
+print-open-first = First open a message to print.
+accounts = Accounts
+account-signed-in-again = Signed in again; the account is reconnecting.
+account-none-yet = There is no account yet. You are looking at sample mail.
+account-waiting-browser = Waiting for the browser…
+account-sign-in-again = Sign in again
+account-sign-in-again-hint = Sign in again in the browser, for example to give permission for calendar, contacts and tasks.
+account-edit = Edit account
+account-edit-hint = Change the name, the servers, the user name or the password; the account reconnects afterwards.
+account-signature = Signature
+account-signature-placeholder = Kind regards,
+    …
+account-signature-hint = Goes under every new message, reply and forward from this account.
+account-signature-save = Save signature
+account-signature-line = Signature: { $line }
+account-signature-set = Set signature
+account-signature-edit = Edit signature
+account-remove-question = This account, the password and the offline copy disappear from this computer. Your mail stays on the server.
+account-remove = Remove account
+account-remove-hint = Takes the account off this computer; asks for confirmation first.
+account-signature-saved = The signature has been saved.
+account-removed = The account has been removed.
+account-edit-heading = Edit account: { $email }
+account-edit-help = Change what is needed and save; the account then reconnects with the new details.
+account-add-help = IMAP and SMTP. Your password goes into your computer's keychain, not into a file.
+account-name-is-address = Fill in your real name, not an email address: an address as the name makes your mail look fake and Outlook marks it "Unverified".
+account-name-hint = The name recipients see with your mail, for example Sanne de Vries.
+account-encryption = Encryption
+account-kind = Account type
+account-exchange-help = For Exchange Server 2013 or newer, through Exchange Web Services (EWS) over HTTPS. Sending goes through the same server. See docs/accounts.md.
+account-suggest = Fill in the servers from the address
+account-username = User name
+account-password = Password
+account-keep-password = Leave empty to keep the current password.
+account-exchange-server = Exchange server
+account-server = Server
+account-exchange-server-help = For example mail.company.com; Merel uses https://<server>/EWS/Exchange.asmx. User name as DOMAIN\name or as an email address.
+account-incoming = Incoming (IMAP)
+account-port = Port
+account-outgoing = Outgoing (SMTP)
+account-dav = Calendar and address book (CalDAV/CardDAV), optional
+account-address-book = Address book
+account-dav-help = The https address of the server, for example https://caldav.fastmail.com/ or https://cloud.example.com/remote.php/dav/. Leave the address book empty if it is on the same server.
+account-save-reconnect = Save and reconnect
+account-add-connect = Add and connect
+account-saved = The account has been saved and is reconnecting.
+account-google-help = Create an OAuth client of the type Desktop app in the Google Cloud Console and fill in the client ID and the client secret. See docs/accounts.md.
+account-microsoft-help = Fill in your name and email address and sign in with Microsoft in your browser. Merel does not see your password.
+account-microsoft-own-help = Register the app in Microsoft Entra (public client, redirect http://localhost, Microsoft Graph permissions) and fill in the Application (client) ID. See docs/accounts.md.
+account-own-client-id = Own client ID (optional)
+account-sign-in-with = Sign in with { $provider }
+account-browser-open = Sign in in the browser window that opened. The account then appears here by itself.
+account-need-secret = Fill in the client secret Google showed with the OAuth client.
+
+## Welcome
+
+welcome-title = Welcome to Merel
+welcome-next = Next
+welcome-back = Previous
+welcome-done = Get started
+welcome-skip = Skip
+welcome-updates-on = Check every day for a new version
+welcome-hello-title = Mail, calendar, contacts and tasks in one place
+welcome-account-title = Your mail account
+welcome-updates-title = New versions
+welcome-look-title = Look and language
+welcome-hello-1 = Merel works like Outlook and runs on your own computer. Your mail goes straight between this computer and your mail server; there is no service of ours in between.
+welcome-hello-2 = Pictures from the internet only load when you ask for them, passwords are in the system keychain and the offline copy of your mail is encrypted.
+welcome-account-text = Add your account with IMAP and SMTP, Gmail, Microsoft 365 or Exchange. You can also do that later, under File.
+welcome-updates-text = Merel can check with GitHub once a day whether there is a new version and then let you know. Nothing goes along except that question; GitHub does see the address of your internet connection.
+welcome-updates-self = You can always check yourself under Help > Updates.
+welcome-look-text = You can change this later on the View tab, under Theme and Language.
+welcome-skip-hint = Set up the rest later
+
+## Notices
+
+notice-close = Close notice
+tone-success = Done
+tone-info = Information
+tone-warning = Warning
+tone-error = Error
+reveal-finder = Show in Finder
+reveal-explorer = Show in Explorer
+reveal-folder = Show in folder
+reveal-failed = { $what } did not work.
+
+## Notifications
+
+notifications-page = Notifications
+notifications-badge = Number of unread messages on the app icon
+notifications-mail = For new email in the Inbox
+notifications-reminders = For reminders of appointments and tasks
+notifications-sound = Play a sound
+notifications-details = Show sender, subject and title in the notification
+notifications-try = Send a test notification
+notifications-new-message = New message
+notifications-new-message-body = You have a new message in the Inbox.
+notifications-many = { $count } new messages
+notifications-many-body = In the Inbox.
+notifications-reminder-body = { $kind }: open Merel to see what it is.
+notifications-intro = As in Outlook: a count on the Merel icon and a notification from your computer when something comes in while Merel is in the background.
+notifications-on-icon = On the app icon
+notifications-badge-hint = All accounts together, only the Inbox. The window title shows it too: "Merel (3)".
+notifications-system = Notifications from your computer
+notifications-privacy = Privacy
+notifications-details-hint = Off: the notification only says "New message" or "Reminder", so nobody reads along over your shoulder or on a locked screen.
+notifications-macos-hint = See nothing? Check in System Settings > Notifications > Merel whether notifications are on.
+notifications-test-body = This is what a notification from Merel looks like.
+notifications-test-sent = Test notification sent.
+
+## Updates
+
+updates-title = New version of Merel
+updates-check = Updates
+updates-download = Download
+updates-update = Update
+updates-restart = Restart
+updates-page = Open download page
+updates-skip = Skip this version
+updates-later = Later
+updates-auto = Check every day for a new version
+updates-up-to-date = You have the newest version of Merel ({ $version }).
+updates-none-yet = There is no version of Merel ready to download yet.
+updates-check-failed = Checking for updates did not work. Is there an internet connection?
+updates-open-failed = Opening did not work: { $page }
+updates-available = Merel { $version } is available.
+updates-current = You are using version { $version } now.
+updates-how-update = Update downloads the new version, checks the signature, installs it and restarts Merel. Your accounts and mail are kept.
+updates-how-download = Download opens the page with the installation files in your browser. Then install over this version; your accounts and mail are kept.
+updates-skip-hint = Do not bring up this version again; do bring up a newer one
+updates-downloading = Downloading Merel { $version }
+updates-checking = Checking the signature
+updates-checking-text = Merel checks that the download comes from Merel itself and was not changed on the way.
+updates-installing = Installing Merel { $version }
+updates-installing-text = One moment, this takes a few seconds.
+updates-ready = Merel { $version } is ready
+updates-ready-text = Merel closes, installs the new version and then starts again by itself.
+updates-installed = Merel { $version } is installed
+updates-installed-text = Restart Merel to use the new version. If you do that later, you get it at the next start.
+updates-failed = Updating did not work
+updates-failed-text = { $reason } You can also download and install the new version yourself.
+updates-progress = { $done } of { $total } MB
+updates-restart-failed = Restarting did not work. Start Merel again yourself.
+
+## Installing updates
+install-interrupted = Updating was interrupted.
+install-no-dir = There is no folder to put the download in.
+install-dir-failed = The download folder could not be made: { $error }
+install-download-failed = Downloading did not work ({ $error }).
+install-unsigned = This version has no signature, so Merel does not install it itself.
+install-bad-signature = The signature of this version is not right. Nothing has been installed.
+install-mismatch = The download does not match the signed version. Nothing has been installed.
+install-cancelled = Cancelled.
+install-too-big = The installation file is larger than expected. Nothing has been installed.
+install-failed-because = Installing did not work ({ $error }).
+install-failed = Installing did not work.
+install-replace-failed-where = Merel could not replace itself ({ $error }). Is Merel in the Applications folder?
+install-replace-failed = Merel could not replace itself ({ $error }).
+install-program-failed = Installing did not work ({ $program } returned { $status }).
+
+## Help
+shortcut-1 = Previous or next message in the list
+shortcut-2 = Open the selected message in its own window
+shortcut-3 = Select more messages, separately or as a range; the actions then apply to all
+shortcut-4 = Select all messages in the list
+shortcut-5 = Delete the selected message
+shortcut-6 = Ignore conversation: this and later messages in it go to Deleted Items
+shortcut-7 = Archive the selected message
+shortcut-8 = New email
+shortcut-9 = New email, from any module
+shortcut-10 = New appointment, from any module
+shortcut-11 = New contact, from any module
+shortcut-12 = New task, from any module
+shortcut-13 = Reply
+shortcut-14 = Reply all
+shortcut-15 = Reply with meeting request
+shortcut-16 = Forward
+shortcut-17 = Forward as attachment (the message goes along as an .eml file)
+shortcut-18 = Move to a folder
+shortcut-19 = Print through the browser (in the calendar: the open day, week or month)
+shortcut-20 = Save as an .eml file in the Downloads folder
+shortcut-21 = Go to date (in the calendar)
+shortcut-22 = Mark as read
+shortcut-23 = Mark as unread
+shortcut-24 = To the search box (also in calendar, contacts and tasks)
+shortcut-25 = Search words in the search box, as in Outlook; also heeft:bijlage, is:ongelezen and is:gemarkeerd
+shortcut-26 = Quick step 1 to 9 of the account
+shortcut-27 = Close the message window, else clear the search (also in calendar, contacts and tasks)
+shortcut-28 = Refresh folder
+help-open-settings = Open settings folder
+version-plain = Version { $version }
+version-build = Version { $version } (build { $commit })
+version-build-date = Version { $version } (build { $commit } of { $date })
+key-enter-double-click = Enter / double-click
+key-click = click
+search-keywords = van: aan: onderwerp:
+help-shortcuts-where = In the mail module, as long as you are not typing in a text field.
+help-copy = Copy
+help-copy-hint = The version to the clipboard, handy with an error report
+help-about-1 = Mail, calendar, contacts and tasks for the desktop, working the way Outlook does. Written in Rust with egui; one program for macOS, Windows and Linux.
+help-about-2 = Security and privacy first: mail cannot run scripts, pictures from the internet only load when you ask, connections always go over TLS, passwords are in the system keychain and the offline cache is encrypted.
+help-auto-hint = Merel then asks GitHub once a day for the newest version; nothing else goes along with that question
+help-settings-hint = The folder with your accounts, calendar, rules and the encrypted cache
+
+## Certificates and OpenPGP keys
+
+cert-import = Import certificate…
+cert-replace = Other certificate…
+cert-remove = Remove certificate
+cert-confirm = Import
+cert-password = Password of the file
+pgp-import = Import OpenPGP key…
+pgp-replace = Other OpenPGP key…
+pgp-remove = Remove OpenPGP key
+pgp-passphrase = Passphrase of the key
+cert-line = New mail is digitally signed as { $name } <{ $emails }>. Issued by { $issuer }, valid until { $until }.
+cert-none = With a certificate you sign mail digitally: the recipient sees that the message comes from you and was not changed on the way.
+pgp-line = Key of { $name } <{ $emails }>, fingerprint { $fingerprint }. Mail encrypted to you with OpenPGP opens with it.
+pgp-none = Do you use OpenPGP (GnuPG, Thunderbird, Proton)? Import your key to read encrypted mail. Export it as an .asc file first.
+cert-title = Certificate (S/MIME)
+pgp-title = OpenPGP key
+cert-file = File: { $file }
+cert-import-hint = Choose a .p12 or .pfx file with your certificate and private key, from your organization or a certificate provider.
+cert-remove-hint = Mail from this account is no longer signed. The file you imported from stays.
+pgp-import-hint = Choose your exported private key (.asc, .gpg or .key), for example from gpg --export-secret-keys --armor or Kleopatra.
+pgp-remove-hint = Mail encrypted with OpenPGP to this account no longer opens. The file you imported from stays.
+cert-pick = Choose certificate
+cert-filter = Certificate with key
+pgp-pick = Choose OpenPGP key
+cert-imported = The certificate of { $name } has been imported; new mail from this account is signed.
+pgp-imported = The OpenPGP key of { $name } has been imported; mail encrypted with OpenPGP now opens.
+cert-removed = The certificate has been removed; mail from this account is no longer signed.
+pgp-removed = The OpenPGP key has been removed.
+cert-unreadable = This file cannot be read, or is too large for a key.
+
+compose-pick-attachments = Choose attachments
+account-add-title = Add account
+
+## Recent searches
+
+search-recent = Recent searches
+search-recent-clear = Clear list

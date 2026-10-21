@@ -96,9 +96,13 @@ pub fn sort_name(sort: Sort) -> String {
 }
 
 /// The menu in the Leesvenster group that holds the [`MarkRead`] choice.
-pub const MARK_READ_MENU: &str = "Gelezen markeren";
+pub fn mark_read_menu() -> String {
+    tr("view-mark-read-menu")
+}
 /// The Categorie menu's choice that shows every message.
-pub const ALL_CATEGORIES: &str = "Alle categorieën";
+pub fn all_categories() -> String {
+    tr("view-all-categories")
+}
 
 /// What the person chose on the "Beeld" tab.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -158,8 +162,12 @@ pub struct ViewPrefs {
 /// How many recent searches the menu next to the search box keeps.
 pub const RECENT_SEARCHES: usize = 10;
 /// The menu's button, which a screen reader and the hover text name.
-pub const RECENT_MENU: &str = "Recente zoekopdrachten";
-pub const RECENT_CLEAR: &str = "Lijst wissen";
+pub fn recent_menu() -> String {
+    tr("search-recent")
+}
+pub fn recent_clear() -> String {
+    tr("search-recent-clear")
+}
 
 impl Default for ViewPrefs {
     fn default() -> Self {
