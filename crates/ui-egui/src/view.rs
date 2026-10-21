@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::helder::{self, Icon};
+use crate::i18n::{LanguageChoice, tr};
 use crate::{MailApp, Module, Tokens};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,20 +35,20 @@ pub enum ThemeChoice {
 impl ThemeChoice {
     pub(crate) const ALL: [ThemeChoice; 3] = [ThemeChoice::System, ThemeChoice::Light, ThemeChoice::Dark];
 
-    pub(crate) fn dutch_name(self) -> &'static str {
-        match self {
-            ThemeChoice::System => "Systeem",
-            ThemeChoice::Light => "Licht",
-            ThemeChoice::Dark => "Donker",
-        }
+    pub(crate) fn name(self) -> String {
+        tr(match self {
+            ThemeChoice::System => "theme-system",
+            ThemeChoice::Light => "theme-light",
+            ThemeChoice::Dark => "theme-dark",
+        })
     }
 
-    pub(crate) fn hint(self) -> &'static str {
-        match self {
-            ThemeChoice::System => "Licht of donker zoals de computer staat ingesteld",
-            ThemeChoice::Light => "Licht thema",
-            ThemeChoice::Dark => "Donker thema",
-        }
+    pub(crate) fn hint(self) -> String {
+        tr(match self {
+            ThemeChoice::System => "theme-system-hint",
+            ThemeChoice::Light => "theme-light-hint",
+            ThemeChoice::Dark => "theme-dark-hint",
+        })
     }
 
     pub fn preference(self) -> egui::ThemePreference {
@@ -97,6 +98,8 @@ pub struct ViewPrefs {
     /// When a message opened in the reading pane counts as read.
     pub mark_read: MarkRead,
     pub theme: ThemeChoice,
+    /// The language of the words on screen: the computer's, or one picked under Beeld > Taal.
+    pub language: LanguageChoice,
     /// Rows without the preview line, so more messages fit.
     pub compact: bool,
     /// Messages on one subject folded behind the one that stands first in the list.
@@ -154,6 +157,7 @@ impl Default for ViewPrefs {
             reading_pane: ReadingPane::default(),
             mark_read: MarkRead::default(),
             theme: ThemeChoice::default(),
+            language: LanguageChoice::default(),
             compact: false,
             conversations: false,
             groups: true,
@@ -231,6 +235,7 @@ impl MailApp {
     pub fn save_view(&mut self, ctx: &egui::Context) {
         self.view.save(self.engine.config_path());
         ctx.set_theme(self.view.theme.preference());
+        crate::i18n::set(self.view.language.language());
     }
 
     /// Whether the folder is pinned under "Favorieten".
@@ -425,12 +430,37 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
         });
         helder::bar_separator(ui, t);
     }
-    section(ui, t, "Thema", |ui| {
+    section(ui, t, &tr("theme-group"), |ui| {
         for choice in ThemeChoice::ALL {
-            if crate::ribbon_toggle_hint(ui, t, choice.dutch_name(), app.view.theme == choice, choice.hint()) {
+            if crate::ribbon_toggle_hint(ui, t, &choice.name(), app.view.theme == choice, &choice.hint()) {
                 app.view.theme = choice;
                 changed = true;
             }
+        }
+    });
+    helder::bar_separator(ui, t);
+    // One menu, not a button per language: the ribbon is full, and more languages may come.
+    group(ui, t, &tr("language-group"), |ui| {
+        let mut language = app.view.language;
+        if crate::menubar::capturing() {
+            let options: Vec<(String, bool)> = LanguageChoice::ALL.iter().map(|c| (c.name(), *c == language)).collect();
+            if let Some(i) = crate::menubar::choice(&tr("language-group"), &options) {
+                language = LanguageChoice::ALL[i];
+            }
+        } else {
+            helder::menu_button(ui, t, Some(Icon::Globe), language.name(), |ui| {
+                ui.set_min_width(160.0);
+                for choice in LanguageChoice::ALL {
+                    if ui.selectable_value(&mut language, choice, choice.name()).on_hover_text(choice.hint()).clicked() {
+                        ui.close();
+                    }
+                }
+            })
+            .on_hover_text(tr("language-menu-hint"));
+        }
+        if language != app.view.language {
+            app.view.language = language;
+            changed = true;
         }
     });
     if changed {

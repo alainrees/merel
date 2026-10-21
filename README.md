@@ -356,6 +356,17 @@ exempts the last two; Merel does not), and icons and control borders at 3:1 or b
 the light and the dark theme. `theme::contrast` measures the ratios and a test holds both themes
 to them, so a colour change that drops below the bar fails the build.
 
+## Languages
+
+Merel speaks Dutch and English. It follows the language the computer is set to (Dutch for Dutch,
+English for every other), and View › Taal picks one for good, without a restart. The words live in
+one [Fluent](https://projectfluent.org) file per language, `crates/ui-egui/locales/nl.ftl` and
+`en.ftl`, built into the binary; a text missing from one falls back to English. To add a
+language, copy `en.ftl`, translate the right-hand side of each line and add the language to
+`crates/ui-egui/src/i18n.rs`; a test checks that every file has every text. The move of the
+window's words into these files goes screen by screen, so for now most of them are still Dutch.
+Tests always run in Dutch, whatever the machine is set to.
+
 ## Fonts
 
 The window draws its text with [Inter](https://github.com/rsms/inter) (SIL Open Font License) and
