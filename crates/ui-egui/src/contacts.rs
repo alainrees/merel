@@ -1,5 +1,6 @@
 //! The contacts module: a searchable list, a contact card, and the form to add or change one.
 
+use crate::i18n::tr;
 use egui::{Align2, Color32, CornerRadius, FontId, Margin, RichText, Sense, Ui, vec2};
 use serde_json::json;
 
@@ -460,31 +461,31 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let has = app.engine.session.selected_contact.is_some();
     let has_mail = app.engine.session.selected_contact().is_some_and(|c| !c.emails.is_empty());
-    if crate::ribbon_action_hint(ui, t, "👤", "Nieuw contact", true, Some(&crate::key_hint("Shift+C"))) {
+    if crate::ribbon_action_hint(ui, t, "👤", &tr("new-contact"), true, Some(&crate::key_hint("Shift+C"))) {
         app.new_contact();
     }
-    if crate::ribbon_action(ui, t, "👥", crate::groups::NEW, true) {
+    if crate::ribbon_action(ui, t, "👥", &tr("contacts-new-group"), true) {
         app.new_group();
     }
     crate::ribbon_separator(ui);
-    if crate::ribbon_action(ui, t, "✎", "Bewerken", has) {
+    if crate::ribbon_action(ui, t, "✎", &tr("edit"), has) {
         app.edit_selected_contact();
     }
-    if crate::ribbon_action(ui, t, "✉", "E-mail sturen", has_mail) {
+    if crate::ribbon_action(ui, t, "✉", &tr("contacts-send-mail"), has_mail) {
         app.mail_selected_contact();
     }
     crate::ribbon_separator(ui);
-    if crate::ribbon_action(ui, t, "🗑", "Verwijderen", has) {
+    if crate::ribbon_action(ui, t, "🗑", &tr("delete"), has) {
         app.run("contact.delete", serde_json::Value::Null);
         app.contacts.editor = None;
     }
-    if crate::ribbon_action(ui, t, "⟳", "Vernieuwen", !app.engine.session.item_accounts.is_empty()) {
+    if crate::ribbon_action(ui, t, "⟳", &tr("refresh"), !app.engine.session.item_accounts.is_empty()) {
         app.run("sync.refresh", serde_json::Value::Null);
     }
     crate::ribbon_separator(ui);
-    if crate::ribbon_action(ui, t, "📂", crate::vcard::IMPORT, true) {
+    if crate::ribbon_action(ui, t, "📂", &tr("contacts-import"), true) {
         // The computer's own dialog; it blocks until the person has chosen or cancelled.
-        if let Some(paths) = rfd::FileDialog::new().set_title("vCard-bestanden kiezen").add_filter("vCard", &["vcf", "vcard"]).pick_files() {
+        if let Some(paths) = rfd::FileDialog::new().set_title(tr("contacts-import-title")).add_filter("vCard", &["vcf", "vcard"]).pick_files() {
             app.import_contacts(&paths);
         }
     }

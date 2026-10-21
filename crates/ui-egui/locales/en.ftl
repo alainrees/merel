@@ -21,3 +21,163 @@ language-system = System language
 language-system-hint = The language the computer is set to: Dutch, or else English
 language-dutch-hint = Merel in Dutch
 language-english-hint = Merel in English
+
+## Modules en tabbladen
+
+module-mail = Mail
+module-calendar = Calendar
+module-people = People
+module-tasks = Tasks
+tab-file = File
+tab-home = Home
+tab-folder = Folder
+tab-send-receive = Send / Receive
+tab-view = View
+tab-help = Help
+ribbon-not-yet = Not available yet
+
+## Menubalk (macOS)
+
+menu-file = File
+menu-message = Message
+menu-calendar = Calendar
+menu-people = People
+menu-tasks = Tasks
+menu-folder = Folder
+menu-view = View
+menu-help = Help
+app-about = About Merel
+app-check-updates = Check for Updates…
+app-services = Services
+app-hide = Hide Merel
+app-hide-others = Hide Others
+app-show-all = Show All
+app-quit = Quit Merel
+app-window = Window
+app-minimize = Minimize
+app-zoom = Zoom
+app-fullscreen = Enter Full Screen
+app-bring-all-to-front = Bring All to Front
+menu-accounts = Accounts…
+
+## Knoppen die op meer linten staan
+
+new-mail = New email
+new-appointment = New appointment
+new-contact = New contact
+new-task = New task
+delete = Delete
+refresh = Refresh
+edit = Edit
+
+## Start-lint in E-mail
+
+mail-reply = Reply
+mail-reply-all = Reply all
+mail-forward = Forward
+mail-archive = Archive
+mail-junk = Junk
+mail-move = Move
+mail-rules = Rules
+mail-rules-hint = Move or mark mail automatically
+mail-read = Read
+mail-unread = Unread
+mail-flag = Flag
+group-new = New
+group-respond = Respond
+group-clean = Clean up
+group-file = Organize
+group-tags = Tags
+categories-group = Categories
+categorize = Categorize
+categories-clear = Clear all categories
+categories-all = All categories…
+quick-steps = Quick steps
+quick-steps-manage = Manage…
+quick-steps-manage-hint = Create or change quick steps
+
+## Start-lint in Agenda
+
+calendar-today = Today
+calendar-goto = Go to date
+calendar-day = Day
+calendar-work-week = Work week
+calendar-week = Week
+calendar-month = Month
+
+## Start-lint in Contacten en Taken
+
+contacts-new-group = New group
+contacts-send-mail = Send email
+contacts-import = Import…
+contacts-import-title = Choose vCard files
+tasks-reopen = Reopen
+tasks-complete = Complete
+
+## Map-lint
+
+folder-new = New folder
+folder-new-hint = A folder under the selected folder
+folder-rename = Rename
+folder-rename-hint = Give the selected folder another name
+folder-delete = Delete folder
+folder-delete-hint = Delete the selected folder and everything in it
+folder-empty = Empty folder
+folder-empty-hint = Delete every message in the selected folder for good
+folder-all-read = All read
+folder-all-read-hint = Mark every message in the selected folder as read
+folder-clean-up = Clean up folder
+folder-clean-up-hint = Move older messages of each conversation in the selected folder to Deleted Items
+folder-favorite = Favorite
+folder-favorite-off-hint = Take the selected folder out of Favorites
+folder-favorite-on-hint = Put the selected folder under Favorites at the top of the folder pane
+
+## Help-lint
+
+help-shortcuts = Shortcuts
+help-shortcuts-hint = Every key of the mail module at a glance
+help-settings-folder = Settings folder
+help-settings-folder-hint = Open the folder with accounts, calendar, rules and cache
+help-github = On GitHub
+help-github-hint = Open the project page with the manual in the browser
+help-about = About Merel
+help-about-hint = Version and principles
+help-updates = Updates
+help-updates-hint = Ask GitHub whether there is a newer version of Merel
+
+## Beeld-lint
+
+view-category = Category
+view-all-categories = All categories
+view-category-hint = Show only messages with this category
+view-sort = Sort
+view-sort-hint = Order of the message list
+sort-newest = Newest first
+sort-oldest = Oldest first
+sort-sender = By sender
+sort-subject = By subject
+view-reading-pane = Reading pane
+view-pane-right = Right
+view-pane-right-hint = The reading pane right of the message list
+view-pane-bottom = Bottom
+view-pane-bottom-hint = The reading pane under the message list
+view-pane-off = Off
+view-pane-off-hint = No reading pane; Enter or a double click opens the message in a window of its own
+view-mark-read = Mark as read
+view-mark-read-menu = Mark read
+view-mark-read-hint = { $menu }: when an opened message counts as read. Now: { $now }.
+mark-read-now = At once
+mark-read-later = After 5 seconds
+mark-read-never = Not by itself
+view-list = List
+view-compact = Compact
+view-compact-hint = Rows without the preview line, so more messages fit
+view-conversations = Conversations
+view-conversations-hint = Messages on one subject as one conversation behind the newest; the arrow in front shows the rest.
+view-groups = Groups
+view-groups-hint = Headings Today, Yesterday, This week, Last week, This month… over the messages, as in Outlook; only when sorted by date.
+view-calendar = Calendar
+view-week-numbers = Week numbers
+view-week-numbers-hint = The week number left of each week in the month and week views, as in Outlook.
+view-work-hours = Work hours
+view-work-hours-hint = The hours outside 8:00-17:00 and the weekend grey in the day and week views, as in Outlook.

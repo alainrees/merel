@@ -1,6 +1,7 @@
 //! Categories in the window: the "Categoriseren" menu in the ribbon, the coloured squares on a
 //! message row, the chips above a message, and the window that manages the list.
 
+use crate::i18n::tr;
 use egui::{Color32, CornerRadius, RichText, Sense, Stroke, Ui, vec2};
 use merel_model::{Category, CategoryColor};
 use serde_json::json;
@@ -79,9 +80,9 @@ pub fn menu(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let mut clear = false;
     let mut manage = false;
     ui.add_enabled_ui(has, |ui| {
-        crate::view::group(ui, t, "Categorieën", |ui| {
+        crate::view::group(ui, t, &tr("categories-group"), |ui| {
             crate::helder::quiet(ui, t, |ui| {
-                crate::helder::menu_button(ui, t, Some(crate::helder::Icon::Tag), "Categoriseren", |ui| {
+                crate::helder::menu_button(ui, t, Some(crate::helder::Icon::Tag), tr("categorize"), |ui| {
                     ui.set_min_width(220.0);
                     for c in &known {
                         let on = carried.iter().any(|x| x.eq_ignore_ascii_case(&c.name));
@@ -95,11 +96,11 @@ pub fn menu(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         }
                     }
                     ui.separator();
-                    if ui.add_enabled(!carried.is_empty(), egui::Button::new("Alle categorieën wissen")).clicked() {
+                    if ui.add_enabled(!carried.is_empty(), egui::Button::new(tr("categories-clear"))).clicked() {
                         clear = true;
                         ui.close();
                     }
-                    if ui.button("Alle categorieën…").clicked() {
+                    if ui.button(tr("categories-all")).clicked() {
                         manage = true;
                         ui.close();
                     }

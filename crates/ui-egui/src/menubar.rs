@@ -30,7 +30,7 @@ pub enum Entry {
 /// A menu of the menu bar.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Menu {
-    pub title: &'static str,
+    pub title: String,
     pub entries: Vec<Entry>,
 }
 

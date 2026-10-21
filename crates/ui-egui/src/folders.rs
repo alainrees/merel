@@ -2,6 +2,7 @@
 //! "Favorieten": the "Map" tab in the ribbon, the right-click menu on a folder row, and one small window for the name or the question
 //! before something goes for good (a folder, its contents, or a message in the Deleted folder).
 
+use crate::i18n::tr;
 use egui::RichText;
 use merel_engine::CommandError;
 use merel_model::FolderKind;
@@ -123,16 +124,16 @@ pub fn describe(e: &CommandError) -> String {
 pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     let selected = app.engine.session.selected_folder.clone();
     let ordinary = selected.as_deref().and_then(|id| app.engine.session.folder(id)).is_some_and(|f| f.kind == FolderKind::Other);
-    if ribbon_action_hint(ui, t, "📁", "Nieuwe map", !app.engine.session.accounts.is_empty(), Some("Een map onder de geselecteerde map")) {
+    if ribbon_action_hint(ui, t, "📁", &tr("folder-new"), !app.engine.session.accounts.is_empty(), Some(&tr("folder-new-hint"))) {
         app.new_folder(None);
     }
     crate::ribbon_separator(ui);
-    if ribbon_action_hint(ui, t, "✎", "Naam wijzigen", ordinary, Some("De geselecteerde map een andere naam geven"))
+    if ribbon_action_hint(ui, t, "✎", &tr("folder-rename"), ordinary, Some(&tr("folder-rename-hint")))
         && let Some(id) = selected.clone()
     {
         app.rename_folder(id);
     }
-    if ribbon_action_hint(ui, t, "🗑", "Map verwijderen", ordinary, Some("De geselecteerde map met alles erin verwijderen"))
+    if ribbon_action_hint(ui, t, "🗑", &tr("folder-delete"), ordinary, Some(&tr("folder-delete-hint")))
         && let Some(id) = selected.clone()
     {
         app.delete_folder(id);
@@ -142,33 +143,26 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
         .as_deref()
         .map(|id| (app.engine.session.messages.iter().any(|m| m.folder_id == id), app.engine.session.folder(id).is_some_and(|f| f.unread > 0)))
         .unwrap_or((false, false));
-    if ribbon_action_hint(ui, t, "🗑", "Map leegmaken", has_mail, Some("Alle berichten in de geselecteerde map definitief verwijderen"))
+    if ribbon_action_hint(ui, t, "🗑", &tr("folder-empty"), has_mail, Some(&tr("folder-empty-hint")))
         && let Some(id) = selected.clone()
     {
         app.empty_folder(id);
     }
-    if ribbon_action_hint(ui, t, "◉", "Alles gelezen", has_unread, Some("Alle berichten in de geselecteerde map als gelezen markeren"))
+    if ribbon_action_hint(ui, t, "◉", &tr("folder-all-read"), has_unread, Some(&tr("folder-all-read-hint")))
         && let Some(id) = selected.clone()
     {
         app.run("folder.mark_all_read", json!({ "id": id }));
     }
     let deleted = selected.as_deref().and_then(|id| app.engine.session.folder(id)).is_some_and(|f| f.kind == FolderKind::Deleted);
-    if ribbon_action_hint(
-        ui,
-        t,
-        "♻",
-        "Opruimen",
-        has_mail && !deleted,
-        Some("Oudere berichten van elk gesprek in de geselecteerde map naar Verwijderde items"),
-    ) && let Some(id) = selected.clone()
+    if ribbon_action_hint(ui, t, "♻", &tr("folder-clean-up"), has_mail && !deleted, Some(&tr("folder-clean-up-hint")))
+        && let Some(id) = selected.clone()
     {
         app.ask_cleanup_folder(&id);
     }
     crate::ribbon_separator(ui);
     let favorite = selected.as_deref().is_some_and(|id| app.is_favorite(id));
-    let hint =
-        if favorite { "De geselecteerde map uit Favorieten halen" } else { "De geselecteerde map bovenin het mappenvenster onder Favorieten zetten" };
-    if ribbon_action_hint(ui, t, if favorite { "★" } else { "☆" }, "Favoriet", selected.is_some(), Some(hint))
+    let hint = tr(if favorite { "folder-favorite-off-hint" } else { "folder-favorite-on-hint" });
+    if ribbon_action_hint(ui, t, if favorite { "★" } else { "☆" }, &tr("folder-favorite"), selected.is_some(), Some(&hint))
         && let Some(id) = selected
     {
         app.toggle_favorite(&id, ui.ctx());

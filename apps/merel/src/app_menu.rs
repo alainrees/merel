@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, channel};
 
+use merel_ui_egui::i18n::tr;
 use merel_ui_egui::menubar::{self, Entry};
 use muda::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 
@@ -46,8 +47,8 @@ pub struct AppMenu {
 impl AppMenu {
     /// Puts the menu in place of the default one; `None` (and the default stays) if that fails.
     pub fn install(ctx: &egui::Context) -> Option<AppMenu> {
-        let about = MenuItem::new("Over Merel", true, None);
-        let updates = MenuItem::new("Zoek naar updates…", true, None);
+        let about = MenuItem::new(tr("app-about"), true, None);
+        let updates = MenuItem::new(tr("app-check-updates"), true, None);
         let app = Submenu::with_items(
             "Merel",
             true,
@@ -55,27 +56,27 @@ impl AppMenu {
                 &about,
                 &updates,
                 &PredefinedMenuItem::separator(),
-                &PredefinedMenuItem::services(Some("Voorzieningen")),
+                &PredefinedMenuItem::services(Some(&tr("app-services"))),
                 &PredefinedMenuItem::separator(),
-                &PredefinedMenuItem::hide(Some("Verberg Merel")),
-                &PredefinedMenuItem::hide_others(Some("Verberg andere")),
-                &PredefinedMenuItem::show_all(Some("Toon alles")),
+                &PredefinedMenuItem::hide(Some(&tr("app-hide"))),
+                &PredefinedMenuItem::hide_others(Some(&tr("app-hide-others"))),
+                &PredefinedMenuItem::show_all(Some(&tr("app-show-all"))),
                 &PredefinedMenuItem::separator(),
-                &PredefinedMenuItem::quit(Some("Stop Merel")),
+                &PredefinedMenuItem::quit(Some(&tr("app-quit"))),
             ],
         )
         .map_err(|e| log::warn!("app menu not built: {e}"))
         .ok()?;
         let window = Submenu::with_items(
-            "Venster",
+            tr("app-window"),
             true,
             &[
-                &PredefinedMenuItem::minimize(Some("Minimaliseer")),
-                &PredefinedMenuItem::maximize(Some("Zoom")),
+                &PredefinedMenuItem::minimize(Some(&tr("app-minimize"))),
+                &PredefinedMenuItem::maximize(Some(&tr("app-zoom"))),
                 &PredefinedMenuItem::separator(),
-                &PredefinedMenuItem::fullscreen(Some("Schermvullende weergave")),
+                &PredefinedMenuItem::fullscreen(Some(&tr("app-fullscreen"))),
                 &PredefinedMenuItem::separator(),
-                &PredefinedMenuItem::bring_all_to_front(Some("Alles op voorgrond")),
+                &PredefinedMenuItem::bring_all_to_front(Some(&tr("app-bring-all-to-front"))),
             ],
         )
         .map_err(|e| log::warn!("window menu not built: {e}"))
@@ -141,7 +142,7 @@ impl AppMenu {
         // After the app menu; Help goes last, after the Venster menu, as on every Mac.
         let mut place = 1;
         for (index, m) in menus.iter().enumerate() {
-            let top = Submenu::new(m.title, true);
+            let top = Submenu::new(&m.title, true);
             fill(&top, &m.entries, index, &mut Vec::new(), &mut self.items, &mut self.paths);
             let added = if m.title == "Help" {
                 self.menu.append(&top)
