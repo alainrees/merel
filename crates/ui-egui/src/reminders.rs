@@ -9,7 +9,7 @@ use egui::{Align2, RichText, vec2};
 use serde_json::json;
 
 use crate::calendar::{MONTHS, WEEKDAYS, to_local};
-use crate::{MailApp, Module, Tokens};
+use crate::{MailApp, Module, Tokens, helder};
 
 /// How long a reminder can be put off, as the window offers it: minutes and label.
 const SNOOZES: [(u32, &str); 5] = [(5, "5 minuten"), (15, "15 minuten"), (60, "1 uur"), (240, "4 uur"), (1440, "1 dag")];
@@ -79,6 +79,68 @@ fn follow_up_due(due: chrono::NaiveDate, today: chrono::NaiveDate) -> String {
     }
 }
 
+/// The reminder window's width, inside its frame.
+const WIDTH: f32 = 420.0;
+
+/// One reminder as a white card: a round badge with `icon`, what kind of reminder it is, the
+/// title, when it is due in `lead`'s colour, the `details` each with its icon, and the buttons
+/// `buttons` adds. A screen reader hears the title as "kind: title".
+#[allow(clippy::too_many_arguments)]
+fn card(
+    ui: &mut egui::Ui,
+    t: &Tokens,
+    icon: helder::Icon,
+    kind: &str,
+    title: &str,
+    lead: (String, egui::Color32),
+    details: &[(helder::Icon, String)],
+    buttons: impl FnOnce(&mut egui::Ui),
+) {
+    helder::card_frame(t).inner_margin(14).show(ui, |ui| {
+        ui.set_width(WIDTH - 28.0);
+        ui.horizontal_top(|ui| {
+            let (rect, _) = ui.allocate_exact_size(vec2(36.0, 36.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 18.0, t.checked);
+            icon.image(helder::ICON, t.accent_text).paint_at(ui, egui::Rect::from_center_size(rect.center(), vec2(helder::ICON, helder::ICON)));
+            ui.add_space(4.0);
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.label(RichText::new(kind).size(12.0).color(t.text_dim));
+                let name = format!("{kind}: {title}");
+                ui.add(egui::Label::new(RichText::new(title).size(15.0).strong().color(t.text)).wrap())
+                    .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &name));
+                ui.label(RichText::new(lead.0).size(13.0).color(lead.1));
+                for (icon, text) in details {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui.add(icon.image(14.0, t.text_dim));
+                        ui.label(RichText::new(text).size(13.0).color(t.text_dim));
+                    });
+                }
+            });
+        });
+        ui.add_space(6.0);
+        helder::quiet(ui, t, |ui| {
+            ui.spacing_mut().button_padding.x = 8.0;
+            ui.horizontal(buttons);
+        });
+    });
+}
+
+/// The "Uitstellen" menu: how long to put a reminder off for, if one was picked.
+fn snooze(ui: &mut egui::Ui, t: &Tokens) -> Option<u32> {
+    let mut picked = None;
+    helder::menu_button(ui, t, Some(helder::Icon::Clock), RichText::new("Uitstellen").size(14.0).color(t.text), |ui| {
+        for (minutes, label) in SNOOZES {
+            if ui.button(label).clicked() {
+                picked = Some(minutes);
+                ui.close();
+            }
+        }
+    });
+    picked
+}
+
 /// Draws the window when a reminder is due.
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let now = now();
@@ -102,103 +164,88 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut action: Option<Action> = None;
     let count = due.len() + follow.len() + tasks.len();
     let title = if count == 1 { "Herinnering".to_string() } else { format!("Herinneringen ({count})") };
-    egui::Window::new(title)
+    egui::Window::new(&title)
         .id(egui::Id::new("reminders"))
+        .title_bar(false)
         .collapsible(false)
         .resizable(false)
-        .default_width(360.0)
         .anchor(Align2::RIGHT_TOP, vec2(-16.0, 96.0))
+        .frame(helder::window_frame(ctx, t))
         .show(ctx, |ui| {
-            for a in &due {
-                egui::Frame::new().fill(t.list).corner_radius(6).inner_margin(8).show(ui, |ui| {
-                    ui.set_width(340.0);
-                    ui.label(RichText::new(&a.title).strong().color(t.text));
-                    ui.label(RichText::new(relative(now, a.start)).color(t.accent_text));
-                    ui.label(RichText::new(when(a.start, a.all_day)).size(12.0).color(t.text_dim));
-                    if !a.location.is_empty() {
-                        ui.label(RichText::new(&a.location).size(12.0).color(t.text_dim));
-                    }
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("Openen").clicked() {
-                            action = Some(Action::Open(a.id.clone(), a.start));
+            ui.set_width(WIDTH);
+            ui.spacing_mut().item_spacing.y = 8.0;
+            let head = vec2(WIDTH, helder::BUTTON_HEIGHT);
+            ui.allocate_ui_with_layout(head, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(helder::Icon::Bell.image(helder::ICON, t.accent_text));
+                ui.label(RichText::new(&title).size(16.0).strong().color(t.text));
+                if count > 1 {
+                    helder::right(ui, |ui| {
+                        if helder::text_button(ui, t, "Alles sluiten").clicked() {
+                            action = Some(Action::DismissAll);
                         }
-                        if ui.button("Sluiten").clicked() {
-                            action = Some(Action::Dismiss(a.id.clone(), a.start));
-                        }
-                        egui::ComboBox::from_id_salt(("snooze", &a.id, a.start)).selected_text("Uitstellen…").width(130.0).show_ui(ui, |ui| {
-                            for (minutes, label) in SNOOZES {
-                                if ui.selectable_label(false, label).clicked() {
-                                    action = Some(Action::Snooze(a.id.clone(), a.start, minutes));
-                                }
-                            }
-                        });
                     });
+                }
+            });
+            for a in &due {
+                let mut details = vec![(helder::Icon::Clock, when(a.start, a.all_day))];
+                if !a.location.is_empty() {
+                    details.push((helder::Icon::MapPin, a.location.clone()));
+                }
+                let lead = (relative(now, a.start), t.accent_text);
+                card(ui, t, helder::Icon::Calendar, "Afspraak", &a.title, lead, &details, |ui| {
+                    if helder::primary_button(ui, t, helder::Icon::Calendar, "Openen").clicked() {
+                        action = Some(Action::Open(a.id.clone(), a.start));
+                    }
+                    if helder::tool_button(ui, t, helder::Icon::X, "Sluiten").clicked() {
+                        action = Some(Action::Dismiss(a.id.clone(), a.start));
+                    }
+                    if let Some(minutes) = snooze(ui, t) {
+                        action = Some(Action::Snooze(a.id.clone(), a.start, minutes));
+                    }
                 });
-                ui.add_space(4.0);
             }
             // Flagged mail whose day has come, as Outlook reminds of flagged items.
             for (m, day) in &follow {
-                egui::Frame::new().fill(t.list).corner_radius(6).inner_margin(8).show(ui, |ui| {
-                    ui.set_width(340.0);
-                    ui.label(RichText::new(format!("⚑ Opvolgen: {}", m.subject)).strong().color(t.text));
-                    let late = *day < today;
-                    ui.label(RichText::new(follow_up_due(*day, today)).color(if late { t.flag } else { t.accent_text }));
-                    ui.label(RichText::new(format!("van {}", m.from.display())).size(12.0).color(t.text_dim));
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("Openen").clicked() {
-                            action = Some(Action::OpenMail(m.id.clone()));
-                        }
-                        if ui.button("Voltooid").on_hover_text("Haalt de vlag en de datum weg.").clicked() {
-                            action = Some(Action::Done(m.id.clone()));
-                        }
-                        if ui.button("Sluiten").on_hover_text("Sluit de herinnering; de vlag en de datum blijven.").clicked() {
-                            action = Some(Action::DismissMail(m.id.clone()));
-                        }
-                        egui::ComboBox::from_id_salt(("snooze-followup", &m.id)).selected_text("Uitstellen…").width(130.0).show_ui(ui, |ui| {
-                            for (minutes, label) in SNOOZES {
-                                if ui.selectable_label(false, label).clicked() {
-                                    action = Some(Action::SnoozeMail(m.id.clone(), minutes));
-                                }
-                            }
-                        });
-                    });
+                let late = *day < today;
+                let lead = (follow_up_due(*day, today), if late { t.flag } else { t.accent_text });
+                let details = [(helder::Icon::User, format!("van {}", m.from.display()))];
+                card(ui, t, helder::Icon::Flag, "Opvolgen", &m.subject, lead, &details, |ui| {
+                    if helder::primary_button(ui, t, helder::Icon::Mail, "Openen").clicked() {
+                        action = Some(Action::OpenMail(m.id.clone()));
+                    }
+                    if helder::tool_button(ui, t, helder::Icon::CircleCheck, "Voltooid").on_hover_text("Haalt de vlag en de datum weg.").clicked() {
+                        action = Some(Action::Done(m.id.clone()));
+                    }
+                    if helder::tool_button(ui, t, helder::Icon::X, "Sluiten")
+                        .on_hover_text("Sluit de herinnering; de vlag en de datum blijven.")
+                        .clicked()
+                    {
+                        action = Some(Action::DismissMail(m.id.clone()));
+                    }
+                    if let Some(minutes) = snooze(ui, t) {
+                        action = Some(Action::SnoozeMail(m.id.clone(), minutes));
+                    }
                 });
-                ui.add_space(4.0);
             }
             // Tasks whose due day has come, as Outlook reminds of tasks with a due date.
             for task in &tasks {
-                egui::Frame::new().fill(t.list).corner_radius(6).inner_margin(8).show(ui, |ui| {
-                    ui.set_width(340.0);
-                    ui.label(RichText::new(format!("☑ Taak: {}", task.title)).strong().color(t.text));
-                    let day = to_local(task.due.unwrap_or(now)).date();
-                    let late = day < today;
-                    ui.label(RichText::new(follow_up_due(day, today)).color(if late { t.flag } else { t.accent_text }));
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("Openen").clicked() {
-                            action = Some(Action::OpenTask(task.id.clone()));
-                        }
-                        if ui.button("Voltooid").on_hover_text("Vinkt de taak af.").clicked() {
-                            action = Some(Action::DoneTask(task.id.clone()));
-                        }
-                        if ui.button("Sluiten").on_hover_text("Sluit de herinnering; de taak blijft open.").clicked() {
-                            action = Some(Action::DismissTask(task.id.clone()));
-                        }
-                        egui::ComboBox::from_id_salt(("snooze-task", &task.id)).selected_text("Uitstellen…").width(130.0).show_ui(ui, |ui| {
-                            for (minutes, label) in SNOOZES {
-                                if ui.selectable_label(false, label).clicked() {
-                                    action = Some(Action::SnoozeTask(task.id.clone(), minutes));
-                                }
-                            }
-                        });
-                    });
+                let day = to_local(task.due.unwrap_or(now)).date();
+                let late = day < today;
+                let lead = (follow_up_due(day, today), if late { t.flag } else { t.accent_text });
+                card(ui, t, helder::Icon::SquareCheck, "Taak", &task.title, lead, &[], |ui| {
+                    if helder::primary_button(ui, t, helder::Icon::SquareCheck, "Openen").clicked() {
+                        action = Some(Action::OpenTask(task.id.clone()));
+                    }
+                    if helder::tool_button(ui, t, helder::Icon::CircleCheck, "Voltooid").on_hover_text("Vinkt de taak af.").clicked() {
+                        action = Some(Action::DoneTask(task.id.clone()));
+                    }
+                    if helder::tool_button(ui, t, helder::Icon::X, "Sluiten").on_hover_text("Sluit de herinnering; de taak blijft open.").clicked() {
+                        action = Some(Action::DismissTask(task.id.clone()));
+                    }
+                    if let Some(minutes) = snooze(ui, t) {
+                        action = Some(Action::SnoozeTask(task.id.clone(), minutes));
+                    }
                 });
-                ui.add_space(4.0);
-            }
-            if count > 1 && ui.button("Alles sluiten").clicked() {
-                action = Some(Action::DismissAll);
             }
         });
     match action {
