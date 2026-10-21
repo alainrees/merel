@@ -208,7 +208,7 @@ fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bo
     let mut save = false;
     let mut cancel = false;
     ui.horizontal(|ui| {
-        save = ui.add(egui::Button::new(RichText::new("Regel opslaan").color(t.on_accent)).fill(t.accent).min_size(vec2(110.0, 26.0))).clicked();
+        save = ui.add(crate::helder::primary_text(t, "Regel opslaan")).clicked();
         cancel = ui.add(egui::Button::new("Annuleren").min_size(vec2(90.0, 26.0))).clicked();
     });
     (save, cancel)
@@ -239,7 +239,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut cancel = false;
     let mut close = false;
     let mut form_state = app.rules.as_mut().and_then(|s| s.form.take());
-    egui::Window::new("Regels").collapsible(false).resizable(false).default_width(460.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "rules", "Regels", 460.0, |ui| {
         ui.label(
             RichText::new("Regels kijken naar nieuwe mail in het Postvak IN van een account en verplaatsen of markeren wat erop past.")
                 .size(12.0)
@@ -254,7 +254,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             return;
         }
         ui.horizontal(|ui| {
-            if ui.button("Nieuwe regel").clicked() {
+            if ui.add(crate::helder::primary_text(t, "Nieuwe regel")).clicked() {
                 action = Some(Action::New);
             }
             if ui
@@ -303,7 +303,9 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 close = true;
             }
         });
-    });
+    }) {
+        close = true;
+    }
     if save && let Some(form) = form_state.as_mut() {
         match app.engine.run("rule.save", &form.params()) {
             Ok(()) => form_state = None,

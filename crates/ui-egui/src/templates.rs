@@ -2,7 +2,7 @@
 //! drops a saved piece of text into the message, above the signature and the quoted text, and
 //! the window behind "Sjablonen beheren…" makes and changes them.
 
-use egui::{RichText, Ui, vec2};
+use egui::{RichText, Ui};
 use serde_json::json;
 
 use merel_engine::CommandError;
@@ -158,7 +158,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut cancel = false;
     let mut close = false;
     let mut form_state = app.templates.as_mut().and_then(|s| s.form.take());
-    egui::Window::new(HEADING).collapsible(false).resizable(false).default_width(460.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "templates", HEADING, 460.0, |ui| {
         ui.label(
             RichText::new("Een sjabloon is een vaste tekst die je met één klik in een bericht zet, via het menu Sjablonen in het opstelvenster.")
                 .size(12.0)
@@ -179,7 +179,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 ui.label(RichText::new(e).color(t.flag));
             }
             ui.horizontal(|ui| {
-                if ui.add(egui::Button::new("Opslaan").min_size(vec2(90.0, 26.0))).clicked() {
+                if ui.add(crate::helder::primary_text(t, "Opslaan")).clicked() {
                     save = true;
                 }
                 if ui.button("Annuleren").clicked() {
@@ -188,7 +188,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             });
             return;
         }
-        if ui.button(NEW).clicked() {
+        if ui.add(crate::helder::primary_text(t, NEW)).clicked() {
             action = Some(Action::New);
         }
         ui.add_space(6.0);
@@ -215,7 +215,9 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         if ui.button("Sluiten").clicked() {
             close = true;
         }
-    });
+    }) {
+        close = true;
+    }
     if save && let Some(form) = form_state.as_mut() {
         match app.engine.run("template.save", &form.params()) {
             Ok(()) => form_state = None,

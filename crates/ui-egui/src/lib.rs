@@ -1626,7 +1626,7 @@ fn move_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         .collect();
     let mut target = None;
     let mut close = false;
-    egui::Window::new("Verplaatsen naar").collapsible(false).resizable(false).default_width(280.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "move-to", "Verplaatsen naar", 280.0, |ui| {
         ui.label(RichText::new(clip(&m.subject, 48)).size(12.0).color(t.text_dim));
         ui.add_space(4.0);
         egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
@@ -1640,7 +1640,9 @@ fn move_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         if ui.button("Annuleren").clicked() {
             close = true;
         }
-    });
+    }) {
+        close = true;
+    }
     if let Some(folder) = target {
         app.run("message.move", json!({ "folder_id": folder }));
         close = true;

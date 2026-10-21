@@ -541,6 +541,62 @@ pub fn primary_button(ui: &mut Ui, t: &Tokens, icon: Icon, text: &str) -> Respon
     )
 }
 
+/// A dialog's main button, only text, in the app colour: "Opslaan", "Nieuwe regel". Add it with
+/// `ui.add` or `ui.add_enabled`.
+pub fn primary_text(t: &Tokens, text: &str) -> egui::Button<'static> {
+    egui::Button::new(RichText::new(text).size(14.0).color(t.on_accent))
+        .fill(t.accent)
+        .stroke(Stroke::NONE)
+        .corner_radius(CONTROL_RADIUS)
+        .min_size(vec2(0.0, BUTTON_HEIGHT))
+}
+
+/// One of a few choices, as a row with a frame of its own: a round mark, `title` and under it
+/// `detail` in quiet type. The chosen one has a frame and a filled mark in the app colour, as
+/// the settings of the new Outlook have them, instead of a bare radio button.
+pub fn choice(ui: &mut Ui, t: &Tokens, title: &str, detail: &str, on: bool) -> Response {
+    let background = ui.painter().add(egui::Shape::Noop);
+    let width = ui.available_width();
+    let frame = Frame::new().inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
+        ui.set_width(width - 24.0);
+        ui.horizontal_top(|ui| {
+            let (mark, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+            let p = ui.painter();
+            if on {
+                p.circle_filled(mark.center(), 9.0, t.accent);
+                p.circle_filled(mark.center(), 3.5, t.on_accent);
+            } else {
+                p.circle_stroke(mark.center(), 8.0, Stroke::new(1.5, t.control_border));
+            }
+            ui.add_space(4.0);
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                // Painted, not a label: the row itself carries the name for a screen reader.
+                let galley = ui.painter().layout_no_wrap(title.to_owned(), FontId::proportional(14.0), t.text);
+                let (rect, _) = ui.allocate_exact_size(galley.size(), Sense::hover());
+                ui.painter().galley(rect.min, galley, t.text);
+                ui.add(egui::Label::new(RichText::new(detail).size(12.0).color(t.text_dim)).wrap());
+            });
+        });
+    });
+    let rect = frame.response.rect;
+    let r = ui.interact(rect, ui.id().with(("choice", title)), Sense::click());
+    r.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, true, on, title));
+    let (fill, stroke) = if on {
+        (t.checked, Stroke::new(2.0, t.accent))
+    } else if r.hovered() {
+        (t.hover, Stroke::new(1.0, t.control_border))
+    } else {
+        (Color32::TRANSPARENT, Stroke::new(1.0, t.card_border))
+    };
+    let shape = egui::epaint::RectShape::new(rect, CONTROL_RADIUS, fill, stroke, egui::StrokeKind::Inside);
+    ui.painter().set(background, shape);
+    if r.has_focus() {
+        ui.painter().rect_stroke(rect.expand(2.0), CONTROL_RADIUS, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
+    }
+    r
+}
+
 /// A quiet button that opens a menu, with a chevron after its label; `icon` goes before it.
 pub fn menu_button<R>(ui: &mut Ui, t: &Tokens, icon: Option<Icon>, text: impl Into<WidgetText>, add: impl FnOnce(&mut Ui) -> R) -> Response {
     let text = text.into();
@@ -868,10 +924,48 @@ pub fn item_window<R>(
     open: &mut bool,
     add: impl FnOnce(&mut Ui) -> R,
 ) -> Option<R> {
-    // Over the main window, a little in from its corner, as Outlook opens an item: the system
-    // could otherwise put the window where it is not seen, off screen or behind the main one.
-    // Inside the main window (embedded) egui places the window itself.
+    own_window(ctx, t, id, title, Shape::Item(size), open, add)
+}
+
+/// A dialog in a window of its own, such as Regels or Snelle stappen: the system's title bar with
+/// its close, minimise and zoom buttons and `title`, and under it the Helder style, a card on
+/// the window's grey ground whose buttons are secondary buttons. The window is `width` wide and
+/// as tall as what `add` draws, and opens over the middle of the main window. Returns whether it
+/// was closed from its title bar. Where the platform cannot open a second window (and in the
+/// tests) it is drawn as a window inside the main one.
+pub fn popup(ctx: &egui::Context, t: &Tokens, id: &str, title: &str, width: f32, add: impl FnOnce(&mut Ui)) -> bool {
+    let mut open = true;
+    own_window(ctx, t, id, title, Shape::Popup(width, true), &mut open, add);
+    !open
+}
+
+/// What kind of window [`own_window`] opens.
+#[derive(Clone, Copy)]
+enum Shape {
+    /// An item, such as a message or an appointment: this size to start with, then the user's.
+    Item(egui::Vec2),
+    /// A dialog this wide and as tall as its content; on a card, or on the grey ground for a
+    /// dialog that lays out cards of its own.
+    Popup(f32, bool),
+}
+
+/// The room around a popup's card, and the card's own margin.
+const POPUP_GROUND: f32 = 12.0;
+const POPUP_CARD: f32 = 16.0;
+
+fn own_window<R>(ctx: &egui::Context, t: &Tokens, id: &str, title: &str, shape: Shape, open: &mut bool, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+    // An item opens over the main window, a little in from its corner, as Outlook opens one; a
+    // dialog over its middle. The system could otherwise put the window where it is not seen,
+    // off screen or behind the main one. Inside the main window (embedded) egui places it.
     let main = if ctx.embed_viewports() { None } else { ctx.input(|i| i.viewport().outer_rect) };
+    let height_id = egui::Id::new(id).with("popup-height");
+    let height: Option<f32> = ctx.data(|d| d.get_temp(height_id));
+    let size = match shape {
+        Shape::Item(size) => size,
+        Shape::Popup(width, _) => vec2(width + 2.0 * (POPUP_GROUND + POPUP_CARD), height.unwrap_or(200.0)),
+    };
+    // A dialog is placed for good once its height is known, so it is centred as it is.
+    let settled = matches!(shape, Shape::Item(_)) || height.is_some();
     let (viewport, place, new) = ctx.data_mut(|d| {
         let w = d.get_temp_mut_or_default::<Windows>(egui::Id::new(WINDOWS));
         // Each opening is a window of its own. Reusing the one just closed, still kept hidden
@@ -890,8 +984,13 @@ pub fn item_window<R>(
         let place = match w.placed.iter().find(|(v, _)| *v == viewport) {
             Some((_, at)) => Some(*at),
             None => {
-                let at = main.map(|r| r.min + vec2(60.0, 60.0));
-                if let Some(at) = at {
+                let at = main.map(|r| match shape {
+                    Shape::Item(_) => r.min + vec2(60.0, 60.0),
+                    Shape::Popup(..) => (r.center() - size / 2.0).max(r.min + vec2(20.0, 60.0)),
+                });
+                if let Some(at) = at
+                    && settled
+                {
                     w.placed.push((viewport, at));
                 }
                 at
@@ -899,8 +998,12 @@ pub fn item_window<R>(
         };
         (viewport, place, new)
     });
-    let mut builder =
-        egui::ViewportBuilder::default().with_title(title).with_visible(true).with_inner_size(size).with_min_inner_size(vec2(480.0, 360.0));
+    let mut builder = egui::ViewportBuilder::default().with_title(title).with_visible(true).with_inner_size(size);
+    // A dialog keeps all three title bar buttons and can be made larger; it takes its content's
+    // height again when that changes.
+    if let Shape::Item(_) = shape {
+        builder = builder.with_min_inner_size(vec2(480.0, 360.0));
+    }
     if let Some(at) = place {
         builder = builder.with_position(at);
     }
@@ -913,15 +1016,41 @@ pub fn item_window<R>(
     ctx.show_viewport_immediate(viewport, builder, |ui, class| {
         let Some(add) = add.take() else { return };
         if class == egui::ViewportClass::EmbeddedWindow {
-            out = Some(add(ui));
+            out = Some(match shape {
+                Shape::Item(_) => add(ui),
+                Shape::Popup(width, _) => {
+                    ui.set_width(width);
+                    secondary(ui, t, add)
+                }
+            });
             return;
         }
         if ui.input(|i| i.viewport().close_requested()) {
             *open = false;
         }
-        egui::CentralPanel::default().frame(Frame::NONE.fill(t.window).inner_margin(12)).show(ui, |ui| {
-            out = Some(add(ui));
-        });
+        match shape {
+            Shape::Item(_) => {
+                egui::CentralPanel::default().frame(Frame::NONE.fill(t.window).inner_margin(12)).show(ui, |ui| {
+                    out = Some(add(ui));
+                });
+            }
+            Shape::Popup(width, card) => {
+                egui::CentralPanel::default().frame(Frame::NONE.fill(t.window).inner_margin(POPUP_GROUND)).show(ui, |ui| {
+                    let frame = if card { card_frame(t) } else { Frame::NONE };
+                    let card = frame.inner_margin(POPUP_CARD).show(ui, |ui| {
+                        ui.set_width(width);
+                        secondary(ui, t, add)
+                    });
+                    out = Some(card.inner);
+                    // The window takes the height of what it shows.
+                    let height = (card.response.rect.height() + 2.0 * POPUP_GROUND).ceil();
+                    if (height - size.y).abs() > 0.5 {
+                        ui.ctx().data_mut(|d| d.insert_temp(height_id, height));
+                        ui.ctx().request_repaint();
+                    }
+                });
+            }
+        }
     });
     out
 }
@@ -995,19 +1124,15 @@ pub fn right<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 /// The accessible name of a dialog's close button.
 pub const CLOSE: &str = "Sluiten";
 
-/// A dialog in the Helder style, inside the main window and centred on it: no grey title bar,
-/// but the title in large type with a quiet close button on its right, on the window's grey
-/// ground. Returns whether the close button was used.
+/// A dialog in the Helder style in a window of its own (see [`popup`]), such as "Over Merel" or
+/// the welcome. Inside the main window (embedded) it keeps a quiet close button of its own, as
+/// such a window has no title bar buttons. Returns whether it was closed.
 pub fn dialog(ctx: &egui::Context, t: &Tokens, title: &str, width: f32, add: impl FnOnce(&mut Ui)) -> bool {
     let mut close = false;
-    egui::Window::new(title)
-        .title_bar(false)
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .frame(window_frame(ctx, t).inner_margin(16))
-        .show(ctx, |ui| {
-            ui.set_width(width);
+    let mut open = true;
+    own_window(ctx, t, title, title, Shape::Popup(width, false), &mut open, |ui| {
+        // Drawn inside the main window, it is still on the main window's viewport.
+        if ui.ctx().viewport_id() == egui::ViewportId::ROOT {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(title).size(TITLE_TEXT).strong().color(t.text));
                 right(ui, |ui| {
@@ -1015,9 +1140,10 @@ pub fn dialog(ctx: &egui::Context, t: &Tokens, title: &str, width: f32, add: imp
                 });
             });
             ui.add_space(8.0);
-            add(ui);
-        });
-    close
+        }
+        add(ui);
+    });
+    close || !open
 }
 
 /// A round badge in the selection colour with `icon` in the app colour, for the head of a

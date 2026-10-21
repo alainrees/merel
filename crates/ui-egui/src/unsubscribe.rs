@@ -128,18 +128,20 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     };
     let mut go = false;
     let mut close = false;
-    egui::Window::new("Afmelden").collapsible(false).resizable(false).default_width(340.0).show(ctx, |ui| {
+    if crate::helder::popup(ctx, t, "unsubscribe", "Afmelden", 340.0, |ui| {
         ui.label(RichText::new(text).color(t.text));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if ui.button("Ja, afmelden").clicked() {
+            if ui.add(crate::helder::primary_text(t, "Ja, afmelden")).clicked() {
                 go = true;
             }
             if ui.button("Annuleren").clicked() {
                 close = true;
             }
         });
-    });
+    }) {
+        close = true;
+    }
     if go {
         app.unsubscribe_now(ctx, &c);
     }
