@@ -520,7 +520,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if crate::ribbon_action_hint(ui, t, "✔", "Nieuwe taak", true, Some(&crate::key_hint("Shift+K"))) {
         app.new_task();
     }
-    ui.separator();
+    crate::ribbon_separator(ui);
     if crate::ribbon_action(ui, t, "✎", "Bewerken", has) {
         app.edit_selected_task();
     }
@@ -528,7 +528,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     if crate::ribbon_action(ui, t, "☑", flip, has) {
         app.run("task.complete", serde_json::Value::Null);
     }
-    ui.separator();
+    crate::ribbon_separator(ui);
     if crate::ribbon_action(ui, t, "🗑", "Verwijderen", has) {
         app.run("task.delete", serde_json::Value::Null);
         app.tasks.editor = None;

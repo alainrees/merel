@@ -126,7 +126,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     if ribbon_action_hint(ui, t, "📁", "Nieuwe map", !app.engine.session.accounts.is_empty(), Some("Een map onder de geselecteerde map")) {
         app.new_folder(None);
     }
-    ui.separator();
+    crate::ribbon_separator(ui);
     if ribbon_action_hint(ui, t, "✎", "Naam wijzigen", ordinary, Some("De geselecteerde map een andere naam geven"))
         && let Some(id) = selected.clone()
     {
@@ -137,7 +137,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     {
         app.delete_folder(id);
     }
-    ui.separator();
+    crate::ribbon_separator(ui);
     let (has_mail, has_unread) = selected
         .as_deref()
         .map(|id| (app.engine.session.messages.iter().any(|m| m.folder_id == id), app.engine.session.folder(id).is_some_and(|f| f.unread > 0)))
@@ -164,7 +164,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     {
         app.ask_cleanup_folder(&id);
     }
-    ui.separator();
+    crate::ribbon_separator(ui);
     let favorite = selected.as_deref().is_some_and(|id| app.is_favorite(id));
     let hint =
         if favorite { "De geselecteerde map uit Favorieten halen" } else { "De geselecteerde map bovenin het mappenvenster onder Favorieten zetten" };

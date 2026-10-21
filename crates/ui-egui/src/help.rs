@@ -86,7 +86,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     if ribbon_action_hint(ui, t, "⌨", "Sneltoetsen", true, Some("Alle toetsen van de mailmodule op een rij")) {
         app.help = Some(HelpWindow::Shortcuts);
     }
-    ui.separator();
+    crate::ribbon_separator(ui);
     let folder = settings_folder(app);
     if ribbon_action_hint(ui, t, "📂", "Instellingenmap", folder.is_some(), Some("De map met accounts, agenda, regels en cache openen"))
         && let Some(f) = folder
@@ -96,7 +96,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     if ribbon_action_hint(ui, t, "🌐", "Op GitHub", true, Some("De projectpagina met de handleiding openen in de browser")) {
         open_outside(app, REPOSITORY);
     }
-    ui.separator();
+    crate::ribbon_separator(ui);
     if ribbon_action_hint(ui, t, "ℹ", "Over Merel", true, Some("Versie en uitgangspunten")) {
         app.help = Some(HelpWindow::About);
     }
@@ -104,7 +104,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
     if ribbon_action_hint(ui, t, "⟳", crate::updates::CHECK, !checking, Some("Bij GitHub nagaan of er een nieuwere versie van Merel is")) {
         app.check_for_updates(ui.ctx(), true);
     }
-    ui.separator();
+    crate::ribbon_separator(ui);
     ui.label(RichText::new(version_line()).size(12.0).color(t.text_dim));
 }
 

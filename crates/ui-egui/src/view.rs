@@ -266,35 +266,50 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
             let names: Vec<String> = app.engine.session.categories.iter().map(|c| c.name.clone()).collect();
             let mut pick: Option<Option<String>> = None;
             let shown = current.clone().unwrap_or_else(|| ALL_CATEGORIES.to_string());
-            helder::menu_button(ui, t, Some(Icon::Tag), shown, |ui| {
-                ui.set_min_width(180.0);
-                if ui.selectable_label(current.is_none(), ALL_CATEGORIES).clicked() {
-                    pick = Some(None);
-                    ui.close();
+            if crate::menubar::capturing() {
+                let mut options = vec![(ALL_CATEGORIES.to_string(), current.is_none())];
+                options.extend(names.iter().map(|n| (n.clone(), current.as_deref() == Some(n.as_str()))));
+                if let Some(i) = crate::menubar::choice("Categorie", &options) {
+                    pick = Some(if i == 0 { None } else { Some(names[i - 1].clone()) });
                 }
-                for n in names {
-                    if ui.selectable_label(current.as_deref() == Some(n.as_str()), &n).clicked() {
-                        pick = Some(Some(n));
+            } else {
+                helder::menu_button(ui, t, Some(Icon::Tag), shown, |ui| {
+                    ui.set_min_width(180.0);
+                    if ui.selectable_label(current.is_none(), ALL_CATEGORIES).clicked() {
+                        pick = Some(None);
                         ui.close();
                     }
-                }
-            })
-            .on_hover_text("Alleen berichten met deze categorie tonen");
+                    for n in names {
+                        if ui.selectable_label(current.as_deref() == Some(n.as_str()), &n).clicked() {
+                            pick = Some(Some(n));
+                            ui.close();
+                        }
+                    }
+                })
+                .on_hover_text("Alleen berichten met deze categorie tonen");
+            }
             if let Some(name) = pick {
                 app.run("view.category", json!({ "name": name }));
             }
         });
         group(ui, t, "Sorteren", |ui| {
             let mut sort = app.view.sort;
-            helder::menu_button(ui, t, Some(Icon::ArrowDownUp), sort.dutch_name(), |ui| {
-                ui.set_min_width(160.0);
-                for s in Sort::ALL {
-                    if ui.selectable_value(&mut sort, s, s.dutch_name()).clicked() {
-                        ui.close();
-                    }
+            if crate::menubar::capturing() {
+                let options: Vec<(String, bool)> = Sort::ALL.iter().map(|s| (s.dutch_name().to_string(), *s == sort)).collect();
+                if let Some(i) = crate::menubar::choice("Sorteren", &options) {
+                    sort = Sort::ALL[i];
                 }
-            })
-            .on_hover_text("Volgorde van de berichtenlijst");
+            } else {
+                helder::menu_button(ui, t, Some(Icon::ArrowDownUp), sort.dutch_name(), |ui| {
+                    ui.set_min_width(160.0);
+                    for s in Sort::ALL {
+                        if ui.selectable_value(&mut sort, s, s.dutch_name()).clicked() {
+                            ui.close();
+                        }
+                    }
+                })
+                .on_hover_text("Volgorde van de berichtenlijst");
+            }
             if sort != app.view.sort {
                 app.view.sort = sort;
                 app.run("view.sort", json!({ "sort": sort }));
@@ -302,7 +317,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
             }
         });
         helder::bar_separator(ui, t);
-        group(ui, t, "Leesvenster", |ui| {
+        section(ui, t, "Leesvenster", |ui| {
             for (pane, name, hint) in [
                 (ReadingPane::Right, "Rechts", "Het leesvenster rechts van de berichtenlijst"),
                 (ReadingPane::Bottom, "Onder", "Het leesvenster onder de berichtenlijst"),
@@ -315,31 +330,41 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
             }
             // When an opened message counts as read, as Outlook's reading-pane options.
             let mut choice = app.view.mark_read;
-            let button = egui::Button::image(Icon::MailCheck.image(helder::ICON, t.accent_text))
-                .right_text(Icon::ChevronDown.image(14.0, t.text_dim))
-                .frame_when_inactive(false)
-                .corner_radius(helder::CONTROL_RADIUS)
-                .min_size(egui::vec2(0.0, helder::BUTTON_HEIGHT));
-            let r = egui::containers::menu::MenuButton::from_button(button)
-                .ui(ui, |ui| {
-                    ui.label(egui::RichText::new("Als gelezen markeren").size(12.0).color(t.text_dim));
-                    for m in MarkRead::ALL {
-                        if ui.selectable_label(choice == m, m.dutch_name()).clicked() {
-                            choice = m;
-                            ui.close();
+            if crate::menubar::capturing() {
+                let options: Vec<(String, bool)> = MarkRead::ALL.iter().map(|m| (m.dutch_name().to_string(), *m == choice)).collect();
+                if let Some(i) = crate::menubar::choice("Als gelezen markeren", &options) {
+                    choice = MarkRead::ALL[i];
+                }
+            } else {
+                let button = egui::Button::image(Icon::MailCheck.image(helder::ICON, t.accent_text))
+                    .right_text(Icon::ChevronDown.image(14.0, t.text_dim))
+                    .frame_when_inactive(false)
+                    .corner_radius(helder::CONTROL_RADIUS)
+                    .min_size(egui::vec2(0.0, helder::BUTTON_HEIGHT));
+                let r = egui::containers::menu::MenuButton::from_button(button)
+                    .ui(ui, |ui| {
+                        ui.label(egui::RichText::new("Als gelezen markeren").size(12.0).color(t.text_dim));
+                        for m in MarkRead::ALL {
+                            if ui.selectable_label(choice == m, m.dutch_name()).clicked() {
+                                choice = m;
+                                ui.close();
+                            }
                         }
-                    }
-                })
-                .0;
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, MARK_READ_MENU));
-            r.on_hover_text(format!("{MARK_READ_MENU}: wanneer een geopend bericht als gelezen telt. Nu: {}.", choice.dutch_name().to_lowercase()));
+                    })
+                    .0;
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, MARK_READ_MENU));
+                r.on_hover_text(format!(
+                    "{MARK_READ_MENU}: wanneer een geopend bericht als gelezen telt. Nu: {}.",
+                    choice.dutch_name().to_lowercase()
+                ));
+            }
             if choice != app.view.mark_read {
                 app.view.mark_read = choice;
                 changed = true;
             }
         });
         helder::bar_separator(ui, t);
-        group(ui, t, "Lijst", |ui| {
+        section(ui, t, "Lijst", |ui| {
             for (on, label, hint) in [
                 (&mut app.view.compact, "Compact", "Rijen zonder voorbeeldregel, zodat er meer berichten passen"),
                 (
@@ -361,7 +386,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
         helder::bar_separator(ui, t);
     }
     if app.module == Module::Calendar {
-        group(ui, t, "Agenda", |ui| {
+        section(ui, t, "Agenda", |ui| {
             if switch(
                 ui,
                 t,
@@ -383,7 +408,7 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
         });
         helder::bar_separator(ui, t);
     }
-    group(ui, t, "Thema", |ui| {
+    section(ui, t, "Thema", |ui| {
         for choice in ThemeChoice::ALL {
             if crate::ribbon_toggle_hint(ui, t, choice.dutch_name(), app.view.theme == choice, choice.hint()) {
                 app.view.theme = choice;
@@ -405,6 +430,15 @@ fn switch(ui: &mut egui::Ui, t: &Tokens, on: &mut bool, label: &str, hint: &str)
         *on = !*on;
     }
     clicked
+}
+
+/// A ribbon [`group`] that is a submenu of its own in the menu bar, such as "Thema".
+pub(crate) fn section(ui: &mut egui::Ui, t: &Tokens, name: &str, add: impl FnOnce(&mut egui::Ui)) {
+    if crate::menubar::capturing() {
+        crate::menubar::submenu(name, || add(ui));
+    } else {
+        group(ui, t, name, add);
+    }
 }
 
 /// A ribbon group: its controls in a row, its name in small print underneath, like Outlook.
