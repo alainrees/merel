@@ -1685,3 +1685,13 @@ oauth-page-err = That did not work
 oauth-page-err-text = Signing in did not work. Go back to Merel and try again.
 
 pgp-wrong-passphrase = The passphrase is wrong.
+
+## Standard folders and the local calendar
+
+folder-kind-inbox = Inbox
+folder-kind-drafts = Drafts
+folder-kind-sent = Sent Items
+folder-kind-archive = Archive
+folder-kind-junk = Junk Email
+folder-kind-deleted = Deleted Items
+calendar-mine = My calendar

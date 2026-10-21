@@ -1670,3 +1670,13 @@ oauth-page-err = Niet gelukt
 oauth-page-err-text = Het aanmelden is niet gelukt. Ga terug naar Merel en probeer het opnieuw.
 
 pgp-wrong-passphrase = De wachtwoordzin klopt niet.
+
+## Standard folders and the local calendar
+
+folder-kind-inbox = Postvak IN
+folder-kind-drafts = Concepten
+folder-kind-sent = Verzonden items
+folder-kind-archive = Archief
+folder-kind-junk = Ongewenste e-mail
+folder-kind-deleted = Verwijderde items
+calendar-mine = Mijn agenda

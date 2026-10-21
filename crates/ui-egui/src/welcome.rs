@@ -175,7 +175,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                                     .clicked()
                                 {
                                     app.view.language = choice;
-                                    crate::i18n::set(choice.language());
+                                    app.apply_language();
                                 }
                             }
                         });

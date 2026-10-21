@@ -469,6 +469,24 @@ pub struct Session {
 }
 
 impl Session {
+    /// Gives the standard folders and the local calendar their names in the app's language,
+    /// after a change of language; a name the user chose stays.
+    pub fn relabel(&mut self) {
+        for f in &mut self.folders {
+            if let Some(name) = f.kind.local_name()
+                && f.kind.is_standard_name(&f.name)
+            {
+                f.name = name;
+            }
+        }
+        let standard = |name: &str| merel_i18n::Language::ALL.iter().any(|&l| merel_i18n::plain(l, "calendar-mine").as_deref() == Some(name));
+        for c in &mut self.calendars {
+            if c.id == "local" && standard(&c.name) {
+                c.name = merel_i18n::tr("calendar-mine");
+            }
+        }
+    }
+
     /// A session with built-in sample mail, for first run and tests. No network.
     pub fn sample() -> Self {
         let mut s = sample::session();
@@ -953,7 +971,7 @@ impl Session {
             .map(|f| Folder {
                 id: format!("{account_id}/{}", f.path),
                 account_id: account_id.to_string(),
-                name: f.kind.dutch_name().map(str::to_string).unwrap_or_else(|| clean_text(&f.name)),
+                name: f.kind.local_name().unwrap_or_else(|| clean_text(&f.name)),
                 parent: f.parent.filter(|p| listed.contains(p) && *p != f.path).map(|p| format!("{account_id}/{p}")),
                 path: f.path,
                 kind: f.kind,

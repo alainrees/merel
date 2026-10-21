@@ -253,7 +253,14 @@ impl MailApp {
     pub fn save_view(&mut self, ctx: &egui::Context) {
         self.view.save(self.engine.config_path());
         ctx.set_theme(self.view.theme.preference());
+        self.apply_language();
+    }
+
+    /// Switches the texts to the chosen language, along with the names of the standard folders
+    /// and the local calendar.
+    pub fn apply_language(&mut self) {
         crate::i18n::set(self.view.language.language());
+        self.engine.session.relabel();
     }
 
     /// Whether the folder is pinned under "Favorieten".

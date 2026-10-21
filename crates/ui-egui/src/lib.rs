@@ -280,6 +280,7 @@ impl MailApp {
     pub fn new(mut engine: Engine) -> Self {
         let view = view::ViewPrefs::load(engine.config_path());
         i18n::set(view.language.language());
+        engine.session.relabel();
         engine.session.sort = view.sort;
         let mut app = MailApp {
             engine,
@@ -4640,7 +4641,8 @@ mod tests {
     #[test]
     fn the_mail_screens_speak_english_in_english() {
         let mut h = harness();
-        i18n::set(i18n::Language::English);
+        h.state_mut().view.language = i18n::LanguageChoice::English;
+        h.state_mut().apply_language();
         h.state_mut().run("message.select", json!({ "id": "m1" }));
         h.run();
         h.run();
@@ -4652,20 +4654,7 @@ mod tests {
         // A Dutch text from nl.ftl whose English differs must not show; the sample mail itself is
         // Dutch, so its subjects, names and text are left out.
         let dutch: std::collections::HashSet<String> = i18n::dutch_only_texts();
-        // The folders keep their Dutch names until the standard folders move too.
-        let sample = [
-            "Planning voor donderdag",
-            "Sanne",
-            "Merel",
-            "Overleg ontwerp",
-            "Postvak IN",
-            "Verwijderde items",
-            "Archief",
-            "Voorbeeld",
-            "Ongewenste e-mail",
-            "Concepten",
-            "Verzonden items",
-        ];
+        let sample = ["Planning voor donderdag", "Sanne", "Merel", "Overleg ontwerp", "Voorbeeld"];
         let left: Vec<&String> = seen.iter().filter(|l| dutch.contains(l.as_str()) && !sample.iter().any(|s| l.contains(s))).collect();
         assert!(left.is_empty(), "Dutch on the English mail screens: {left:?}");
     }
@@ -4673,7 +4662,8 @@ mod tests {
     #[test]
     fn the_calendar_contacts_and_tasks_speak_english_in_english() {
         let mut h = harness();
-        i18n::set(i18n::Language::English);
+        h.state_mut().view.language = i18n::LanguageChoice::English;
+        h.state_mut().apply_language();
         let mut seen = Vec::new();
         let today = chrono::Local::now().date_naive();
         let screens: [&dyn Fn(&mut MailApp); 6] = [

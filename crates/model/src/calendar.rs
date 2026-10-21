@@ -55,7 +55,7 @@ pub struct Calendar {
 impl Calendar {
     /// The calendar every installation starts with.
     pub fn local() -> Self {
-        Calendar { id: "local".into(), name: "Mijn agenda".into(), account_id: None, color: CALENDAR_COLORS[0].1 }
+        Calendar { id: "local".into(), name: merel_i18n::tr("calendar-mine"), account_id: None, color: CALENDAR_COLORS[0].1 }
     }
 }
 
