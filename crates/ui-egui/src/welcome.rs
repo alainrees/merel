@@ -143,10 +143,11 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     });
                 }
                 Step::Updates => {
-                    helder::paragraph(ui, t, &tr("welcome-updates-text"));
+                    let installed = app.updates.self_update;
+                    helder::paragraph(ui, t, &tr(if installed { "welcome-updates-start" } else { "welcome-updates-text" }));
                     ui.add_space(10.0);
                     let mut on = app.view.update_check == Some(true);
-                    helder::toggle(ui, t, &mut on, &updates_on());
+                    helder::toggle(ui, t, &mut on, &if installed { tr("welcome-updates-also") } else { updates_on() });
                     app.view.update_check = Some(on);
                     ui.add(egui::Label::new(RichText::new(tr("welcome-updates-self")).size(12.0).color(t.text_dim)).wrap());
                 }
