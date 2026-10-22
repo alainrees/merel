@@ -327,7 +327,7 @@ impl MailApp {
             categories: None,
             help: None,
             view,
-            updates: updates::Updates::default(),
+            updates: updates::Updates::new(),
             welcome: None,
             expanded: std::collections::HashSet::new(),
             theme_applied: false,
@@ -386,6 +386,10 @@ impl MailApp {
         self.wake_snoozed();
         self.tick_read_timer(ui.ctx());
         self.tick_updates(ui.ctx());
+        if self.updates.required {
+            updates::required_screen(self, ui, &t);
+            return;
+        }
         let arrivals = self.engine.session.take_arrivals();
         if !arrivals.is_empty() {
             self.notice = Some(Notice::info(if arrivals.len() == 1 {
@@ -2877,6 +2881,46 @@ mod tests {
         h.get_by_label("Bijwerken is niet gelukt");
         h.get_by_label(&updates::page_label());
         assert!(h.query_by_label_contains("De handtekening van deze versie klopt niet").is_some());
+    }
+
+    #[test]
+    fn an_installed_merel_must_update_before_it_can_be_used() {
+        use install::{Job, Restart, Stage};
+        use updates::{Outcome, Release};
+        let mut h = harness();
+        h.state_mut().updates.self_update = true;
+        h.run();
+        assert!(h.state().updates.running(), "an installed Merel asks at every start, whatever the daily setting");
+        // Without internet, or when this is the newest, Merel simply starts.
+        h.state_mut().finish_update_check(Outcome::Failed("offline".into()));
+        h.state_mut().finish_update_check(Outcome::UpToDate);
+        h.run();
+        assert!(!h.state().updates.required);
+        h.get_by_label("Help");
+
+        h.state_mut().view.skipped_version = Some("9.0.0".into());
+        h.state_mut().finish_update_check(Outcome::Newer(Release { version: "9.0.0".into(), notes: "Beveiliging.".into() }));
+        h.run();
+        assert!(h.state().updates.required, "a skipped version is still required");
+        h.get_by_label("Merel 9.0.0 is beschikbaar.");
+        h.get_by_label(&updates::update());
+        assert!(h.query_by_label(&updates::skip()).is_none());
+        assert!(h.query_by_label(&updates::later()).is_none());
+        assert!(h.query_by_label("Help").is_none(), "the rest of Merel waits");
+
+        // A failed download goes back to the offer, never on to Merel.
+        h.state_mut().updates.job = Some(Job::at("9.0.0", Stage::Failed("Geen verbinding.".into())));
+        h.run();
+        h.get_by_label(&updates::retry()).click();
+        h.run();
+        assert!(h.state().updates.job.is_none());
+        h.get_by_label(&updates::update());
+        assert!(h.query_by_label("Help").is_none());
+
+        h.state_mut().updates.job = Some(Job::at("9.0.0", Stage::Ready(Restart::Relaunch("/Applications/Merel.app".into()))));
+        h.run();
+        h.get_by_label(&updates::restart_label());
+        assert!(h.query_by_label(&updates::later()).is_none());
     }
 
     #[test]

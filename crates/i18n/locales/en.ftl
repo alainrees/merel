@@ -1413,6 +1413,8 @@ welcome-hello-1 = Merel works like Outlook and runs on your own computer. Your m
 welcome-hello-2 = Pictures from the internet only load when you ask for them, passwords are in the system keychain and the offline copy of your mail is encrypted.
 welcome-account-text = Add your account with IMAP and SMTP, Gmail, Microsoft 365 or Exchange. You can also do that later, under File.
 welcome-updates-text = Merel can check with GitHub once a day whether there is a new version and then let you know. Nothing goes along except that question; GitHub does see the address of your internet connection.
+welcome-updates-start = Every time it starts, Merel checks with GitHub whether there is a new version. If there is, you update Merel first, so security fixes reach everyone right away. Nothing goes along except that question; GitHub does see the address of your internet connection.
+welcome-updates-also = Also check every day while Merel is open
 welcome-updates-self = You can always check yourself under Help > Updates.
 welcome-look-text = You can change this later on the View tab, under Theme and Language.
 welcome-skip-hint = Set up the rest later
@@ -1488,6 +1490,8 @@ updates-failed = Updating did not work
 updates-failed-text = { $reason } You can also download and install the new version yourself.
 updates-progress = { $done } of { $total } MB
 updates-restart-failed = Restarting did not work. Start Merel again yourself.
+updates-required-text = Update Merel before you continue. That way everyone always has the newest version, with every security fix.
+updates-retry = Try again
 
 ## Installing updates
 install-interrupted = Updating was interrupted.

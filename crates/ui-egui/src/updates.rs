@@ -3,8 +3,11 @@
 //! installs it and starts Merel again ([`crate::install`]); where Merel cannot replace itself
 //! (run from source, from a `.deb`) the button opens the release page instead.
 //!
-//! The question goes out only when the person asks (Help tab) or has switched on the daily
-//! check, because it shows GitHub this computer's address and that Merel runs. It carries
+//! An installed Merel, one that can update itself, asks at every start, and a newer release
+//! must be installed before Merel can be used ([`required_screen`]): a fix for a vulnerability
+//! then reaches everyone. Without internet Merel starts as usual. A build from source asks
+//! only when the person asks (Help tab) or has switched on the daily check, and never blocks.
+//! The question shows GitHub this computer's address and that Merel runs. It carries
 //! no account, no identifier and no version: one `https` GET with a short timeout and a size
 //! cap. The reply is data, never a link to follow: the release page is built from our own
 //! repository address and a tag that must read as a version number.
@@ -65,6 +68,9 @@ pub fn later() -> String {
 pub fn auto() -> String {
     tr("updates-auto")
 }
+pub fn retry() -> String {
+    tr("updates-retry")
+}
 
 /// A release newer than this build.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -107,9 +113,18 @@ pub struct Updates {
     pub offer: Option<Release>,
     /// The update that is downloading or installing, once the person chose "Bijwerken".
     pub job: Option<Job>,
+    /// Whether this Merel can install a new version itself (an installed app, not a build
+    /// from source): then it asks at every start, and a newer release is required.
+    pub self_update: bool,
+    /// The offer is a required update: Merel cannot be used until it is installed.
+    pub required: bool,
 }
 
 impl Updates {
+    pub fn new() -> Self {
+        Updates { self_update: install::available(), ..Default::default() }
+    }
+
     pub fn running(&self) -> bool {
         self.pending.is_some()
     }
@@ -205,6 +220,10 @@ impl MailApp {
     pub fn finish_update_check(&mut self, outcome: Outcome) {
         let manual = std::mem::take(&mut self.updates.manual);
         match outcome {
+            Outcome::Newer(release) if self.updates.self_update => {
+                self.updates.offer = Some(release);
+                self.updates.required = true;
+            }
             Outcome::Newer(release) => {
                 if manual || self.view.skipped_version.as_deref() != Some(release.version.as_str()) {
                     self.updates.offer = Some(release);
@@ -226,7 +245,8 @@ impl MailApp {
         }
     }
 
-    /// Picks up a finished check and starts the daily one when it is due; every frame.
+    /// Picks up a finished check and starts the next when it is due; every frame. An installed
+    /// Merel asks at every start, whatever the daily setting says.
     pub fn tick_updates(&mut self, ctx: &egui::Context) {
         let done = self.updates.pending.as_ref().and_then(|slot| slot.lock().ok().and_then(|mut s| s.take()));
         if let Some(outcome) = done {
@@ -234,7 +254,8 @@ impl MailApp {
             self.finish_update_check(outcome);
         }
         let due = self.updates.last.is_none_or(|t| t.elapsed() >= INTERVAL);
-        if self.view.update_check == Some(true) && due && !self.updates.running() {
+        let start = self.updates.last.is_none() && self.updates.self_update;
+        if (start || self.view.update_check == Some(true)) && due && !self.updates.running() {
             self.check_for_updates(ctx, false);
         }
     }
@@ -248,81 +269,132 @@ fn open_page(app: &mut MailApp, release: &Release) {
     }
 }
 
-/// The window that offers a newer release, and then walks through the update.
+/// The window that offers a newer release, and then walks through the update. A required
+/// update is not a window but [`required_screen`].
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    if app.updates.required {
+        return;
+    }
     if app.updates.job.is_some() {
-        return progress(app, ctx, t);
+        let mut close = false;
+        let closed = helder::dialog(ctx, t, &window_label(), 460.0, |ui| close = progress(app, ui, t));
+        return end_progress(app, close || closed);
     }
     let Some(release) = app.updates.offer.clone() else { return };
+    let mut close = false;
+    let closed = helder::dialog(ctx, t, &window_label(), 460.0, |ui| close = offer(app, ui, t, &release));
+    if close || closed {
+        app.updates.offer = None;
+    }
+}
+
+/// A newer release this Merel can install itself must be installed before Merel can be used:
+/// the update fills the main window, without "Later" or "Overslaan", so a fix for a
+/// vulnerability reaches everyone. Closing Merel is still possible; the next start asks again.
+pub fn required_screen(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
+    ui.painter().rect_filled(ui.available_rect_before_wrap(), 0.0, t.window);
+    let Some(release) = app.updates.offer.clone() else { return };
+    let width = 460.0_f32.min(ui.available_width() - 32.0);
+    let mut close = false;
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        ui.vertical_centered(|ui| {
+            ui.add_space(((ui.available_height() - 420.0) / 2.0).max(48.0));
+            ui.label(RichText::new(window_label()).size(helder::TITLE_TEXT).strong().color(t.text));
+            ui.add_space(12.0);
+            ui.allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_width(width);
+                if app.updates.job.is_some() {
+                    close = progress(app, ui, t);
+                } else {
+                    offer(app, ui, t, &release);
+                }
+            });
+        });
+    });
+    if app.updates.job.is_some() {
+        end_progress(app, close);
+    }
+}
+
+/// The offer: what is new, and the buttons. True when the person closed it.
+fn offer(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens, release: &Release) -> bool {
+    let required = app.updates.required;
     let here = install::Install::detect().filter(|_| install::SIGNING_KEY.is_some());
     let mut close = false;
-    let closed = helder::dialog(ctx, t, &window_label(), 460.0, |ui| {
-        if here.is_some() {
-            helder::step_dots(ui, t, 0, STEPS);
-            ui.add_space(12.0);
-        }
-        helder::card_frame(t).inner_margin(20).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                helder::badge(ui, t, Icon::Download);
-                ui.add_space(8.0);
-                ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(crate::i18n::tr_args("updates-available", &[("version", release.version.as_str().into())]))
-                            .size(18.0)
-                            .strong()
-                            .color(t.text),
-                    );
-                    ui.label(
-                        RichText::new(crate::i18n::tr_args("updates-current", &[("version", env!("CARGO_PKG_VERSION").into())]))
-                            .size(14.0)
-                            .color(t.text_dim),
-                    );
-                });
-            });
-            if !release.notes.is_empty() {
-                ui.add_space(12.0);
-                egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| crate::release_notes::show(ui, t, &release.notes));
-            }
-            ui.add_space(12.0);
-            let how = if here.is_some() { tr("updates-how-update") } else { tr("updates-how-download") };
-            ui.add(egui::Label::new(RichText::new(how).size(12.0).color(t.text_dim)).wrap());
-        });
+    if here.is_some() || required {
+        helder::step_dots(ui, t, 0, STEPS);
         ui.add_space(12.0);
+    }
+    helder::card_frame(t).inner_margin(20).show(ui, |ui| {
+        ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
+            helder::badge(ui, t, Icon::Download);
+            ui.add_space(8.0);
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new(crate::i18n::tr_args("updates-available", &[("version", release.version.as_str().into())]))
+                        .size(18.0)
+                        .strong()
+                        .color(t.text),
+                );
+                ui.label(
+                    RichText::new(crate::i18n::tr_args("updates-current", &[("version", env!("CARGO_PKG_VERSION").into())]))
+                        .size(14.0)
+                        .color(t.text_dim),
+                );
+            });
+        });
+        if required {
+            ui.add_space(12.0);
+            helder::paragraph(ui, t, &tr("updates-required-text"));
+        }
+        if !release.notes.is_empty() {
+            ui.add_space(12.0);
+            egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| crate::release_notes::show(ui, t, &release.notes));
+        }
+        ui.add_space(12.0);
+        let how = if here.is_some() || required { tr("updates-how-update") } else { tr("updates-how-download") };
+        ui.add(egui::Label::new(RichText::new(how).size(12.0).color(t.text_dim)).wrap());
+    });
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        if !required {
             helder::quiet(ui, t, |ui| {
                 if helder::text_button(ui, t, &skip()).on_hover_text(tr("updates-skip-hint")).clicked() {
                     app.view.skipped_version = Some(release.version.clone());
-                    app.save_view(ctx);
+                    app.save_view(ui.ctx());
                     close = true;
                 }
             });
-            helder::right(ui, |ui| {
-                match (&here, install::SIGNING_KEY) {
-                    (Some(place), Some(key)) => {
-                        if helder::primary_button(ui, t, Icon::Download, &update()).clicked() {
-                            app.updates.job = Some(Job::start(ctx, place.clone(), &release.version, key));
-                        }
-                    }
-                    _ => {
-                        if helder::primary_button(ui, t, Icon::Download, &download()).clicked() {
-                            open_page(app, &release);
-                            close = true;
-                        }
+        }
+        helder::right(ui, |ui| {
+            match (&here, install::SIGNING_KEY) {
+                (Some(place), Some(key)) => {
+                    if helder::primary_button(ui, t, Icon::Download, &update()).clicked() {
+                        app.updates.job = Some(Job::start(ui.ctx(), place.clone(), &release.version, key));
                     }
                 }
+                // Only in tests: a required update is only ever found where Merel can install it.
+                _ if required => {
+                    helder::primary_button(ui, t, Icon::Download, &update());
+                }
+                _ => {
+                    if helder::primary_button(ui, t, Icon::Download, &download()).clicked() {
+                        open_page(app, release);
+                        close = true;
+                    }
+                }
+            }
+            if !required {
                 helder::secondary(ui, t, |ui| {
                     if ui.button(RichText::new(later()).size(14.0).color(t.text)).clicked() {
                         close = true;
                     }
                 });
-            });
+            }
         });
     });
-    close |= closed;
-    if close {
-        app.updates.offer = None;
-    }
+    close
 }
 
 /// The steps the wizard shows as dots: offer, download, check, install.
@@ -336,9 +408,11 @@ fn quit(ctx: &egui::Context) {
 }
 
 /// The update under way: a progress bar while it downloads, then the check, the install and
-/// the button that starts the new version; or what went wrong, with the release page.
-fn progress(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
-    let Some(job) = &app.updates.job else { return };
+/// the button that starts the new version; or what went wrong, with the release page. True
+/// when the person closed it.
+fn progress(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) -> bool {
+    let Some(job) = &app.updates.job else { return false };
+    let required = app.updates.required;
     let stage = job.stage();
     let version = job.version.clone();
     let release = Release { version: version.clone(), notes: String::new() };
@@ -361,88 +435,105 @@ fn progress(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         }
     };
     let mut close = false;
-    let closed = helder::dialog(ctx, t, &window_label(), 460.0, |ui| {
-        if !matches!(stage, Stage::Failed(_)) {
-            helder::step_dots(ui, t, step, STEPS);
-            ui.add_space(12.0);
-        }
-        helder::card_frame(t).inner_margin(20).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                helder::badge(ui, t, icon);
-                ui.add_space(8.0);
-                ui.label(RichText::new(&title).size(18.0).strong().color(t.text));
-            });
-            ui.add_space(12.0);
-            if let Stage::Downloading { done, total } = stage {
-                let fraction = total.filter(|t| *t > 0).map(|t| done as f32 / t as f32);
-                helder::progress_bar(ui, t, fraction);
-                ui.add_space(6.0);
-                let mb = |b: u64| b as f64 / 1_000_000.0;
-                let line = match total {
-                    Some(total) => crate::i18n::tr_args(
-                        "updates-progress",
-                        &[("done", format!("{:.0}", mb(done)).into()), ("total", format!("{:.0}", mb(total)).into())],
-                    ),
-                    None => format!("{:.0} MB", mb(done)),
-                };
-                ui.label(RichText::new(line).size(12.0).color(t.text_dim));
-            } else {
-                helder::paragraph(ui, t, &text);
-            }
+    if !matches!(stage, Stage::Failed(_)) {
+        helder::step_dots(ui, t, step, STEPS);
+        ui.add_space(12.0);
+    }
+    helder::card_frame(t).inner_margin(20).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            helder::badge(ui, t, icon);
+            ui.add_space(8.0);
+            ui.label(RichText::new(&title).size(18.0).strong().color(t.text));
         });
         ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            helder::right(ui, |ui| match &stage {
-                Stage::Downloading { .. } => {
-                    helder::secondary(ui, t, |ui| {
-                        if ui.button(RichText::new(cancel()).size(14.0).color(t.text)).clicked() {
-                            close = true;
-                        }
-                    });
-                }
-                Stage::Checking | Stage::Installing => {}
-                Stage::Ready(restart) => {
-                    if helder::primary_button(ui, t, Icon::RefreshCw, &restart_label()).clicked() {
-                        let handover = install::hand_over(&app.engine);
-                        match restart.start(handover.as_ref()) {
-                            Ok(()) => quit(ctx),
-                            Err(e) => {
-                                log::warn!("could not start the new version: {e}");
-                                if let Some(key) = &handover {
-                                    install::take_back(&app.engine, key);
-                                }
-                                app.notice = Some(Notice::error(tr("updates-restart-failed")));
-                            }
-                        }
+        if let Stage::Downloading { done, total } = stage {
+            let fraction = total.filter(|t| *t > 0).map(|t| done as f32 / t as f32);
+            helder::progress_bar(ui, t, fraction);
+            ui.add_space(6.0);
+            let mb = |b: u64| b as f64 / 1_000_000.0;
+            let line = match total {
+                Some(total) => crate::i18n::tr_args(
+                    "updates-progress",
+                    &[("done", format!("{:.0}", mb(done)).into()), ("total", format!("{:.0}", mb(total)).into())],
+                ),
+                None => format!("{:.0} MB", mb(done)),
+            };
+            ui.label(RichText::new(line).size(12.0).color(t.text_dim));
+        } else {
+            helder::paragraph(ui, t, &text);
+        }
+    });
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        helder::right(ui, |ui| match &stage {
+            Stage::Downloading { .. } => {
+                helder::secondary(ui, t, |ui| {
+                    if ui.button(RichText::new(cancel()).size(14.0).color(t.text)).clicked() {
                         close = true;
                     }
+                });
+            }
+            Stage::Checking | Stage::Installing => {}
+            Stage::Ready(restart) => {
+                if helder::primary_button(ui, t, Icon::RefreshCw, &restart_label()).clicked() {
+                    let handover = install::hand_over(&app.engine);
+                    match restart.start(handover.as_ref()) {
+                        Ok(()) => quit(ui.ctx()),
+                        Err(e) => {
+                            log::warn!("could not start the new version: {e}");
+                            if let Some(key) = &handover {
+                                install::take_back(&app.engine, key);
+                            }
+                            app.notice = Some(Notice::error(tr("updates-restart-failed")));
+                        }
+                    }
+                    close = true;
+                }
+                if !required {
                     helder::secondary(ui, t, |ui| {
                         if ui.button(RichText::new(later()).size(14.0).color(t.text)).clicked() {
                             close = true;
                         }
                     });
                 }
-                Stage::Failed(_) => {
-                    if helder::primary_button(ui, t, Icon::Globe, &page_label()).clicked() {
-                        open_page(app, &release);
+            }
+            Stage::Failed(_) => {
+                if required {
+                    if helder::primary_button(ui, t, Icon::RefreshCw, &retry()).clicked() {
                         close = true;
                     }
-                    helder::secondary(ui, t, |ui| {
-                        if ui.button(RichText::new(helder::close_label()).size(14.0).color(t.text)).clicked() {
+                } else if helder::primary_button(ui, t, Icon::Globe, &page_label()).clicked() {
+                    open_page(app, &release);
+                    close = true;
+                }
+                helder::secondary(ui, t, |ui| {
+                    let (label, page) = if required { (page_label(), true) } else { (helder::close_label(), false) };
+                    if ui.button(RichText::new(label).size(14.0).color(t.text)).clicked() {
+                        if page {
+                            open_page(app, &release);
+                        } else {
                             close = true;
                         }
-                    });
-                }
-            });
+                    }
+                });
+            }
         });
     });
-    // While it installs the window stays: half an install must not be walked away from.
-    let busy = matches!(stage, Stage::Checking | Stage::Installing);
-    if (close || closed) && !busy {
-        if let Some(job) = app.updates.job.take() {
-            job.cancel();
-        }
+    close
+}
+
+/// Ends the update when the person closed it, unless it is installing: half an install must
+/// not be walked away from. A required update goes back to its offer; any other closes.
+fn end_progress(app: &mut MailApp, close: bool) {
+    let Some(job) = &app.updates.job else { return };
+    if !close || matches!(job.stage(), Stage::Checking | Stage::Installing) {
+        return;
+    }
+    if let Some(job) = app.updates.job.take() {
+        job.cancel();
+    }
+    if !app.updates.required {
         app.updates.offer = None;
     }
 }

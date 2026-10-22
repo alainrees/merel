@@ -1398,6 +1398,8 @@ welcome-hello-1 = Merel werkt zoals Outlook en draait op je eigen computer. Je m
 welcome-hello-2 = Afbeeldingen van internet laden pas als je erom vraagt, wachtwoorden staan in de sleutelhanger van het systeem en de offline kopie van je mail is versleuteld.
 welcome-account-text = Voeg je account toe met IMAP en SMTP, Gmail, Microsoft 365 of Exchange. Dat kan ook later, onder Bestand.
 welcome-updates-text = Merel kan eens per dag bij GitHub nagaan of er een nieuwe versie is en het je dan laten weten. Er gaat niets mee behalve die vraag; GitHub ziet wel het adres van je internetverbinding.
+welcome-updates-start = Bij elke start kijkt Merel bij GitHub of er een nieuwe versie is. Is die er, dan werk je Merel eerst bij; zo komt beveiligingsherstel meteen bij iedereen aan. Er gaat niets mee behalve die vraag; GitHub ziet wel het adres van je internetverbinding.
+welcome-updates-also = Ook elke dag kijken terwijl Merel openstaat
 welcome-updates-self = Zelf kijken kan altijd via Help > Updates.
 welcome-look-text = Dit kun je later wijzigen op het tabblad Beeld, onder Thema en Taal.
 welcome-skip-hint = De rest later instellen
@@ -1473,6 +1475,8 @@ updates-failed = Bijwerken is niet gelukt
 updates-failed-text = { $reason } Je kunt de nieuwe versie ook zelf downloaden en installeren.
 updates-progress = { $done } van { $total } MB
 updates-restart-failed = Opnieuw starten is niet gelukt. Start Merel zelf opnieuw.
+updates-required-text = Werk Merel eerst bij voordat je verdergaat. Zo heeft iedereen steeds de nieuwste versie, met alle beveiligingsherstel.
+updates-retry = Opnieuw proberen
 
 ## Installing updates
 install-interrupted = Bijwerken is onderbroken.
