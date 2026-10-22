@@ -7,6 +7,7 @@ use egui::{RichText, Ui};
 use merel_smime::CertInfo;
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::helder::{self, Icon};
 use crate::{MailApp, Tokens};
 
 pub fn import_label() -> String {
@@ -68,80 +69,127 @@ pub enum Action {
     Remove(Kind, String),
 }
 
+/// What the certificate of an account is, in a few words: for the folded Security line.
+pub fn summary(info: Option<&CertInfo>) -> String {
+    match info {
+        Some(_) => tr("cert-title-short"),
+        None => tr("cert-summary-none"),
+    }
+}
+
+/// What the OpenPGP key of an account is, in a few words: its shortened fingerprint.
+pub fn pgp_summary(info: Option<&merel_pgp::KeyInfo>) -> String {
+    match info {
+        Some(info) => short_fingerprint(&info.grouped()),
+        None => tr("pgp-summary-none"),
+    }
+}
+
+/// The first two and the last group of a fingerprint, as people compare them: "38C9 7EB3 … 4800".
+fn short_fingerprint(grouped: &str) -> String {
+    let groups: Vec<&str> = grouped.split(' ').collect();
+    match groups.as_slice() {
+        [a, b, .., z] if groups.len() > 3 => format!("{a} {b} … {z}"),
+        _ => grouped.to_string(),
+    }
+}
+
 /// The certificate part of the card of `account_id`.
 pub fn section(ui: &mut Ui, t: &Tokens, import: &mut Option<Import>, account_id: &str, info: Option<&CertInfo>) -> Option<Action> {
-    let line = match info {
-        Some(info) => crate::i18n::tr_args(
-            "cert-line",
-            &[
-                ("name", info.name.as_str().into()),
-                ("emails", info.emails.join(", ").into()),
-                ("issuer", if info.issuer.is_empty() { tr("unknown").to_lowercase() } else { info.issuer.clone() }.into()),
-                ("until", crate::dates::day(info.not_after).into()),
-            ],
+    let (line, detail) = match info {
+        Some(info) => (
+            crate::i18n::tr_args("cert-summary", &[("name", info.name.as_str().into()), ("until", crate::dates::day(info.not_after).into())]),
+            crate::i18n::tr_args(
+                "cert-line",
+                &[
+                    ("name", info.name.as_str().into()),
+                    ("emails", info.emails.join(", ").into()),
+                    ("issuer", if info.issuer.is_empty() { tr("unknown").to_lowercase() } else { info.issuer.clone() }.into()),
+                    ("until", crate::dates::day(info.not_after).into()),
+                ],
+            ),
         ),
-        None => tr("cert-none"),
+        None => (tr("cert-summary-none"), tr("cert-none")),
     };
-    part(ui, t, import, Kind::Certificate, account_id, info.is_some(), &line)
+    part(ui, t, import, Kind::Certificate, account_id, info.is_some(), &line, &detail)
 }
 
 /// The OpenPGP part of the card of `account_id`.
 pub fn pgp_section(ui: &mut Ui, t: &Tokens, import: &mut Option<Import>, account_id: &str, info: Option<&merel_pgp::KeyInfo>) -> Option<Action> {
-    let line = match info {
-        Some(info) => crate::i18n::tr_args(
-            "pgp-line",
-            &[("name", info.name.as_str().into()), ("emails", info.emails.join(", ").into()), ("fingerprint", info.grouped().into())],
+    let (line, detail) = match info {
+        Some(info) => (
+            crate::i18n::tr_args("pgp-summary", &[("fingerprint", short_fingerprint(&info.grouped()).into())]),
+            crate::i18n::tr_args(
+                "pgp-line",
+                &[("name", info.name.as_str().into()), ("emails", info.emails.join(", ").into()), ("fingerprint", info.grouped().into())],
+            ),
         ),
-        None => tr("pgp-none"),
+        None => (tr("pgp-summary-none"), tr("pgp-none")),
     };
-    part(ui, t, import, Kind::OpenPgp, account_id, info.is_some(), &line)
+    part(ui, t, import, Kind::OpenPgp, account_id, info.is_some(), &line, &detail)
 }
 
-fn part(ui: &mut Ui, t: &Tokens, import: &mut Option<Import>, kind: Kind, account_id: &str, has: bool, line: &str) -> Option<Action> {
+/// One key of the Security part: its icon, its name and a short line on what there is, the
+/// buttons on the right, and the whole explanation under the pointer.
+#[allow(clippy::too_many_arguments)]
+fn part(ui: &mut Ui, t: &Tokens, import: &mut Option<Import>, kind: Kind, account_id: &str, has: bool, line: &str, detail: &str) -> Option<Action> {
     let mut action = None;
     ui.add_space(6.0);
-    let title = match kind {
-        Kind::Certificate => tr("cert-title"),
-        Kind::OpenPgp => tr("pgp-title"),
+    let (title, icon) = match kind {
+        Kind::Certificate => (tr("cert-title"), Icon::ShieldCheck),
+        Kind::OpenPgp => (tr("pgp-title"), Icon::Lock),
     };
-    ui.label(RichText::new(title).strong().color(t.text));
-    ui.label(RichText::new(line).size(12.0).color(t.text_dim));
-    match import.as_mut().filter(|i| i.account_id == account_id && i.kind == kind) {
-        Some(pending) => {
-            ui.label(RichText::new(crate::i18n::tr_args("cert-file", &[("file", pending.file.as_str().into())])).size(12.0).color(t.text));
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(if kind == Kind::Certificate { password() } else { passphrase() }).color(t.text));
-                let field = ui.add(egui::TextEdit::singleline(&mut pending.password).password(true).desired_width(200.0));
-                if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    action = Some(Action::Import);
-                }
-            });
-            if let Some(e) = &pending.error {
-                ui.label(RichText::new(e).color(t.flag));
+    let pending = import.as_mut().filter(|i| i.account_id == account_id && i.kind == kind);
+    let waiting = pending.is_some();
+    ui.horizontal(|ui| {
+        ui.add_space(20.0);
+        ui.add(icon.image(helder::ICON, if has { t.accent_text } else { t.text_dim }));
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 1.0;
+            ui.label(RichText::new(&title).size(14.0).color(t.text)).on_hover_text(detail);
+            ui.label(RichText::new(line).size(12.0).color(t.text_dim)).on_hover_text(detail);
+        });
+        if waiting {
+            return;
+        }
+        let (import_label, replace, remove, hover, remove_hover) = match kind {
+            Kind::Certificate => (import_label(), replace(), remove(), tr("cert-import-hint"), tr("cert-remove-hint")),
+            Kind::OpenPgp => (pgp_import(), pgp_replace(), pgp_remove(), tr("pgp-import-hint"), tr("pgp-remove-hint")),
+        };
+        helder::right(ui, |ui| {
+            if has && helder::icon_button(ui, t, Icon::Trash, &remove).on_hover_text(remove_hover).clicked() {
+                action = Some(Action::Remove(kind, account_id.to_string()));
             }
-            ui.horizontal(|ui| {
-                if ui.button(confirm()).clicked() {
-                    action = Some(Action::Import);
+            if ui.button(if has { replace } else { import_label }).on_hover_text(hover).clicked() {
+                action = Some(Action::Pick(kind, account_id.to_string()));
+            }
+        });
+    });
+    if let Some(pending) = pending {
+        ui.horizontal(|ui| {
+            ui.add_space(48.0);
+            ui.vertical(|ui| {
+                ui.label(RichText::new(crate::i18n::tr_args("cert-file", &[("file", pending.file.as_str().into())])).size(12.0).color(t.text));
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(if kind == Kind::Certificate { password() } else { passphrase() }).color(t.text));
+                    let field = ui.add(egui::TextEdit::singleline(&mut pending.password).password(true).desired_width(200.0));
+                    if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        action = Some(Action::Import);
+                    }
+                });
+                if let Some(e) = &pending.error {
+                    ui.label(RichText::new(e).color(t.flag));
                 }
-                if ui.button(tr("cancel")).clicked() {
-                    action = Some(Action::Cancel);
-                }
+                ui.horizontal(|ui| {
+                    if ui.add(helder::primary_text(t, &confirm())).clicked() {
+                        action = Some(Action::Import);
+                    }
+                    if ui.button(tr("cancel")).clicked() {
+                        action = Some(Action::Cancel);
+                    }
+                });
             });
-        }
-        None => {
-            let (import_label, replace, remove, hover, remove_hover) = match kind {
-                Kind::Certificate => (import_label(), replace(), remove(), tr("cert-import-hint"), tr("cert-remove-hint")),
-                Kind::OpenPgp => (pgp_import(), pgp_replace(), pgp_remove(), tr("pgp-import-hint"), tr("pgp-remove-hint")),
-            };
-            ui.horizontal(|ui| {
-                if ui.button(if has { replace } else { import_label }).on_hover_text(hover).clicked() {
-                    action = Some(Action::Pick(kind, account_id.to_string()));
-                }
-                if has && ui.button(remove).on_hover_text(remove_hover).clicked() {
-                    action = Some(Action::Remove(kind, account_id.to_string()));
-                }
-            });
-        }
+        });
     }
     action
 }
@@ -237,10 +285,18 @@ mod tests {
         app
     }
 
+    /// Opens the folded Security part of the account's card.
+    fn open_security(harness: &mut Harness<'_, MailApp>) {
+        harness.get_by_label(&tr("account-security")).click();
+        harness.run();
+    }
+
     #[test]
     fn a_certificate_is_imported_with_its_password_and_removed_again() {
         let mut harness = Harness::builder().with_size(vec2(1100.0, 1000.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app());
         harness.run();
+        assert!(harness.query_by_label(&import_label()).is_none(), "Security starts folded");
+        open_security(&mut harness);
         harness.get_by_label(&import_label());
         assert!(harness.query_by_label(&remove()).is_none());
         let id = harness.state().engine.session.accounts[0].id.clone();
@@ -265,7 +321,7 @@ mod tests {
         harness.run();
         assert!(harness.state().form.certificate.is_none());
         assert_eq!(harness.state().engine.certificate(&id).map(|c| c.name), Some("Alain Tester".into()));
-        assert!(harness.query_all_by_label_contains("ondertekend als Alain Tester <alain@voorbeeld.nl>").count() == 1);
+        assert!(harness.query_all_by_label_contains("Ondertekent als Alain Tester").count() == 1);
 
         // New mail from the account is signed, and the box can be unticked for one message.
         harness.state_mut().open_compose(crate::compose::Kind::New);
@@ -305,6 +361,7 @@ mod tests {
     fn an_openpgp_key_is_imported_with_its_passphrase_and_removed_again() {
         let mut harness = Harness::builder().with_size(vec2(1100.0, 1200.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app());
         harness.run();
+        open_security(&mut harness);
         harness.get_by_label(&pgp_import());
         let id = harness.state().engine.session.accounts[0].id.clone();
         let file = std::env::temp_dir().join(format!("merel-key-{}.asc", std::process::id()));
@@ -320,7 +377,7 @@ mod tests {
         harness.get_by_label(&confirm()).click();
         harness.run();
         assert_eq!(harness.state().engine.pgp_key(&id).map(|k| k.name), Some("Alain Tester".into()));
-        assert_eq!(harness.query_all_by_label_contains("Sleutel van Alain Tester <alain@voorbeeld.nl>").count(), 1);
+        assert_eq!(harness.query_all_by_label_contains("Sleutel ").count(), 1, "the short line with the fingerprint");
 
         // New mail can be signed and encrypted with the key.
         harness.state_mut().open_compose(crate::compose::Kind::New);
@@ -345,6 +402,7 @@ mod tests {
     fn a_file_that_cannot_be_read_is_reported_and_cancelled() {
         let mut harness = Harness::builder().with_size(vec2(1100.0, 1000.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app());
         harness.run();
+        open_security(&mut harness);
         let id = harness.state().engine.session.accounts[0].id.clone();
         harness.state_mut().pick_certificate(&id, std::path::Path::new("/bestaat/niet.p12"));
         harness.run();
