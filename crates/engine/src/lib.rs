@@ -11,6 +11,7 @@
 pub mod cache;
 pub mod calendar;
 pub mod calls;
+pub use calls::{Call, CallTask};
 pub mod categories;
 pub mod certificates;
 pub mod chat;
