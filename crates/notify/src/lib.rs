@@ -9,6 +9,7 @@
 //! installer gives Merel's Start menu shortcut; the taskbar has no count, the window title
 //! carries it ("Merel (3)").
 
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 /// The app's id, as in the macOS bundle and on the Windows Start menu shortcut.
@@ -43,6 +44,31 @@ fn clicked(id: String) {
     if let Some(wake) = WAKER.get() {
         wake();
     }
+}
+
+/// Whether the computer shows the count on the app icon: unknown until it says (see
+/// [`badge_blocked`]).
+static BADGE_SETTING: AtomicU8 = AtomicU8::new(BADGE_UNKNOWN);
+const BADGE_UNKNOWN: u8 = 0;
+const BADGE_ALLOWED: u8 = 1;
+const BADGE_BLOCKED: u8 = 2;
+/// Set when the computer's answer may have changed what the badge shows, so it is sent again.
+static BADGE_RESEND: AtomicBool = AtomicBool::new(false);
+
+/// Called from any thread with what the computer allows for the app icon's count.
+#[allow(dead_code)]
+fn badge_allowed(allowed: bool) {
+    BADGE_SETTING.store(if allowed { BADGE_ALLOWED } else { BADGE_BLOCKED }, Ordering::Relaxed);
+    BADGE_RESEND.store(true, Ordering::Relaxed);
+    if let Some(wake) = WAKER.get() {
+        wake();
+    }
+}
+
+/// Whether the computer's own settings keep the count off the app icon (macOS: Systeeminstellingen
+/// > Berichtgeving > Merel > "Kenteken op appsymbool"), so the app can say where to switch it on.
+pub fn badge_blocked() -> bool {
+    BADGE_SETTING.load(Ordering::Relaxed) == BADGE_BLOCKED
 }
 
 /// The ids of the notifications clicked since the last call, oldest first.
@@ -83,9 +109,12 @@ impl Notifier {
         }
     }
 
-    /// The count on the app icon; 0 takes it away. Only a change reaches the computer.
+    /// The count on the app icon; 0 takes it away. Only a change reaches the computer, or the
+    /// same count again once the computer's settings for it have been read. On macOS the Dock
+    /// only shows the count of an app that may badge, so this asks for that first.
     pub fn set_badge(&mut self, count: u32) {
-        if self.badge != Some(count) {
+        self.prepare();
+        if self.badge != Some(count) || BADGE_RESEND.swap(false, Ordering::Relaxed) {
             self.badge = Some(count);
             self.inner.set_badge(count);
         }
@@ -94,6 +123,14 @@ impl Notifier {
     pub fn show(&mut self, alert: &Alert) {
         self.prepare();
         self.inner.show(alert);
+    }
+
+    /// Reads the computer's notification settings again, as the person may have changed them
+    /// in the meantime; [`badge_blocked`] tells the answer.
+    pub fn check_settings(&mut self) {
+        if self.prepared {
+            self.inner.check_settings();
+        }
     }
 }
 
@@ -114,8 +151,8 @@ mod platform {
     use objc2_app_kit::NSApplication;
     use objc2_foundation::{NSBundle, NSError, NSString};
     use objc2_user_notifications::{
-        UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest, UNNotificationResponse, UNNotificationSound,
-        UNUserNotificationCenter, UNUserNotificationCenterDelegate,
+        UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest, UNNotificationResponse, UNNotificationSetting,
+        UNNotificationSettings, UNNotificationSound, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
     };
 
     use super::Alert;
@@ -152,6 +189,19 @@ mod platform {
         delegate: Option<Retained<Delegate>>,
     }
 
+    /// Asks for the notification settings; the answer comes on another thread.
+    fn read_settings() {
+        let Some(center) = center() else { return };
+        let answer = block2::RcBlock::new(|settings: std::ptr::NonNull<UNNotificationSettings>| {
+            // SAFETY: the framework hands a valid settings object for the call's duration.
+            let settings = unsafe { settings.as_ref() };
+            let badge = settings.badgeSetting();
+            log::info!("badge setting: {}", badge.0);
+            super::badge_allowed(badge != UNNotificationSetting::Disabled);
+        });
+        center.getNotificationSettingsWithCompletionHandler(&answer);
+    }
+
     /// The notification center, only inside an app bundle: outside one the framework aborts.
     fn center() -> Option<Retained<UNUserNotificationCenter>> {
         NSBundle::mainBundle().bundleIdentifier()?;
@@ -171,10 +221,19 @@ mod platform {
             let delegate = Delegate::new();
             center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
             self.delegate = Some(delegate);
+            // The Badge option too: without it the Dock leaves the count off Merel's icon.
+            // Someone who answered before Badge was asked for is not asked again; they switch
+            // it on in System Settings, which the app points to (see `badge_blocked`).
             let answer = block2::RcBlock::new(|granted: objc2::runtime::Bool, _error: *mut NSError| {
                 log::info!("notifications allowed: {}", granted.as_bool());
+                read_settings();
             });
-            center.requestAuthorizationWithOptions_completionHandler(UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound, &answer);
+            let options = UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound | UNAuthorizationOptions::Badge;
+            center.requestAuthorizationWithOptions_completionHandler(options, &answer);
+        }
+
+        pub fn check_settings(&mut self) {
+            read_settings();
         }
 
         pub fn set_badge(&mut self, count: u32) {
@@ -241,6 +300,8 @@ mod platform {
 
         pub fn prepare(&mut self) {}
 
+        pub fn check_settings(&mut self) {}
+
         pub fn set_badge(&mut self, count: u32) {
             if let Some(jobs) = &self.jobs {
                 let _ = jobs.send(Job::Badge(count));
@@ -306,6 +367,8 @@ mod platform {
 
         pub fn prepare(&mut self) {}
 
+        pub fn check_settings(&mut self) {}
+
         /// The taskbar shows no count of its own; the window title carries it.
         pub fn set_badge(&mut self, _count: u32) {}
 
@@ -343,6 +406,7 @@ mod platform {
             Inner
         }
         pub fn prepare(&mut self) {}
+        pub fn check_settings(&mut self) {}
         pub fn set_badge(&mut self, _count: u32) {}
         pub fn show(&mut self, _alert: &Alert) {}
     }

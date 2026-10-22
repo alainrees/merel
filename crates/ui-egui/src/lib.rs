@@ -212,6 +212,9 @@ pub struct MailApp {
     pub alerts: Vec<merel_notify::Alert>,
     /// Which page Bestand shows.
     pub(crate) file_page: backstage::Page,
+    /// Whether the window had the focus last frame, to read the computer's notification
+    /// settings again when Merel comes back to the front.
+    pub(crate) was_focused: bool,
 }
 
 /// The window title: the app's name, with the unread inbox mail of every account in brackets
@@ -332,6 +335,7 @@ impl MailApp {
             notifier: None,
             alerts: Vec::new(),
             file_page: backstage::Page::default(),
+            was_focused: false,
         };
         app.welcome = welcome::due(&app).then_some(welcome::Step::Hello);
         app

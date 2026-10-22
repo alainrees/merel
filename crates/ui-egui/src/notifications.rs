@@ -136,7 +136,14 @@ impl MailApp {
     /// Every frame: the count on the icon, and what was clicked in a notification.
     pub fn tick_notifications(&mut self, ctx: &egui::Context) {
         let count = if self.view.notifications.badge { self.engine.session.inbox_unread() } else { 0 };
+        // Back in front: the person may have changed the settings for Merel meanwhile.
+        let focused = ctx.input(|i| i.viewport().focused) == Some(true);
+        let returned = focused && !self.was_focused;
+        self.was_focused = focused;
         if let Some(n) = self.notifier.as_mut() {
+            if returned {
+                n.check_settings();
+            }
             n.set_badge(count);
         }
         for id in merel_notify::take_clicked() {
@@ -187,6 +194,18 @@ pub fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     section(ui, &tr("notifications-on-icon"));
     helder::toggle(ui, t, &mut p.badge, &badge());
     hint(ui, &tr("notifications-badge-hint"));
+    if p.badge && merel_notify::badge_blocked() {
+        ui.horizontal(|ui| {
+            ui.add_space(44.0);
+            ui.add(egui::Label::new(RichText::new(tr("notifications-badge-blocked")).size(13.0).color(t.warning)).wrap());
+        });
+        ui.horizontal(|ui| {
+            ui.add_space(44.0);
+            if ui.button(tr("notifications-open-settings")).clicked() {
+                let _ = open::that("x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=io.github.alainrees.merel");
+            }
+        });
+    }
     section(ui, &tr("notifications-system"));
     helder::toggle(ui, t, &mut p.mail, &mail());
     helder::toggle(ui, t, &mut p.reminders, &reminders());

@@ -1431,6 +1431,8 @@ notifications-details-hint = Uit: de melding zegt alleen "Nieuw bericht" of "Her
 notifications-macos-hint = Zie je niets? Kijk in Systeeminstellingen > Berichtgeving > Merel of meldingen aan staan.
 notifications-test-body = Zo ziet een melding van Merel eruit.
 notifications-test-sent = Proefmelding verstuurd.
+notifications-badge-blocked = macOS laat de teller nu niet zien. Zet in Systeeminstellingen > Berichtgeving > Merel de badges op het appsymbool aan.
+notifications-open-settings = Systeeminstellingen openen
 
 ## Updates
 
