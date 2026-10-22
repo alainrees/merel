@@ -132,7 +132,8 @@ pub fn sign_message(key: &SecretKey, raw: &[u8], now: i64) -> Result<Vec<u8>, Pg
 ///
 /// The encrypted part carries its own copy of the header fields a reader needs to trust
 /// (protected headers, RFC 9788), which Delta Chat reads instead of the outer ones; the fields
-/// only the recipients may see (`Secure-Join…`, `Autocrypt-Gossip`) go inside only.
+/// only the recipients may see (`Secure-Join…`, `Merel-Call…`, `Autocrypt-Gossip`, and every
+/// `Chat-…` field but `Chat-Version`, such as a group's name) go inside only.
 pub fn encrypt_message(key: &SecretKey, raw: &[u8], recipients: &[PublicKey], sign: bool, now: i64) -> Result<Vec<u8>, PgpError> {
     let (outer, inner) = protect(raw);
     let own = key.public();
@@ -189,7 +190,10 @@ fn protect(raw: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let (mut outer, mut head) = (Vec::new(), Vec::new());
     for field in fields(&outer_all) {
         let name = String::from_utf8_lossy(field.split(|b| *b == b':').next().unwrap_or_default()).trim().to_ascii_lowercase();
-        let secret = name.starts_with("secure-join") || name.starts_with("merel-call") || name == "autocrypt-gossip";
+        // Only the Chat-Version mark stays outside, so a chat message is known as one before it
+        // is opened; a group's id and name, like the steps, travel only inside.
+        let chat_detail = name.starts_with("chat-") && name != "chat-version";
+        let secret = chat_detail || name.starts_with("secure-join") || name.starts_with("merel-call") || name == "autocrypt-gossip";
         if !secret {
             outer.extend_from_slice(field);
         }
