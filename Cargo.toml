@@ -33,6 +33,7 @@ merel-sign = { path = "crates/sign" }
 merel-notify = { path = "crates/notify" }
 merel-i18n = { path = "crates/i18n" }
 merel-call = { path = "crates/call" }
+merel-mobile = { path = "crates/mobile" }
 
 # foundation
 thiserror = "2"
@@ -75,8 +76,9 @@ base64 = "0.23"
 getrandom = "0.4"
 # Exchange Web Services responses; a read-only tree without unsafe code.
 roxmltree = "0.21"
-# SMTP over rustls with the platform verifier; aws-lc-rs matches the IMAP side so rustls has one provider.
-lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "aws-lc-rs", "rustls-platform-verifier"] }
+# SMTP over rustls; aws-lc-rs matches the IMAP side so rustls has one provider. Which root
+# certificates it trusts is chosen per platform in crates/smtp.
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "aws-lc-rs"] }
 
 # calendar: date arithmetic and the computer's time zone
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

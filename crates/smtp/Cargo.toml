@@ -10,8 +10,16 @@ license.workspace = true
 merel-i18n = { workspace = true }
 merel-model = { workspace = true }
 merel-secrets = { workspace = true }
-lettre = { workspace = true }
 thiserror = { workspace = true }
+
+# The computer's own certificate check, as for IMAP.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+lettre = { workspace = true, features = ["rustls-platform-verifier"] }
+
+# lettre cannot use the platform verifier on Android yet, so there it trusts Mozilla's root
+# certificates (webpki-roots); certificate checks stay on.
+[target.'cfg(target_os = "android")'.dependencies]
+lettre = { workspace = true, features = ["webpki-roots"] }
 
 [dev-dependencies]
 merel-mime = { workspace = true }

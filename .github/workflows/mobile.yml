@@ -1,0 +1,59 @@
+name: Mobile
+# Builds Merel's core (crates/mobile) for the iPhone and Android, with the Swift and Kotlin
+# bindings the apps call it through. The apps themselves come later; this keeps the core
+# building for phones from the start.
+on:
+  push:
+    branches: [main]
+  pull_request:
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+jobs:
+  ios:
+    runs-on: macos-latest
+    env:
+      # The same minimum iOS for the C parts (aws-lc) as for Rust, or the link fails.
+      IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+      - name: Core for iPhone and the iPhone simulator
+        run: |
+          cargo build -p merel-mobile --lib --release --target aarch64-apple-ios
+          cargo build -p merel-mobile --lib --release --target aarch64-apple-ios-sim
+      - name: Swift bindings
+        run: |
+          cargo build -p merel-mobile --lib
+          cargo run -p merel-mobile --bin uniffi-bindgen -- generate --library target/debug/libmerel_mobile.dylib --language swift --out-dir bindings/swift
+      - uses: actions/upload-artifact@v4
+        with:
+          name: merel-core-ios
+          path: |
+            target/aarch64-apple-ios/release/libmerel_mobile.a
+            target/aarch64-apple-ios-sim/release/libmerel_mobile.a
+            bindings/swift
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-ndk --locked
+      - name: Core for Android phones and the emulator
+        run: cargo ndk -t arm64-v8a -t x86_64 -o jniLibs build -p merel-mobile --lib --release
+      - name: Kotlin bindings
+        run: |
+          cargo build -p merel-mobile --lib
+          cargo run -p merel-mobile --bin uniffi-bindgen -- generate --library target/debug/libmerel_mobile.so --language kotlin --out-dir bindings/kotlin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: merel-core-android
+          path: |
+            jniLibs
+            bindings/kotlin
