@@ -1830,3 +1830,9 @@ meet-intro = Hier staan de onlinevergaderingen uit je agenda, van Microsoft 365,
 meet-paste-title = Deelnemen via een link
 meet-paste-hint = Plak een vergaderlink (https://…)
 meet-paste-bad = Dat is geen vergaderlink. Een vergaderlink begint met https:// en bevat geen spaties.
+
+## Vergaderen in Merel
+call-ring-text = Ik wil met je vergaderen in Merel. Open deze chat in Merel en kies Deelnemen.
+call-no-chat = Deze chat bestaat niet meer.
+call-no-key = Vergaderen kan alleen versleuteld. Merel heeft nog geen sleutel van { $names }: stuur eerst een chatbericht.
+call-gone = Deze vergadering bestaat niet meer.

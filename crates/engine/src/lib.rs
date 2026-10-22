@@ -10,6 +10,7 @@
 
 pub mod cache;
 pub mod calendar;
+pub mod calls;
 pub mod categories;
 pub mod certificates;
 pub mod chat;
@@ -1134,6 +1135,8 @@ pub struct Engine {
     keys: certificates::Keys,
     /// The invitations: own tokens, those under way and the keys they verified.
     invites: securejoin::Invites,
+    /// The meetings in Merel's own room and what waits for the media side.
+    calls: calls::Calls,
     last_refresh: Instant,
     last_item_refresh: Instant,
 }
@@ -1181,6 +1184,7 @@ impl Engine {
             cache: cache::Cache::none(),
             keys: certificates::Keys::default(),
             invites: securejoin::Invites::default(),
+            calls: calls::Calls::default(),
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
         }
@@ -1203,6 +1207,7 @@ impl Engine {
             cache: cache::Cache::none(),
             keys,
             invites: securejoin::Invites::default(),
+            calls: calls::Calls::default(),
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
         };
@@ -1546,6 +1551,7 @@ impl Engine {
             None => self.learn_autocrypt(message_id, header.from.as_ref(), raw),
         }
         self.handle_handshake(message_id, header, body, carried.as_deref());
+        self.handle_call(message_id, header, body);
         self.send_waiting();
     }
 

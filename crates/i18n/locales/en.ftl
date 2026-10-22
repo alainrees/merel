@@ -1845,3 +1845,9 @@ meet-intro = Here are the online meetings in your calendar, from Microsoft 365, 
 meet-paste-title = Join with a link
 meet-paste-hint = Paste a meeting link (https://…)
 meet-paste-bad = That is not a meeting link. A meeting link starts with https:// and has no spaces.
+
+## Meetings in Merel
+call-ring-text = I'd like to meet with you in Merel. Open this chat in Merel and choose Join.
+call-no-chat = This chat no longer exists.
+call-no-key = Meetings only work encrypted. Merel has no key for { $names } yet: send a chat message first.
+call-gone = This meeting no longer exists.

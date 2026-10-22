@@ -189,7 +189,7 @@ fn protect(raw: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let (mut outer, mut head) = (Vec::new(), Vec::new());
     for field in fields(&outer_all) {
         let name = String::from_utf8_lossy(field.split(|b| *b == b':').next().unwrap_or_default()).trim().to_ascii_lowercase();
-        let secret = name.starts_with("secure-join") || name == "autocrypt-gossip";
+        let secret = name.starts_with("secure-join") || name.starts_with("merel-call") || name == "autocrypt-gossip";
         if !secret {
             outer.extend_from_slice(field);
         }
