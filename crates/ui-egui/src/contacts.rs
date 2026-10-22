@@ -5,7 +5,7 @@ use egui::{Align, Align2, Color32, CornerRadius, FontId, Layout, Margin, RichTex
 use serde_json::json;
 
 use merel_engine::CommandError;
-use merel_model::{Contact, PhoneKind, Photo, Place, PlaceKind};
+use merel_model::{Availability, Contact, PhoneKind, Photo, Place, PlaceKind, Presence};
 
 use crate::helder::{self, Icon};
 use crate::{ComposeKind, MailApp, Module, Tokens};
@@ -505,6 +505,118 @@ fn field_grid(ui: &mut Ui, t: &Tokens, fields: &[Field]) -> Option<Act> {
     act
 }
 
+/// When a status ends, for "Bezet tot …": the time today, the weekday and time this week,
+/// else the date.
+fn until_text(ts: i64) -> String {
+    let at = crate::calendar::to_local(ts);
+    let days = (at.date() - crate::calendar::today()).num_days();
+    let time = at.format("%H:%M").to_string();
+    match days {
+        0 => time,
+        1..=6 => {
+            use chrono::Datelike;
+            format!("{} {time}", crate::i18n::weekday_short(at.weekday().num_days_from_monday() as usize))
+        }
+        _ => at.format("%d-%m-%Y %H:%M").to_string(),
+    }
+}
+
+fn presence_color(t: &Tokens, p: Presence) -> Color32 {
+    match p {
+        Presence::Free => t.success,
+        Presence::Tentative => t.warning,
+        Presence::Busy | Presence::Away => t.flag,
+        Presence::WorkingElsewhere => t.accent,
+        Presence::OffHours => t.text_dim,
+    }
+}
+
+/// The line that says whether someone is free, as Outlook words it.
+pub fn presence_text(a: &Availability) -> String {
+    let until = a.until.map(until_text);
+    let with = |key: &str, time: &Option<String>| match time {
+        Some(time) => crate::i18n::tr_args(key, &[("time", time.as_str().into())]),
+        None => String::new(),
+    };
+    let text = match a.now {
+        Presence::Free => with("availability-free-until", &until),
+        Presence::Tentative => with("availability-tentative-until", &until),
+        Presence::Busy => with("availability-busy-until", &until),
+        Presence::Away => with("availability-away-until", &until),
+        Presence::WorkingElsewhere => with("availability-elsewhere-until", &until),
+        Presence::OffHours => with("availability-back-at", &until),
+    };
+    if !text.is_empty() {
+        return text;
+    }
+    match a.now {
+        Presence::Free => tr("availability-free"),
+        Presence::Tentative => tr("availability-tentative"),
+        Presence::Busy => tr("availability-busy"),
+        Presence::Away => tr("availability-away"),
+        Presence::WorkingElsewhere => tr("availability-elsewhere"),
+        Presence::OffHours => tr("availability-off-hours"),
+    }
+}
+
+/// The time where they are, when their clock differs from this one: "13:42 bij Sanne (7 uur
+/// later)"; else the time here.
+fn clock_text(a: &Availability, first_name: &str) -> String {
+    let here = chrono::Local::now();
+    let ours = i64::from(chrono::Offset::fix(here.offset()).local_minus_utc());
+    match a.offset.map(i64::from).filter(|o| *o != ours) {
+        Some(theirs) => {
+            let time = (chrono::Utc::now() + chrono::Duration::seconds(theirs)).format("%H:%M").to_string();
+            let diff = (theirs - ours) as f64 / 3_600.0;
+            let hours = if diff.fract() == 0.0 { format!("{}", diff.abs()) } else { format!("{:.1}", diff.abs()) };
+            let key = if diff > 0.0 { "availability-later" } else { "availability-earlier" };
+            let diff = crate::i18n::tr_args(key, &[("hours", hours.into())]);
+            crate::i18n::tr_args("availability-their-time", &[("time", time.into()), ("name", first_name.into()), ("diff", diff.into())])
+        }
+        None => crate::i18n::tr_args("availability-your-time", &[("time", here.format("%H:%M").to_string().into())]),
+    }
+}
+
+/// The box with whether they are free, their working hours and their time, as at the top of
+/// Outlook's card.
+fn availability_box(ui: &mut Ui, t: &Tokens, a: &Availability, first_name: &str) {
+    egui::Frame::new()
+        .fill(t.card)
+        .stroke(egui::Stroke::new(1.0, t.card_border))
+        .corner_radius(helder::CONTROL_RADIUS)
+        .inner_margin(Margin::symmetric(16, 12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width() - 16.0);
+            ui.horizontal_top(|ui| {
+                let (rect, _) = ui.allocate_exact_size(vec2(24.0, 22.0), Sense::hover());
+                ui.painter().circle_filled(rect.center(), 8.0, presence_color(t, a.now));
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.label(RichText::new(presence_text(a)).size(14.5).strong().color(t.text));
+                    if let Some(w) = &a.working {
+                        ui.label(
+                            RichText::new(crate::i18n::tr_args(
+                                "availability-hours",
+                                &[("start", w.start.as_str().into()), ("end", w.end.as_str().into())],
+                            ))
+                            .size(13.0)
+                            .color(t.text_dim),
+                        );
+                    }
+                });
+            });
+            ui.add_space(8.0);
+            let y = ui.cursor().top();
+            ui.painter().hline(ui.max_rect().x_range(), y, egui::Stroke::new(1.0, t.card_border));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let (rect, _) = ui.allocate_exact_size(vec2(24.0, 22.0), Sense::hover());
+                Icon::Clock.image(18.0, t.text_dim).paint_at(ui, egui::Rect::from_center_size(rect.center(), vec2(18.0, 18.0)));
+                ui.label(RichText::new(clock_text(a, first_name)).size(14.0).color(t.text));
+            });
+        });
+}
+
 /// A square button with only an icon on a grey face, as under the name on Outlook's card.
 fn quick_button(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str, enabled: bool) -> egui::Response {
     let color = if enabled { t.text } else { t.text_disabled };
@@ -542,9 +654,20 @@ fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let email = c.emails.first().cloned();
     let mobile = c.phone(PhoneKind::Mobile).or_else(|| c.phones.first().map(|p| p.number.as_str())).map(str::to_string);
     let mut act = None;
+    // Microsoft 365 is asked now and then whether they are free.
+    if let Some(e) = &email {
+        app.engine.session.request_availability(e, c.account_id.as_deref());
+    }
+    let availability = email.as_deref().and_then(|e| app.engine.session.availability_of(e)).cloned();
     ui.horizontal_top(|ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(96.0, 96.0), Sense::hover());
         helder::portrait(ui, rect.center(), 46.0, &c.name, email.as_deref().unwrap_or(""), c.photo.as_ref());
+        if let Some(a) = &availability {
+            // The status as a dot on the picture, as Outlook has it.
+            let dot = rect.center() + vec2(33.0, 33.0);
+            ui.painter().circle_filled(dot, 11.0, t.card);
+            ui.painter().circle_filled(dot, 8.0, presence_color(t, a.now));
+        }
         ui.add_space(12.0);
         ui.vertical(|ui| {
             ui.label(RichText::new(&c.name).size(22.0).strong().color(t.text));
@@ -581,6 +704,10 @@ fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
         match app.contacts.tab {
             CardTab::Contact => {
+                if let Some(a) = &availability {
+                    availability_box(ui, t, a, split_name(&c.name).0.as_str());
+                    ui.add_space(16.0);
+                }
                 ui.label(RichText::new(tr("contacts-details")).size(16.0).strong().color(t.text));
                 ui.add_space(10.0);
                 let fields = contact_fields(app, &c);

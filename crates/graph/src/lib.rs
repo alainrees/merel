@@ -16,12 +16,12 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDateTime, Offset, TimeZone, Timelike, Utc};
 use merel_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result, kind_from_name};
 use merel_mime::ParsedHeader;
 use merel_model::{
-    Address, Appointment, Attendee, ChatTag, Contact, FolderKind, Frequency, Importance, MAX_PHOTO, Meeting, Phone, PhoneKind, Photo, Place,
-    PlaceKind, Priority, Recurrence, Response, Server, ShowAs, Task, clean_text,
+    Address, Appointment, Attendee, Availability, ChatTag, Contact, FolderKind, Frequency, Importance, MAX_PHOTO, Meeting, Phone, PhoneKind, Photo,
+    Place, PlaceKind, Presence, Priority, Recurrence, Response, Server, ShowAs, Task, WorkingHours, clean_text,
 };
 use merel_secrets::Secret;
 use serde_json::{Value, json};
@@ -438,6 +438,86 @@ fn batch_photos(reply: &Value) -> Vec<(String, Option<Photo>)> {
             (str_of(r, "id").to_string(), photo)
         })
         .collect()
+}
+
+/// `08:00:00.0000000` as `08:00` and minutes since midnight.
+fn clock(s: &str) -> Option<(String, u32)> {
+    let mut parts = s.trim().split(':');
+    let h: u32 = parts.next()?.parse().ok()?;
+    let m: u32 = parts.next()?.get(..2)?.parse().ok()?;
+    (h < 24 && m < 60).then(|| (format!("{h:02}:{m:02}"), h * 60 + m))
+}
+
+/// A zone as Graph names it, IANA or Windows.
+fn zone_of(name: &str) -> Option<chrono_tz::Tz> {
+    let name = name.trim();
+    name.parse::<chrono_tz::Tz>().ok().or_else(|| merel_model::iana_of_windows(name).and_then(|iana| iana.parse().ok()))
+}
+
+/// One person's answer to `getSchedule` as their [`Availability`] at `now`.
+fn availability_of(info: &Value, now: i64) -> Option<Availability> {
+    if info.get("error").is_some() {
+        return None;
+    }
+    let mut items: Vec<(i64, i64, Presence)> = info
+        .get("scheduleItems")
+        .and_then(Value::as_array)
+        .map(|l| {
+            l.iter()
+                .filter_map(|i| {
+                    let presence = match str_of(i, "status") {
+                        "busy" => Presence::Busy,
+                        "tentative" => Presence::Tentative,
+                        "oof" => Presence::Away,
+                        "workingElsewhere" => Presence::WorkingElsewhere,
+                        _ => return None,
+                    };
+                    Some((i.get("start").and_then(moment)?, i.get("end").and_then(moment)?, presence))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    items.sort_by_key(|i| i.0);
+    let hours = info.get("workingHours");
+    let zone = hours.and_then(|h| h.get("timeZone")).map(|z| str_of(z, "name")).and_then(zone_of);
+    let working = hours.and_then(|h| {
+        const DAYS: [&str; 7] = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+        let days: Vec<u8> = h
+            .get("daysOfWeek")
+            .and_then(Value::as_array)?
+            .iter()
+            .filter_map(Value::as_str)
+            .filter_map(|d| DAYS.iter().position(|x| x.eq_ignore_ascii_case(d)).map(|p| p as u8))
+            .collect();
+        let (start, end) = (clock(str_of(h, "startTime"))?, clock(str_of(h, "endTime"))?);
+        Some((WorkingHours { days, start: start.0, end: end.0, zone: zone.map(|z| z.name().to_string()) }, start.1, end.1))
+    });
+    let at = DateTime::<Utc>::from_timestamp(now, 0)?;
+    let offset = zone.map(|z| z.offset_from_utc_datetime(&at.naive_utc()).fix().local_minus_utc());
+    let result = |now_is: Presence, until: Option<i64>| Availability { now: now_is, until, working: working.as_ref().map(|w| w.0.clone()), offset };
+    if let Some(&(_, end, presence)) = items.iter().find(|(s, e, _)| *s <= now && now < *e) {
+        // Back to back meetings are one stretch.
+        let mut until = end;
+        while let Some(&(_, e, _)) = items.iter().find(|(s, e, _)| *s <= until && *e > until) {
+            until = e;
+        }
+        return Some(result(presence, Some(until)));
+    }
+    if let (Some((w, start, end)), Some(zone)) = (&working, zone) {
+        let local = at.with_timezone(&zone);
+        let minute = local.hour() * 60 + local.minute();
+        let today = local.weekday().num_days_from_monday() as u8;
+        if !(w.days.contains(&today) && (*start..*end).contains(&minute)) {
+            let next = (0..8).find_map(|d| {
+                let day = local.date_naive().checked_add_days(chrono::Days::new(d))?;
+                let weekday = day.weekday().num_days_from_monday() as u8;
+                let begin = zone.from_local_datetime(&day.and_hms_opt(start / 60, start % 60, 0)?).earliest()?.timestamp();
+                (w.days.contains(&weekday) && begin > now).then_some(begin)
+            });
+            return Some(result(Presence::OffHours, next));
+        }
+    }
+    Some(result(Presence::Free, items.iter().find(|(s, _, _)| *s > now).map(|i| i.0)))
 }
 
 fn task_of(t: &Value) -> Option<Task> {
@@ -1069,6 +1149,17 @@ impl ItemStore for GraphClient {
         let path = self.path_of(id)?;
         self.call("DELETE", &path, None).map(drop)
     }
+
+    fn availability(&mut self, email: &str, now: i64) -> Result<Option<Availability>> {
+        let body = json!({
+            "schedules": [email],
+            "startTime": { "dateTime": utc(now - 12 * 3_600), "timeZone": "UTC" },
+            "endTime": { "dateTime": utc(now + 2 * 86_400), "timeZone": "UTC" },
+            "availabilityViewInterval": 30,
+        });
+        let reply = self.call("POST", "/me/calendar/getSchedule", Some(&body))?;
+        Ok(reply.get("value").and_then(Value::as_array).and_then(|l| l.first()).and_then(|info| availability_of(info, now)))
+    }
 }
 
 /// HTTPS checked by the computer's own certificate store (Keychain on macOS), with aws-lc-rs
@@ -1325,6 +1416,36 @@ mod tests {
         let photos = batch_photos(&reply);
         assert_eq!(photos.iter().find(|(id, _)| id == "0").and_then(|(_, p)| p.clone()), Photo::new(png));
         assert!(photos.iter().filter(|(id, _)| id != "0").all(|(_, p)| p.is_none()), "no photo, and nothing that is not an image");
+    }
+
+    #[test]
+    fn a_schedule_says_whether_someone_is_free_now_and_when_they_work() {
+        // Thursday 22 October 2026, 10:00 UTC: 12:00 in Amsterdam.
+        let now = 1_792_663_200;
+        let at = |h: u32, m: u32| format!("2026-10-22T{h:02}:{m:02}:00.0000000");
+        let hours = json!({ "daysOfWeek": ["monday", "tuesday", "wednesday", "thursday", "friday"], "startTime": "08:00:00.0000000",
+            "endTime": "17:00:00.0000000", "timeZone": { "name": "W. Europe Standard Time" } });
+        let item = |s: String, e: String, status: &str| json!({ "status": status, "start": { "dateTime": s, "timeZone": "UTC" }, "end": { "dateTime": e, "timeZone": "UTC" } });
+        let busy = json!({ "scheduleItems": [item(at(9, 30), at(10, 30), "busy"), item(at(10, 30), at(11, 0), "tentative"), item(at(13, 0), at(14, 0), "busy")], "workingHours": hours });
+        let a = availability_of(&busy, now).unwrap();
+        assert_eq!((a.now, a.until), (Presence::Busy, Some(now + 3_600)), "two meetings back to back are one stretch");
+        let w = a.working.unwrap();
+        assert_eq!((w.start.as_str(), w.end.as_str(), w.days.len(), w.zone.as_deref()), ("08:00", "17:00", 5, Some("Europe/Amsterdam")));
+        assert_eq!(a.offset, Some(7_200));
+
+        let free = json!({ "scheduleItems": [item(at(13, 0), at(14, 0), "busy"), item(at(8, 0), at(9, 0), "free")], "workingHours": hours });
+        let a = availability_of(&free, now).unwrap();
+        assert_eq!((a.now, a.until), (Presence::Free, Some(now + 3 * 3_600)));
+
+        // 04:42 UTC is 06:42 in Amsterdam: before the working day, which starts at 08:00 there.
+        let early = now - 5 * 3_600 - 18 * 60;
+        let a = availability_of(&json!({ "scheduleItems": [], "workingHours": hours }), early).unwrap();
+        assert_eq!((a.now, a.until), (Presence::OffHours, Some(now - 4 * 3_600)));
+        // Friday evening: back on Monday at 08:00, which is 07:00 UTC once summer time is over.
+        let friday_evening = now + 86_400 + 8 * 3_600;
+        let a = availability_of(&json!({ "workingHours": hours }), friday_evening).unwrap();
+        assert_eq!(a.until, Some(now + 4 * 86_400 - 3 * 3_600));
+        assert!(availability_of(&json!({ "error": { "message": "no access" } }), now).is_none());
     }
 
     #[test]

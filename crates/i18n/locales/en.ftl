@@ -1063,6 +1063,23 @@ contacts-more = More
 contacts-birthday-field = Birthday (dd-mm-yyyy)
 contacts-birthday-pick = Pick a birthday
 contacts-bad-birthday = The birthday is not a valid date; write it as day-month-year.
+availability-free = Available
+availability-free-until = Available until { $time }
+availability-tentative = Tentative
+availability-tentative-until = Tentative until { $time }
+availability-busy = Busy
+availability-busy-until = Busy until { $time }
+availability-away = Away
+availability-away-until = Away until { $time }
+availability-elsewhere = Working elsewhere
+availability-elsewhere-until = Working elsewhere until { $time }
+availability-off-hours = Outside working hours
+availability-back-at = Outside working hours · available at { $time }
+availability-hours = Working hours: { $start } - { $end }
+availability-your-time = { $time } - your local time
+availability-their-time = { $time } for { $name } ({ $diff })
+availability-later = { $hours } h ahead of you
+availability-earlier = { $hours } h behind you
 
 ## Meetings
 

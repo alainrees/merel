@@ -1057,6 +1057,23 @@ contacts-more = Overig
 contacts-birthday-field = Verjaardag (dd-mm-jjjj)
 contacts-birthday-pick = Verjaardag kiezen
 contacts-bad-birthday = De verjaardag is geen geldige datum; schrijf hem als dag-maand-jaar.
+availability-free = Beschikbaar
+availability-free-until = Beschikbaar tot { $time }
+availability-tentative = Onder voorbehoud
+availability-tentative-until = Onder voorbehoud tot { $time }
+availability-busy = Bezet
+availability-busy-until = Bezet tot { $time }
+availability-away = Afwezig
+availability-away-until = Afwezig tot { $time }
+availability-elsewhere = Werkt elders
+availability-elsewhere-until = Werkt elders tot { $time }
+availability-off-hours = Buiten werktijd
+availability-back-at = Buiten werktijd · beschikbaar om { $time }
+availability-hours = Werkuren: { $start } - { $end }
+availability-your-time = { $time } - jouw lokale tijd
+availability-their-time = { $time } bij { $name } ({ $diff })
+availability-later = { $hours } uur later dan hier
+availability-earlier = { $hours } uur eerder dan hier
 
 ## Meetings
 

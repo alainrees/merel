@@ -3348,6 +3348,29 @@ mod tests {
     }
 
     #[test]
+    fn a_contact_card_says_whether_they_are_free_and_when_they_work() {
+        use merel_model::{Availability, Presence, WorkingHours};
+        let mut h = harness();
+        h.state_mut().module = Module::People;
+        h.run();
+        h.get_by_label("Sanne de Vries").click();
+        h.run();
+        assert!(h.query_by_label_contains("Werkuren").is_none(), "nothing while Microsoft 365 has not answered");
+        let evening = calendar::to_timestamp(calendar::today().and_hms_opt(23, 59, 0).unwrap()).unwrap();
+        let working = WorkingHours { days: vec![0, 1, 2, 3, 4], start: "08:00".into(), end: "17:00".into(), zone: Some("Europe/Amsterdam".into()) };
+        let a = Availability { now: Presence::Busy, until: Some(evening), working: Some(working), offset: None };
+        h.state_mut().engine.session.availability.insert("sanne@example.org".into(), (i64::MAX / 2, Some(a.clone())));
+        h.run();
+        h.get_by_label("Bezet tot 23:59");
+        h.get_by_label("Werkuren: 08:00 - 17:00");
+        assert_eq!(h.query_all_by_label_contains("jouw lokale tijd").count(), 1);
+        let free = Availability { now: Presence::Free, until: None, ..a.clone() };
+        assert_eq!(contacts::presence_text(&free), "Beschikbaar");
+        let off = Availability { now: Presence::OffHours, until: Some(evening), ..a };
+        assert_eq!(contacts::presence_text(&off), "Buiten werktijd · beschikbaar om 23:59");
+    }
+
+    #[test]
     fn a_contact_card_shows_its_details_on_two_tabs_and_the_form_changes_them() {
         use merel_model::PhoneKind;
         let mut h = harness();

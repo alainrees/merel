@@ -219,39 +219,7 @@ pub fn parse(text: &str) -> Vec<Component> {
     roots
 }
 
-/// Windows time zone names, as Outlook and Exchange write them in `TZID`, with an IANA zone that
-/// keeps the same clock.
-const WINDOWS_ZONES: &[(&str, &str)] = &[
-    ("W. Europe Standard Time", "Europe/Amsterdam"),
-    ("Romance Standard Time", "Europe/Paris"),
-    ("Central Europe Standard Time", "Europe/Budapest"),
-    ("Central European Standard Time", "Europe/Warsaw"),
-    ("GMT Standard Time", "Europe/London"),
-    ("Greenwich Standard Time", "Atlantic/Reykjavik"),
-    ("GTB Standard Time", "Europe/Athens"),
-    ("FLE Standard Time", "Europe/Helsinki"),
-    ("E. Europe Standard Time", "Europe/Chisinau"),
-    ("Turkey Standard Time", "Europe/Istanbul"),
-    ("Russian Standard Time", "Europe/Moscow"),
-    ("South Africa Standard Time", "Africa/Johannesburg"),
-    ("Egypt Standard Time", "Africa/Cairo"),
-    ("Israel Standard Time", "Asia/Jerusalem"),
-    ("Arabian Standard Time", "Asia/Dubai"),
-    ("India Standard Time", "Asia/Kolkata"),
-    ("China Standard Time", "Asia/Shanghai"),
-    ("Singapore Standard Time", "Asia/Singapore"),
-    ("Tokyo Standard Time", "Asia/Tokyo"),
-    ("AUS Eastern Standard Time", "Australia/Sydney"),
-    ("New Zealand Standard Time", "Pacific/Auckland"),
-    ("Eastern Standard Time", "America/New_York"),
-    ("Central Standard Time", "America/Chicago"),
-    ("Mountain Standard Time", "America/Denver"),
-    ("Pacific Standard Time", "America/Los_Angeles"),
-    ("Atlantic Standard Time", "America/Halifax"),
-    ("E. South America Standard Time", "America/Sao_Paulo"),
-    ("UTC", "UTC"),
-    ("Coordinated Universal Time", "UTC"),
-];
+use merel_model::WINDOWS_ZONES;
 
 /// The IANA zone a `TZID` stands for: its own name, or the zone of a Windows name.
 fn known_zone(tzid: &str) -> Option<Tz> {

@@ -86,6 +86,35 @@ impl Session {
         format!("{account_id}/{PENDING}{}-{}", now(), self.next_pending_id)
     }
 
+    /// How long an answer about someone's calendar is shown before it is asked again.
+    pub const AVAILABILITY_FOR: i64 = 300;
+
+    /// Asks Microsoft 365 whether `email` is free, through `account_id` when that is a
+    /// Microsoft 365 account with a calendar, else through the first one there is. Nothing
+    /// happens while an answer is fresh or on its way, or when there is no such account.
+    pub fn request_availability(&mut self, email: &str, account_id: Option<&str>) {
+        let key = email.trim().to_lowercase();
+        let now = now();
+        if key.is_empty() || self.availability.get(&key).is_some_and(|(at, _)| now - at < Self::AVAILABILITY_FOR) {
+            return;
+        }
+        let graph = |a: &&merel_model::Account| a.protocol == merel_model::Protocol::Microsoft365 && self.item_accounts.contains(&a.id);
+        let Some(account) =
+            self.accounts.iter().filter(graph).find(|a| Some(a.id.as_str()) == account_id).or_else(|| self.accounts.iter().find(graph))
+        else {
+            return;
+        };
+        let account_id = account.id.clone();
+        let known = self.availability.remove(&key).and_then(|(_, a)| a);
+        self.availability.insert(key.clone(), (now, known));
+        self.pending.push(Job::Availability { account_id, email: key });
+    }
+
+    /// What is known about whether `email` is free now.
+    pub fn availability_of(&self, email: &str) -> Option<&merel_model::Availability> {
+        self.availability.get(&email.trim().to_lowercase()).and_then(|(_, a)| a.as_ref())
+    }
+
     /// Asks the store of `account_id` for its items; nothing happens while a request is out.
     pub fn request_sync(&mut self, account_id: &str) {
         let key = format!("sync/{account_id}");
@@ -329,6 +358,28 @@ mod tests {
         let cal = s.calendar("acc/calendar").unwrap();
         assert_eq!((cal.name.as_str(), cal.color), (ACCOUNT_CALENDAR, [1, 2, 3]), "renamed, colour kept");
         assert_eq!(s.calendar_label(&Calendar::local()), "Mijn agenda", "a local calendar keeps its own name");
+    }
+
+    #[test]
+    fn availability_is_asked_of_microsoft_365_once_in_a_while() {
+        let mut s = Session::default();
+        s.accounts.push(account("acc", "Werk"));
+        s.item_accounts.insert("acc".into());
+        s.request_availability("Sanne@Example.org", None);
+        assert!(s.pending.is_empty(), "Exchange is not asked");
+        s.accounts.push(Account { protocol: Protocol::Microsoft365, ..account("m365", "M365") });
+        s.item_accounts.insert("m365".into());
+        s.request_availability("Sanne@Example.org", Some("acc"));
+        assert!(matches!(s.pending.as_slice(), [Job::Availability { account_id, email }] if account_id == "m365" && email == "sanne@example.org"));
+        s.request_availability("sanne@example.org", None);
+        assert_eq!(s.pending.len(), 1, "not again while the answer is on its way");
+        let a = merel_model::Availability { now: merel_model::Presence::Busy, until: Some(1), working: None, offset: None };
+        s.apply(Event::Availability { email: "sanne@example.org".into(), availability: Some(a.clone()) });
+        assert_eq!(s.availability_of("SANNE@example.org"), Some(&a));
+        s.availability.get_mut("sanne@example.org").unwrap().0 -= Session::AVAILABILITY_FOR;
+        s.request_availability("sanne@example.org", None);
+        assert_eq!(s.pending.len(), 2, "asked again after five minutes");
+        assert_eq!(s.availability_of("sanne@example.org"), Some(&a), "the old answer shows meanwhile");
     }
 
     #[test]

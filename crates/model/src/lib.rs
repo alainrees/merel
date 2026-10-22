@@ -5,6 +5,7 @@
 //! above can trust what they hold.
 
 mod address;
+mod availability;
 mod calendar;
 mod categories;
 mod chat;
@@ -20,6 +21,7 @@ mod task;
 mod templates;
 
 pub use address::{Address, AddressError, parse_address_list};
+pub use availability::{Availability, Presence, WINDOWS_ZONES, WorkingHours, iana_of_windows};
 pub use calendar::{
     Appointment, AppointmentError, Attendee, CALENDAR_COLORS, Calendar, Frequency, MAX_ATTENDEES, MAX_CALENDAR_NAME, MAX_INTERVAL, MAX_NOTES,
     MAX_OCCURRENCES, MAX_REMINDER, Meeting, Recurrence, Response, ShowAs, describe_recurrence,
