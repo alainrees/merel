@@ -1427,6 +1427,8 @@ notifications-details-hint = Off: the notification only says "New message" or "R
 notifications-macos-hint = See nothing? Check in System Settings > Notifications > Merel whether notifications are on.
 notifications-test-body = This is what a notification from Merel looks like.
 notifications-test-sent = Test notification sent.
+notifications-badge-blocked = macOS is not showing the count now. In System Settings > Notifications > Merel, switch on badges on the app icon.
+notifications-open-settings = Open System Settings
 
 ## Updates
 
