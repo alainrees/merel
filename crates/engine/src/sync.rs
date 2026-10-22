@@ -131,6 +131,13 @@ impl Session {
         self.calendar(calendar_id).and_then(|c| c.account_id.clone())
     }
 
+    /// Whether the server behind `calendar_id` makes an online meeting with its join link when
+    /// asked: a Microsoft 365 or Google account's calendar.
+    pub fn makes_online(&self, calendar_id: &str) -> bool {
+        let Some(account) = self.appointment_account(calendar_id) else { return false };
+        self.accounts.iter().any(|a| a.id == account && matches!(a.protocol, merel_model::Protocol::Microsoft365 | merel_model::Protocol::Gmail))
+    }
+
     fn ensure_calendar(&mut self, account_id: &str) -> String {
         let id = Self::account_calendar_id(account_id);
         match self.calendars.iter_mut().find(|c| c.id == id) {
@@ -231,8 +238,11 @@ impl Session {
     /// The store of `account_id` named the item the session knew as `local_id`.
     pub(crate) fn apply_saved(&mut self, account_id: &str, local_id: &str, remote_id: &str) {
         let id = Self::local_item_id(account_id, remote_id);
+        let mut fetch = false;
         if let Some(a) = self.appointments.iter_mut().find(|a| a.id == local_id) {
             a.id = id.clone();
+            // The server made an online meeting; its link comes with the next listing.
+            fetch = a.make_online;
         }
         if let Some(c) = self.contacts.iter_mut().find(|c| c.id == local_id) {
             c.id = id.clone();
@@ -244,6 +254,9 @@ impl Session {
             if selected.as_deref() == Some(local_id) {
                 *selected = Some(id.clone());
             }
+        }
+        if fetch {
+            self.request_sync(account_id);
         }
     }
 }
@@ -303,6 +316,7 @@ mod tests {
             categories: Vec::new(),
             meeting: None,
             online: None,
+            make_online: false,
         }
     }
 
@@ -432,6 +446,31 @@ mod tests {
         s.apply(Event::Synced { account_id: "acc".into(), appointments: vec![tracked], contacts: Vec::new(), tasks: Vec::new() });
         let kept = s.appointment("acc/A1").and_then(|x| x.meeting.clone()).expect("a meeting");
         assert_eq!(kept.attendees[0].replied, Some(5));
+    }
+
+    #[test]
+    fn microsoft_365_and_google_make_an_online_meeting_and_the_link_is_fetched() {
+        let mut m365 = account("acc", "Werk");
+        m365.protocol = Protocol::Microsoft365;
+        let mut s = Session::with_accounts(vec![m365]);
+        connected(&mut s);
+        s.apply(Event::Synced { account_id: "acc".into(), appointments: Vec::new(), contacts: Vec::new(), tasks: Vec::new() });
+        s.take_jobs();
+        assert!(s.makes_online("acc/calendar") && !s.makes_online("local"));
+        s.run("appointment.save", &json!({ "calendar_id": "acc/calendar", "title": "Overleg", "start": 1000, "end": 4600, "make_online": true }))
+            .unwrap();
+        let pending = s.selected_appointment().unwrap().id.clone();
+        assert!(matches!(&s.take_jobs()[..], [Job::SaveItem { item, .. }] if matches!(&**item, Item::Appointment(a) if a.make_online)));
+        s.apply(Event::ItemSaved { account_id: "acc".into(), local_id: pending, remote_id: "A1".into() });
+        assert!(matches!(&s.take_jobs()[..], [Job::Sync { account_id, .. }] if account_id == "acc"), "the link comes with a fresh listing");
+
+        let mut exchange = Session::with_accounts(vec![account("acc", "Werk")]);
+        connected(&mut exchange);
+        exchange.apply(Event::Synced { account_id: "acc".into(), appointments: Vec::new(), contacts: Vec::new(), tasks: Vec::new() });
+        exchange
+            .run("appointment.save", &json!({ "calendar_id": "acc/calendar", "title": "Overleg", "start": 1000, "end": 4600, "make_online": true }))
+            .unwrap();
+        assert!(!exchange.selected_appointment().unwrap().make_online, "Exchange makes none: the request is dropped");
     }
 
     #[test]

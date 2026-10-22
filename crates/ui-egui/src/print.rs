@@ -391,6 +391,7 @@ mod tests {
             categories: Vec::new(),
             meeting: None,
             online: None,
+            make_online: false,
         };
         let mon = d(2026, 10, 19);
         let tue = d(2026, 10, 20);

@@ -106,6 +106,10 @@ pub struct Appointment {
     /// [`Appointment::meeting_link`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub online: Option<String>,
+    /// Asks the account's server to make it an online meeting when it is saved (Microsoft 365,
+    /// Google Meet); the link then comes back as `online`. Only for an appointment without one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub make_online: bool,
 }
 
 /// The most people one meeting invites.
@@ -471,6 +475,7 @@ impl Appointment {
         self.categories = crate::clean_categories(std::mem::take(&mut self.categories));
         self.meeting = self.meeting.take().map(Meeting::validated);
         self.online = self.online.take().and_then(|u| crate::online::meeting_link(&u)).map(|l| l.url);
+        self.make_online &= self.online.is_none();
         if let Some(r) = self.recurrence.take() {
             let r = r.normalized();
             if self.end - self.start > r.shortest_gap() {
@@ -581,6 +586,7 @@ mod tests {
             categories: Vec::new(),
             meeting: None,
             online: None,
+            make_online: false,
         }
     }
 

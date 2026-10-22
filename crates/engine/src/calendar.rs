@@ -138,7 +138,9 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 /// is a [`merel_model::Meeting`] (organiser, attendees and their answers) or null for an
 /// appointment of your own; left out, an existing appointment keeps its meeting. `online` is
 /// the link to join it online (an `https` address) or null for none; left out, an existing
-/// appointment keeps its link.
+/// appointment keeps its link. `make_online` true asks the server of a Microsoft 365 or Google
+/// calendar to make it an online meeting (see [`Session::makes_online`]); elsewhere it is
+/// ignored.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
         Some(id) => Some(s.appointment(id).ok_or(CommandError::NotFound)?.clone()),
@@ -189,6 +191,8 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         Some(Value::Null) => None,
         Some(v) => Some(v.as_str().and_then(merel_model::meeting_link).ok_or(CommandError::Param("online"))?.url),
     };
+    // Only the server of a Microsoft 365 or Google calendar makes an online meeting.
+    let make_online = params.get("make_online").and_then(Value::as_bool).unwrap_or(false) && s.makes_online(&calendar_id);
     let id = match (&existing, &account) {
         (Some(a), _) => a.id.clone(),
         (None, Some(account)) => s.pending_id(account),
@@ -212,6 +216,7 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         categories,
         meeting,
         online,
+        make_online,
     }
     .validated()
     .map_err(|e| match e {

@@ -207,6 +207,7 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
         categories: categories_of(e),
         meeting: None,
         online: online_of(e),
+        make_online: false,
     }
     .validated()
     .ok()
@@ -280,6 +281,11 @@ fn event_json(a: &Appointment, zone: &str) -> Value {
     });
     if let Some(r) = &a.recurrence {
         event["recurrence"] = json!([format!("RRULE:{}", r.rrule(a.all_day))]);
+    }
+    if a.make_online {
+        // Google makes a Meet room; the request id only has to be new per request.
+        let request = format!("merel-{}-{}", a.start, Utc::now().timestamp_millis());
+        event["conferenceData"] = json!({ "createRequest": { "requestId": request, "conferenceSolutionKey": { "type": "hangoutsMeet" } } });
     }
     event
 }
@@ -516,10 +522,12 @@ impl ItemStore for GoogleItems {
         match item {
             Item::Appointment(a) => {
                 let body = event_json(a, &local_zone());
+                // The Calendar API only reads `conferenceData` when asked to.
+                let conference = if a.make_online { "?conferenceDataVersion=1" } else { "" };
                 if id.is_empty() {
-                    Self::created_id(&self.call("POST", EVENTS, Some(&without_nulls(body)))?, "id", "event:")
+                    Self::created_id(&self.call("POST", &format!("{EVENTS}{conference}"), Some(&without_nulls(body)))?, "id", "event:")
                 } else {
-                    self.call("PATCH", &url_of(id)?, Some(&body))?;
+                    self.call("PATCH", &format!("{}{conference}", url_of(id)?), Some(&body))?;
                     Ok(id.to_string())
                 }
             }
@@ -596,6 +604,11 @@ mod tests {
         let zoom = json!({ "id": "e2", "summary": "Klant", "start": times["start"], "end": times["end"],
             "conferenceData": { "entryPoints": [{ "entryPointType": "phone", "uri": "tel:+31-20" }, { "entryPointType": "video", "uri": "https://zoom.us/j/123" }] } });
         assert_eq!(appointment_of(&zoom).unwrap().online.as_deref(), Some("https://zoom.us/j/123"));
+        let mut plain = appointment_of(&json!({ "id": "e3", "summary": "Nieuw", "start": times["start"], "end": times["end"] })).unwrap();
+        assert!(event_json(&plain, "Europe/Amsterdam").get("conferenceData").is_none());
+        plain.make_online = true;
+        let asked = event_json(&plain, "Europe/Amsterdam");
+        assert_eq!(asked["conferenceData"]["createRequest"]["conferenceSolutionKey"]["type"], "hangoutsMeet", "Google makes a Meet room");
     }
 
     #[test]

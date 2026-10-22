@@ -309,6 +309,7 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
             .filter(|u| !u.is_empty())
             .or_else(|| e.get("onlineMeetingUrl").and_then(Value::as_str))
             .map(str::to_string),
+        make_online: false,
     }
     .validated()
     .ok()
@@ -430,6 +431,11 @@ impl GraphClient {
         }
         if let Some(r) = &a.recurrence {
             event["recurrence"] = recurrence_json(r, a.start, zone);
+        }
+        if a.make_online {
+            // Microsoft 365 makes the meeting and lists its join link with the event.
+            event["isOnlineMeeting"] = json!(true);
+            event["onlineMeetingProvider"] = json!("teamsForBusiness");
         }
         event
     }
@@ -1000,6 +1006,17 @@ mod tests {
         assert_eq!(h.header.message_id.as_deref(), Some("<abc@example.org>"));
         assert_eq!(h.header.importance, Importance::Low);
         assert!(header_of(&json!({ "subject": "no id" })).is_none());
+    }
+
+    #[test]
+    fn an_online_meeting_is_asked_for_only_when_wanted() {
+        let mut a = appointment_of(&json!({ "id": "E1", "subject": "Overleg", "start": { "dateTime": "2026-10-14T09:00:00", "timeZone": "UTC" },
+            "end": { "dateTime": "2026-10-14T10:00:00", "timeZone": "UTC" } }))
+        .unwrap();
+        assert!(GraphClient::event_json(&a, "Europe/Amsterdam").get("isOnlineMeeting").is_none());
+        a.make_online = true;
+        let e = GraphClient::event_json(&a, "Europe/Amsterdam");
+        assert_eq!((e["isOnlineMeeting"].as_bool(), e["onlineMeetingProvider"].as_str()), (Some(true), Some("teamsForBusiness")));
     }
 
     #[test]

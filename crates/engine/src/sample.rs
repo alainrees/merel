@@ -202,6 +202,7 @@ fn appointments() -> Vec<Appointment> {
                 categories: if i == 0 { vec!["Blauwe categorie".into()] } else { Vec::new() },
                 meeting: None,
                 online: None,
+                make_online: false,
             })
         })
         .collect();
@@ -226,6 +227,7 @@ fn appointments() -> Vec<Appointment> {
             categories: Vec::new(),
             meeting: None,
             online: None,
+            make_online: false,
         });
     }
     list
