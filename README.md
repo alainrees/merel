@@ -485,7 +485,7 @@ The packaging files live in `packaging/`: the app icon, `macos/bundle.sh` with `
 
 ## iPhone and Android
 
-The phone apps are on their way: native screens (SwiftUI on the iPhone, Jetpack Compose on Android) on top of the same engine as the desktop. `crates/mobile` puts that engine behind a UniFFI interface; the `Mobile` workflow builds it for both phones and writes the Swift and Kotlin bindings.
+The phone apps are on their way: native screens (SwiftUI on the iPhone, Jetpack Compose on Android) on top of the same engine as the desktop. `crates/mobile` puts that engine behind a UniFFI interface; the `Mobile` workflow builds it for both phones and writes the Swift and Kotlin bindings. The iPhone app is in `apps/ios` (SwiftUI): sample mail, adding an IMAP/SMTP account, folders, the message list with swipe actions, and reading; see its README for running it on your own iPhone.
 
 ## License
 

@@ -1,7 +1,6 @@
 name: Mobile
-# Builds Merel's core (crates/mobile) for the iPhone and Android, with the Swift and Kotlin
-# bindings the apps call it through. The apps themselves come later; this keeps the core
-# building for phones from the start.
+# Builds Merel's core (crates/mobile) for the iPhone and Android with the Swift and Kotlin
+# bindings the apps call it through, and the iPhone app (apps/ios) for the simulator.
 on:
   push:
     branches: [main]
@@ -19,23 +18,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
       - uses: Swatinem/rust-cache@v2
-      - name: Core for iPhone and the iPhone simulator
+      - name: Core for iPhone and the simulator, with the Swift bindings
+        run: apps/ios/scripts/build-core.sh
+      - run: brew install xcodegen
+      - name: iPhone app for the simulator
+        working-directory: apps/ios
         run: |
-          cargo build -p merel-mobile --lib --release --target aarch64-apple-ios
-          cargo build -p merel-mobile --lib --release --target aarch64-apple-ios-sim
-      - name: Swift bindings
-        run: |
-          cargo build -p merel-mobile --lib
-          cargo run -p merel-mobile --bin uniffi-bindgen -- generate --library target/debug/libmerel_mobile.dylib --language swift --out-dir bindings/swift
+          xcodegen
+          xcodebuild -project Merel.xcodeproj -scheme Merel -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
       - uses: actions/upload-artifact@v4
         with:
           name: merel-core-ios
-          path: |
-            target/aarch64-apple-ios/release/libmerel_mobile.a
-            target/aarch64-apple-ios-sim/release/libmerel_mobile.a
-            bindings/swift
+          path: apps/ios/Generated
   android:
     runs-on: ubuntu-latest
     steps:

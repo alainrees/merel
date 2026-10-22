@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use merel_engine::{AccountStatus, Engine};
-use merel_model::FolderKind;
+use merel_model::{Account, Address, Auth, FolderKind, Protocol, Server, Tls};
 use merel_secrets::{Secret, SecretError, SecretStore};
 
 uniffi::setup_scaffolding!();
@@ -64,6 +64,10 @@ pub enum CoreError {
     /// The parameters were not JSON.
     #[error("parameters are not valid JSON: {reason}")]
     Params { reason: String },
+    /// A field of a form is missing or not valid: `email`, `username`, `password`, `incoming`
+    /// or `outgoing`.
+    #[error("invalid {field}")]
+    Invalid { field: String },
     /// The engine refused the command; `reason` says why, for the log.
     #[error("{reason}")]
     Command { reason: String },
@@ -152,6 +156,43 @@ pub struct MessageView {
     pub attachments: Vec<String>,
 }
 
+/// How a connection is secured; there is no plain-text choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ConnectionSecurity {
+    /// TLS from the first byte (IMAP 993, SMTP 465).
+    Tls,
+    /// STARTTLS, required.
+    StartTls,
+}
+
+impl From<ConnectionSecurity> for Tls {
+    fn from(s: ConnectionSecurity) -> Self {
+        match s {
+            ConnectionSecurity::Tls => Tls::Implicit,
+            ConnectionSecurity::StartTls => Tls::StartTls,
+        }
+    }
+}
+
+/// A mail server: host, port and how it is secured.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ServerSettings {
+    pub host: String,
+    pub port: u16,
+    pub security: ConnectionSecurity,
+}
+
+/// What the "Account toevoegen" form asks for an IMAP/SMTP account.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ImapAccount {
+    pub name: String,
+    pub email: String,
+    /// Empty: the e-mail address.
+    pub username: String,
+    pub incoming: ServerSettings,
+    pub outgoing: ServerSettings,
+}
+
 /// The engine, shared by the app's screens.
 #[derive(uniffi::Object)]
 pub struct MerelCore {
@@ -190,6 +231,23 @@ impl MerelCore {
             serde_json::from_str(&params_json).map_err(|e| CoreError::Params { reason: e.to_string() })?
         };
         self.engine().run(&command, &params).map_err(|e| CoreError::Command { reason: e.to_string() })
+    }
+
+    /// Adds an IMAP/SMTP account: the password goes to the vault, the account is saved and
+    /// starts connecting. Returns the new account's id.
+    pub fn add_imap_account(&self, form: ImapAccount, password: String) -> Result<String, CoreError> {
+        let account = imap_account(&form, now())?;
+        if password.is_empty() {
+            return Err(CoreError::Invalid { field: "password".into() });
+        }
+        let id = account.id.clone();
+        self.engine().add_account(account, Secret::new(password)).map_err(|reason| CoreError::Command { reason })?;
+        Ok(id)
+    }
+
+    /// True while only the sample mail is there, so the app can offer to add an account.
+    pub fn is_sample(&self) -> bool {
+        self.engine().session.is_sample()
     }
 
     /// Takes in what the background worker has found; true when the screen should be redrawn.
@@ -260,6 +318,42 @@ impl MerelCore {
     }
 }
 
+fn now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// The account `form` describes, checked the way the desktop's account form checks it.
+fn imap_account(form: &ImapAccount, now: u64) -> Result<Account, CoreError> {
+    let invalid = |field: &str| CoreError::Invalid { field: field.into() };
+    let name = form.name.trim();
+    let address = Address::new(Some(name), form.email.trim()).map_err(|_| invalid("email"))?;
+    let username = if form.username.trim().is_empty() { address.email().to_string() } else { form.username.trim().to_string() };
+    if username.chars().any(|c| c.is_control() || c == '"' || c == '\\') {
+        return Err(invalid("username"));
+    }
+    let server = |s: &ServerSettings, field: &str| {
+        let host = s.host.trim();
+        if host.is_empty() || s.port == 0 || host.chars().any(|c| c.is_whitespace() || c.is_control() || c == '/') {
+            return Err(invalid(field));
+        }
+        Ok(Server { host: host.to_string(), port: s.port, tls: s.security.into() })
+    };
+    let incoming = server(&form.incoming, "incoming")?;
+    let outgoing = server(&form.outgoing, "outgoing")?;
+    Ok(Account {
+        id: format!("{}-{now}", address.email().replace(['@', '.'], "-")),
+        name: if name.is_empty() { address.email().to_string() } else { name.to_string() },
+        address,
+        username,
+        protocol: Protocol::ImapSmtp,
+        auth: Auth::Password,
+        incoming: Some(incoming),
+        outgoing: Some(outgoing),
+        dav: None,
+        signature: String::new(),
+    })
+}
+
 fn row(m: &merel_model::MessageHeader, selected: Option<&str>) -> MessageRow {
     MessageRow {
         id: m.id.clone(),
@@ -318,6 +412,56 @@ mod tests {
         let core = MerelCore::sample();
         assert!(matches!(core.run("folder.select".into(), "{".into()), Err(CoreError::Params { .. })));
         assert!(matches!(core.run("no.such".into(), String::new()), Err(CoreError::Command { .. })));
+    }
+
+    fn form() -> ImapAccount {
+        ImapAccount {
+            name: "Alain".into(),
+            email: "alain@example.org".into(),
+            username: String::new(),
+            incoming: ServerSettings { host: "mail.example.org".into(), port: 993, security: ConnectionSecurity::Tls },
+            outgoing: ServerSettings { host: "mail.example.org".into(), port: 465, security: ConnectionSecurity::Tls },
+        }
+    }
+
+    #[test]
+    fn an_imap_form_becomes_an_account() {
+        let a = imap_account(&form(), 7).unwrap();
+        assert_eq!(a.id, "alain-example-org-7");
+        assert_eq!(a.username, "alain@example.org");
+        assert_eq!(a.incoming.unwrap().tls, Tls::Implicit);
+        assert_eq!(a.protocol, Protocol::ImapSmtp);
+    }
+
+    #[test]
+    fn a_bad_form_names_the_field() {
+        let field = |f: ImapAccount| match imap_account(&f, 1) {
+            Err(CoreError::Invalid { field }) => field,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(field(ImapAccount { email: "geen adres".into(), ..form() }), "email");
+        assert_eq!(field(ImapAccount { username: "a\"b".into(), ..form() }), "username");
+        let mut f = form();
+        f.incoming.host = "mail example".into();
+        assert_eq!(field(f), "incoming");
+        let mut f = form();
+        f.outgoing.port = 0;
+        assert_eq!(field(f), "outgoing");
+    }
+
+    #[test]
+    fn adding_an_account_keeps_its_password_in_the_vault() {
+        let dir = std::env::temp_dir().join(format!("merel-mobile-add-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let vault = Arc::new(MemoryVault::default());
+        let core = MerelCore::new(dir.to_string_lossy().into_owned(), vault.clone());
+        assert!(core.is_sample());
+        assert!(matches!(core.add_imap_account(form(), String::new()), Err(CoreError::Invalid { .. })));
+        let id = core.add_imap_account(form(), "geheim".into()).unwrap();
+        assert_eq!(vault.get(id.clone()).unwrap().as_deref(), Some("geheim"));
+        assert!(core.accounts().iter().any(|a| a.id == id));
+        assert!(!core.is_sample());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

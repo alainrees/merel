@@ -1,0 +1,25 @@
+# Merel for the iPhone
+
+A native SwiftUI app on top of Merel's Rust core (`crates/mobile`, through UniFFI). The
+screens follow the approved designs in the project's `ontwerp/mobiel/` folder.
+
+What works now: sample mail, adding an IMAP/SMTP account (password in the iOS keychain), the
+folder tree, the message list with search, pull to refresh and swipe actions (archive, delete,
+flag, read/unread), and reading a message. Calendar, chat, contacts and tasks follow.
+
+## Running it on your own iPhone (free Apple ID)
+
+1. Install Xcode from the App Store, and once: `brew install xcodegen` and
+   `rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios`.
+2. In the repository: `apps/ios/scripts/build-core.sh` (builds the core, a few minutes).
+3. `cd apps/ios && xcodegen && open Merel.xcodeproj`.
+4. In Xcode: target Merel > Signing & Capabilities > Team: your Apple ID ("Personal Team").
+   If the bundle identifier is taken, change `nl.merel.app` to something of your own.
+5. Connect the iPhone, pick it as the run destination and press Run. On the iPhone, allow the
+   developer once under Settings > General > VPN & Device Management, and turn on Developer
+   Mode when iOS asks.
+
+With a free Apple ID the app runs for 7 days; then press Run again. The App Store and
+TestFlight need the paid Apple Developer Program.
+
+CI (`.github/workflows/mobile.yml`) builds the app for the simulator on every pull request.
