@@ -820,6 +820,51 @@ pub fn avatar(p: &egui::Painter, center: egui::Pos2, radius: f32, name: &str, em
     p.text(center, egui::Align2::CENTER_CENTER, text, FontId::proportional(radius * 0.8), Color32::WHITE);
 }
 
+/// A person's picture: their photo, cut round, else the avatar with their initials. The
+/// photo's bytes are handed over once per photo, kept in the context under its fingerprint.
+pub fn portrait(ui: &Ui, center: egui::Pos2, radius: f32, name: &str, email: &str, photo: Option<&merel_model::Photo>) {
+    let Some(photo) = photo else {
+        avatar(ui.painter(), center, radius, name, email);
+        return;
+    };
+    let key = egui::Id::new(("portrait", photo.fingerprint()));
+    let bytes: std::sync::Arc<[u8]> = match ui.data(|d| d.get_temp::<std::sync::Arc<[u8]>>(key)) {
+        Some(b) => b,
+        None => {
+            let b: std::sync::Arc<[u8]> = photo.0.clone().into();
+            ui.data_mut(|d| d.insert_temp(key, b.clone()));
+            b
+        }
+    };
+    let ext = photo.mime().and_then(|m| m.strip_prefix("image/")).unwrap_or("jpeg");
+    let uri = format!("bytes://merel/portrait-{:016x}.{ext}", photo.fingerprint());
+    let rect = Rect::from_center_size(center, vec2(radius * 2.0, radius * 2.0));
+    // Until it is decoded, and if it cannot be, the initials show underneath.
+    avatar(ui.painter(), center, radius, name, email);
+    Image::from_bytes(uri, egui::load::Bytes::Shared(bytes))
+        .fit_to_exact_size(rect.size())
+        .maintain_aspect_ratio(false)
+        .corner_radius(CornerRadius::same(radius.min(127.0) as u8))
+        .paint_at(ui, rect);
+}
+
+/// A tab of a card, such as Contactpersoon and Organisatie: its name, underlined in the app
+/// colour while it is the one shown.
+pub fn tab(ui: &mut Ui, t: &Tokens, text: &str, on: bool) -> Response {
+    let color = if on { t.accent_text } else { t.text_dim };
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(15.0), color);
+    let (rect, r) = ui.allocate_exact_size(vec2(galley.size().x + 16.0, 36.0), Sense::click());
+    r.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, on, text));
+    let p = ui.painter();
+    p.galley(egui::pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0), galley, color);
+    if on {
+        p.hline(rect.x_range(), rect.bottom() - 1.5, Stroke::new(3.0, t.accent));
+    } else if r.hovered() {
+        p.hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, t.control_border));
+    }
+    r.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 /// A row of choices shown as rounded chips, such as Alles, Ongelezen; the lit one is `on`.
 pub fn chip(ui: &mut Ui, t: &Tokens, text: &str, on: bool) -> Response {
     let color = if on { t.accent_text } else { t.text };

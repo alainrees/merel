@@ -113,7 +113,9 @@ your availability, Outlook's Vrij, Voorlopig, Bezet or Afwezig: a free appointme
 calendar's colour as its border, a tentative one half-transparent, a busy one solid and an out-of-office one purple.
 The status travels as Exchange's LegacyFreeBusyStatus, Microsoft 365's showAs, Google's transparency (free or busy,
 all that Google knows) and iCalendar's `TRANSP` with Outlook's `X-MICROSOFT-CDO-BUSYSTATUS`. The contacts module keeps a local address
-book (`contacts.json`) with search and a contact card, and the compose window completes
+book (`contacts.json`) with search and a contact card as Outlook has it (photo, quick buttons to mail, chat and call, tabs
+Contactpersoon and Organisatie with phones by kind, work and home addresses, job title, department, website and birthday;
+photos come from Microsoft 365 and vCards, are kept only on this computer and are never loaded from a link), and the compose window completes
 addresses from it and from the mail you have seen. A sender goes into the address book in one click: "Toevoegen aan
 contacten" next to the sender in the reading pane (and "Afzender toevoegen aan contacten" in the message's right-click
 menu) opens the contact form with the name and address filled in; when the address is already known the button reads

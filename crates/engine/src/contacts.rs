@@ -114,9 +114,11 @@ pub fn select(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// `contact.save { id?, account_id?, name, emails: [..], phones: [..], company?, notes? }`:
-/// creates the contact (in the account's store when `account_id` names one), or replaces the
-/// one with `id`.
+/// `contact.save { id?, account_id?, name, emails: [..], phones: [..], company?, notes?,
+/// job_title?, department?, office?, website?, birthday?, places?, photo? }`: creates the
+/// contact (in the account's store when `account_id` names one), or replaces the one with
+/// `id`. Phones are text or `{ kind, number }`; the photo is base64, or null to take it out.
+/// Of the details from `job_title` on, one left out stays as it was.
 pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     let existing = match str_param(params, "id") {
         Some(id) => Some(s.contact(id).ok_or(CommandError::NotFound)?.clone()),
@@ -131,12 +133,36 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         (None, Some(account)) => s.pending_id(account),
         (None, None) => s.new_contact_id(),
     };
+    let before = existing.clone().unwrap_or_default();
+    let kept = |key: &str, old: &str| str_param(params, key).map(str::to_string).unwrap_or_else(|| old.to_string());
+    let photo = match params.get("photo") {
+        None => before.photo.clone(),
+        Some(Value::String(b64)) => {
+            use base64::Engine as _;
+            let bytes = base64::engine::general_purpose::STANDARD.decode(b64).map_err(|_| CommandError::Param("photo"))?;
+            Some(merel_model::Photo::new(bytes).ok_or(CommandError::Param("photo"))?)
+        }
+        Some(_) => None,
+    };
     let contact = Contact {
         id: id.clone(),
         name: str_param(params, "name").unwrap_or("").to_string(),
         emails: list_param(params, "emails"),
-        phones: list_param(params, "phones"),
+        phones: params.get("phones").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default(),
         company: str_param(params, "company").unwrap_or("").to_string(),
+        job_title: kept("job_title", &before.job_title),
+        department: kept("department", &before.department),
+        office: kept("office", &before.office),
+        website: kept("website", &before.website),
+        birthday: match params.get("birthday") {
+            None => before.birthday.clone(),
+            Some(v) => v.as_str().filter(|b| !b.trim().is_empty()).map(str::to_string),
+        },
+        places: match params.get("places") {
+            None => before.places.clone(),
+            Some(v) => serde_json::from_value(v.clone()).map_err(|_| CommandError::Param("places"))?,
+        },
+        photo,
         notes: str_param(params, "notes").unwrap_or("").to_string(),
         account_id: account.clone(),
         // Formatting that does not parse is dropped: the notes stay, as text.
@@ -209,6 +235,37 @@ mod tests {
         s.run("contact.delete", &Value::Null).unwrap();
         assert_eq!(s.contacts.len(), n);
         assert!(s.selected_contact.is_none());
+    }
+
+    #[test]
+    fn the_details_photo_and_kinds_of_phone_are_saved() {
+        use base64::Engine as _;
+        let mut s = Session::sample();
+        let png = [b"\x89PNG\r\n\x1a\n".as_slice(), &[3; 10]].concat();
+        let photo = base64::engine::general_purpose::STANDARD.encode(&png);
+        s.run(
+            "contact.save",
+            &json!({ "name": "Noor Bakker", "emails": [], "phones": [{ "kind": "mobile", "number": "06 1" }, "010 2"], "job_title": "Bakker",
+                "places": [{ "kind": "home", "street": "Dorpsstraat 1", "city": "Gouda" }], "birthday": "1990-05-01", "photo": photo }),
+        )
+        .unwrap();
+        let c = s.selected_contact().unwrap().clone();
+        assert_eq!(c.phones, vec![merel_model::Phone::new(merel_model::PhoneKind::Mobile, "06 1"), merel_model::Phone::from("010 2")]);
+        assert_eq!((c.job_title.as_str(), c.birthday.as_deref()), ("Bakker", Some("1990-05-01")));
+        assert_eq!(c.places[0].city, "Gouda");
+        assert_eq!(c.photo.as_ref().map(|p| p.0.clone()), Some(png));
+
+        // What is left out stays; a null photo goes.
+        s.run("contact.save", &json!({ "id": c.id, "name": "Noor Bakker", "emails": [] })).unwrap();
+        let same = s.contact(&c.id).unwrap();
+        assert!(same.photo.is_some() && same.job_title == "Bakker" && same.places.len() == 1);
+        s.run("contact.save", &json!({ "id": c.id, "name": "Noor Bakker", "emails": [], "photo": null, "birthday": "" })).unwrap();
+        assert!(s.contact(&c.id).unwrap().photo.is_none() && s.contact(&c.id).unwrap().birthday.is_none());
+        assert_eq!(
+            s.run("contact.save", &json!({ "id": c.id, "name": "Noor", "emails": [], "photo": "PHN2Zz4=" })),
+            Err(CommandError::Param("photo")),
+            "an svg is no photo"
+        );
     }
 
     #[test]

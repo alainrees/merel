@@ -25,7 +25,7 @@ pub use calendar::{
 };
 pub use categories::{Category, CategoryColor, MAX_CATEGORY_NAME, MAX_ITEM_CATEGORIES, category_keyword, clean_categories};
 pub use chat::{CHAT_VERSION, ChatTag, Handshake, MAX_GROUP_ID, MAX_GROUP_NAME as MAX_CHAT_GROUP_NAME, fingerprint_of, token as chat_token};
-pub use contact::{Contact, ContactError};
+pub use contact::{Contact, ContactError, MAX_PHOTO, Phone, PhoneKind, Photo, Place, PlaceKind};
 pub use groups::{ContactGroup, ContactGroupError, MAX_GROUP_MEMBERS, MAX_GROUP_NAME, mailbox};
 pub use junk::{JunkLevel, JunkLists, MAX_JUNK_ENTRY, entry_covers, junk_entry};
 pub use quicksteps::{MAX_QUICK_STEP_NAME, QuickStep, QuickStepError};
@@ -567,7 +567,7 @@ pub fn mime_of(name: &str) -> &'static str {
 }
 
 /// Attachment contents as base64 in JSON, a quarter the size of a list of numbers.
-mod base64_bytes {
+pub(crate) mod base64_bytes {
     use base64::Engine;
     use serde::{Deserialize, Deserializer, Serializer};
 

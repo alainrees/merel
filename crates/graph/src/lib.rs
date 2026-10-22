@@ -11,6 +11,7 @@
 //! which makes the worker fetch a fresh token and retry once. Store ids carry their kind
 //! (`event:`, `contact:`, `task:`) since the APIs are three.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use base64::Engine as _;
@@ -19,8 +20,8 @@ use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Utc};
 use merel_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result, kind_from_name};
 use merel_mime::ParsedHeader;
 use merel_model::{
-    Address, Appointment, Attendee, Contact, FolderKind, Frequency, Importance, Meeting, Priority, Recurrence, Response, Server, ShowAs, Task,
-    clean_text,
+    Address, Appointment, Attendee, Contact, FolderKind, Frequency, Importance, MAX_PHOTO, Meeting, Phone, PhoneKind, Photo, Place, PlaceKind,
+    Priority, Recurrence, Response, Server, ShowAs, Task, clean_text,
 };
 use merel_secrets::Secret;
 use serde_json::{Value, json};
@@ -59,7 +60,13 @@ pub struct GraphClient {
     time_zone: String,
     /// The id of the default To Do list, once looked up.
     task_list: Option<String>,
+    /// Each contact's photo as last fetched, with the contact's `changeKey` then, so a
+    /// photo is asked for again only once the contact changed.
+    photos: HashMap<String, (String, Option<Photo>)>,
 }
+
+/// How many requests one `$batch` may carry.
+const BATCH: usize = 20;
 
 /// `s` percent-encoded for a URL path segment or query value.
 fn encode(s: &str) -> String {
@@ -294,14 +301,37 @@ fn meeting_of(e: &Value) -> Option<Meeting> {
     })
 }
 
+/// A Graph `physicalAddress` as a [`Place`]; `None` when it is empty.
+fn place_of(v: Option<&Value>, kind: PlaceKind) -> Option<Place> {
+    let v = v?;
+    let place = Place {
+        kind,
+        street: str_of(v, "street").to_string(),
+        postal_code: str_of(v, "postalCode").to_string(),
+        city: str_of(v, "city").to_string(),
+        region: str_of(v, "state").to_string(),
+        country: str_of(v, "countryOrRegion").to_string(),
+    };
+    (!place.is_empty()).then_some(place)
+}
+
+fn place_json(p: Option<&Place>) -> Value {
+    let p = p.cloned().unwrap_or_default();
+    json!({ "street": p.street, "postalCode": p.postal_code, "city": p.city, "state": p.region, "countryOrRegion": p.country })
+}
+
+/// The fields a contact listing asks for.
+const CONTACT_FIELDS: &str = "id,changeKey,displayName,givenName,surname,emailAddresses,businessPhones,mobilePhone,homePhones,companyName,department,jobTitle,officeLocation,businessAddress,homeAddress,otherAddress,businessHomePage,birthday,personalNotes";
+
 fn contact_of(c: &Value) -> Option<Contact> {
     let strings =
         |key: &str| c.get(key).and_then(Value::as_array).map(|l| l.iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>());
-    let mut phones = strings("businessPhones").unwrap_or_default();
+    let mut phones: Vec<Phone> = Vec::new();
     if let Some(m) = c.get("mobilePhone").and_then(Value::as_str) {
-        phones.push(m.to_string());
+        phones.push(Phone::new(PhoneKind::Mobile, m));
     }
-    phones.extend(strings("homePhones").unwrap_or_default());
+    phones.extend(strings("businessPhones").unwrap_or_default().iter().map(|n| Phone::new(PhoneKind::Work, n)));
+    phones.extend(strings("homePhones").unwrap_or_default().iter().map(|n| Phone::new(PhoneKind::Home, n)));
     let emails = c
         .get("emailAddresses")
         .and_then(Value::as_array)
@@ -309,18 +339,47 @@ fn contact_of(c: &Value) -> Option<Contact> {
         .unwrap_or_default();
     let name = str_of(c, "displayName");
     let name = if name.is_empty() { format!("{} {}", str_of(c, "givenName"), str_of(c, "surname")) } else { name.to_string() };
+    let places = [("businessAddress", PlaceKind::Work), ("homeAddress", PlaceKind::Home), ("otherAddress", PlaceKind::Other)]
+        .into_iter()
+        .filter_map(|(key, kind)| place_of(c.get(key), kind))
+        .collect();
     Contact {
         id: format!("contact:{}", id_of(c)?),
         name,
         emails,
         phones,
         company: str_of(c, "companyName").to_string(),
+        department: str_of(c, "department").to_string(),
+        job_title: str_of(c, "jobTitle").to_string(),
+        office: str_of(c, "officeLocation").to_string(),
+        places,
+        website: str_of(c, "businessHomePage").to_string(),
+        birthday: c.get("birthday").and_then(Value::as_str).and_then(|b| b.get(..10)).map(str::to_string),
+        photo: None,
         notes: str_of(c, "personalNotes").to_string(),
         account_id: None,
         notes_rich: None,
     }
     .validated()
     .ok()
+}
+
+/// The photos in the reply to a `$batch` of photo requests, by request id: Graph puts a
+/// binary body in base64. A request without a photo (404) gives `None`.
+fn batch_photos(reply: &Value) -> Vec<(String, Option<Photo>)> {
+    let Some(responses) = reply.get("responses").and_then(Value::as_array) else { return Vec::new() };
+    responses
+        .iter()
+        .map(|r| {
+            let photo = (r.get("status").and_then(Value::as_u64) == Some(200))
+                .then(|| r.get("body").and_then(Value::as_str))
+                .flatten()
+                .filter(|b| b.len() <= MAX_PHOTO / 3 * 4 + 8)
+                .and_then(|b| BASE64.decode(b).ok())
+                .and_then(Photo::new);
+            (str_of(r, "id").to_string(), photo)
+        })
+        .collect()
 }
 
 fn task_of(t: &Value) -> Option<Task> {
@@ -376,19 +435,31 @@ impl GraphClient {
         event
     }
 
-    /// The contact as Graph takes it: the first phone is the business one, the second the
-    /// mobile, the rest home phones. Empty fields are sent, so an update clears them.
+    /// The contact as Graph takes it. Graph has one mobile number; the other numbers without
+    /// a kind go with the business ones. Empty fields are sent, so an update clears them.
     fn contact_json(c: &Contact) -> Value {
         let (given, surname) = c.name.split_once(' ').unwrap_or((c.name.as_str(), ""));
+        let numbers = |kinds: &[PhoneKind]| c.phones.iter().filter(|p| kinds.contains(&p.kind)).map(|p| p.number.clone()).collect::<Vec<_>>();
+        let mut business = numbers(&[PhoneKind::Work]);
+        business.extend(numbers(&[PhoneKind::Other]));
+        business.extend(numbers(&[PhoneKind::Mobile]).into_iter().skip(1));
         json!({
             "givenName": given,
             "surname": surname.trim(),
             "companyName": c.company,
+            "department": c.department,
+            "jobTitle": c.job_title,
+            "officeLocation": c.office,
+            "businessHomePage": c.website,
+            "birthday": c.birthday.as_ref().map(|b| format!("{b}T12:00:00Z")),
+            "businessAddress": place_json(c.place(PlaceKind::Work)),
+            "homeAddress": place_json(c.place(PlaceKind::Home)),
+            "otherAddress": place_json(c.place(PlaceKind::Other)),
             "personalNotes": c.notes,
             "emailAddresses": c.emails.iter().map(|e| json!({ "address": e, "name": c.name })).collect::<Vec<_>>(),
-            "businessPhones": c.phones.first().into_iter().collect::<Vec<_>>(),
-            "mobilePhone": c.phones.get(1),
-            "homePhones": c.phones.iter().skip(2).collect::<Vec<_>>(),
+            "businessPhones": business,
+            "mobilePhone": c.phone(PhoneKind::Mobile),
+            "homePhones": numbers(&[PhoneKind::Home]),
         })
     }
 
@@ -427,7 +498,16 @@ impl GraphClient {
                 .build(),
         );
         let time_zone = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into());
-        let mut client = GraphClient { agent, base: format!("https://{host}/v1.0"), host, token, known: Vec::new(), time_zone, task_list: None };
+        let mut client = GraphClient {
+            agent,
+            base: format!("https://{host}/v1.0"),
+            host,
+            token,
+            known: Vec::new(),
+            time_zone,
+            task_list: None,
+            photos: HashMap::new(),
+        };
         client.known = client.well_known()?;
         Ok(client)
     }
@@ -443,6 +523,7 @@ impl GraphClient {
             known: Vec::new(),
             time_zone: "Europe/Amsterdam".into(),
             task_list: None,
+            photos: HashMap::new(),
         }
     }
 
@@ -472,6 +553,13 @@ impl GraphClient {
                 .map_err(connect)?
             }
             "DELETE" => self.agent.delete(&url).header("Authorization", &auth).call().map_err(connect)?,
+            "PUT" => self
+                .agent
+                .put(&url)
+                .header("Authorization", &auth)
+                .header("Content-Type", content_type.unwrap_or("application/json"))
+                .send(body)
+                .map_err(connect)?,
             _ => {
                 let req = if method == "PATCH" { self.agent.patch(&url) } else { self.agent.post(&url) };
                 req.header("Authorization", &auth)
@@ -604,6 +692,61 @@ impl GraphClient {
         } else {
             Err(MailboxError::BadName(id.chars().take(40).collect()))
         }
+    }
+
+    /// Asks for the photos of the contacts that are new or changed since their photo was
+    /// fetched, twenty to a `$batch`. A photo that does not come is no reason to fail the
+    /// contacts, so failures are only logged.
+    fn fetch_photos(&mut self, contacts: &[(String, Contact)]) {
+        let wanted: Vec<(&str, &str)> = contacts
+            .iter()
+            .filter(|(key, c)| self.photos.get(&c.id).is_none_or(|(k, _)| k != key || key.is_empty()))
+            .map(|(key, c)| (key.as_str(), c.id.as_str()))
+            .collect();
+        for chunk in wanted.chunks(BATCH) {
+            let requests: Vec<Value> = chunk
+                .iter()
+                .enumerate()
+                .map(|(i, (_, id))| {
+                    let id = id.strip_prefix("contact:").unwrap_or(id);
+                    json!({ "id": i.to_string(), "method": "GET", "url": format!("/me/contacts/{}/photo/$value", encode(id)) })
+                })
+                .collect();
+            match self.call("POST", "/$batch", Some(&json!({ "requests": requests }))) {
+                Ok(reply) => {
+                    let photos = batch_photos(&reply);
+                    for (i, (key, id)) in chunk.iter().enumerate() {
+                        let photo = photos.iter().find(|(r, _)| *r == i.to_string()).and_then(|(_, p)| p.clone());
+                        self.photos.insert(id.to_string(), (key.to_string(), photo));
+                    }
+                }
+                Err(e) => log::warn!("contact photos did not come: {e}"),
+            }
+        }
+    }
+
+    /// Sends the contact's photo when it is not the one the server has; a photo taken out is
+    /// deleted there as far as Graph allows.
+    fn save_photo(&mut self, id: &str, photo: Option<&Photo>) -> Result<()> {
+        let known = self.photos.get(id).and_then(|(_, p)| p.as_ref());
+        if known == photo {
+            return Ok(());
+        }
+        let path = format!("{}/photo/$value", self.path_of(id)?);
+        match photo {
+            Some(p) => {
+                let (status, bytes) = self.request("PUT", &path, p.mime(), &p.0)?;
+                Self::reply("PUT", status, &bytes)?;
+            }
+            None => {
+                if let Err(e) = self.call("DELETE", &path, None) {
+                    log::warn!("a contact's photo could not be deleted: {e}");
+                }
+            }
+        }
+        // The contact's changeKey changes with its photo, so the next listing asks again.
+        self.photos.insert(id.to_string(), (String::new(), photo.cloned()));
+        Ok(())
     }
 
     fn created(reply: &Value, prefix: &str) -> Result<String> {
@@ -765,10 +908,15 @@ impl ItemStore for GraphClient {
     }
 
     fn contacts(&mut self) -> Result<Vec<Contact>> {
-        let path = format!(
-            "/me/contacts?$top={PAGE}&$select=id,displayName,givenName,surname,emailAddresses,businessPhones,mobilePhone,homePhones,companyName,personalNotes"
-        );
-        Ok(self.list(&path)?.iter().filter_map(contact_of).collect())
+        let path = format!("/me/contacts?$top={PAGE}&$select={CONTACT_FIELDS}");
+        let listed = self.list(&path)?;
+        let mut contacts: Vec<(String, Contact)> =
+            listed.iter().filter_map(|v| contact_of(v).map(|c| (str_of(v, "changeKey").to_string(), c))).collect();
+        self.fetch_photos(&contacts);
+        for (_, c) in &mut contacts {
+            c.photo = self.photos.get(&c.id).and_then(|(_, p)| p.clone());
+        }
+        Ok(contacts.into_iter().map(|(_, c)| c).collect())
     }
 
     fn tasks(&mut self) -> Result<Vec<Task>> {
@@ -786,13 +934,17 @@ impl ItemStore for GraphClient {
             Item::Contact(c) => (Self::contact_json(c), "/me/contacts".to_string(), "contact:"),
             Item::Task(t) => (Self::task_json(t, &zone), format!("/me/todo/lists/{}/tasks", encode(&self.task_list()?)), "task:"),
         };
-        if item.id().is_empty() {
-            Self::created(&self.call("POST", &create_path, Some(&body))?, prefix)
+        let id = if item.id().is_empty() {
+            Self::created(&self.call("POST", &create_path, Some(&body))?, prefix)?
         } else {
             let path = self.path_of(item.id())?;
             self.call("PATCH", &path, Some(&body))?;
-            Ok(item.id().to_string())
+            item.id().to_string()
+        };
+        if let Item::Contact(c) = item {
+            self.save_photo(&id, c.photo.as_ref())?;
         }
+        Ok(id)
     }
 
     fn delete(&mut self, id: &str) -> Result<()> {
@@ -950,12 +1102,13 @@ mod tests {
         let contact = contact_of(&c).unwrap();
         assert_eq!((contact.id.as_str(), contact.name.as_str(), contact.company.as_str()), ("contact:C1", "Sanne de Vries", "Studio"));
         assert_eq!(contact.emails, vec!["sanne@example.org"]);
-        assert_eq!(contact.phones, vec!["020 1", "06 1"]);
+        assert_eq!(contact.phones, vec![Phone::new(PhoneKind::Mobile, "06 1"), Phone::new(PhoneKind::Work, "020 1")]);
         let body = GraphClient::contact_json(&contact);
         assert_eq!((body["givenName"].as_str(), body["surname"].as_str()), (Some("Sanne"), Some("de Vries")));
         assert_eq!(body["businessPhones"], json!(["020 1"]));
         assert_eq!(body["mobilePhone"], "06 1");
         assert_eq!(body["homePhones"], json!([]));
+        assert_eq!(body["birthday"], Value::Null);
         assert_eq!(body["emailAddresses"][0]["address"], "sanne@example.org");
 
         let t = json!({ "id": "T1", "title": "Offerte", "status": "completed", "importance": "high", "body": { "content": "n" },
@@ -970,6 +1123,37 @@ mod tests {
         assert_eq!(body["dueDateTime"]["timeZone"], "Europe/Amsterdam");
         let open = Task { title: "x".into(), ..Task::default() };
         assert!(GraphClient::task_json(&open, "UTC")["dueDateTime"].is_null());
+    }
+
+    #[test]
+    fn a_contact_brings_its_work_details_addresses_and_photo() {
+        let c = json!({ "id": "C2", "displayName": "Alain Rees", "companyName": "Cyber Inc.", "jobTitle": "Directeur", "department": "Security",
+            "officeLocation": "Amsterdam", "businessHomePage": "cyberinc.nl", "birthday": "1980-02-15T00:00:00Z",
+            "businessAddress": { "street": "Wibautstraat 3", "city": "Amsterdam", "state": "Noord-Holland", "postalCode": "1091 GH", "countryOrRegion": "Nederland" },
+            "homeAddress": { "street": "Jacob van der Doesstraat 1", "city": "Den Haag" },
+            "otherAddress": { "street": "", "city": "" },
+            "businessPhones": ["0613485555"], "mobilePhone": "+31 6 13 48 55 55", "homePhones": ["070 1"] });
+        let mut contact = contact_of(&c).unwrap();
+        assert_eq!((contact.job_title.as_str(), contact.department.as_str(), contact.office.as_str()), ("Directeur", "Security", "Amsterdam"));
+        assert_eq!(contact.places.iter().map(|p| p.kind).collect::<Vec<_>>(), [PlaceKind::Work, PlaceKind::Home], "an empty address is none");
+        assert_eq!(contact.place(PlaceKind::Work).unwrap().postal_code, "1091 GH");
+        assert_eq!((contact.phone(PhoneKind::Home), contact.birthday.as_deref()), (Some("070 1"), Some("1980-02-15")));
+        contact.phones.push(Phone::from("088 1"));
+        let body = GraphClient::contact_json(&contact);
+        assert_eq!(body["businessPhones"], json!(["0613485555", "088 1"]), "a number without a kind goes with the business ones");
+        assert_eq!(body["homeAddress"]["city"], "Den Haag");
+        assert_eq!(body["otherAddress"]["street"], "");
+        assert_eq!((body["jobTitle"].as_str(), body["birthday"].as_str()), (Some("Directeur"), Some("1980-02-15T12:00:00Z")));
+
+        let png = [b"\x89PNG\r\n\x1a\n".as_slice(), &[1; 16]].concat();
+        let reply = json!({ "responses": [
+            { "id": "1", "status": 404, "body": { "error": { "code": "ImageNotFound" } } },
+            { "id": "0", "status": 200, "headers": { "Content-Type": "image/png" }, "body": BASE64.encode(&png) },
+            { "id": "2", "status": 200, "body": BASE64.encode(b"<html>") },
+        ] });
+        let photos = batch_photos(&reply);
+        assert_eq!(photos.iter().find(|(id, _)| id == "0").and_then(|(_, p)| p.clone()), Photo::new(png));
+        assert!(photos.iter().filter(|(id, _)| id != "0").all(|(_, p)| p.is_none()), "no photo, and nothing that is not an image");
     }
 
     #[test]

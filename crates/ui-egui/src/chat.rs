@@ -73,6 +73,28 @@ impl MailApp {
         self.chat.error = None;
     }
 
+    /// Opens the chat with `email`, from a contact card: the one already going, else the
+    /// form for a new chat to them.
+    pub(crate) fn chat_with(&mut self, email: &str) {
+        self.module = crate::Module::Chat;
+        let existing =
+            self.engine.session.chats().into_iter().find(|c| !c.is_group() && c.people.iter().any(|p| p.email().eq_ignore_ascii_case(email)));
+        match existing {
+            Some(chat) => self.open_chat(&chat.id),
+            None => {
+                self.new_chat();
+                if let Some(new) = self.chat.new.as_mut() {
+                    new.to = email.to_string();
+                }
+            }
+        }
+    }
+
+    /// Whether any account can carry chat.
+    pub(crate) fn can_chat(&self) -> bool {
+        !self.chat_accounts().is_empty()
+    }
+
     /// The accounts that can carry chat, by id.
     fn chat_accounts(&self) -> Vec<String> {
         self.engine.session.accounts.iter().filter(|a| engine_chat::can_chat(a)).map(|a| a.id.clone()).collect()

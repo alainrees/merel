@@ -12,7 +12,9 @@
 
 use chrono::{DateTime, Datelike, Local, TimeZone, Utc};
 use merel_mailbox::{Item, ItemStore, MailboxError, Result};
-use merel_model::{Address, Appointment, Attendee, Contact, Frequency, Meeting, Priority, Recurrence, Response, ShowAs, Task, clean_text};
+use merel_model::{
+    Address, Appointment, Attendee, Contact, Frequency, Meeting, Phone, PhoneKind, Priority, Recurrence, Response, ShowAs, Task, clean_text,
+};
 use roxmltree::Node;
 
 use crate::{EwsClient, categories_of, child, esc, find, parse, parse_datetime, response_messages, text};
@@ -139,11 +141,27 @@ fn contact_of(node: Node<'_, '_>) -> Option<Contact> {
         id: item_id(node)?,
         name,
         emails,
-        phones: entries(node, "PhoneNumbers").into_iter().map(|(_, v)| v.to_string()).collect(),
+        phones: child(node, "PhoneNumbers")
+            .map(|list| {
+                list.children()
+                    .filter(|n| n.is_element() && n.tag_name().name() == "Entry")
+                    .filter_map(|e| {
+                        let kind = match e.attribute("Key") {
+                            Some("MobilePhone") => PhoneKind::Mobile,
+                            Some(k) if k.starts_with("Business") => PhoneKind::Work,
+                            Some(k) if k.starts_with("Home") => PhoneKind::Home,
+                            _ => PhoneKind::Other,
+                        };
+                        Some(Phone::new(kind, e.text()?.trim()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         company: text(node, "CompanyName").unwrap_or("").to_string(),
+        job_title: text(node, "JobTitle").unwrap_or("").to_string(),
+        department: text(node, "Department").unwrap_or("").to_string(),
         notes: body_text(node),
-        account_id: None,
-        notes_rich: None,
+        ..Contact::default()
     }
     .validated()
     .ok()
@@ -323,8 +341,11 @@ fn contact_fields(c: &Contact) -> Fields {
         let value = c.emails.get(i).map(|v| entry("EmailAddresses", key, v));
         f.list.push(("contacts:EmailAddress", Some(key), value));
     }
-    for (i, key) in PHONE_KEYS.iter().enumerate() {
-        let value = c.phones.get(i).map(|v| entry("PhoneNumbers", key, v));
+    // Exchange keeps one number per kind; a number without one is the business number when
+    // there is no other.
+    let business = c.phone(PhoneKind::Work).or_else(|| c.phone(PhoneKind::Other));
+    for (key, number) in PHONE_KEYS.iter().zip([business, c.phone(PhoneKind::Mobile), c.phone(PhoneKind::Home)]) {
+        let value = number.map(|v| entry("PhoneNumbers", key, v));
         f.list.push(("contacts:PhoneNumber", Some(key), value));
     }
     f.put_or_clear("contacts:Surname", "Surname", surname.trim());
@@ -662,7 +683,7 @@ mod tests {
         let c = first(&xml, contact_of).unwrap();
         assert_eq!((c.name.as_str(), c.company.as_str(), c.notes.as_str()), ("Sanne de Vries", "Studio", "n"));
         assert_eq!(c.emails, vec!["sanne@example.org"]);
-        assert_eq!(c.phones, vec!["06 1"]);
+        assert_eq!(c.phones, vec![Phone::new(PhoneKind::Mobile, "06 1")]);
         let nameless = reply("<t:Contact><t:ItemId Id=\"C2\"/><t:GivenName>Ravi</t:GivenName><t:Surname>Kumar</t:Surname></t:Contact>");
         assert_eq!(first(&nameless, contact_of).unwrap().name, "Ravi Kumar");
     }
@@ -751,8 +772,7 @@ mod tests {
             phones: vec![],
             company: String::new(),
             notes: "n".into(),
-            account_id: None,
-            notes_rich: None,
+            ..Contact::default()
         };
         let xml = contact_fields(&c).create();
         assert_eq!(

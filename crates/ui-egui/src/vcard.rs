@@ -97,7 +97,10 @@ impl MailApp {
                     out.skipped += 1;
                     continue;
                 }
-                let params = json!({ "name": c.name, "emails": c.emails, "phones": c.phones, "company": c.company, "notes": c.notes });
+                use base64::Engine as _;
+                let params = json!({ "name": c.name, "emails": c.emails, "phones": c.phones, "company": c.company, "notes": c.notes,
+                    "job_title": c.job_title, "department": c.department, "office": c.office, "website": c.website, "birthday": c.birthday,
+                    "places": c.places, "photo": c.photo.as_ref().map(|p| base64::engine::general_purpose::STANDARD.encode(&p.0)) });
                 match self.engine.run("contact.save", &params) {
                     Ok(()) => out.added += 1,
                     Err(_) => out.failed += 1,
@@ -124,12 +127,15 @@ mod tests {
             id: "c1".into(),
             name: "Sanne de Vries".into(),
             emails: vec!["sanne@example.org".into(), "s.devries@example.com".into()],
-            phones: vec!["06 12345678".into()],
+            phones: vec![merel_model::Phone::new(merel_model::PhoneKind::Mobile, "06 12345678")],
             company: "Studio ArtCraft".into(),
+            job_title: "Art director".into(),
+            places: vec![merel_model::Place { kind: merel_model::PlaceKind::Work, city: "Amsterdam".into(), ..Default::default() }],
+            photo: crate::contacts::picture_from_bytes(&tiny_png()),
             notes: "Ontwerpt de schetsen;\nbelt liever.".into(),
-            account_id: None,
-            notes_rich: None,
+            ..Contact::default()
         };
+        assert!(c.photo.is_some());
         let text = export(&c);
         assert!(
             text.starts_with("BEGIN:VCARD\r\nVERSION:3.0\r\n") && text.contains("FN:Sanne de Vries") && text.ends_with("END:VCARD\r\n"),
@@ -139,6 +145,29 @@ mod tests {
         assert_eq!(back.len(), 1);
         assert_eq!((back[0].name.as_str(), &back[0].emails, &back[0].phones), ("Sanne de Vries", &c.emails, &c.phones));
         assert_eq!((back[0].company.as_str(), back[0].notes.as_str()), ("Studio ArtCraft", "Ontwerpt de schetsen;\nbelt liever."));
+        assert_eq!((&back[0].job_title, &back[0].places, &back[0].photo), (&c.job_title, &c.places, &c.photo), "the details and photo go along");
+    }
+
+    /// A small picture, as a file from the computer would be.
+    fn tiny_png() -> Vec<u8> {
+        let img = image::RgbImage::from_fn(300, 200, |x, _| image::Rgb([(x % 256) as u8, 90, 160]));
+        let mut out = Vec::new();
+        image::DynamicImage::ImageRgb8(img).write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+        out
+    }
+
+    #[test]
+    fn a_chosen_picture_is_cut_square_and_made_small() {
+        let photo = crate::contacts::picture_from_bytes(&tiny_png()).unwrap();
+        assert_eq!(photo.mime(), Some("image/jpeg"));
+        let img = image::load_from_memory(&photo.0).unwrap();
+        assert_eq!((img.width(), img.height()), (200, 200), "a square from the middle, not larger than it was");
+        let big = image::RgbImage::from_fn(1200, 900, |_, y| image::Rgb([20, (y % 256) as u8, 40]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(big).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        let small = image::load_from_memory(&crate::contacts::picture_from_bytes(&png).unwrap().0).unwrap();
+        assert_eq!((small.width(), small.height()), (256, 256));
+        assert!(crate::contacts::picture_from_bytes(b"<svg xmlns='http://www.w3.org/2000/svg'/>").is_none());
     }
 
     #[test]
@@ -159,7 +188,7 @@ mod tests {
         let out = app.import_contacts(&[file.clone(), dir.join("missing.vcf")]);
         assert_eq!(out, Outcome { added: 2, skipped: 1, failed: 1 });
         assert_eq!(app.engine.session.contacts.len(), before + 2);
-        assert!(app.engine.session.contacts.iter().any(|c| c.name == "Ravi Patel" && c.phones == ["+31 6 1111"]));
+        assert!(app.engine.session.contacts.iter().any(|c| c.name == "Ravi Patel" && c.phones == [merel_model::Phone::from("+31 6 1111")]));
         assert!(app.engine.session.contacts.iter().any(|c| c.name == "Zonder adres" && c.company == "Firma"));
         assert_eq!(app.notice.as_deref(), Some("2 contacten geïmporteerd, 1 al bekend en overgeslagen, 1 bestand niet leesbaar."));
         // The same file again adds nothing; the card without an address is the exception, as

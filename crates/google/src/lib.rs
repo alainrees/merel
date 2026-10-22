@@ -16,7 +16,7 @@ use std::time::Duration;
 use chrono::{DateTime, Local, NaiveDate, NaiveTime, TimeZone, Utc};
 use merel_imap::ImapClient;
 use merel_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result};
-use merel_model::{Address, Appointment, Contact, Server, ShowAs, Task, clean_text};
+use merel_model::{Address, Appointment, Contact, Phone, PhoneKind, Server, ShowAs, Task, clean_text};
 use merel_secrets::Secret;
 use serde_json::{Value, json};
 
@@ -294,11 +294,28 @@ fn contact_of(p: &Value) -> Option<Contact> {
         id: id.to_string(),
         name: name.to_string(),
         emails: values(p, "emailAddresses").into_iter().filter(|e| Address::new(None, e).is_ok()).collect(),
-        phones: values(p, "phoneNumbers"),
+        phones: p
+            .get("phoneNumbers")
+            .and_then(Value::as_array)
+            .map(|l| {
+                l.iter()
+                    .map(|e| {
+                        let kind = match str_of(e, "type") {
+                            "mobile" => PhoneKind::Mobile,
+                            "work" | "workMobile" | "main" => PhoneKind::Work,
+                            "home" => PhoneKind::Home,
+                            _ => PhoneKind::Other,
+                        };
+                        Phone::new(kind, str_of(e, "value").trim())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         company: first_str(p, "organizations", "name").to_string(),
+        job_title: first_str(p, "organizations", "title").to_string(),
+        department: first_str(p, "organizations", "department").to_string(),
         notes: first_str(p, "biographies", "value").to_string(),
-        account_id: None,
-        notes_rich: None,
+        ..Contact::default()
     }
     .validated()
     .ok()
@@ -307,12 +324,25 @@ fn contact_of(p: &Value) -> Option<Contact> {
 /// The person as the People API takes it.
 fn person_json(c: &Contact) -> Value {
     let (given, family) = c.name.split_once(' ').unwrap_or((c.name.as_str(), ""));
-    let organizations: Vec<Value> = if c.company.is_empty() { Vec::new() } else { vec![json!({ "name": c.company })] };
+    let organizations: Vec<Value> = if c.company.is_empty() && c.job_title.is_empty() && c.department.is_empty() {
+        Vec::new()
+    } else {
+        vec![json!({ "name": c.company, "title": c.job_title, "department": c.department })]
+    };
     let biographies: Vec<Value> = if c.notes.is_empty() { Vec::new() } else { vec![json!({ "value": c.notes, "contentType": "TEXT_PLAIN" })] };
     json!({
         "names": [{ "givenName": given, "familyName": family.trim() }],
         "emailAddresses": c.emails.iter().map(|e| json!({ "value": e })).collect::<Vec<_>>(),
-        "phoneNumbers": c.phones.iter().map(|p| json!({ "value": p })).collect::<Vec<_>>(),
+        "phoneNumbers": c
+            .phones
+            .iter()
+            .map(|p| match p.kind {
+                PhoneKind::Mobile => json!({ "value": p.number, "type": "mobile" }),
+                PhoneKind::Work => json!({ "value": p.number, "type": "work" }),
+                PhoneKind::Home => json!({ "value": p.number, "type": "home" }),
+                PhoneKind::Other => json!({ "value": p.number }),
+            })
+            .collect::<Vec<_>>(),
         "organizations": organizations,
         "biographies": biographies,
     })
@@ -642,10 +672,15 @@ mod tests {
         let p = json!({ "resourceName": "people/c1", "etag": "x",
             "names": [{ "displayName": "Sanne de Vries", "givenName": "Sanne" }],
             "emailAddresses": [{ "value": "Sanne@Example.org" }, { "value": "not an address" }],
-            "phoneNumbers": [{ "value": "06 1" }], "organizations": [{ "name": "Studio" }], "biographies": [{ "value": "n" }] });
+            "phoneNumbers": [{ "value": "06 1", "type": "mobile" }], "organizations": [{ "name": "Studio", "title": "Ontwerper" }], "biographies": [{ "value": "n" }] });
         let c = contact_of(&p).unwrap();
         assert_eq!((c.id.as_str(), c.name.as_str(), c.company.as_str(), c.notes.as_str()), ("people/c1", "Sanne de Vries", "Studio", "n"));
-        assert_eq!((c.emails.as_slice(), c.phones.as_slice()), (&["sanne@example.org".to_string()][..], &["06 1".to_string()][..]));
+        assert_eq!(
+            (c.emails.as_slice(), c.phones.as_slice()),
+            (&["sanne@example.org".to_string()][..], &[Phone::new(PhoneKind::Mobile, "06 1")][..])
+        );
+        assert_eq!(c.job_title, "Ontwerper");
+        assert_eq!(person_json(&c)["phoneNumbers"][0]["type"], "mobile");
         assert!(contact_of(&json!({ "resourceName": "otherContacts/c1" })).is_none());
         let body = person_json(&c);
         assert_eq!(body["names"][0]["givenName"], "Sanne");

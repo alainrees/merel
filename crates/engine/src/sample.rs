@@ -146,28 +146,36 @@ fn tasks() -> Vec<Task> {
 }
 
 fn contacts() -> Vec<Contact> {
-    [
-        ("Sanne de Vries", "sanne@example.org", "06 12345678", "Studio ArtCraft"),
-        ("Ravi Kumar", "ravi@example.org", "020 1234567", "Drukkerij Kumar"),
-        ("Studio ArtCraft", "studio@example.org", "", ""),
-    ]
-    .into_iter()
-    .enumerate()
-    .filter_map(|(i, (name, email, phone, company))| {
-        Contact {
-            id: format!("sample-{i}"),
-            name: name.into(),
-            emails: vec![email.into()],
-            phones: if phone.is_empty() { Vec::new() } else { vec![phone.into()] },
-            company: company.into(),
-            notes: String::new(),
-            account_id: None,
-            notes_rich: None,
-        }
-        .validated()
-        .ok()
-    })
-    .collect()
+    use merel_model::{Phone, PhoneKind, Place, PlaceKind};
+    let sanne = Contact {
+        id: "sample-0".into(),
+        name: "Sanne de Vries".into(),
+        emails: vec!["sanne@example.org".into()],
+        phones: vec![Phone::new(PhoneKind::Mobile, "06 12345678"), Phone::new(PhoneKind::Work, "020 7654321")],
+        company: "Studio ArtCraft".into(),
+        job_title: "Art director".into(),
+        department: "Design".into(),
+        places: vec![Place {
+            kind: PlaceKind::Work,
+            street: "Keizersgracht 123".into(),
+            postal_code: "1015 CJ".into(),
+            city: "Amsterdam".into(),
+            region: "Noord-Holland".into(),
+            country: "Nederland".into(),
+        }],
+        website: "example.org".into(),
+        ..Contact::default()
+    };
+    let ravi = Contact {
+        id: "sample-1".into(),
+        name: "Ravi Kumar".into(),
+        emails: vec!["ravi@example.org".into()],
+        phones: vec![Phone::new(PhoneKind::Work, "020 1234567")],
+        company: "Drukkerij Kumar".into(),
+        ..Contact::default()
+    };
+    let studio = Contact { id: "sample-2".into(), name: "Studio ArtCraft".into(), emails: vec!["studio@example.org".into()], ..Contact::default() };
+    [sanne, ravi, studio].into_iter().filter_map(|c| c.validated().ok()).collect()
 }
 
 /// Three appointments around today and a weekly one, so the calendar has something to show.

@@ -1497,11 +1497,7 @@ mod tests {
             id: "c1".into(),
             name: "Ravi Kumar".into(),
             emails: vec!["ravi@example.org".into()],
-            phones: Vec::new(),
-            company: String::new(),
-            notes: String::new(),
-            account_id: None,
-            notes_rich: None,
+            ..merel_model::Contact::default()
         });
         app.open_compose(Kind::New);
         let mut h = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
