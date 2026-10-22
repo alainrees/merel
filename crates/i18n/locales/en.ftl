@@ -769,6 +769,7 @@ chat-pick-account = Choose an account
 chat-via = Via { $email }
 chat-name-hint = Group name (optional)
 chat-first-hint = Type your first message…
+chat-key-on-start = This account has no chat key yet. Merel makes one when you choose Start; mail from this account is signed from then on and carries your key.
 chat-enable-first = Turn on chat for this account first; you can do that on the Chat start page.
 chat-invite = Invitation link
 chat-invite-for = Invitation for { $email }
