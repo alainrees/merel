@@ -109,7 +109,8 @@ pub fn outgoing(keys: &Keys, account: &Account, draft: &Draft, raw: Vec<u8>) -> 
     let recipients: Vec<&Address> = draft.to.iter().chain(&draft.cc).chain(&draft.bcc).collect();
     // The first step of an invitation goes out as it is: it carries a key and nothing secret,
     // and the other side has no key to encrypt to yet.
-    if draft.chat.as_ref().and_then(|c| c.handshake.as_ref()).is_some_and(|h| h.step == "vc-request") {
+    // So does the invitation Merel mails to someone without a key: only the link, never a message.
+    if draft.chat.as_ref().is_some_and(|c| c.invite || c.handshake.as_ref().is_some_and(|h| h.step == "vc-request")) {
         return if pgp.is_some() && !draft.encrypt { Ok(raw) } else { Err(merel_i18n::tr("chat-enable-short")) };
     }
     // A chat message only ever goes out encrypted with OpenPGP, as Delta Chat reads it.

@@ -25,6 +25,11 @@ pub struct ChatTag {
     /// Set on a step of an invitation's handshake, which is no message to show.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handshake: Option<Handshake>,
+    /// Set on the invitation Merel mails by itself to someone without a key, so a chat can
+    /// start: it goes out unencrypted and holds nothing but the invitation link, never the
+    /// message that waits for the key. Not a header; the other side reads it as a chat message.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub invite: bool,
 }
 
 /// A step of the handshake that makes an invitation link into a verified chat (Delta Chat's
@@ -86,7 +91,7 @@ impl ChatTag {
             .and(group_name)
             .map(|n| clean_text(n.trim()).chars().take(MAX_GROUP_NAME).collect::<String>())
             .filter(|n| !n.is_empty());
-        Some(ChatTag { group_id, group_name, handshake: None })
+        Some(ChatTag { group_id, group_name, handshake: None, invite: false })
     }
 
     /// A new group id: 16 characters from `random`, of the alphabet Delta Chat uses.

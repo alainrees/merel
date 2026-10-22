@@ -181,6 +181,12 @@ impl MailApp {
     }
 
     /// Opens a new message to the selected contact's first address.
+    /// Opens a new chat with the selected contact, at their first address.
+    pub fn chat_selected_contact(&mut self) {
+        let Some(address) = self.engine.session.selected_contact().and_then(|c| c.addresses().into_iter().next()) else { return };
+        self.chat_with(address);
+    }
+
     pub fn mail_selected_contact(&mut self) {
         let Some(address) = self.engine.session.selected_contact().and_then(|c| c.addresses().into_iter().next()) else { return };
         self.open_compose(ComposeKind::New);
@@ -303,6 +309,13 @@ fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
         });
     });
+    let mut chat = false;
+    if !c.emails.is_empty() {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            chat = helder::secondary(ui, t, |ui| helder::tool_button(ui, t, Icon::MessagesSquare, &tr("contacts-chat"))).clicked();
+        });
+    }
     helder::rule(ui, t);
     let mut mail = false;
     for e in &c.emails {
@@ -332,6 +345,9 @@ fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     if mail {
         app.mail_selected_contact();
+    }
+    if chat {
+        app.chat_selected_contact();
     }
 }
 
@@ -478,6 +494,9 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     if crate::ribbon_action(ui, t, "✉", &tr("contacts-send-mail"), has_mail) {
         app.mail_selected_contact();
+    }
+    if crate::ribbon_action(ui, t, "💬", &tr("contacts-chat"), has_mail) {
+        app.chat_selected_contact();
     }
     crate::ribbon_separator(ui);
     if crate::ribbon_action(ui, t, "🗑", &tr("delete"), has) {
