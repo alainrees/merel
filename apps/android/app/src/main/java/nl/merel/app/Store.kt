@@ -82,7 +82,7 @@ class Store(app: Application) : AndroidViewModel(app) {
     fun open(id: String) = run("message.select", mapOf("id" to id))
     fun refreshFolder() = run("folder.refresh")
 
-    fun setFilter(value: String) {
+    fun showOnly(value: String) {
         filter = value
         run("view.filter", mapOf("filter" to value))
     }

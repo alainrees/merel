@@ -266,7 +266,7 @@ fun MessagesScreen(store: Store) {
             item { Spacer(Modifier.width(8.dp)) }
             items(listOf("all" to R.string.filter_all, "unread" to R.string.filter_unread, "flagged" to R.string.filter_flagged, "attachments" to R.string.filter_attachments)) { (value, label) ->
                 FilterChip(
-                    selected = store.filter == value, onClick = { store.setFilter(value) }, label = { Text(stringResource(label)) },
+                    selected = store.filter == value, onClick = { store.showOnly(value) }, label = { Text(stringResource(label)) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = h.selected, selectedLabelColor = h.ink, containerColor = h.card),
                 )
             }
