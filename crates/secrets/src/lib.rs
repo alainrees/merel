@@ -55,16 +55,20 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, key: &str) -> Result<(), SecretError>;
 }
 
-/// The system credential store.
+/// The system credential store. Not on phones, where the app passes in the keychain or the
+/// Android Keystore itself.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[derive(Default)]
 pub struct Keychain;
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 impl Keychain {
     fn entry(key: &str) -> Result<keyring::Entry, SecretError> {
         keyring::Entry::new(SERVICE, key).map_err(|e| SecretError::Unavailable(e.to_string()))
     }
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 impl SecretStore for Keychain {
     fn set(&self, key: &str, secret: &Secret) -> Result<(), SecretError> {
         Self::entry(key)?.set_password(secret.expose()).map_err(|e| SecretError::Store(e.to_string()))
