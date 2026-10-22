@@ -62,18 +62,18 @@ fn is_timeout(e: &io::Error) -> bool {
 /// What went wrong while opening a connection, in words for the person.
 fn reason_of(e: &io::Error) -> String {
     if is_timeout(e) {
-        return "de server reageert niet; klopt de keuze tussen TLS en STARTTLS bij deze poort?".into();
+        return merel_i18n::tr("imap-no-answer-tls");
     }
     if let Some(tls) = e.get_ref().and_then(|inner| inner.downcast_ref::<rustls::Error>()) {
         return match tls {
-            rustls::Error::InvalidCertificate(c) => format!("het certificaat van de server wordt niet vertrouwd ({c:?})"),
-            other => format!("de beveiligde verbinding mislukte ({other}); klopt de keuze tussen TLS en STARTTLS bij deze poort?"),
+            rustls::Error::InvalidCertificate(c) => merel_i18n::tr_args("imap-untrusted-cert", &[("detail", format!("{c:?}").into())]),
+            other => merel_i18n::tr_args("imap-tls-failed-port", &[("detail", other.to_string().into())]),
         };
     }
     match e.kind() {
-        io::ErrorKind::ConnectionRefused => "de server weigert de verbinding; klopt de poort?".into(),
+        io::ErrorKind::ConnectionRefused => merel_i18n::tr("imap-refused"),
         io::ErrorKind::InvalidData | io::ErrorKind::UnexpectedEof | io::ErrorKind::ConnectionReset | io::ErrorKind::ConnectionAborted => {
-            "de server verbrak de beveiligde verbinding; klopt de keuze tussen TLS en STARTTLS bij deze poort?".into()
+            merel_i18n::tr("imap-tls-dropped")
         }
         _ => e.to_string(),
     }
@@ -93,7 +93,7 @@ impl From<ImapError> for MailboxError {
             ImapError::Connect { host, reason } => MailboxError::Connect { host, reason },
             ImapError::Login => MailboxError::Login,
             ImapError::Protocol(e) => match *e {
-                imap::Error::Io(io) if is_timeout(&io) => MailboxError::Protocol("de server reageert niet meer".into()),
+                imap::Error::Io(io) if is_timeout(&io) => MailboxError::Protocol(merel_i18n::tr("imap-no-longer-answers")),
                 e => MailboxError::Protocol(e.to_string()),
             },
             ImapError::BadName(n) => MailboxError::BadName(n),
@@ -137,9 +137,9 @@ impl SetReadTimeout for TlsStream {
 /// A TCP connection to `host:port`, tried address by address, each within
 /// [`CONNECT_TIMEOUT`]; reads and writes on it give up after `wait`.
 fn open_tcp(host: &str, port: u16, wait: Duration) -> std::result::Result<TcpStream, String> {
-    let addrs: Vec<_> = (host, port).to_socket_addrs().map_err(|_| "de servernaam is niet gevonden; klopt hij?".to_string())?.collect();
+    let addrs: Vec<_> = (host, port).to_socket_addrs().map_err(|_| merel_i18n::tr("imap-host-not-found"))?.collect();
     if addrs.is_empty() {
-        return Err("de servernaam is niet gevonden; klopt hij?".into());
+        return Err(merel_i18n::tr("imap-host-not-found"));
     }
     let mut last = None;
     for addr in addrs {
@@ -152,11 +152,9 @@ fn open_tcp(host: &str, port: u16, wait: Duration) -> std::result::Result<TcpStr
         }
     }
     Err(match last {
-        Some(e) if is_timeout(&e) => {
-            format!("de server reageert niet (na {} seconden opgegeven); klopt de servernaam en de poort?", CONNECT_TIMEOUT.as_secs())
-        }
+        Some(e) if is_timeout(&e) => merel_i18n::tr_args("imap-timeout", &[("seconds", (CONNECT_TIMEOUT.as_secs() as usize).into())]),
         Some(e) => reason_of(&e),
-        None => "de servernaam is niet gevonden; klopt hij?".into(),
+        None => merel_i18n::tr("imap-host-not-found"),
     })
 }
 
@@ -168,10 +166,11 @@ fn tls(host: &str, tcp: TcpStream) -> std::result::Result<TlsStream, String> {
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
         .and_then(|b| b.with_platform_verifier())
-        .map_err(|e| format!("de beveiliging kon niet worden ingesteld ({e})"))?
+        .map_err(|e| merel_i18n::tr_args("imap-tls-setup", &[("detail", e.to_string().into())]))?
         .with_no_client_auth();
-    let name = rustls::pki_types::ServerName::try_from(host.to_string()).map_err(|_| "de servernaam is niet geldig".to_string())?;
-    let conn = rustls::ClientConnection::new(Arc::new(config), name).map_err(|e| format!("de beveiligde verbinding mislukte ({e})"))?;
+    let name = rustls::pki_types::ServerName::try_from(host.to_string()).map_err(|_| merel_i18n::tr("imap-host-invalid"))?;
+    let conn =
+        rustls::ClientConnection::new(Arc::new(config), name).map_err(|e| merel_i18n::tr_args("tls-failed", &[("detail", e.to_string().into())]))?;
     Ok(TlsStream(rustls::StreamOwned::new(conn, tcp)))
 }
 
@@ -182,13 +181,13 @@ fn read_line(tcp: &mut TcpStream) -> std::result::Result<String, String> {
     let mut byte = [0u8; 1];
     while line.len() < 8192 {
         match tcp.read(&mut byte) {
-            Ok(0) => return Err("de server verbrak de verbinding; klopt de keuze tussen TLS en STARTTLS bij deze poort?".into()),
+            Ok(0) => return Err(merel_i18n::tr("imap-dropped")),
             Ok(_) if byte[0] == b'\n' => return Ok(String::from_utf8_lossy(&line).trim_end().to_string()),
             Ok(_) => line.push(byte[0]),
             Err(e) => return Err(reason_of(&e)),
         }
     }
-    Err("de server stuurt iets anders dan IMAP; klopt de poort?".into())
+    Err(merel_i18n::tr("imap-not-imap"))
 }
 
 /// Reads the plain greeting and asks for `STARTTLS`; the connection is ready for TLS after.
@@ -196,17 +195,13 @@ fn starttls(tcp: &mut TcpStream) -> std::result::Result<(), String> {
     let greeting = read_line(tcp)?;
     // PREAUTH before TLS would mean a session nobody secured; it is refused like anything else.
     if !greeting.starts_with("* OK") {
-        return Err("de server stuurt iets anders dan IMAP; klopt de poort?".into());
+        return Err(merel_i18n::tr("imap-not-imap"));
     }
     tcp.write_all(b"m0 STARTTLS\r\n").map_err(|e| reason_of(&e))?;
     loop {
         let line = read_line(tcp)?;
         if let Some(status) = line.strip_prefix("m0 ") {
-            return if status.get(..2).is_some_and(|s| s.eq_ignore_ascii_case("OK")) {
-                Ok(())
-            } else {
-                Err("de server weigert STARTTLS; kies TLS of een andere poort".into())
-            };
+            return if status.get(..2).is_some_and(|s| s.eq_ignore_ascii_case("OK")) { Ok(()) } else { Err(merel_i18n::tr("imap-no-starttls")) };
         }
     }
 }

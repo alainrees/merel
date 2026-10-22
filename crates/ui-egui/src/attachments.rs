@@ -4,6 +4,7 @@
 //! gets a thumbnail under the message and a window with the full picture, decoded by the same
 //! image loader the HTML view uses; other kinds are only saved.
 
+use crate::i18n::tr;
 use std::path::{Path, PathBuf};
 
 use merel_mime::Attachment;
@@ -16,7 +17,9 @@ const MAX_NAME: usize = 120;
 
 /// The button after the attachment chips of a message with several, Outlook's "Alle bijlagen
 /// opslaan".
-pub const SAVE_ALL: &str = "↓ Alle bijlagen opslaan";
+pub fn save_all_label() -> String {
+    tr("attachments-save-all")
+}
 
 /// `name` as a plain file name: no directories, no control characters, no leading dot, no
 /// Windows-reserved characters, bounded; `bijlage` when nothing is left.
@@ -73,7 +76,9 @@ pub fn save_all(dir: &Path, list: &[Attachment]) -> (usize, Option<String>) {
         match save_to(dir, &a.name, &a.bytes) {
             Ok(_) => saved += 1,
             Err(e) => {
-                problem.get_or_insert_with(|| format!("{} niet opgeslagen: {e}", a.name));
+                problem.get_or_insert_with(|| {
+                    crate::i18n::tr_args("file-not-saved", &[("name", a.name.as_str().into()), ("error", e.to_string().into())])
+                });
             }
         }
     }
@@ -168,14 +173,15 @@ pub fn preview_uri(message_id: &str, index: usize) -> String {
 
 /// What the thumbnail and the window are called, for the accessibility tree and the hover text.
 pub fn preview_label(name: &str) -> String {
-    format!("Voorbeeld van {name}")
+    crate::i18n::tr_args("attachment-preview", &[("name", name.into())])
 }
 
 /// The notice for a file that went into a folder: its name and the folder's, not the whole
 /// path, with a button that shows the file.
 pub fn saved(what: &str, path: &Path) -> Notice {
     let dir = path.parent().map(folder_name).unwrap_or_default();
-    Notice::success(format!("{what} opgeslagen in {dir}: {}", file_name(path))).revealing(path)
+    Notice::success(crate::i18n::tr_args("saved-in", &[("what", what.into()), ("folder", dir.into()), ("file", file_name(path).into())]))
+        .revealing(path)
 }
 
 impl MailApp {
@@ -183,10 +189,10 @@ impl MailApp {
     pub fn save_attachment(&mut self, a: &Attachment) {
         self.notice = Some(match downloads_dir() {
             Some(dir) => match save_to(&dir, &a.name, &a.bytes) {
-                Ok(path) => saved("Bijlage", &path),
-                Err(e) => Notice::error(format!("Bijlage niet opgeslagen: {e}")),
+                Ok(path) => saved(&tr("noun-attachment"), &path),
+                Err(e) => Notice::error(crate::i18n::tr_args("attachment-not-saved", &[("error", e.to_string().into())])),
             },
-            None => Notice::error("Bijlage niet opgeslagen: geen map Downloads gevonden."),
+            None => Notice::error(tr("attachment-no-downloads")),
         });
     }
 
@@ -194,19 +200,22 @@ impl MailApp {
     pub fn save_attachments(&mut self, list: &[Attachment]) {
         self.notice = Some(match downloads_dir() {
             Some(dir) => match save_all(&dir, list) {
-                (n, None) => Notice::success(format!("{n} bijlagen opgeslagen in {}.", folder_name(&dir))).revealing(&dir),
-                (0, Some(problem)) => Notice::error(format!("Bijlagen niet opgeslagen: {problem}")),
-                (n, Some(problem)) => {
-                    Notice::warning(format!("{n} van {} bijlagen opgeslagen in {}; {problem}", list.len(), folder_name(&dir))).revealing(&dir)
-                }
+                (n, None) => Notice::success(crate::i18n::tr_args("attachments-saved", &[("count", n.into()), ("folder", folder_name(&dir).into())]))
+                    .revealing(&dir),
+                (0, Some(problem)) => Notice::error(crate::i18n::tr_args("attachments-not-saved", &[("error", problem.into())])),
+                (n, Some(problem)) => Notice::warning(crate::i18n::tr_args(
+                    "attachments-partly-saved",
+                    &[("count", n.into()), ("total", list.len().into()), ("folder", folder_name(&dir).into()), ("error", problem.into())],
+                ))
+                .revealing(&dir),
             },
-            None => Notice::error("Bijlagen niet opgeslagen: geen map Downloads gevonden."),
+            None => Notice::error(tr("attachments-no-downloads")),
         });
     }
 }
 
 /// The preview window, while a picture is open: the picture fitted to the window, with
-/// "Opslaan in Downloads" and "Sluiten".
+/// "Save to Downloads" and "Close".
 pub fn preview_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(p) = app.preview.clone() else { return };
     let mut save = false;
@@ -220,10 +229,10 @@ pub fn preview_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         ui.label(egui::RichText::new(format!("{}  ({})", p.attachment.name, crate::size_text(p.attachment.size))).size(12.0).color(t.text_dim));
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.add(crate::helder::primary_text(t, "Opslaan in Downloads")).clicked() {
+            if ui.add(crate::helder::primary_text(t, &tr("attachment-save-downloads"))).clicked() {
                 save = true;
             }
-            if ui.button("Sluiten").clicked() {
+            if ui.button(tr("close")).clicked() {
                 close = true;
             }
         });

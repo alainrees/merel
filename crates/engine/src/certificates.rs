@@ -86,11 +86,9 @@ pub fn sign_if_asked(identities: &Identities, account: &Account, sign: Option<bo
     let identity = identities.read().ok().and_then(|map| map.get(&account.id).cloned());
     match (sign, identity) {
         (Some(false), _) | (None, None) => Ok(raw),
-        (Some(true), None) => {
-            Err("Dit account heeft geen certificaat om mee te ondertekenen. Importeer er een onder Bestand, of zet Ondertekenen uit.".into())
-        }
+        (Some(true), None) => Err(merel_i18n::tr("sign-no-cert")),
         (_, Some(identity)) => {
-            identity.check_usable(now()).map_err(|e| format!("{e} Importeer een nieuw certificaat onder Bestand, of zet Ondertekenen uit."))?;
+            identity.check_usable(now()).map_err(|e| merel_i18n::tr_args("sign-cert-unusable", &[("error", e.to_string().into())]))?;
             merel_smime::sign_message(&identity, &raw, now()).map_err(|e| e.to_string())
         }
     }
@@ -112,11 +110,11 @@ pub fn outgoing(keys: &Keys, account: &Account, draft: &Draft, raw: Vec<u8>) -> 
     // The first step of an invitation goes out as it is: it carries a key and nothing secret,
     // and the other side has no key to encrypt to yet.
     if draft.chat.as_ref().and_then(|c| c.handshake.as_ref()).is_some_and(|h| h.step == "vc-request") {
-        return if pgp.is_some() && !draft.encrypt { Ok(raw) } else { Err("Zet eerst chat aan voor dit account.".into()) };
+        return if pgp.is_some() && !draft.encrypt { Ok(raw) } else { Err(merel_i18n::tr("chat-enable-short")) };
     }
     // A chat message only ever goes out encrypted with OpenPGP, as Delta Chat reads it.
     if draft.chat.is_some() {
-        let Some(key) = pgp.filter(|_| draft.encrypt) else { return Err("Een chatbericht gaat alleen versleuteld de deur uit.".into()) };
+        let Some(key) = pgp.filter(|_| draft.encrypt) else { return Err(merel_i18n::tr("chat-encrypted-only")) };
         let missing = keys.openpgp.missing(recipients.iter().copied(), now());
         if !missing.is_empty() {
             return Err(crate::chat::missing_chat_text(&missing));
@@ -135,13 +133,13 @@ pub fn outgoing(keys: &Keys, account: &Account, draft: &Draft, raw: Vec<u8>) -> 
         return Ok(signed);
     }
     let Some(own) = own else {
-        return Err("Dit account heeft geen certificaat of OpenPGP-sleutel. Importeer er een onder Bestand om versleuteld te mailen, of zet Versleutelen uit.".into());
+        return Err(merel_i18n::tr("encrypt-no-key"));
     };
     let missing = missing(&keys.people, recipients.iter().copied());
     if !missing.is_empty() {
         return Err(format!("{} Zet Versleutelen uit om toch te verzenden.", missing_text(&missing)));
     }
-    let people = keys.people.read().map_err(|_| "De certificaten kunnen niet worden gelezen.".to_string())?;
+    let people = keys.people.read().map_err(|_| merel_i18n::tr("certs-unreadable"))?;
     // The sender's own copy too, so Verzonden items stays readable.
     let mut certificates = vec![own];
     certificates.extend(recipients.iter().filter_map(|a| people.get(&a.email().to_lowercase()).cloned()));
@@ -186,11 +184,7 @@ fn missing<'a>(people: &People, addresses: impl Iterator<Item = &'a Address>) ->
 
 /// Says which recipients cannot get encrypted mail yet.
 pub fn missing_text(missing: &[String]) -> String {
-    format!(
-        "Van {} is nog geen certificaat of sleutel bekend, dus het bericht kan niet versleuteld naar {} worden gestuurd. Vraag om eerst een ondertekend bericht te sturen.",
-        missing.join(", "),
-        if missing.len() == 1 { "die ontvanger" } else { "deze ontvangers" }
-    )
+    merel_i18n::tr_args("encrypt-missing", &[("who", missing.join(", ").into()), ("count", missing.len().into())])
 }
 
 /// The body of `raw` for `account_id`: an encrypted message is opened with the account's
@@ -231,7 +225,7 @@ fn open_body(identities: &Identities, account_id: &str, raw: &[u8]) -> Body {
     let identity = identities.read().ok().and_then(|map| map.get(account_id).cloned());
     let opened = match identity {
         Some(identity) => merel_smime::decrypt_message(&identity, raw).map_err(|e| e.to_string()),
-        None => Err("Dit bericht is versleuteld, maar je hebt voor dit account geen certificaat met privésleutel. Importeer het onder Bestand om het te lezen.".to_string()),
+        None => Err(merel_i18n::tr("decrypt-no-cert")),
     };
     match opened {
         Ok(plain) => {
@@ -276,16 +270,16 @@ impl Engine {
     /// `message_id` is its sender's, though its issuer is not one the computer trusts. It is
     /// kept like a learned one, and the message shows as trusted.
     pub fn trust_certificate(&mut self, message_id: &str) -> Result<(), String> {
-        let from = self.session.message(message_id).map(|m| m.from.email().to_lowercase()).ok_or("Dit bericht is er niet meer.")?;
+        let from = self.session.message(message_id).map(|m| m.from.email().to_lowercase()).ok_or_else(|| merel_i18n::tr("message-gone-short"))?;
         if self.in_junk(message_id) {
-            return Err("Een certificaat uit Ongewenste e-mail wordt niet vertrouwd.".into());
+            return Err(merel_i18n::tr("cert-from-junk"));
         }
-        let Some(body) = self.session.bodies.get_mut(message_id) else { return Err("Dit bericht is er niet meer.".into()) };
+        let Some(body) = self.session.bodies.get_mut(message_id) else { return Err(merel_i18n::tr("message-gone-short")) };
         let Some(Signature::Valid { signer, certificate, trusted, .. }) = body.signature.as_mut() else {
-            return Err("Dit bericht heeft geen geldige handtekening.".into());
+            return Err(merel_i18n::tr("cert-no-signature"));
         };
         if !signer.covers(&from) {
-            return Err(format!("Dit certificaat is niet van de afzender {from}."));
+            return Err(merel_i18n::tr_args("cert-not-sender", &[("from", from.as_str().into())]));
         }
         *trusted = true;
         let certificate = certificate.clone();
@@ -347,21 +341,17 @@ impl Engine {
     /// Imports the PKCS#12 file `bytes` (.p12, .pfx) as the certificate of `account_id`,
     /// replacing the one it had. The certificate must be issued for the account's address.
     pub fn import_certificate(&mut self, account_id: &str, bytes: &[u8], password: &str) -> Result<CertInfo, String> {
-        let account = self
-            .session
-            .accounts
-            .iter()
-            .find(|a| a.id == account_id && a.id != SAMPLE_ACCOUNT)
-            .ok_or_else(|| "Dit account bestaat niet meer.".to_string())?;
+        let account =
+            self.session.accounts.iter().find(|a| a.id == account_id && a.id != SAMPLE_ACCOUNT).ok_or_else(|| merel_i18n::tr("account-gone"))?;
         if bytes.len() > MAX_PKCS12 {
-            return Err("Dit bestand is te groot voor een certificaat.".into());
+            return Err(merel_i18n::tr("cert-too-big"));
         }
         let identity = Identity::from_pkcs12(bytes, password, now()).map_err(|e| e.to_string())?;
         let email = account.address.email().to_string();
         if !identity.info().covers(&email) {
             let issued = identity.info().emails.join(", ");
-            let issued = if issued.is_empty() { "geen e-mailadres".to_string() } else { issued };
-            return Err(format!("Dit certificaat is uitgegeven voor {issued}, niet voor {email}."));
+            let issued = if issued.is_empty() { merel_i18n::tr("no-email-address") } else { issued };
+            return Err(merel_i18n::tr_args("cert-wrong-address", &[("issued", issued.into()), ("email", email.to_string().into())]));
         }
         // An account added in this run may not have its cache directory yet.
         if !self.cache.has_store() {
@@ -369,13 +359,9 @@ impl Engine {
         }
         self.cache
             .save_identity(account_id, KeyKind::Certificate, &identity.to_stored())
-            .map_err(|e| format!("Het certificaat kan niet worden bewaard: {e}"))?;
+            .map_err(|e| merel_i18n::tr_args("cert-not-stored-because", &[("error", e.to_string().into())]))?;
         let info = identity.info().clone();
-        self.keys
-            .identities
-            .write()
-            .map_err(|_| "Het certificaat kan niet worden bewaard.".to_string())?
-            .insert(account_id.to_string(), Arc::new(identity));
+        self.keys.identities.write().map_err(|_| merel_i18n::tr("cert-not-stored"))?.insert(account_id.to_string(), Arc::new(identity));
         Ok(info)
     }
 
@@ -524,7 +510,7 @@ mod tests {
             m.from = jij();
         }
         e.session.bodies.insert(id.clone(), forged);
-        assert_eq!(e.trust_certificate("weg"), Err("Dit bericht is er niet meer.".to_string()));
+        assert_eq!(e.trust_certificate("weg"), Err(merel_i18n::tr("message-gone-short")));
         e.trust_certificate(&id).unwrap();
         assert!(matches!(e.session.bodies[&id].signature, Some(Signature::Valid { trusted: true, .. })));
         assert!(e.missing_certificates("a1", &[jij()]).is_empty());

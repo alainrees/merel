@@ -6,6 +6,7 @@
 //! links are switched off, the way Outlook does it: drawn, with their target on hover, but a
 //! click does nothing.
 
+use crate::i18n::tr;
 use egui::{Color32, CornerRadius, Margin, RichText, Sense, Stroke, Ui, vec2};
 
 use merel_html::{Block, Cell, Document, Image, ImageSource, Inline, Style};
@@ -41,7 +42,9 @@ struct Painter<'a> {
 }
 
 /// What hovering a switched-off link says, before its target.
-pub const LINKS_OFF: &str = "Uitgeschakeld in Ongewenste e-mail";
+pub fn links_off() -> String {
+    tr("junk-links-off")
+}
 
 /// Draws `doc`. `key` names the message, so its pictures are cached under their own names;
 /// `links` false draws the links but lets no click through.
@@ -49,7 +52,7 @@ pub fn show(ui: &mut Ui, t: &Tokens, doc: &Document, images: &[InlineImage], key
     let mut p = Painter { t, images, key, remote, links, data_images: 0, remote_images: 0, clicked: None };
     p.blocks(ui, &doc.blocks);
     if doc.truncated {
-        ui.label(RichText::new("[Bericht afgekapt: te groot om volledig te tonen.]").color(t.text_dim).size(12.0));
+        ui.label(RichText::new(tr("message-truncated")).color(t.text_dim).size(12.0));
     }
     p.clicked
 }
@@ -132,7 +135,7 @@ impl Painter<'_> {
                     }
                     Inline::Link { href, text, style } if !self.links => {
                         let rich = self.rich(text, *style, size).color(self.t.text_dim).underline();
-                        ui.add(egui::Label::new(rich).wrap()).on_hover_text(format!("{LINKS_OFF}: {href}"));
+                        ui.add(egui::Label::new(rich).wrap()).on_hover_text(format!("{}: {href}", links_off()));
                     }
                     Inline::Link { href, text, style } => {
                         let rich = self.rich(text, *style, size).color(self.t.accent_text).underline();
@@ -185,16 +188,16 @@ impl Painter<'_> {
         let (uri, bytes) = match &image.source {
             ImageSource::Inline(cid) => match self.images.iter().find(|i| i.cid == *cid) {
                 Some(i) => (format!("bytes://merel/{}/cid/{cid}", self.key), i.bytes.clone()),
-                None => return self.placeholder(ui, "🖼 Afbeelding ontbreekt", &image.alt),
+                None => return self.placeholder(ui, &tr("image-missing"), &image.alt),
             },
             ImageSource::Data { bytes, .. } => {
                 self.data_images += 1;
                 (format!("bytes://merel/{}/data/{}", self.key, self.data_images), bytes.clone())
             }
             ImageSource::Remote(url) => match self.remote.and_then(|r| r.get(url)) {
-                None => return self.placeholder(ui, "🖼 Afbeelding van internet geblokkeerd", &image.alt),
-                Some(Load::Pending) => return self.placeholder(ui, "🖼 Afbeelding laden…", &image.alt),
-                Some(Load::Failed) => return self.placeholder(ui, "🖼 Afbeelding kon niet worden geladen", &image.alt),
+                None => return self.placeholder(ui, &tr("image-blocked"), &image.alt),
+                Some(Load::Pending) => return self.placeholder(ui, &tr("image-loading"), &image.alt),
+                Some(Load::Failed) => return self.placeholder(ui, &tr("image-failed"), &image.alt),
                 Some(Load::Ready(bytes)) => {
                     self.remote_images += 1;
                     (format!("bytes://merel/{}/remote/{}", self.key, self.remote_images), bytes.clone())

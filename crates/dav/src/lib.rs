@@ -59,7 +59,7 @@ impl DavMailbox {
         let password = match credential {
             Credential::Password(p) => p.clone(),
             Credential::OAuth2(_) => {
-                return Err(MailboxError::Protocol("CalDAV/CardDAV werkt met een wachtwoord, niet met een browser-aanmelding".into()));
+                return Err(MailboxError::Protocol(merel_i18n::tr("dav-needs-password")));
             }
         };
         let imap = ImapClient::connect(server, username, credential).map_err(MailboxError::from)?;
@@ -192,10 +192,10 @@ fn origin(url: &str) -> String {
 /// Why a request did not get through, in words for the person.
 fn reason_of(e: &ureq::Error) -> String {
     match e {
-        ureq::Error::Timeout(_) => "de server reageert niet".into(),
-        ureq::Error::HostNotFound => "de servernaam is niet gevonden; klopt het adres?".into(),
-        ureq::Error::ConnectionFailed => "de server weigert de verbinding".into(),
-        ureq::Error::Tls(_) | ureq::Error::Rustls(_) => format!("de beveiligde verbinding mislukte ({e})"),
+        ureq::Error::Timeout(_) => merel_i18n::tr("dav-no-answer"),
+        ureq::Error::HostNotFound => merel_i18n::tr("dav-host-not-found"),
+        ureq::Error::ConnectionFailed => merel_i18n::tr("dav-refused"),
+        ureq::Error::Tls(_) | ureq::Error::Rustls(_) => merel_i18n::tr_args("tls-failed", &[("detail", e.to_string().into())]),
         other => other.to_string(),
     }
 }
@@ -279,7 +279,9 @@ fn ical_time(ts: i64) -> String {
     DateTime::<Utc>::from_timestamp(ts, 0).map(|d| d.format("%Y%m%dT%H%M%SZ").to_string()).unwrap_or_else(|| "19700101T000000Z".into())
 }
 
-const RECURRING: &str = "Herhalende afspraken kun je nog niet bewerken in Merel; doe dat in de agenda van je aanbieder.";
+fn recurring() -> String {
+    merel_i18n::tr("dav-recurring")
+}
 
 impl DavClient {
     /// Finds the calendars and address books behind `dav` for `username`.
@@ -310,7 +312,7 @@ impl DavClient {
         let home = client.home(&principal, CALDAV, "calendar-home-set")?;
         client.calendars = client.collections(&home, CALDAV, "calendar")?;
         if client.calendars.iter().all(|c| !c.events) {
-            return Err(MailboxError::Protocol(format!("Geen agenda gevonden op {}.", host_of(&calendar_base))));
+            return Err(MailboxError::Protocol(merel_i18n::tr_args("dav-no-calendar-at", &[("host", host_of(&calendar_base).into())])));
         }
         let contacts_base = dav.contacts.as_deref().map(with_slash);
         let addressbooks = client
@@ -319,7 +321,12 @@ impl DavClient {
             .and_then(|home| client.collections(&home, CARDDAV, "addressbook"));
         client.addressbooks = match (addressbooks, &contacts_base) {
             (Ok(books), _) => books,
-            (Err(e), Some(base)) => return Err(MailboxError::Protocol(format!("Adresboek op {}: {e}", host_of(base)))),
+            (Err(e), Some(base)) => {
+                return Err(MailboxError::Protocol(merel_i18n::tr_args(
+                    "dav-address-book-at",
+                    &[("host", host_of(base).into()), ("error", e.to_string().into())],
+                )));
+            }
             (Err(e), None) => {
                 log::info!("no address book next to the calendar: {e}");
                 Vec::new()
@@ -344,7 +351,7 @@ impl DavClient {
         let mut url = url.to_string();
         for _ in 0..=MAX_REDIRECTS {
             if !url.starts_with("https://") {
-                return Err(MailboxError::Protocol("de DAV-server moet via https bereikbaar zijn".into()));
+                return Err(MailboxError::Protocol(merel_i18n::tr("dav-needs-https")));
             }
             let mut builder = ureq::http::Request::builder().method(method).uri(&url).header("Authorization", &auth);
             for (k, v) in headers {
@@ -409,7 +416,7 @@ impl DavClient {
                 prop.and_then(|p| descendant(p, DAV, "current-user-principal")).and_then(|c| child(c, DAV, "href")).map(|h| text(Some(h)))
             })
             .filter(|h| !h.is_empty())
-            .ok_or_else(|| MailboxError::Protocol(format!("{} noemt geen gebruikersprincipal", host_of(base))))?;
+            .ok_or_else(|| MailboxError::Protocol(merel_i18n::tr_args("dav-no-principal", &[("host", host_of(base).into())])))?;
         Ok(resolve(&start, &href))
     }
 
@@ -425,7 +432,9 @@ impl DavClient {
             .into_iter()
             .find_map(|(_, p)| p.and_then(|p| descendant(p, ns, prop)).and_then(|h| child(h, DAV, "href")).map(|h| text(Some(h))))
             .filter(|h| !h.is_empty())
-            .ok_or_else(|| MailboxError::Protocol(format!("{} noemt geen {prop}", host_of(principal))))?;
+            .ok_or_else(|| {
+                MailboxError::Protocol(merel_i18n::tr_args("dav-no-prop", &[("host", host_of(principal).into()), ("prop", prop.to_string().into())]))
+            })?;
         Ok(with_slash(&resolve(principal, &href)))
     }
 
@@ -441,8 +450,8 @@ impl DavClient {
         match status {
             200..=299 => Ok(()),
             401 => Err(MailboxError::Login),
-            404 | 410 => Err(MailboxError::Protocol("Dit item bestaat niet meer op de server.".into())),
-            412 => Err(MailboxError::Protocol("Dit item is op de server gewijzigd; vernieuw en probeer het opnieuw.".into())),
+            404 | 410 => Err(MailboxError::Protocol(merel_i18n::tr("dav-gone"))),
+            412 => Err(MailboxError::Protocol(merel_i18n::tr("dav-changed"))),
             s => Err(MailboxError::Protocol(format!("HTTP {s} op {}", clean_text(&host_of(url))))),
         }
     }
@@ -538,7 +547,7 @@ impl DavClient {
             .iter()
             .find(|c| if todos { c.todos } else { c.events })
             .map(|c| c.url.clone())
-            .ok_or_else(|| MailboxError::Protocol(if todos { "Deze server bewaart geen taken.".into() } else { "Geen agenda gevonden.".into() }))
+            .ok_or_else(|| MailboxError::Protocol(if todos { merel_i18n::tr("dav-no-tasks") } else { merel_i18n::tr("dav-no-calendar") }))
     }
 
     /// Creates or replaces one calendar object (`VEVENT` or `VTODO`).
@@ -562,14 +571,14 @@ impl DavClient {
         }
         let (_, url, recurrence) = parse_id(id)?;
         if recurrence.is_some() {
-            return Err(MailboxError::Protocol(RECURRING.into()));
+            return Err(MailboxError::Protocol(recurring()));
         }
         let resource = self.resource(&url)?;
         let mut roots = ical::parse(&resource.text);
-        let Some(root) = roots.first_mut() else { return Err(MailboxError::Protocol("Dit item is niet leesbaar.".into())) };
+        let Some(root) = roots.first_mut() else { return Err(MailboxError::Protocol(merel_i18n::tr("dav-unreadable"))) };
         let instances = root.all(kind);
         if instances.len() != 1 || instances.iter().any(|c| c.prop("RRULE").is_some() || c.prop("RDATE").is_some()) {
-            return Err(MailboxError::Protocol(RECURRING.into()));
+            return Err(MailboxError::Protocol(recurring()));
         }
         if let Some(inner) = root.find_mut(kind) {
             write(inner);
@@ -693,7 +702,7 @@ impl ItemStore for DavClient {
                         .addressbooks
                         .first()
                         .map(|b| b.url.clone())
-                        .ok_or_else(|| MailboxError::Protocol("Geen adresboek gevonden op de server.".into()))?;
+                        .ok_or_else(|| MailboxError::Protocol(merel_i18n::tr("dav-no-address-book")))?;
                     let uid = self.uid();
                     let mut card = ical::new_card(&uid);
                     ical::write_contact(&mut card, c);
@@ -705,7 +714,7 @@ impl ItemStore for DavClient {
                 let resource = self.resource(&url)?;
                 let mut roots = ical::parse(&resource.text);
                 let Some(card) = roots.iter_mut().find(|r| r.name == "VCARD") else {
-                    return Err(MailboxError::Protocol("Dit contact is niet leesbaar.".into()));
+                    return Err(MailboxError::Protocol(merel_i18n::tr("dav-contact-unreadable")));
                 };
                 ical::write_contact(card, c);
                 let card = card.clone();
@@ -718,7 +727,7 @@ impl ItemStore for DavClient {
     fn delete(&mut self, id: &str) -> Result<()> {
         let (_, url, recurrence) = parse_id(id)?;
         if recurrence.is_some() {
-            return Err(MailboxError::Protocol(RECURRING.into()));
+            return Err(MailboxError::Protocol(recurring()));
         }
         let (status, _, _) = self.request("DELETE", &url, &[], None)?;
         self.seen.remove(&url);

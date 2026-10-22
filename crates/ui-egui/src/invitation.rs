@@ -1,11 +1,12 @@
 //! A meeting invitation in the mail, as Outlook shows one: a `text/calendar` part (an `.ics`)
 //! with a VEVENT becomes a strip over the message that names the appointment, when and where
-//! it is and who asks, with "Aan agenda toevoegen", which opens the appointment window filled in
+//! it is and who asks, with "Add to calendar", which opens the appointment window filled in
 //! so the person looks before it is saved. Nothing is answered to the organiser: Merel sends
 //! no acceptance, it only files the appointment in the person's own calendar. An answer to a
 //! meeting the person organises shows as Outlook shows it, "Sanne heeft geaccepteerd", and the
 //! engine has already filed it in the appointment.
 
+use crate::i18n::tr;
 use chrono::NaiveDateTime;
 use egui::RichText;
 use merel_dav::ical;
@@ -66,7 +67,7 @@ pub fn parse(text: &str) -> Option<Invitation> {
         return None;
     }
     let answer = meetings::parse_answer(text);
-    Some(Invitation { title: if title.trim().is_empty() { "(zonder titel)".to_string() } else { title }, appointment, organizer, cancelled, answer })
+    Some(Invitation { title: if title.trim().is_empty() { tr("no-title") } else { title }, appointment, organizer, cancelled, answer })
 }
 
 /// "woensdag 21 oktober 10:00–11:30", or the days of an all-day appointment.
@@ -89,13 +90,13 @@ pub fn when(a: &Appointment) -> String {
 pub fn answer_head(answer: &Answer) -> String {
     let who = answer.attendee.label();
     if answer.proposed.is_some() {
-        return format!("{who} stelt een nieuwe tijd voor");
+        return crate::i18n::tr_args("answer-proposed", &[("who", who.into())]);
     }
     match answer.attendee.response {
-        Response::Accepted => format!("{who} heeft geaccepteerd"),
-        Response::Tentative => format!("{who} heeft voorlopig geaccepteerd"),
-        Response::Declined => format!("{who} heeft afgewezen"),
-        Response::None => format!("{who} heeft nog niet besloten"),
+        Response::Accepted => crate::i18n::tr_args("answer-accepted", &[("who", who.into())]),
+        Response::Tentative => crate::i18n::tr_args("answer-tentative", &[("who", who.into())]),
+        Response::Declined => crate::i18n::tr_args("answer-declined", &[("who", who.into())]),
+        Response::None => crate::i18n::tr_args("answer-none", &[("who", who.into())]),
     }
 }
 
@@ -113,12 +114,14 @@ fn answer_strip(ui: &mut egui::Ui, t: &Tokens, inv: &Invitation, answer: &Answer
             ui.label(RichText::new(format!("{}: {}", answer_head(answer), inv.title)).strong().color(t.text));
         });
         let mut line = match (answer.proposed, &inv.appointment) {
-            (Some((start, end)), Some(a)) => format!("Voorgesteld: {}", when(&Appointment { start, end, all_day: false, ..a.clone() })),
+            (Some((start, end)), Some(a)) => {
+                crate::i18n::tr_args("answer-proposed-time", &[("when", when(&Appointment { start, end, all_day: false, ..a.clone() }).into())])
+            }
             (None, Some(a)) => when(a),
             _ => String::new(),
         };
-        let filed = if filed { "Bijgewerkt in je agenda." } else { "Deze vergadering staat niet in je agenda." };
-        line = if line.is_empty() { filed.to_string() } else { format!("{line} · {filed}") };
+        let filed = if filed { tr("answer-filed") } else { tr("answer-not-filed") };
+        line = if line.is_empty() { filed.clone() } else { format!("{line} · {filed}") };
         ui.label(RichText::new(line).size(12.0).color(t.text_dim));
     });
 }
@@ -134,7 +137,11 @@ pub fn strip(ui: &mut egui::Ui, t: &Tokens, inv: &Invitation, in_calendar: bool)
     let mut add = None;
     let fill = if inv.cancelled { t.flag.gamma_multiply(0.15) } else { t.checked };
     egui::Frame::new().fill(fill).corner_radius(4).inner_margin(8).show(ui, |ui| {
-        let head = if inv.cancelled { format!("📅 Afspraak geannuleerd: {}", inv.title) } else { format!("📅 Uitnodiging: {}", inv.title) };
+        let head = if inv.cancelled {
+            crate::i18n::tr_args("invitation-cancelled", &[("title", inv.title.as_str().into())])
+        } else {
+            crate::i18n::tr_args("invitation-head", &[("title", inv.title.as_str().into())])
+        };
         ui.label(RichText::new(head).strong().color(if inv.cancelled { t.flag } else { t.text }));
         if let Some(a) = &inv.appointment {
             let mut line = when(a);
@@ -142,22 +149,18 @@ pub fn strip(ui: &mut egui::Ui, t: &Tokens, inv: &Invitation, in_calendar: bool)
                 line.push_str(&format!(" · {}", a.location.trim()));
             }
             if !inv.organizer.is_empty() {
-                line.push_str(&format!(" · van {}", inv.organizer));
+                line.push_str(&format!(" · {}", crate::i18n::tr_args("reminder-from", &[("name", inv.organizer.as_str().into())])));
             }
             ui.label(RichText::new(line).size(12.0).color(t.text_dim));
             ui.horizontal_wrapped(|ui| {
                 if in_calendar {
-                    ui.label(RichText::new("Staat al in je agenda.").size(12.0).color(t.text_dim));
-                } else if ui
-                    .small_button("Aan agenda toevoegen")
-                    .on_hover_text("Opent het afspraakvenster, ingevuld; de organisator krijgt geen antwoord.")
-                    .clicked()
-                {
+                    ui.label(RichText::new(tr("invitation-in-calendar")).size(12.0).color(t.text_dim));
+                } else if ui.small_button(tr("invitation-add")).on_hover_text(tr("invitation-add-hint")).clicked() {
                     add = Some(a.clone());
                 }
             });
         } else if !inv.organizer.is_empty() {
-            ui.label(RichText::new(format!("van {}", inv.organizer)).size(12.0).color(t.text_dim));
+            ui.label(RichText::new(crate::i18n::tr_args("reminder-from", &[("name", inv.organizer.as_str().into())])).size(12.0).color(t.text_dim));
         }
     });
     add

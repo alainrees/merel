@@ -1,12 +1,15 @@
 //! Outlook's "Dit bericht opnieuw verzenden": the message opens as a new one with the same
 //! recipients, subject, text and attachments, to send again, to someone else, or corrected.
 
+use crate::i18n::tr;
 use merel_model::{FolderKind, MessageHeader};
 
 use crate::MailApp;
 use crate::compose::{Compose, Kind, join};
 
-pub const RESEND: &str = "Opnieuw verzenden";
+pub fn resend() -> String {
+    tr("resend")
+}
 
 impl MailApp {
     /// Opens `m` as a new message: the same recipients, subject, text, urgency and attachments,

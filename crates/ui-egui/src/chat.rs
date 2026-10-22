@@ -225,7 +225,7 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.horizontal(|ui| {
                 let width = (ui.available_width() - 40.0).max(60.0);
                 helder::search_field(ui, t, &mut app.chat.query, egui::Id::new(SEARCH_BOX), &tr("chat-search"), width);
-                if !app.chat.query.is_empty() && helder::quiet(ui, t, |ui| helder::icon_button(ui, t, Icon::X, crate::SEARCH_CLEAR)).clicked() {
+                if !app.chat.query.is_empty() && helder::quiet(ui, t, |ui| helder::icon_button(ui, t, Icon::X, &crate::search_clear())).clicked() {
                     app.chat.query.clear();
                 }
             });

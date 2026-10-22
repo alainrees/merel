@@ -3,6 +3,7 @@
 //! while they are hidden. The "⋯" after a row (or a right click on it) picks another colour, and
 //! for a calendar on this computer renames or deletes it. "Agenda toevoegen" makes a new one.
 
+use crate::i18n::tr;
 use egui::{Color32, FontId, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
@@ -13,11 +14,19 @@ use crate::helder::{self, Icon};
 use crate::{MailApp, Tokens};
 
 /// The button above the list, and the title of its window.
-pub const ADD: &str = "Agenda toevoegen";
-pub const RENAME: &str = "Naam van agenda wijzigen";
-pub const DELETE: &str = "Agenda verwijderen";
+pub fn add() -> String {
+    tr("calendars-add")
+}
+pub fn rename() -> String {
+    tr("calendars-rename")
+}
+pub fn delete() -> String {
+    tr("calendars-delete")
+}
 /// The button that confirms deleting.
-pub const CONFIRM_DELETE: &str = "Ja, verwijderen";
+pub fn confirm_delete() -> String {
+    tr("calendars-confirm-delete")
+}
 
 /// The window that is open over the list, if any.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,12 +38,17 @@ pub enum Dialog {
 
 /// The label of a row's options button.
 pub fn options_label(name: &str) -> String {
-    format!("Opties voor {name}")
+    crate::i18n::tr_args("calendars-options", &[("name", name.into())])
 }
 
 /// The label of a colour in the colour menu.
 pub fn color_label(name: &str) -> String {
-    format!("Kleur {name}")
+    crate::i18n::tr_args("calendars-color", &[("name", color_name(name).into())])
+}
+
+/// The name of one of the calendar colours (named in Dutch in the model) in the current language.
+pub fn color_name(dutch: &str) -> String {
+    tr(&format!("calendar-color-{}", dutch.to_lowercase()))
 }
 
 /// The colour a picked RGB value shows in.
@@ -63,7 +77,7 @@ pub fn paint_dot(p: &egui::Painter, center: egui::Pos2, radius: f32, color: Colo
 /// "Agenda toevoegen" and the list of calendars, each with its dot and options.
 pub fn list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     helder::quiet(ui, t, |ui| {
-        if helder::tool_button(ui, t, Icon::CalendarPlus, ADD).clicked() {
+        if helder::tool_button(ui, t, Icon::CalendarPlus, &add()).clicked() {
             let used: Vec<[u8; 3]> = app.engine.session.calendars.iter().map(|c| c.color).collect();
             let color = CALENDAR_COLORS.iter().map(|(_, c)| *c).find(|c| !used.contains(c)).unwrap_or(CALENDAR_COLORS[0].1);
             app.calendar.dialog = Some(Dialog::Add { name: String::new(), color });
@@ -73,15 +87,15 @@ pub fn list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let locals = calendars.iter().filter(|c| c.account_id.is_none()).count();
     // As Outlook: the calendars of each account under its address, the ones that live only
     // here under a heading of their own, so two accounts with the same name stay apart.
-    let mut groups: Vec<(String, Vec<&Calendar>)> = vec![(LOCAL.into(), calendars.iter().filter(|c| c.account_id.is_none()).collect())];
+    let mut groups: Vec<(String, Vec<&Calendar>)> = vec![(local(), calendars.iter().filter(|c| c.account_id.is_none()).collect())];
     for a in &app.engine.session.accounts {
         groups.push((a.address.email().to_string(), calendars.iter().filter(|c| c.account_id.as_deref() == Some(a.id.as_str())).collect()));
     }
     for (heading, members) in groups.into_iter().filter(|(_, m)| !m.is_empty()) {
         ui.add_space(6.0);
         let r = ui.add(egui::Label::new(RichText::new(&heading).size(12.0).strong().color(t.text_dim)).truncate());
-        if heading == LOCAL {
-            r.on_hover_text(LOCAL_HINT);
+        if *heading == local() {
+            r.on_hover_text(local_hint());
         }
         ui.add_space(2.0);
         for c in members {
@@ -91,9 +105,13 @@ pub fn list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 }
 
 /// The heading over the calendars that live only on this computer.
-pub const LOCAL: &str = "Op deze computer";
+pub fn local() -> String {
+    tr("calendars-local")
+}
 /// What that heading explains on hover.
-pub const LOCAL_HINT: &str = "Deze agenda's staan alleen op deze computer en worden niet met een account gedeeld.";
+pub fn local_hint() -> String {
+    tr("calendars-local-hint")
+}
 
 /// One calendar: a click on the dot or the name shows or hides its appointments.
 fn row(app: &mut MailApp, ui: &mut Ui, t: &Tokens, c: &Calendar, deletable: bool) {
@@ -115,7 +133,7 @@ fn row(app: &mut MailApp, ui: &mut Ui, t: &Tokens, c: &Calendar, deletable: bool
         let text = Rect::from_min_max(pos2(rect.left() + 30.0, rect.top()), pos2(rect.right() - 4.0, rect.bottom()));
         let galley = p.layout_no_wrap(c.name.clone(), FontId::proportional(14.0), t.text);
         p.with_clip_rect(text).galley(pos2(text.left(), rect.center().y - galley.size().y / 2.0), galley, t.text);
-        let r = r.on_hover_text(crate::calendar::CALENDAR_TICK_HINT);
+        let r = r.on_hover_text(crate::calendar::calendar_tick_hint());
         if r.clicked() {
             app.view.set_calendar_shown(&c.id, !shown);
             let ctx = ui.ctx().clone();
@@ -134,7 +152,7 @@ fn row(app: &mut MailApp, ui: &mut Ui, t: &Tokens, c: &Calendar, deletable: bool
 
 /// The colours to pick from, then rename and delete for a calendar on this computer.
 fn menu(app: &mut MailApp, ui: &mut Ui, t: &Tokens, c: &Calendar, deletable: bool) {
-    ui.label(RichText::new("Kleur").size(12.0).strong().color(t.text_dim));
+    ui.label(RichText::new(tr("calendars-color-heading")).size(12.0).strong().color(t.text_dim));
     egui::Grid::new(("calendar-colors", &c.id)).spacing(vec2(4.0, 4.0)).show(ui, |ui| {
         for (i, (name, color)) in CALENDAR_COLORS.iter().enumerate() {
             let (rect, r) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::click());
@@ -145,7 +163,7 @@ fn menu(app: &mut MailApp, ui: &mut Ui, t: &Tokens, c: &Calendar, deletable: boo
                 ui.painter().circle_stroke(rect.center(), 12.0, Stroke::new(2.0, t.text));
             }
             paint_dot(ui.painter(), rect.center(), 9.0, rgb(*color), on);
-            if r.on_hover_text(*name).clicked() {
+            if r.on_hover_text(color_name(name)).clicked() {
                 app.run("calendar.color", json!({ "id": c.id, "color": color }));
                 ui.close();
             }
@@ -158,11 +176,11 @@ fn menu(app: &mut MailApp, ui: &mut Ui, t: &Tokens, c: &Calendar, deletable: boo
         return;
     }
     ui.separator();
-    if ui.add(egui::Button::image_and_text(Icon::Pencil.image(helder::ICON, t.text), "Naam wijzigen…")).clicked() {
+    if ui.add(egui::Button::image_and_text(Icon::Pencil.image(helder::ICON, t.text), tr("calendars-rename-menu"))).clicked() {
         app.calendar.dialog = Some(Dialog::Rename { id: c.id.clone(), name: c.name.clone() });
         ui.close();
     }
-    if deletable && ui.add(egui::Button::image_and_text(Icon::Trash.image(helder::ICON, t.text), "Verwijderen…")).clicked() {
+    if deletable && ui.add(egui::Button::image_and_text(Icon::Trash.image(helder::ICON, t.text), tr("calendars-delete-menu"))).clicked() {
         app.calendar.dialog = Some(Dialog::Delete { id: c.id.clone(), name: c.name.clone() });
         ui.close();
     }
@@ -170,9 +188,9 @@ fn menu(app: &mut MailApp, ui: &mut Ui, t: &Tokens, c: &Calendar, deletable: boo
 
 fn describe(e: &CommandError) -> String {
     match e {
-        CommandError::Param("name") => "Geef de agenda een naam.".into(),
-        CommandError::Param("id") => "Deze agenda kan dat niet; er blijft altijd één agenda op deze computer.".into(),
-        CommandError::NotFound => "Deze agenda bestaat niet meer.".into(),
+        CommandError::Param("name") => tr("calendars-need-name"),
+        CommandError::Param("id") => tr("calendars-keep-one"),
+        CommandError::NotFound => tr("calendars-gone"),
         e => e.to_string(),
     }
 }
@@ -181,16 +199,16 @@ fn describe(e: &CommandError) -> String {
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(mut dialog) = app.calendar.dialog.take() else { return };
     let title = match &dialog {
-        Dialog::Add { .. } => ADD,
-        Dialog::Rename { .. } => RENAME,
-        Dialog::Delete { .. } => DELETE,
+        Dialog::Add { .. } => add(),
+        Dialog::Rename { .. } => rename(),
+        Dialog::Delete { .. } => delete(),
     };
     let mut ok = false;
     let mut close = false;
-    if helder::popup(ctx, t, "calendar-dialog", title, 320.0, |ui| {
+    if helder::popup(ctx, t, "calendar-dialog", &title, 320.0, |ui| {
         match &mut dialog {
             Dialog::Add { name, color } => {
-                let r = helder::underline_field(ui, t, name, "Naam van de agenda", 280.0, false);
+                let r = helder::underline_field(ui, t, name, &tr("calendars-name"), 280.0, false);
                 if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     ok = true;
                 }
@@ -204,43 +222,39 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                             ui.painter().circle_stroke(rect.center(), 12.0, Stroke::new(2.0, t.text));
                         }
                         paint_dot(ui.painter(), rect.center(), 9.0, rgb(c), *color == c);
-                        if r.on_hover_text(label).clicked() {
+                        if r.on_hover_text(color_name(label)).clicked() {
                             *color = c;
                         }
                     }
                 });
             }
             Dialog::Rename { name, .. } => {
-                let r = helder::underline_field(ui, t, name, "Naam van de agenda", 280.0, false);
+                let r = helder::underline_field(ui, t, name, &tr("calendars-name"), 280.0, false);
                 if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     ok = true;
                 }
             }
             Dialog::Delete { id, name } => {
                 let count = app.engine.session.appointments.iter().filter(|a| &a.calendar_id == id).count();
-                let text = match count {
-                    0 => format!("Agenda \"{name}\" verwijderen?"),
-                    1 => format!("Agenda \"{name}\" en de afspraak erin verwijderen? Dit kan niet ongedaan worden gemaakt."),
-                    n => format!("Agenda \"{name}\" en de {n} afspraken erin verwijderen? Dit kan niet ongedaan worden gemaakt."),
-                };
+                let text = crate::i18n::tr_args("calendars-delete-question", &[("name", name.as_str().into()), ("count", count.into())]);
                 ui.add(egui::Label::new(RichText::new(text).color(t.text)).wrap());
             }
         }
         if name_too_long(&dialog) {
-            ui.label(RichText::new(format!("Een naam is hooguit {MAX_CALENDAR_NAME} tekens.")).size(12.0).color(t.flag));
+            ui.label(RichText::new(crate::i18n::tr_args("calendars-name-too-long", &[("max", MAX_CALENDAR_NAME.into())])).size(12.0).color(t.flag));
         }
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             let primary = match &dialog {
-                Dialog::Add { .. } => "Toevoegen",
-                Dialog::Rename { .. } => "Opslaan",
-                Dialog::Delete { .. } => CONFIRM_DELETE,
+                Dialog::Add { .. } => tr("add"),
+                Dialog::Rename { .. } => tr("save"),
+                Dialog::Delete { .. } => confirm_delete(),
             };
-            if helder::primary_button(ui, t, if matches!(dialog, Dialog::Delete { .. }) { Icon::Trash } else { Icon::Save }, primary).clicked() {
+            if helder::primary_button(ui, t, if matches!(dialog, Dialog::Delete { .. }) { Icon::Trash } else { Icon::Save }, &primary).clicked() {
                 ok = true;
             }
             helder::quiet(ui, t, |ui| {
-                if ui.button(RichText::new("Annuleren").size(14.0).color(t.text)).clicked() {
+                if ui.button(RichText::new(tr("cancel")).size(14.0).color(t.text)).clicked() {
                     close = true;
                 }
             });

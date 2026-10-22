@@ -225,7 +225,7 @@ pub enum FolderKind {
 pub struct Folder {
     pub id: String,
     pub account_id: String,
-    /// What the list shows: the last path segment, or the Dutch name of a special folder.
+    /// What the list shows: the last path segment, or the name of a special folder in the app's language.
     pub name: String,
     /// The mailbox name on the server, as given to SELECT.
     pub path: String,
@@ -237,15 +237,25 @@ pub struct Folder {
 }
 
 impl FolderKind {
-    /// The name Outlook (Dutch) gives a special folder; `None` for ordinary ones.
-    pub fn dutch_name(self) -> Option<&'static str> {
+    /// The name Outlook gives a special folder, in the app's language; `None` for ordinary ones.
+    pub fn local_name(self) -> Option<String> {
+        self.key().map(merel_i18n::tr)
+    }
+
+    /// Whether `name` is what this special folder is called in one of the app's languages, so a
+    /// name kept from another language can be told from one the user chose.
+    pub fn is_standard_name(self, name: &str) -> bool {
+        self.key().is_some_and(|k| merel_i18n::Language::ALL.iter().any(|&l| merel_i18n::plain(l, k).as_deref() == Some(name)))
+    }
+
+    fn key(self) -> Option<&'static str> {
         Some(match self {
-            FolderKind::Inbox => "Postvak IN",
-            FolderKind::Drafts => "Concepten",
-            FolderKind::Sent => "Verzonden items",
-            FolderKind::Archive => "Archief",
-            FolderKind::Junk => "Ongewenste e-mail",
-            FolderKind::Deleted => "Verwijderde items",
+            FolderKind::Inbox => "folder-kind-inbox",
+            FolderKind::Drafts => "folder-kind-drafts",
+            FolderKind::Sent => "folder-kind-sent",
+            FolderKind::Archive => "folder-kind-archive",
+            FolderKind::Junk => "folder-kind-junk",
+            FolderKind::Deleted => "folder-kind-deleted",
             FolderKind::Other => return None,
         })
     }
@@ -465,11 +475,11 @@ pub struct StoredDraft {
 impl StoredDraft {
     /// The message as it would go out: the address lines parsed, at least one recipient.
     pub fn to_draft(&self) -> Result<Draft, String> {
-        let to = parse_address_list(&self.to).map_err(|_| "Controleer de adressen bij Aan.".to_string())?;
-        let cc = parse_address_list(&self.cc).map_err(|_| "Controleer de adressen bij CC.".to_string())?;
-        let bcc = parse_address_list(&self.bcc).map_err(|_| "Controleer de adressen bij BCC.".to_string())?;
+        let to = parse_address_list(&self.to).map_err(|_| merel_i18n::tr("draft-check-to"))?;
+        let cc = parse_address_list(&self.cc).map_err(|_| merel_i18n::tr("draft-check-cc"))?;
+        let bcc = parse_address_list(&self.bcc).map_err(|_| merel_i18n::tr("draft-check-bcc"))?;
         if to.is_empty() {
-            return Err("Vul ten minste één ontvanger in bij Aan.".into());
+            return Err(merel_i18n::tr("draft-need-to"));
         }
         let rich = self.rich.clone().map(|mut r| {
             r.fit(&self.body);

@@ -231,7 +231,7 @@ impl Job {
     }
 
     pub fn stage(&self) -> Stage {
-        self.stage.lock().map(|s| s.clone()).unwrap_or(Stage::Failed("Bijwerken is onderbroken.".into()))
+        self.stage.lock().map(|s| s.clone()).unwrap_or(Stage::Failed(crate::i18n::tr("install-interrupted")))
     }
 
     /// Stops a download; nothing is installed after this.
@@ -242,9 +242,9 @@ impl Job {
 
 /// A folder of our own for the download, emptied first; readable by this user only.
 fn work_dir() -> Result<PathBuf, String> {
-    let dir = directories::ProjectDirs::from("nl", "", "Merel").ok_or("Er is geen map om de download in te zetten.")?.cache_dir().join("update");
+    let dir = directories::ProjectDirs::from("nl", "", "Merel").ok_or_else(|| crate::i18n::tr("install-no-dir"))?.cache_dir().join("update");
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("De downloadmap kon niet worden gemaakt: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| crate::i18n::tr_args("install-dir-failed", &[("error", e.to_string().into())]))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -272,12 +272,12 @@ fn fetch_small(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, String> {
     agent
         .get(url)
         .call()
-        .map_err(|e| format!("Downloaden is niet gelukt ({e})."))?
+        .map_err(|e| crate::i18n::tr_args("install-download-failed", &[("error", e.to_string().into())]))?
         .body_mut()
         .with_config()
         .limit(MAX_LIST_BYTES)
         .read_to_vec()
-        .map_err(|e| format!("Downloaden is niet gelukt ({e})."))
+        .map_err(|e| crate::i18n::tr_args("install-download-failed", &[("error", e.to_string().into())]))
 }
 
 fn run(install: &Install, version: &str, key: &str, cancel: &AtomicBool, report: &dyn Fn(Stage)) -> Result<Restart, String> {
@@ -285,10 +285,9 @@ fn run(install: &Install, version: &str, key: &str, cancel: &AtomicBool, report:
     let name = install.asset(version);
     // The list first: without a good signature nothing else is downloaded.
     let sums = fetch_small(&agent, &release_file(version, merel_sign::SUMS))?;
-    let signature = fetch_small(&agent, &release_file(version, merel_sign::SIGNATURE))
-        .map_err(|_| "Deze versie heeft geen handtekening, dus Merel installeert hem niet zelf.".to_owned())?;
+    let signature = fetch_small(&agent, &release_file(version, merel_sign::SIGNATURE)).map_err(|_| crate::i18n::tr("install-unsigned"))?;
     let signature = String::from_utf8_lossy(&signature);
-    merel_sign::verify(key, &sums, &signature).map_err(|_| "De handtekening van deze versie klopt niet. Er is niets geïnstalleerd.".to_owned())?;
+    merel_sign::verify(key, &sums, &signature).map_err(|_| crate::i18n::tr("install-bad-signature"))?;
 
     let dir = work_dir()?;
     let file = dir.join(&name);
@@ -296,10 +295,10 @@ fn run(install: &Install, version: &str, key: &str, cancel: &AtomicBool, report:
     report(Stage::Checking);
     merel_sign::check(key, &sums, &signature, &name, &hash).map_err(|_| {
         let _ = std::fs::remove_file(&file);
-        "De download komt niet overeen met de ondertekende versie. Er is niets geïnstalleerd.".to_owned()
+        crate::i18n::tr("install-mismatch")
     })?;
     if cancel.load(Ordering::Relaxed) {
-        return Err("Geannuleerd.".into());
+        return Err(crate::i18n::tr("install-cancelled"));
     }
     report(Stage::Installing);
     let restart = match install {
@@ -313,11 +312,11 @@ fn run(install: &Install, version: &str, key: &str, cancel: &AtomicBool, report:
 
 /// Downloads `url` to `to`, reporting progress; returns the SHA-256 of what came in.
 fn download(agent: &ureq::Agent, url: &str, to: &Path, cancel: &AtomicBool, report: &dyn Fn(Stage)) -> Result<String, String> {
-    let failed = |e: &dyn std::fmt::Display| format!("Downloaden is niet gelukt ({e}).");
+    let failed = |e: &dyn std::fmt::Display| crate::i18n::tr_args("install-download-failed", &[("error", e.to_string().into())]);
     let mut response = agent.get(url).call().map_err(|e| failed(&e))?;
     let total = response.headers().get("content-length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
     if total.is_some_and(|t| t > MAX_INSTALLER_BYTES) {
-        return Err("Het installatiebestand is groter dan verwacht. Er is niets geïnstalleerd.".into());
+        return Err(crate::i18n::tr("install-too-big"));
     }
     let mut body = response.body_mut().with_config().limit(MAX_INSTALLER_BYTES).reader();
     let mut out = std::fs::File::create(to).map_err(|e| failed(&e))?;
@@ -326,7 +325,7 @@ fn download(agent: &ureq::Agent, url: &str, to: &Path, cancel: &AtomicBool, repo
     let mut done = 0u64;
     loop {
         if cancel.load(Ordering::Relaxed) {
-            return Err("Geannuleerd.".into());
+            return Err(crate::i18n::tr("install-cancelled"));
         }
         let n = body.read(&mut buffer).map_err(|e| failed(&e))?;
         if n == 0 {
@@ -343,8 +342,8 @@ fn download(agent: &ureq::Agent, url: &str, to: &Path, cancel: &AtomicBool, repo
 
 /// Puts the new AppImage in the old one's place in one rename.
 fn replace_file(new: &Path, target: &Path) -> Result<(), String> {
-    let failed = |e: std::io::Error| format!("Installeren is niet gelukt ({e}).");
-    let dir = target.parent().ok_or("Installeren is niet gelukt.")?;
+    let failed = |e: std::io::Error| crate::i18n::tr_args("install-failed-because", &[("error", e.to_string().into())]);
+    let dir = target.parent().ok_or_else(|| crate::i18n::tr("install-failed"))?;
     let staging = dir.join(".Merel-update.AppImage");
     std::fs::copy(new, &staging).map_err(failed)?;
     #[cfg(unix)]
@@ -361,7 +360,7 @@ fn replace_file(new: &Path, target: &Path) -> Result<(), String> {
 /// Copies `Merel.app` out of the disk image next to `app`, then swaps the two.
 fn install_mac(dmg: &Path, app: &Path, dir: &Path) -> Result<(), String> {
     let mount = dir.join("mnt");
-    std::fs::create_dir_all(&mount).map_err(|e| format!("Installeren is niet gelukt ({e})."))?;
+    std::fs::create_dir_all(&mount).map_err(|e| crate::i18n::tr_args("install-failed-because", &[("error", e.to_string().into())]))?;
     command(
         "hdiutil",
         &[
@@ -375,7 +374,7 @@ fn install_mac(dmg: &Path, app: &Path, dir: &Path) -> Result<(), String> {
         ],
     )?;
     let copied = (|| {
-        let parent = app.parent().ok_or("Installeren is niet gelukt.")?;
+        let parent = app.parent().ok_or_else(|| crate::i18n::tr("install-failed"))?;
         let staging = parent.join(".Merel-update.app");
         let _ = std::fs::remove_dir_all(&staging);
         // ditto keeps the app's signature and attributes intact.
@@ -389,18 +388,25 @@ fn install_mac(dmg: &Path, app: &Path, dir: &Path) -> Result<(), String> {
 /// Moves `new` into `target`'s place, keeping the old one until the new one is there.
 fn swap(new: &Path, target: &Path, old: &Path) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(old);
-    std::fs::rename(target, old).map_err(|e| format!("Merel kon zichzelf niet vervangen ({e}). Staat Merel in de map Programma's?"))?;
+    std::fs::rename(target, old).map_err(|e| crate::i18n::tr_args("install-replace-failed-where", &[("error", e.to_string().into())]))?;
     if let Err(e) = std::fs::rename(new, target) {
         let _ = std::fs::rename(old, target);
-        return Err(format!("Merel kon zichzelf niet vervangen ({e})."));
+        return Err(crate::i18n::tr_args("install-replace-failed", &[("error", e.to_string().into())]));
     }
     let _ = std::fs::remove_dir_all(old);
     Ok(())
 }
 
 fn command(program: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
-    let status = std::process::Command::new(program).args(args).status().map_err(|e| format!("Installeren is niet gelukt ({program}: {e})."))?;
-    if status.success() { Ok(()) } else { Err(format!("Installeren is niet gelukt ({program} gaf {status}).")) }
+    let status = std::process::Command::new(program)
+        .args(args)
+        .status()
+        .map_err(|e| crate::i18n::tr_args("install-failed-because", &[("error", format!("{program}: {e}").into())]))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(crate::i18n::tr_args("install-program-failed", &[("program", program.to_string().into()), ("status", status.to_string().into())]))
+    }
 }
 
 #[cfg(test)]

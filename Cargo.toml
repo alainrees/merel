@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "apps/*"]
 
 [workspace.package]
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -31,6 +31,7 @@ merel-touch-bar = { path = "crates/touch-bar" }
 merel-window-buttons = { path = "crates/window-buttons" }
 merel-sign = { path = "crates/sign" }
 merel-notify = { path = "crates/notify" }
+merel-i18n = { path = "crates/i18n" }
 
 # foundation
 thiserror = "2"

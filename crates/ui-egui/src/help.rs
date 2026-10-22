@@ -8,7 +8,9 @@ use crate::helder::{self, Icon};
 use crate::{MailApp, Tokens, key_hint, ribbon_action_hint};
 
 /// The button in "Over Merel" that shows the folder with this computer's settings.
-pub const OPEN_SETTINGS: &str = "Instellingenmap openen";
+pub fn open_settings() -> String {
+    tr("help-open-settings")
+}
 
 /// The project page, for the "Op GitHub" button.
 pub const REPOSITORY: &str = "https://github.com/alainrees/merel";
@@ -21,9 +23,11 @@ pub fn version_line() -> String {
 
 fn version_text(version: &str, commit: &str, date: &str) -> String {
     match (commit.is_empty(), date.is_empty()) {
-        (true, _) => format!("Versie {version}"),
-        (false, true) => format!("Versie {version} (build {commit})"),
-        (false, false) => format!("Versie {version} (build {commit} van {date})"),
+        (true, _) => crate::i18n::tr_args("version-plain", &[("version", version.into())]),
+        (false, true) => crate::i18n::tr_args("version-build", &[("version", version.into()), ("commit", commit.into())]),
+        (false, false) => {
+            crate::i18n::tr_args("version-build-date", &[("version", version.into()), ("commit", commit.into()), ("date", date.into())])
+        }
     }
 }
 
@@ -36,36 +40,36 @@ pub enum HelpWindow {
 
 /// The shortcuts of the mail module, as the "Sneltoetsen" window lists them: the keys (with
 /// Cmd or Ctrl for this computer) and what they do.
-pub fn shortcut_list() -> Vec<(String, &'static str)> {
+pub fn shortcut_list() -> Vec<(String, String)> {
     vec![
-        ("↑ / ↓".to_string(), "Vorig of volgend bericht in de lijst"),
-        ("Enter / dubbelklik".to_string(), "Geselecteerd bericht in een eigen venster openen"),
-        (format!("{} / Shift+klik", key_hint("klik")), "Meer berichten selecteren, los of als reeks; de acties gelden dan voor alle"),
-        (key_hint("A"), "Alle berichten in de lijst selecteren"),
-        ("Delete".to_string(), "Geselecteerd bericht verwijderen"),
-        ("Ctrl+Delete".to_string(), "Gesprek negeren: dit en volgende berichten erin naar Verwijderde items"),
-        (if cfg!(target_os = "macos") { "Ctrl+E" } else { "Backspace" }.to_string(), "Geselecteerd bericht archiveren"),
-        (key_hint("N"), "Nieuwe e-mail"),
-        (key_hint("Shift+M"), "Nieuwe e-mail, vanuit elke module"),
-        (key_hint("Shift+A"), "Nieuwe afspraak, vanuit elke module"),
-        (key_hint("Shift+C"), "Nieuw contact, vanuit elke module"),
-        (key_hint("Shift+K"), "Nieuwe taak, vanuit elke module"),
-        (key_hint("R"), "Beantwoorden"),
-        (key_hint("Shift+R"), "Allen beantwoorden"),
-        (key_hint("Alt+R"), "Beantwoorden met vergaderverzoek"),
-        (key_hint("F"), "Doorsturen"),
-        (key_hint("Alt+F"), "Doorsturen als bijlage (het bericht gaat mee als .eml-bestand)"),
-        (key_hint("Shift+V"), "Verplaatsen naar een map"),
-        (key_hint("P"), "Afdrukken via de browser (in de agenda: de open dag, week of maand)"),
-        (key_hint("S"), "Opslaan als .eml-bestand in de map Downloads"),
-        (key_hint("G"), "Ga naar datum (in de agenda)"),
-        (key_hint("Q"), "Markeren als gelezen"),
-        (key_hint("U"), "Markeren als ongelezen"),
-        (key_hint("E"), "Naar het zoekveld (ook in agenda, contacten en taken)"),
-        ("van: aan: onderwerp:".to_string(), "Zoekwoorden in het zoekveld, zoals in Outlook; ook heeft:bijlage, is:ongelezen en is:gemarkeerd"),
-        (key_hint("Shift+1") + " … 9", "Snelle stap 1 tot 9 van het account"),
-        ("Esc".to_string(), "Berichtvenster sluiten, anders zoekopdracht wissen (ook in agenda, contacten en taken)"),
-        ("F5".to_string(), "Map vernieuwen"),
+        ("↑ / ↓".to_string(), tr("shortcut-1")),
+        (tr("key-enter-double-click"), tr("shortcut-2")),
+        (format!("{} / Shift+{}", key_hint(&tr("key-click")), tr("key-click")), tr("shortcut-3")),
+        (key_hint("A"), tr("shortcut-4")),
+        ("Delete".to_string(), tr("shortcut-5")),
+        ("Ctrl+Delete".to_string(), tr("shortcut-6")),
+        (if cfg!(target_os = "macos") { "Ctrl+E" } else { "Backspace" }.to_string(), tr("shortcut-7")),
+        (key_hint("N"), tr("shortcut-8")),
+        (key_hint("Shift+M"), tr("shortcut-9")),
+        (key_hint("Shift+A"), tr("shortcut-10")),
+        (key_hint("Shift+C"), tr("shortcut-11")),
+        (key_hint("Shift+K"), tr("shortcut-12")),
+        (key_hint("R"), tr("shortcut-13")),
+        (key_hint("Shift+R"), tr("shortcut-14")),
+        (key_hint("Alt+R"), tr("shortcut-15")),
+        (key_hint("F"), tr("shortcut-16")),
+        (key_hint("Alt+F"), tr("shortcut-17")),
+        (key_hint("Shift+V"), tr("shortcut-18")),
+        (key_hint("P"), tr("shortcut-19")),
+        (key_hint("S"), tr("shortcut-20")),
+        (key_hint("G"), tr("shortcut-21")),
+        (key_hint("Q"), tr("shortcut-22")),
+        (key_hint("U"), tr("shortcut-23")),
+        (key_hint("E"), tr("shortcut-24")),
+        (tr("search-keywords"), tr("shortcut-25")),
+        (key_hint("Shift+1") + " … 9", tr("shortcut-26")),
+        ("Esc".to_string(), tr("shortcut-27")),
+        ("F5".to_string(), tr("shortcut-28")),
     ]
 }
 
@@ -78,7 +82,7 @@ fn settings_folder(app: &MailApp) -> Option<std::path::PathBuf> {
 fn open_outside(app: &mut MailApp, target: &str) {
     if let Err(e) = open::that_detached(target) {
         log::warn!("could not open {target}: {e}");
-        app.notice = Some(crate::Notice::error(format!("Openen is niet gelukt: {target}")));
+        app.notice = Some(crate::Notice::error(crate::i18n::tr_args("updates-open-failed", &[("page", target.into())])));
     }
 }
 
@@ -113,8 +117,8 @@ pub fn ribbon(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(which) = app.help else { return };
     let close = match which {
-        HelpWindow::Shortcuts => helder::dialog(ctx, t, "Sneltoetsen", 560.0, |ui| {
-            ui.label(RichText::new("In de mailmodule, zolang je niet in een tekstveld typt.").size(12.0).color(t.text_dim));
+        HelpWindow::Shortcuts => helder::dialog(ctx, t, &tr("help-shortcuts"), 560.0, |ui| {
+            ui.label(RichText::new(tr("help-shortcuts-where")).size(12.0).color(t.text_dim));
             ui.add_space(6.0);
             helder::card_frame(t).inner_margin(16).show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -129,52 +133,46 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                 });
             });
         }),
-        HelpWindow::About => helder::dialog(ctx, t, "Over Merel", 460.0, |ui| {
+        HelpWindow::About => helder::dialog(ctx, t, &tr("help-about"), 460.0, |ui| {
             helder::card_frame(t).inner_margin(20).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        helder::app_badge(ui);
-                        ui.add_space(8.0);
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("Merel").size(18.0).strong().color(t.text));
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(version_line()).size(14.0).color(t.text_dim));
-                                helder::quiet(ui, t, |ui| {
-                                    if ui
-                                        .add(egui::Button::new(RichText::new("Kopiëren").size(12.0).color(t.accent_text)).frame_when_inactive(false))
-                                        .on_hover_text("De versie naar het klembord, handig bij een foutmelding")
-                                        .clicked()
-                                    {
-                                        ui.ctx().copy_text(format!("Merel {}", version_line().trim_start_matches("Versie ")));
-                                    }
-                                });
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    helder::app_badge(ui);
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("Merel").size(18.0).strong().color(t.text));
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(version_line()).size(14.0).color(t.text_dim));
+                            helder::quiet(ui, t, |ui| {
+                                if ui
+                                    .add(egui::Button::new(RichText::new(tr("help-copy")).size(12.0).color(t.accent_text)).frame_when_inactive(false))
+                                    .on_hover_text(tr("help-copy-hint"))
+                                    .clicked()
+                                {
+                                    ui.ctx().copy_text(format!("Merel {}", version_line()));
+                                }
                             });
                         });
                     });
-                    ui.add_space(12.0);
-                    helder::paragraph(ui, t, "Mail, agenda, contacten en taken voor de desktop, met de werkwijze van Outlook. Geschreven in Rust met egui; één programma voor macOS, Windows en Linux.");
-                    ui.add_space(8.0);
-                    helder::paragraph(ui, t, "Veiligheid en privacy voorop: mail kan geen scripts uitvoeren, afbeeldingen van internet worden pas geladen als je erom vraagt, verbindingen lopen altijd over TLS, wachtwoorden staan in de sleutelhanger van het systeem en de offline cache is versleuteld.");
-                    ui.add_space(8.0);
-                    let mut auto = app.view.update_check == Some(true);
-                    if helder::toggle(ui, t, &mut auto, crate::updates::AUTO)
-                        .on_hover_text("Merel vraagt dan eens per dag bij GitHub naar de nieuwste versie; er gaat niets anders mee dan die vraag")
-                        .changed()
-                    {
-                        app.view.update_check = Some(auto);
-                        app.save_view(ctx);
-                    }
-                    if let Some(f) = settings_folder(app) {
-                        helder::quiet(ui, t, |ui| {
-                            if helder::tool_button(ui, t, Icon::FolderOpen, OPEN_SETTINGS)
-                                .on_hover_text("De map met je accounts, agenda, regels en de versleutelde cache")
-                                .clicked()
-                            {
-                                open_outside(app, &f.to_string_lossy());
-                            }
-                        });
-                    }
                 });
+                ui.add_space(12.0);
+                helder::paragraph(ui, t, &tr("help-about-1"));
+                ui.add_space(8.0);
+                helder::paragraph(ui, t, &tr("help-about-2"));
+                ui.add_space(8.0);
+                let mut auto = app.view.update_check == Some(true);
+                if helder::toggle(ui, t, &mut auto, &crate::updates::auto()).on_hover_text(tr("help-auto-hint")).changed() {
+                    app.view.update_check = Some(auto);
+                    app.save_view(ctx);
+                }
+                if let Some(f) = settings_folder(app) {
+                    helder::quiet(ui, t, |ui| {
+                        if helder::tool_button(ui, t, Icon::FolderOpen, &open_settings()).on_hover_text(tr("help-settings-hint")).clicked() {
+                            open_outside(app, &f.to_string_lossy());
+                        }
+                    });
+                }
+            });
         }),
     };
     if close {

@@ -5,6 +5,7 @@
 //! meeting called off get a cancellation. Nothing goes out without the person pressing the
 //! button that says so.
 
+use crate::i18n::tr;
 use merel_dav::ical::{self, Prop};
 use merel_engine::{SAMPLE_ACCOUNT, Session};
 use merel_model::{Account, Address, Appointment, Attendee, Draft, DraftAttachment, Meeting, Response, parse_address_list};
@@ -12,26 +13,40 @@ use merel_model::{Account, Address, Appointment, Attendee, Draft, DraftAttachmen
 use crate::compose::{Compose, Kind};
 use crate::invitation;
 
-pub const FIELD: &str = "Genodigden";
-pub const OPTIONAL: &str = "Optioneel";
+pub fn field() -> String {
+    tr("meeting-attendees")
+}
+pub fn optional() -> String {
+    tr("meeting-optional")
+}
 pub const FILE: &str = "uitnodiging.ics";
 pub const MIME: &str = "text/calendar; method=REQUEST; charset=utf-8";
 pub const CANCEL_FILE: &str = "annulering.ics";
 pub const CANCEL_MIME: &str = "text/calendar; method=CANCEL; charset=utf-8";
-pub const NO_ACCOUNT: &str = "Voeg eerst een echt account toe om een uitnodiging te kunnen versturen; de afspraak is nog niet opgeslagen.";
-pub const BAD_ADDRESSES: &str = "Controleer de adressen bij Genodigden.";
+pub fn no_account() -> String {
+    tr("meeting-no-account")
+}
+pub fn bad_addresses() -> String {
+    tr("meeting-bad-addresses")
+}
 /// The button in the window of a saved appointment that passes it on by mail.
-pub const FORWARD: &str = "Doorsturen…";
+pub fn forward_label() -> String {
+    tr("meeting-forward")
+}
 pub const FORWARD_FILE: &str = "afspraak.ics";
 pub const FORWARD_MIME: &str = "text/calendar; method=PUBLISH; charset=utf-8";
 /// The main button of a meeting that changed since it went out.
-pub const SEND_UPDATE: &str = "Update verzenden";
+pub fn send_update() -> String {
+    tr("meeting-send-update")
+}
 /// The delete button of a meeting the person organises.
-pub const CANCEL_MEETING: &str = "Vergadering annuleren";
+pub fn cancel_meeting() -> String {
+    tr("meeting-cancel")
+}
 
 /// The addresses typed under Genodigden, or what is wrong with them; empty for no invitation.
 pub fn attendees(text: &str) -> Result<Vec<Address>, String> {
-    parse_address_list(text).map_err(|_| BAD_ADDRESSES.to_string())
+    parse_address_list(text).map_err(|_| bad_addresses())
 }
 
 /// An address as an attendee who has not answered yet.
@@ -98,12 +113,12 @@ pub fn ics(a: &Appointment, method: &str, attendees: &[Attendee]) -> String {
 
 /// The text of the message, for mail programs that do not read the calendar part.
 fn words(a: &Appointment, opening: &str, closing: &str) -> String {
-    let mut body = format!("{opening}{}\nWanneer: {}\n", a.title.trim(), invitation::when(a));
+    let mut body = format!("{opening}{}\n{}\n", a.title.trim(), crate::i18n::tr_args("meeting-when", &[("when", invitation::when(a).into())]));
     if !a.location.trim().is_empty() {
-        body.push_str(&format!("Waar: {}\n", a.location.trim()));
+        body.push_str(&format!("{}\n", crate::i18n::tr_args("meeting-where", &[("where", a.location.trim().into())])));
     }
     if let Some(o) = a.meeting.as_ref().and_then(organizer_of) {
-        body.push_str(&format!("Organisator: {}\n", mailbox(&o)));
+        body.push_str(&format!("{}\n", crate::i18n::tr_args("meeting-organizer", &[("who", mailbox(&o).into())])));
     }
     if !a.notes.trim().is_empty() {
         body.push_str(&format!("\n{}\n", a.notes.trim()));
@@ -121,11 +136,18 @@ pub fn request(a: &Appointment, update: bool) -> Option<Draft> {
     if to.is_empty() {
         return None;
     }
-    let (opening, subject) = if update { ("De afspraak is gewijzigd: ", "Bijgewerkt") } else { ("Je bent uitgenodigd voor: ", "Uitnodiging") };
-    let body = words(a, opening, "\nDe bijgevoegde uitnodiging zet de afspraak in je agenda.\n");
+    let (opening, subject) =
+        if update { (tr("meeting-changed"), "meeting-updated-subject") } else { (tr("meeting-invited"), "meeting-invitation-subject") };
+    let body = words(a, &format!("{opening} "), &format!("\n{}\n", tr("meeting-request-closing")));
     let mut attachment = DraftAttachment::new(FILE, ics(a, "REQUEST", people).into_bytes());
     attachment.mime = MIME.to_string();
-    Some(Draft { to, subject: format!("{subject}: {}", a.title.trim()), body, attachments: vec![attachment], ..Draft::default() })
+    Some(Draft {
+        to,
+        subject: crate::i18n::tr_args(subject, &[("title", a.title.trim().into())]),
+        body,
+        attachments: vec![attachment],
+        ..Draft::default()
+    })
 }
 
 /// The cancellation to `people` (all attendees when the meeting is called off, or those taken
@@ -135,20 +157,26 @@ pub fn cancellation(a: &Appointment, people: &[Attendee]) -> Option<Draft> {
     if to.is_empty() || a.meeting.is_none() {
         return None;
     }
-    let body = words(a, "Deze afspraak gaat niet door: ", "\nMet de bijgevoegde annulering haal je hem uit je agenda.\n");
+    let body = words(a, &format!("{} ", tr("meeting-called-off")), &format!("\n{}\n", tr("meeting-cancel-closing")));
     let mut attachment = DraftAttachment::new(CANCEL_FILE, ics(a, "CANCEL", people).into_bytes());
     attachment.mime = CANCEL_MIME.to_string();
-    Some(Draft { to, subject: format!("Geannuleerd: {}", a.title.trim()), body, attachments: vec![attachment], ..Draft::default() })
+    Some(Draft {
+        to,
+        subject: crate::i18n::tr_args("meeting-cancelled-subject", &[("title", a.title.trim().into())]),
+        body,
+        attachments: vec![attachment],
+        ..Draft::default()
+    })
 }
 
 /// "Geaccepteerd", "Voorlopig", … for an answer.
-pub fn response_label(r: Response) -> &'static str {
-    match r {
-        Response::Accepted => "Geaccepteerd",
-        Response::Tentative => "Voorlopig",
-        Response::Declined => "Afgewezen",
-        Response::None => "Nog geen reactie",
-    }
+pub fn response_label(r: Response) -> String {
+    tr(match r {
+        Response::Accepted => "response-accepted",
+        Response::Tentative => "response-tentative",
+        Response::Declined => "response-declined",
+        Response::None => "response-none",
+    })
 }
 
 /// The mark before an attendee's name: ✔, ?, ✕, or nothing yet.
@@ -165,9 +193,9 @@ pub fn response_mark(r: Response) -> &'static str {
 pub fn tally_line(m: &Meeting) -> String {
     let [yes, maybe, no, none] = m.tally();
     let mut parts = Vec::new();
-    for (n, what) in [(yes, "geaccepteerd"), (maybe, "voorlopig"), (no, "afgewezen"), (none, "nog geen reactie")] {
+    for (n, key) in [(yes, "tally-accepted"), (maybe, "tally-tentative"), (no, "tally-declined"), (none, "tally-none")] {
         if n > 0 {
-            parts.push(format!("{n} {what}"));
+            parts.push(crate::i18n::tr_args(key, &[("count", n.into())]));
         }
     }
     parts.join(", ")
@@ -190,17 +218,26 @@ pub fn published(a: &Appointment) -> String {
 /// appointment in words, and as an attachment the reader can put in their own calendar. The
 /// recipients are left to the person.
 pub fn forward(a: &Appointment) -> Draft {
-    let mut body = format!("Afspraak: {}\nWanneer: {}\n", a.title.trim(), invitation::when(a));
+    let mut body = format!(
+        "{}\n{}\n",
+        crate::i18n::tr_args("meeting-appointment", &[("title", a.title.trim().into())]),
+        crate::i18n::tr_args("meeting-when", &[("when", invitation::when(a).into())])
+    );
     if !a.location.trim().is_empty() {
-        body.push_str(&format!("Waar: {}\n", a.location.trim()));
+        body.push_str(&format!("{}\n", crate::i18n::tr_args("meeting-where", &[("where", a.location.trim().into())])));
     }
     if !a.notes.trim().is_empty() {
         body.push_str(&format!("\n{}\n", a.notes.trim()));
     }
-    body.push_str("\nMet de bijgevoegde afspraak zet je hem in je eigen agenda.\n");
+    body.push_str(&format!("\n{}\n", tr("meeting-forward-closing")));
     let mut attachment = DraftAttachment::new(FORWARD_FILE, published(a).into_bytes());
     attachment.mime = FORWARD_MIME.to_string();
-    Draft { subject: format!("Doorgestuurd: {}", a.title.trim()), body, attachments: vec![attachment], ..Draft::default() }
+    Draft {
+        subject: crate::i18n::tr_args("meeting-forwarded-subject", &[("title", a.title.trim().into())]),
+        body,
+        attachments: vec![attachment],
+        ..Draft::default()
+    }
 }
 
 /// The compose window for passing `a` on, from the calendar's account (else the current one),
@@ -311,7 +348,7 @@ mod tests {
         assert_eq!(tally_line(m), "2 nog geen reactie");
         m.attendees[0].response = Response::Accepted;
         assert_eq!(tally_line(m), "1 geaccepteerd, 1 nog geen reactie");
-        assert_eq!((response_mark(Response::Declined), response_label(Response::Tentative)), ("✕", "Voorlopig"));
+        assert_eq!((response_mark(Response::Declined), response_label(Response::Tentative).as_str()), ("✕", "Voorlopig"));
     }
 
     #[test]
@@ -337,7 +374,7 @@ mod tests {
     fn the_attendee_line_parses() {
         assert!(attendees("  ").unwrap().is_empty());
         assert_eq!(attendees("Sanne <sanne@example.org>; ravi@example.org").unwrap().len(), 2);
-        assert_eq!(attendees("sanne@"), Err(BAD_ADDRESSES.to_string()));
+        assert_eq!(attendees("sanne@"), Err(bad_addresses()));
     }
 
     #[test]

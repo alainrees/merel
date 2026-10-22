@@ -1,13 +1,18 @@
 //! Urgency, as Outlook's "Hoge urgentie" and "Lage urgentie": the choice in the compose window,
 //! the mark in the message list and the strip over the message.
 
+use crate::i18n::tr;
 use egui::{Color32, RichText, Ui};
 use merel_model::Importance;
 
 use crate::Tokens;
 
-pub const HIGH_STRIP: &str = "Dit bericht is met hoge urgentie verzonden.";
-pub const LOW_STRIP: &str = "Dit bericht is met lage urgentie verzonden.";
+pub fn high_strip() -> String {
+    tr("importance-high-strip")
+}
+pub fn low_strip() -> String {
+    tr("importance-low-strip")
+}
 
 /// The mark the list shows before the date: a red "!" for high, a blue arrow for low.
 pub fn mark(importance: Importance, t: &Tokens) -> Option<(&'static str, Color32)> {
@@ -21,8 +26,8 @@ pub fn mark(importance: Importance, t: &Tokens) -> Option<(&'static str, Color32
 /// The strip over the message, as Outlook shows it; nothing for normal importance.
 pub fn strip(ui: &mut Ui, t: &Tokens, importance: Importance) {
     let (text, fill) = match importance {
-        Importance::High => (HIGH_STRIP, t.flag.gamma_multiply(0.15)),
-        Importance::Low => (LOW_STRIP, t.checked),
+        Importance::High => (&high_strip(), t.flag.gamma_multiply(0.15)),
+        Importance::Low => (&low_strip(), t.checked),
         Importance::Normal => return,
     };
     egui::Frame::new().fill(fill).corner_radius(crate::helder::CONTROL_RADIUS).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
@@ -41,9 +46,9 @@ pub fn strip(ui: &mut Ui, t: &Tokens, importance: Importance) {
 /// always hears the current choice.
 pub fn subject_menu(ui: &mut Ui, t: &Tokens, importance: &mut Importance) {
     let (text, label, color) = match *importance {
-        Importance::High => ("Urgentie: hoog", "Urgentie: hoog", t.flag),
-        Importance::Low => ("Urgentie: laag", "Urgentie: laag", t.accent_text),
-        Importance::Normal => ("Urgentie", "Urgentie: normaal", t.text_dim),
+        Importance::High => (tr("importance-high"), tr("importance-high"), t.flag),
+        Importance::Low => (tr("importance-low"), tr("importance-low"), t.accent_text),
+        Importance::Normal => (tr("importance"), tr("importance-normal"), t.text_dim),
     };
     let button = egui::Button::new(RichText::new(text).size(14.0).color(color))
         .right_text(crate::helder::Icon::ChevronDown.image(14.0, color))
@@ -52,18 +57,18 @@ pub fn subject_menu(ui: &mut Ui, t: &Tokens, importance: &mut Importance) {
         .min_size(egui::vec2(0.0, 28.0));
     let (r, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
         for (value, name, hint) in OPTIONS {
-            if ui.selectable_label(*importance == value, name).on_hover_text(hint).clicked() {
+            if ui.selectable_label(*importance == value, tr(name)).on_hover_text(tr(hint)).clicked() {
                 *importance = value;
                 ui.close();
             }
         }
     });
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
-    let _ = r.on_hover_text("Hoe dringend het bericht is; gaat mee als de kopteksten Importance en X-Priority.");
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+    let _ = r.on_hover_text(tr("importance-hint"));
 }
 
 const OPTIONS: [(Importance, &str, &str); 3] = [
-    (Importance::High, "Hoog", "De ontvanger ziet een rood uitroepteken bij het bericht, zoals in Outlook."),
-    (Importance::Normal, "Normaal", "Geen teken bij het bericht."),
-    (Importance::Low, "Laag", "De ontvanger ziet een blauw pijltje omlaag: het kan wachten."),
+    (Importance::High, "importance-option-high", "importance-option-high-hint"),
+    (Importance::Normal, "importance-option-normal", "importance-option-normal-hint"),
+    (Importance::Low, "importance-option-low", "importance-option-low-hint"),
 ];

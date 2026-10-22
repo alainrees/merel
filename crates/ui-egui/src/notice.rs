@@ -5,6 +5,7 @@
 //! and an error stays until it is closed. A saved file names only itself, never the full path,
 //! and offers to show it in Finder (Explorer, the file manager).
 
+use crate::i18n::tr;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
@@ -48,13 +49,13 @@ impl Tone {
     }
 
     /// What a screen reader says before the text, as the icon's colour does not reach it.
-    pub fn spoken(self) -> &'static str {
-        match self {
-            Tone::Success => "Gelukt",
-            Tone::Info => "Informatie",
-            Tone::Warning => "Let op",
-            Tone::Error => "Fout",
-        }
+    pub fn spoken(self) -> String {
+        tr(match self {
+            Tone::Success => "tone-success",
+            Tone::Info => "tone-info",
+            Tone::Warning => "tone-warning",
+            Tone::Error => "tone-error",
+        })
     }
 
     /// How many seconds the notice stays; `None` until it is closed.
@@ -126,16 +127,20 @@ pub fn folder_name(dir: &Path) -> String {
 }
 
 /// The button that shows a saved file, named after the system's file manager.
-pub const REVEAL: &str = if cfg!(target_os = "macos") {
-    "Toon in Finder"
-} else if cfg!(windows) {
-    "Toon in Verkenner"
-} else {
-    "Toon in map"
-};
+pub fn reveal_label() -> String {
+    tr(if cfg!(target_os = "macos") {
+        "reveal-finder"
+    } else if cfg!(windows) {
+        "reveal-explorer"
+    } else {
+        "reveal-folder"
+    })
+}
 
 /// The close button's accessible name.
-pub const CLOSE: &str = "Melding sluiten";
+pub fn close_label() -> String {
+    tr("notice-close")
+}
 
 /// How far below the commands the notice floats, and how wide it may grow.
 const GAP: f32 = 8.0;
@@ -185,10 +190,10 @@ pub fn toast(app: &mut MailApp, ctx: &egui::Context, t: &Tokens, top: f32) {
                             node.set_live(live);
                             node.set_label(format!("{}: {text}", tone.spoken()));
                         });
-                        if reveal.is_some() && helder::quiet(ui, t, |ui| helder::tool_button(ui, t, Icon::FolderOpen, REVEAL)).clicked() {
+                        if reveal.is_some() && helder::quiet(ui, t, |ui| helder::tool_button(ui, t, Icon::FolderOpen, &reveal_label())).clicked() {
                             show_file = true;
                         }
-                        if helder::quiet(ui, t, |ui| helder::icon_button(ui, t, Icon::X, CLOSE)).clicked() {
+                        if helder::quiet(ui, t, |ui| helder::icon_button(ui, t, Icon::X, &close_label())).clicked() {
                             close = true;
                         }
                     });
@@ -203,7 +208,7 @@ pub fn toast(app: &mut MailApp, ctx: &egui::Context, t: &Tokens, top: f32) {
     if show_file && let Some(path) = reveal {
         if let Err(e) = show_in_file_manager(&path) {
             log::warn!("could not show {}: {e}", path.display());
-            app.notice = Some(Notice::error(format!("{REVEAL} is niet gelukt.")));
+            app.notice = Some(Notice::error(crate::i18n::tr_args("reveal-failed", &[("what", reveal_label().into())])));
         }
         return;
     }

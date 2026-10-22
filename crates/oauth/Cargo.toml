@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+merel-i18n = { workspace = true }
 merel-secrets = { workspace = true }
 ureq = { workspace = true }
 rustls = { workspace = true }

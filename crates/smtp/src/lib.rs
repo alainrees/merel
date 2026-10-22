@@ -84,7 +84,7 @@ fn build_message(from: &Address, draft: &Draft, keep_bcc: bool) -> Result<Messag
         return Err(SmtpError::Build("Vul ten minste één ontvanger in.".into()));
     }
     if draft.attachment_bytes() > MAX_ATTACHMENTS {
-        return Err(SmtpError::Build(format!("De bijlagen zijn samen te groot; maximaal {} MB.", MAX_ATTACHMENTS / (1024 * 1024))));
+        return Err(SmtpError::Build(merel_i18n::tr_args("smtp-too-big", &[("mb", (MAX_ATTACHMENTS / (1024 * 1024)).into())])));
     }
     let mut b = Message::builder().from(mailbox(from)?).subject(draft.subject.trim()).date_now().message_id(Some(message_id(from)));
     for a in &draft.to {

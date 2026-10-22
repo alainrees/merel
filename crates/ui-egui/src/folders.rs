@@ -70,7 +70,7 @@ impl MailApp {
     pub fn rename_folder(&mut self, id: String) {
         let Some(f) = self.engine.session.folder(&id).cloned() else { return };
         if f.kind != FolderKind::Other {
-            self.notice = Some(crate::Notice::info(SPECIAL));
+            self.notice = Some(crate::Notice::info(special()));
             return;
         }
         self.folder_edit = Some(FolderEdit::new(Action::Rename { id }, f.name));
@@ -80,7 +80,7 @@ impl MailApp {
     pub fn delete_folder(&mut self, id: String) {
         let Some(f) = self.engine.session.folder(&id).cloned() else { return };
         if f.kind != FolderKind::Other {
-            self.notice = Some(crate::Notice::info(SPECIAL));
+            self.notice = Some(crate::Notice::info(special()));
             return;
         }
         self.folder_edit = Some(FolderEdit::new(Action::Delete { id }, f.name));
@@ -107,15 +107,17 @@ impl MailApp {
     }
 }
 
-const SPECIAL: &str = "Deze map hoort bij het account en kan niet worden hernoemd of verwijderd.";
+fn special() -> String {
+    tr("folder-special")
+}
 
 /// The error of a folder command, as a sentence.
 pub fn describe(e: &CommandError) -> String {
     match e {
-        CommandError::Param("name") => "Geef de map een naam van hoogstens 80 tekens, zonder / of \\, die nog niet bestaat.".to_string(),
-        CommandError::Param("id") => SPECIAL.to_string(),
-        CommandError::NoSelection => "Voeg eerst een account toe.".to_string(),
-        CommandError::NotFound => "Die map bestaat niet meer.".to_string(),
+        CommandError::Param("name") => tr("folder-name-rule").to_string(),
+        CommandError::Param("id") => special(),
+        CommandError::NoSelection => tr("folder-add-account-first").to_string(),
+        CommandError::NotFound => tr("folder-gone").to_string(),
         e => e.to_string(),
     }
 }
@@ -177,35 +179,35 @@ pub fn context_menu(app: &mut MailApp, r: &egui::Response, id: &str, kind: Folde
     let mut favorite = false;
     let pinned = app.is_favorite(id);
     r.context_menu(|ui| {
-        if ui.button(if pinned { "Uit Favorieten verwijderen" } else { "Toevoegen aan Favorieten" }).clicked() {
+        if ui.button(if pinned { tr("folder-unpin") } else { tr("folder-pin") }).clicked() {
             favorite = true;
             ui.close();
         }
         ui.separator();
-        if ui.button("Nieuwe map…").clicked() {
+        if ui.button(tr("folder-new-menu")).clicked() {
             action = Some(Action::Create { account_id: String::new(), parent: Some(id.to_string()) });
             ui.close();
         }
         if kind == FolderKind::Other {
-            if ui.button("Naam wijzigen…").clicked() {
+            if ui.button(tr("folder-rename-menu")).clicked() {
                 action = Some(Action::Rename { id: id.to_string() });
                 ui.close();
             }
-            if ui.button("Map verwijderen…").clicked() {
+            if ui.button(tr("folder-delete-menu")).clicked() {
                 action = Some(Action::Delete { id: id.to_string() });
                 ui.close();
             }
         }
         ui.separator();
-        if ui.button("Alles als gelezen markeren").clicked() {
+        if ui.button(tr("folders-mark-all-read")).clicked() {
             mark_read = true;
             ui.close();
         }
-        if kind != FolderKind::Deleted && ui.button("Map opruimen…").clicked() {
+        if kind != FolderKind::Deleted && ui.button(tr("folder-clean-up-menu")).clicked() {
             cleanup = true;
             ui.close();
         }
-        if ui.button("Map leegmaken…").clicked() {
+        if ui.button(tr("folder-empty-menu")).clicked() {
             action = Some(Action::Empty { id: id.to_string() });
             ui.close();
         }
@@ -232,43 +234,40 @@ pub fn context_menu(app: &mut MailApp, r: &egui::Response, id: &str, kind: Folde
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(mut edit) = app.folder_edit.clone() else { return };
     let title = match &edit.action {
-        Action::Create { .. } => "Nieuwe map",
-        Action::Rename { .. } => "Naam van map wijzigen",
-        Action::Delete { .. } => "Map verwijderen",
-        Action::Empty { .. } => "Map leegmaken",
-        Action::DeleteForever { .. } => "Definitief verwijderen",
+        Action::Create { .. } => tr("folder-new"),
+        Action::Rename { .. } => tr("folder-rename-title"),
+        Action::Delete { .. } => tr("folder-delete"),
+        Action::Empty { .. } => tr("folder-empty"),
+        Action::DeleteForever { .. } => tr("delete-forever"),
     };
     let place = match &edit.action {
         Action::Create { account_id, parent } => match parent.as_deref().and_then(|p| app.engine.session.folder(p)) {
-            Some(f) => format!("In de map {}", f.name),
+            Some(f) => crate::i18n::tr_args("folder-in", &[("folder", f.name.as_str().into())]),
             None => {
                 let email = app.engine.session.accounts.iter().find(|a| &a.id == account_id).map(|a| a.address.email().to_string());
-                format!("Bovenin het account {}", email.unwrap_or_default())
+                crate::i18n::tr_args("folder-top-of-account", &[("account", email.unwrap_or_default().into())])
             }
         },
         _ => String::new(),
     };
     let mut submit = false;
     let mut close = false;
-    if crate::helder::popup(ctx, t, "folder-edit", title, 300.0, |ui| {
+    if crate::helder::popup(ctx, t, "folder-edit", &title, 300.0, |ui| {
         match &edit.action {
             Action::Delete { .. } => {
-                ui.label(RichText::new(format!("De map “{}” en alle berichten erin worden verwijderd.", edit.name)).color(t.text));
+                ui.label(RichText::new(crate::i18n::tr_args("folder-delete-confirm", &[("folder", edit.name.as_str().into())])).color(t.text));
             }
             Action::Empty { .. } => {
-                ui.label(
-                    RichText::new(format!("Alle berichten in “{}” worden definitief verwijderd, ook wat nog niet in de lijst staat.", edit.name))
-                        .color(t.text),
-                );
+                ui.label(RichText::new(crate::i18n::tr_args("folder-empty-confirm", &[("folder", edit.name.as_str().into())])).color(t.text));
             }
             Action::DeleteForever { .. } => {
-                ui.label(RichText::new(format!("“{}” wordt definitief verwijderd en is dan niet meer terug te halen.", edit.name)).color(t.text));
+                ui.label(RichText::new(crate::i18n::tr_args("delete-forever-confirm", &[("name", edit.name.as_str().into())])).color(t.text));
             }
             _ => {
                 if !place.is_empty() {
                     ui.label(RichText::new(place).size(12.0).color(t.text_dim));
                 }
-                let field = ui.add(egui::TextEdit::singleline(&mut edit.name).desired_width(280.0).hint_text("Naam van de map"));
+                let field = ui.add(egui::TextEdit::singleline(&mut edit.name).desired_width(280.0).hint_text(tr("folder-name")));
                 if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     submit = true;
                 }
@@ -284,15 +283,15 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             let ok = match &edit.action {
-                Action::Create { .. } => "Map aanmaken",
-                Action::Rename { .. } => "Opslaan",
-                Action::Delete { .. } | Action::DeleteForever { .. } => "Ja, verwijderen",
-                Action::Empty { .. } => "Ja, leegmaken",
+                Action::Create { .. } => tr("folder-create"),
+                Action::Rename { .. } => tr("save"),
+                Action::Delete { .. } | Action::DeleteForever { .. } => tr("yes-delete"),
+                Action::Empty { .. } => tr("yes-empty"),
             };
-            if ui.add(crate::helder::primary_text(t, ok)).clicked() {
+            if ui.add(crate::helder::primary_text(t, &ok)).clicked() {
                 submit = true;
             }
-            if ui.button("Annuleren").clicked() {
+            if ui.button(tr("cancel")).clicked() {
                 close = true;
             }
         });

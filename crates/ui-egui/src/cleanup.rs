@@ -2,6 +2,7 @@
 //! with how many messages would go to Verwijderde items and what stays, then the command. See
 //! `merel_engine::cleanup` for what counts as redundant.
 
+use crate::i18n::tr;
 use egui::RichText;
 use merel_model::{FolderKind, conversation_key};
 use serde_json::json;
@@ -25,7 +26,9 @@ pub struct Confirm {
 }
 
 /// What the window says stays put.
-pub const KEEPS: &str = "Ongelezen en gevlagde berichten, berichten met een categorie en berichten met bijlagen blijven staan.";
+pub fn keeps() -> String {
+    tr("cleanup-keeps")
+}
 
 impl MailApp {
     /// Asks before cleaning up the conversation of a message.
@@ -51,30 +54,29 @@ impl MailApp {
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let Some(c) = app.cleanup.clone() else { return };
     let (title, what) = match &c.scope {
-        Scope::Conversation { subject, .. } => ("Gesprek opruimen", format!("het gesprek “{subject}”")),
-        Scope::Folder { name, .. } => ("Map opruimen", format!("de map “{name}”")),
+        Scope::Conversation { subject, .. } => {
+            (tr("cleanup-conversation"), crate::i18n::tr_args("cleanup-the-conversation", &[("subject", subject.as_str().into())]))
+        }
+        Scope::Folder { name, .. } => (tr("cleanup-folder"), crate::i18n::tr_args("cleanup-the-folder", &[("folder", name.as_str().into())])),
     };
     let text = if c.in_deleted {
-        "Verwijderde items wordt niet opgeruimd; daar staat alles al.".to_string()
+        tr("cleanup-in-deleted")
     } else {
         match c.count {
-            0 => format!(
-                "Er is niets op te ruimen in {what}: elk bericht is het nieuwste van zijn gesprek, of het is ongelezen, gevlagd, gecategoriseerd of heeft bijlagen."
-            ),
-            1 => format!("Eén ouder bericht uit {what} gaat naar Verwijderde items. {KEEPS}"),
-            n => format!("{n} oudere berichten uit {what} gaan naar Verwijderde items. {KEEPS}"),
+            0 => crate::i18n::tr_args("cleanup-nothing", &[("what", what.into())]),
+            n => format!("{} {}", crate::i18n::tr_args("cleanup-count", &[("count", n.into()), ("what", what.into())]), keeps()),
         }
     };
     let mut go = false;
     let mut close = false;
-    if crate::helder::popup(ctx, t, "cleanup", title, 340.0, |ui| {
+    if crate::helder::popup(ctx, t, "cleanup", &title, 340.0, |ui| {
         ui.label(RichText::new(text).color(t.text));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if c.count > 0 && ui.add(crate::helder::primary_text(t, "Ja, opruimen")).clicked() {
+            if c.count > 0 && ui.add(crate::helder::primary_text(t, &tr("cleanup-yes"))).clicked() {
                 go = true;
             }
-            if ui.button(if c.count > 0 { "Annuleren" } else { "Sluiten" }).clicked() {
+            if ui.button(tr(if c.count > 0 { "cancel" } else { "close" })).clicked() {
                 close = true;
             }
         });

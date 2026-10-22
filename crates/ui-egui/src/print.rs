@@ -5,6 +5,7 @@
 //! message are embedded as data, pictures on the internet are left out, and a Content Security
 //! Policy on the page forbids scripts and anything from the network.
 
+use crate::i18n::tr;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
@@ -66,9 +67,11 @@ fn image(out: &mut String, img: &Image, images: &[InlineImage]) {
         Some(src) => {
             let _ = write!(out, "<img src=\"{src}\" alt=\"{}\">", esc(&img.alt));
         }
-        None if img.alt.trim().is_empty() => out.push_str("<span class=\"missing\">[afbeelding niet afgedrukt]</span>"),
+        None if img.alt.trim().is_empty() => {
+            let _ = write!(out, "<span class=\"missing\">[{}]</span>", esc(&tr("print-image-left-out")));
+        }
         None => {
-            let _ = write!(out, "<span class=\"missing\">[afbeelding: {}]</span>", esc(&img.alt));
+            let _ = write!(out, "<span class=\"missing\">[{}: {}]</span>", esc(&tr("print-image")), esc(&img.alt));
         }
     }
 }
@@ -178,12 +181,12 @@ table.cal td{padding:.25em .8em .25em 0;vertical-align:top}table.cal td.time{whi
 /// `list` holds the occurrences touching them, as `appointments_between` gives them.
 pub fn calendar_page(title: &str, first: NaiveDate, last: NaiveDate, list: &[Appointment]) -> String {
     let mut out = String::new();
-    out.push_str("<!doctype html>\n<html lang=\"nl\"><head><meta charset=\"utf-8\">\n");
+    let _ = writeln!(out, "<!doctype html>\n<html lang=\"{}\"><head><meta charset=\"utf-8\">", crate::i18n::current().tag());
     out.push_str("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\">\n");
-    let _ = writeln!(out, "<title>Agenda {}</title>", esc(title));
+    let _ = writeln!(out, "<title>{} {}</title>", esc(&tr("print-calendar")), esc(title));
     let _ = writeln!(out, "<style>{STYLE}</style></head><body>");
-    out.push_str("<p class=\"hint\">Afdrukpagina van Merel. Druk af met Ctrl+P (Cmd+P op een Mac); deze regel komt niet mee.</p>\n");
-    let _ = writeln!(out, "<h1 class=\"subject\">Agenda: {}</h1>", esc(title));
+    let _ = writeln!(out, "<p class=\"hint\">{}</p>", esc(&tr("print-hint")));
+    let _ = writeln!(out, "<h1 class=\"subject\">{}: {}</h1>", esc(&tr("print-calendar")), esc(title));
     let mut day = first;
     let mut any = false;
     while day <= last {
@@ -208,7 +211,7 @@ pub fn calendar_page(title: &str, first: NaiveDate, last: NaiveDate, list: &[App
         day = next;
     }
     if !any {
-        out.push_str("<p class=\"missing\">Geen afspraken in deze periode.</p>\n");
+        let _ = writeln!(out, "<p class=\"missing\">{}</p>", esc(&tr("print-no-appointments")));
     }
     out.push_str("</body></html>\n");
     out
@@ -218,14 +221,14 @@ pub fn calendar_page(title: &str, first: NaiveDate, last: NaiveDate, list: &[App
 /// starts or ends on another day, "10:00 – verder" and "tot 11:30".
 fn time_cell(a: &Appointment, day_start: i64, day_end: i64) -> String {
     if a.all_day {
-        return "Hele dag".to_string();
+        return tr("all-day");
     }
     let clock = |ts: i64| calendar::to_local(ts).format("%H:%M").to_string();
     match (a.start >= day_start, a.end <= day_end) {
         (true, true) => format!("{}–{}", clock(a.start), clock(a.end)),
-        (true, false) => format!("{} – verder", clock(a.start)),
-        (false, true) => format!("tot {}", clock(a.end)),
-        (false, false) => "Hele dag".to_string(),
+        (true, false) => crate::i18n::tr_args("print-time-on", &[("time", clock(a.start).into())]),
+        (false, true) => crate::i18n::tr_args("print-time-until", &[("time", clock(a.end).into())]),
+        (false, false) => tr("all-day"),
     }
 }
 
@@ -234,24 +237,25 @@ fn time_cell(a: &Appointment, day_start: i64, day_end: i64) -> String {
 /// plain text).
 pub fn page(h: &MessageHeader, body: Option<&Body>) -> String {
     let mut out = String::new();
-    out.push_str("<!doctype html>\n<html lang=\"nl\"><head><meta charset=\"utf-8\">\n");
+    let _ = writeln!(out, "<!doctype html>\n<html lang=\"{}\"><head><meta charset=\"utf-8\">", crate::i18n::current().tag());
     out.push_str("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'\">\n");
     let _ = writeln!(out, "<title>{}</title>", esc(&h.subject));
     let _ = writeln!(out, "<style>{STYLE}</style></head><body>");
-    out.push_str("<p class=\"hint\">Afdrukpagina van Merel. Druk af met Ctrl+P (Cmd+P op een Mac); deze regel komt niet mee.</p>\n");
-    let _ = writeln!(out, "<h1 class=\"subject\">{}</h1>", esc(if h.subject.trim().is_empty() { "(Zonder onderwerp)" } else { &h.subject }));
+    let _ = writeln!(out, "<p class=\"hint\">{}</p>", esc(&tr("print-hint")));
+    let no_subject = tr("print-no-subject");
+    let _ = writeln!(out, "<h1 class=\"subject\">{}</h1>", esc(if h.subject.trim().is_empty() { &no_subject } else { &h.subject }));
     out.push_str("<table class=\"head\">\n");
-    let _ = writeln!(out, "<tr><th>Van</th><td>{}</td></tr>", address(&h.from));
+    let _ = writeln!(out, "<tr><th>{}</th><td>{}</td></tr>", esc(&tr("compose-from")), address(&h.from));
     if !h.to.is_empty() {
         let to: Vec<String> = h.to.iter().map(address).collect();
-        let _ = writeln!(out, "<tr><th>Aan</th><td>{}</td></tr>", to.join(", "));
+        let _ = writeln!(out, "<tr><th>{}</th><td>{}</td></tr>", esc(&tr("compose-to")), to.join(", "));
     }
-    let _ = writeln!(out, "<tr><th>Datum</th><td>{}</td></tr>", date(h.date));
+    let _ = writeln!(out, "<tr><th>{}</th><td>{}</td></tr>", esc(&tr("print-date")), date(h.date));
     if let Some(b) = body
         && !b.attachments.is_empty()
     {
         let names: Vec<String> = b.attachments.iter().map(|a| esc(&a.name)).collect();
-        let _ = writeln!(out, "<tr><th>Bijlagen</th><td>{}</td></tr>", names.join(", "));
+        let _ = writeln!(out, "<tr><th>{}</th><td>{}</td></tr>", esc(&tr("print-attachments")), names.join(", "));
     }
     out.push_str("</table>\n<hr class=\"sep\">\n<div class=\"body\">\n");
     match body {
@@ -259,7 +263,9 @@ pub fn page(h: &MessageHeader, body: Option<&Body>) -> String {
         Some(b) => {
             let _ = writeln!(out, "<pre>{}</pre>", esc(&b.text));
         }
-        None => out.push_str("<p class=\"missing\">[De inhoud van dit bericht is nog niet opgehaald.]</p>\n"),
+        None => {
+            let _ = writeln!(out, "<p class=\"missing\">[{}]</p>", esc(&tr("print-not-fetched")));
+        }
     }
     out.push_str("</div>\n</body></html>\n");
     out
@@ -268,10 +274,11 @@ pub fn page(h: &MessageHeader, body: Option<&Body>) -> String {
 fn document(out: &mut String, doc: &Document, images: &[InlineImage]) {
     blocks(out, &doc.blocks, images);
     if doc.remote_images > 0 {
-        let _ = writeln!(out, "<p class=\"missing\">[{} afbeelding(en) van internet niet afgedrukt]</p>", doc.remote_images);
+        let _ =
+            writeln!(out, "<p class=\"missing\">[{}]</p>", esc(&crate::i18n::tr_args("print-remote-images", &[("count", doc.remote_images.into())])));
     }
     if doc.truncated {
-        out.push_str("<p class=\"missing\">[Het bericht was te lang; het einde is weggelaten.]</p>\n");
+        let _ = writeln!(out, "<p class=\"missing\">[{}]</p>", esc(&tr("print-truncated")));
     }
 }
 
@@ -307,10 +314,10 @@ impl MailApp {
         let html = calendar_page(&calendar::period_title(self.calendar.view, self.calendar.focus), first, last, &list);
         let path = page_path();
         self.notice = Some(match write_and_open(&path, &html) {
-            Ok(()) => crate::Notice::info("Afdrukpagina geopend in de browser; druk daar af met Ctrl+P (Cmd+P op een Mac)."),
+            Ok(()) => crate::Notice::info(tr("print-opened")),
             Err(e) => {
                 log::warn!("print page {}: {e}", path.display());
-                crate::Notice::error(format!("Afdrukken is niet gelukt: {e}"))
+                crate::Notice::error(crate::i18n::tr_args("print-failed", &[("error", e.to_string().into())]))
             }
         });
     }
@@ -319,16 +326,16 @@ impl MailApp {
     pub fn print_selected(&mut self) {
         let Some(h) = self.engine.session.selected().cloned() else { return };
         let Some(body) = self.engine.session.selected_body().cloned() else {
-            self.notice = Some(crate::Notice::warning("De inhoud van dit bericht is nog niet opgehaald; probeer het zo opnieuw."));
+            self.notice = Some(crate::Notice::warning(tr("print-not-fetched-yet")));
             return;
         };
         let html = page(&h, Some(&body));
         let path = page_path();
         self.notice = Some(match write_and_open(&path, &html) {
-            Ok(()) => crate::Notice::info("Afdrukpagina geopend in de browser; druk daar af met Ctrl+P (Cmd+P op een Mac)."),
+            Ok(()) => crate::Notice::info(tr("print-opened")),
             Err(e) => {
                 log::warn!("print page {}: {e}", path.display());
-                crate::Notice::error(format!("Afdrukken is niet gelukt: {e}"))
+                crate::Notice::error(crate::i18n::tr_args("print-failed", &[("error", e.to_string().into())]))
             }
         });
     }
