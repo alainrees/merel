@@ -1617,6 +1617,7 @@ conn-server-error = The server returned an error: { $error }
 conn-cannot-connect = Cannot connect to { $host }.
 conn-refused-message = The server refused the message: { $error }
 conn-items-failed = Calendar and address book: { $error }
+conn-job-failed = Something did not work for { $account }: { $error }
 
 ## Browser sign-in
 

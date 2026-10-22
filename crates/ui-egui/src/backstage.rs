@@ -1,7 +1,7 @@
 //! The Backstage (the File tab): accounts, and the form that adds one.
 
 use crate::i18n::tr;
-use egui::{Margin, RichText, Sense, Ui, vec2};
+use egui::{Align, Layout, Margin, RichText, Sense, Ui, vec2};
 use zeroize::Zeroize;
 
 use merel_engine::{AccountStatus, signin};
@@ -366,24 +366,6 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ui.horizontal(|ui| {
                         let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
                         helder::avatar(ui.painter(), rect.center(), 20.0, &name, &email);
-                        ui.vertical(|ui| {
-                            // Room for the buttons on the right; a long name or address is cut short.
-                            ui.set_max_width((ui.available_width() - 260.0).max(160.0));
-                            ui.spacing_mut().item_spacing.y = 2.0;
-                            ui.add(egui::Label::new(RichText::new(&name).size(16.0).strong().color(t.text)).truncate());
-                            let (txt, col) = match &status {
-                                AccountStatus::Online => (tr("account-online"), t.accent_text),
-                                AccountStatus::Connecting => (tr("account-connecting"), t.text_dim),
-                                AccountStatus::Offline => (tr("account-offline"), t.text_dim),
-                                AccountStatus::Error(e) => (e.clone(), t.flag),
-                            };
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 6.0;
-                                ui.add(egui::Label::new(RichText::new(&email).size(13.0).color(t.text_dim)).truncate());
-                                ui.label(RichText::new("·").size(13.0).color(t.text_dim));
-                                ui.add(egui::Label::new(helder::dotted(&txt, col, t)).truncate());
-                            });
-                        });
                         helder::right(ui, |ui| {
                             let more = egui::Button::image(Icon::Ellipsis.image(helder::ICON, t.text)).frame_when_inactive(false);
                             let (r, _) = helder::quiet(ui, t, |ui| {
@@ -412,6 +394,27 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                             {
                                 edit = Some(id.clone());
                             }
+                            // The buttons took their room on the right; who the account is and how it
+                            // is doing get what is left, cut short rather than running under them.
+                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                ui.vertical(|ui| {
+                                    ui.spacing_mut().item_spacing.y = 2.0;
+                                    ui.add(egui::Label::new(RichText::new(&name).size(16.0).strong().color(t.text)).truncate());
+                                    let (txt, col) = match &status {
+                                        AccountStatus::Online => (tr("account-online"), t.accent_text),
+                                        AccountStatus::Connecting => (tr("account-connecting"), t.text_dim),
+                                        AccountStatus::Offline => (tr("account-offline"), t.text_dim),
+                                        AccountStatus::Error(e) => (e.clone(), t.flag),
+                                    };
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 6.0;
+                                        ui.add(egui::Label::new(RichText::new(&email).size(13.0).color(t.text_dim)).truncate());
+                                        ui.label(RichText::new("·").size(13.0).color(t.text_dim));
+                                        // A long error is cut short; the whole of it shows on hover.
+                                        ui.add(egui::Label::new(helder::dotted(&txt, col, t)).truncate()).on_hover_text(&txt);
+                                    });
+                                });
+                            });
                         });
                     });
                     // The mail works, the calendar server next to it did not answer.
@@ -908,6 +911,38 @@ mod tests {
         let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         harness.run();
         assert!(harness.query_by_label_contains("Agenda en adresboek: Kan geen verbinding").is_some());
+    }
+
+    #[test]
+    fn a_long_status_is_cut_short_before_the_buttons() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut engine = merel_engine::Engine::sample();
+        let mut f = AccountForm::default();
+        f.email = "alain@voorbeeld.nl".into();
+        f.password = "x".into();
+        f.suggest();
+        let mut account = f.account().unwrap();
+        // Signed in through the browser, as Microsoft 365 is: the widest button, "Opnieuw aanmelden".
+        account.auth = merel_model::Auth::OAuth2 { client_id: "c".into(), auth_url: "a".into(), token_url: "t".into(), scope: "s".into() };
+        let id = account.id.clone();
+        engine.add_account(account, Secret::new("x")).unwrap();
+        let long = "De server gaf een fout: The specified object was not found in the store., The process failed to get the correct properties. (ErrorItemNotFound)";
+        engine.session.status.insert(id, AccountStatus::Error(long.into()));
+        let mut app = MailApp::new(engine);
+        app.tab = Tab::File;
+        let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
+        harness.run();
+        // The card's line, not the status bar at the foot of the window.
+        let status = harness
+            .query_all_by_label_contains("De server gaf een fout")
+            .map(|n| n.rect())
+            .min_by(|a, b| a.min.y.total_cmp(&b.min.y))
+            .expect("the status shows on the card");
+        for button in ["Opnieuw aanmelden", "Handtekening"] {
+            let b = harness.get_by_label(button).rect();
+            assert!(status.max.x <= b.min.x + 0.5, "the status {status:?} runs under {button} {b:?}");
+        }
     }
 
     #[test]

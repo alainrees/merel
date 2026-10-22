@@ -102,6 +102,7 @@ fn describe(e: &MailboxError) -> String {
         MailboxError::AuthScheme(scheme) => merel_i18n::tr_args("conn-auth-scheme", &[("scheme", scheme.as_str().into())]),
         MailboxError::Protocol(m) => merel_i18n::tr_args("conn-server-error", &[("error", clip(m).into())]),
         MailboxError::BadName(_) => merel_i18n::tr("conn-bad-name"),
+        MailboxError::NotFound(m) => merel_i18n::tr_args("conn-server-error", &[("error", clip(m).into())]),
     }
 }
 
@@ -125,6 +126,52 @@ fn failure(account_id: &str, job: &Job, what: String) -> Event {
         Job::Send { draft_id, .. } => Event::Sent { account_id: account_id.to_string(), draft_id: *draft_id, result: Err(what) },
         Job::Search { folder_id, query, .. } => Event::Found { folder_id: folder_id.clone(), query: query.clone(), result: Err(what) },
         _ => Event::Failed { account_id: account_id.to_string(), what },
+    }
+}
+
+/// A job that failed while the connection was there. Only connecting decides whether the
+/// account works: a calendar that will not come is a note on the account, and any other job
+/// that fails is said once while the account stays connected and keeps refreshing.
+fn job_failure(account: &Account, job: &Job, e: &MailboxError) -> Event {
+    let what = describe(e);
+    match job {
+        Job::Connect { .. } | Job::Send { .. } | Job::Search { .. } => failure(&account.id, job, what),
+        Job::Sync { account_id, .. } => {
+            Event::ItemsFailed { account_id: account_id.clone(), what: merel_i18n::tr_args("conn-items-failed", &[("error", what.into())]) }
+        }
+        _ => Event::JobFailed {
+            account_id: account.id.clone(),
+            loading: job.loading_key(),
+            what: merel_i18n::tr_args("conn-job-failed", &[("account", account.address.email().into()), ("error", what.into())]),
+        },
+    }
+}
+
+/// What a job for a message or folder the server no longer has comes to. Someone moved or
+/// deleted it elsewhere (another device, a rule, Outlook on the web); the connection is fine.
+fn gone(c: &mut dyn Mailbox, account: &Account, job: &Job, e: &MailboxError) -> Vec<Event> {
+    let account_id = account.id.clone();
+    match job {
+        // The folder went: let it go and list the folders as they are now.
+        Job::Headers { folder_id, .. } => {
+            let mut out = vec![Event::Gone { account_id: account_id.clone(), folder_id: Some(folder_id.clone()), message_id: None }];
+            match c.folders() {
+                Ok(folders) => out.push(Event::Folders { account_id, folders }),
+                Err(e) => log::warn!("{}: folders not listed again: {e}", account.id),
+            }
+            out
+        }
+        Job::Body { message_id, .. } => vec![Event::Gone { account_id, folder_id: None, message_id: Some(message_id.clone()) }],
+        // Deleted already, or moved on: what the change wanted is done or moot, and the next
+        // refresh shows where the message is now.
+        Job::Flag { .. }
+        | Job::Move { .. }
+        | Job::Delete { .. }
+        | Job::Empty { .. }
+        | Job::Categories { .. }
+        | Job::Junk { .. }
+        | Job::DeleteItem { .. } => Vec::new(),
+        _ => vec![job_failure(account, job, e)],
     }
 }
 
@@ -233,13 +280,22 @@ fn serve(account: Account, mut credentials: Credentials, keys: Keys, jobs: Recei
                     }
                     break;
                 }
+                Err(e @ MailboxError::NotFound(_)) => {
+                    // No reason to reconnect or try again: the server answered, the thing is gone.
+                    log::info!("{}: {e}", account.id);
+                    retry = None;
+                    for ev in gone(c.as_mut(), &account, &job, &e) {
+                        let _ = events.send(ev);
+                    }
+                    break;
+                }
                 Err(e) => {
                     log::warn!("{}: {} (attempt {attempts})", account.id, e);
                     client = None;
                     if attempts >= 2 {
                         let ev = match e {
                             MailboxError::Connect { .. } => no_connection(&account.id, &job, describe(&e)),
-                            _ => failure(&account.id, &job, describe(&e)),
+                            _ => job_failure(&account, &job, &e),
                         };
                         let _ = events.send(ev);
                         break;
@@ -314,7 +370,7 @@ fn sync(store: &mut dyn merel_mailbox::ItemStore, account_id: &str, from: i64, t
 /// One part of a sync: what the server refused becomes an empty list and a line in `refused`.
 fn part<T>(result: Result<Vec<T>, MailboxError>, what: &str, refused: &mut Vec<String>) -> Result<Vec<T>, MailboxError> {
     match result {
-        Err(e @ MailboxError::Protocol(_)) => {
+        Err(e @ (MailboxError::Protocol(_) | MailboxError::NotFound(_))) => {
             refused.push(format!("{what}: {}", describe(&e)));
             Ok(Vec::new())
         }
@@ -496,5 +552,91 @@ mod tests {
         let events = sync(&mut NoTasks, "a", 0, 1).unwrap();
         assert!(matches!(&events[0], Event::Synced { account_id, .. } if account_id == "a"));
         assert!(matches!(&events[1], Event::ItemsFailed { what, .. } if what == "Taken: De server gaf een fout: Invalid request"));
+    }
+
+    /// A mailbox where everything asked for was moved or deleted elsewhere; only its inbox is left.
+    struct Emptied;
+
+    fn not_found<T>() -> merel_mailbox::Result<T> {
+        Err(MailboxError::NotFound("The specified object was not found in the store. (ErrorItemNotFound)".into()))
+    }
+
+    impl Mailbox for Emptied {
+        fn folders(&mut self) -> merel_mailbox::Result<Vec<merel_mailbox::RemoteFolder>> {
+            Ok(vec![merel_mailbox::RemoteFolder {
+                path: "INBOX".into(),
+                name: "Inbox".into(),
+                kind: merel_model::FolderKind::Inbox,
+                selectable: true,
+                parent: None,
+            }])
+        }
+        fn headers(&mut self, _: &str, _: u32, _: u32) -> merel_mailbox::Result<Vec<merel_mailbox::RemoteHeader>> {
+            not_found()
+        }
+        fn search(&mut self, _: &str, _: &str, _: u32) -> merel_mailbox::Result<Vec<merel_mailbox::RemoteHeader>> {
+            not_found()
+        }
+        fn body(&mut self, _: &str, _: &str) -> merel_mailbox::Result<Vec<u8>> {
+            not_found()
+        }
+        fn set_flag(&mut self, _: &str, _: &str, _: Flag, _: bool) -> merel_mailbox::Result<()> {
+            not_found()
+        }
+        fn move_to(&mut self, _: &str, _: &str, _: &str) -> merel_mailbox::Result<()> {
+            not_found()
+        }
+        fn append(&mut self, _: &str, _: &[u8]) -> merel_mailbox::Result<()> {
+            not_found()
+        }
+        fn send(&mut self, _: &[u8]) -> merel_mailbox::Result<bool> {
+            not_found()
+        }
+        fn create_folder(&mut self, _: Option<&str>, _: &str) -> merel_mailbox::Result<()> {
+            not_found()
+        }
+        fn rename_folder(&mut self, _: &str, _: &str) -> merel_mailbox::Result<()> {
+            not_found()
+        }
+        fn delete_folder(&mut self, _: &str) -> merel_mailbox::Result<()> {
+            not_found()
+        }
+        fn delete_message(&mut self, _: &str, _: &str) -> merel_mailbox::Result<()> {
+            not_found()
+        }
+        fn empty_folder(&mut self, _: &str) -> merel_mailbox::Result<()> {
+            not_found()
+        }
+        fn set_categories(&mut self, _: &str, _: &str, _: &[String], _: &[String]) -> merel_mailbox::Result<()> {
+            not_found()
+        }
+        fn logout(self: Box<Self>) {}
+    }
+
+    #[test]
+    fn a_message_or_folder_that_is_gone_leaves_the_account_connected() {
+        let account = unreachable();
+        let e = MailboxError::NotFound("weg".into());
+        let flag = Job::Flag { account_id: "a1".into(), path: "INBOX".into(), id: "7".into(), flag: Flag::Seen, on: true };
+        let err = Emptied.set_flag("INBOX", "7", Flag::Seen, true).unwrap_err();
+        assert!(gone(&mut Emptied, &account, &flag, &err).is_empty(), "a change to a message that is gone is done");
+        let body = Job::Body { account_id: "a1".into(), message_id: "a1/m7".into(), path: "INBOX".into(), id: "7".into() };
+        assert!(matches!(&gone(&mut Emptied, &account, &body, &e)[..], [Event::Gone { message_id: Some(m), .. }] if m == "a1/m7"));
+        let headers = Job::Headers { account_id: "a1".into(), folder_id: "a1/Oud".into(), path: "Oud".into(), offset: 0, limit: crate::HEADER_LIMIT };
+        match &gone(&mut Emptied, &account, &headers, &e)[..] {
+            [Event::Gone { folder_id: Some(f), .. }, Event::Folders { folders, .. }] => assert!(f == "a1/Oud" && folders.len() == 1),
+            other => panic!("expected the folder to go and the folders to come again, got {other:?}"),
+        }
+        // Any other failure of a job is said once, and only connecting makes the account fail.
+        let refused = MailboxError::Protocol("Access is denied.".into());
+        match job_failure(&account, &headers, &refused) {
+            Event::JobFailed { loading, what, .. } => {
+                assert_eq!(loading.as_deref(), Some("a1/Oud"));
+                assert_eq!(what, "Bij a@b.nl lukte iets niet: De server gaf een fout: Access is denied.");
+            }
+            other => panic!("expected a job failure, got {other:?}"),
+        }
+        assert!(matches!(job_failure(&account, &Job::Connect { account_id: "a1".into() }, &refused), Event::Failed { .. }));
+        assert!(matches!(job_failure(&account, &Job::Sync { account_id: "a1".into(), from: 0, to: 1 }, &refused), Event::ItemsFailed { .. }));
     }
 }

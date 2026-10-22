@@ -215,6 +215,15 @@ impl Job {
         }
     }
 
+    /// What the session marks as loading while this job runs: the folder or the message.
+    pub fn loading_key(&self) -> Option<String> {
+        match self {
+            Job::Headers { folder_id, .. } => Some(folder_id.clone()),
+            Job::Body { message_id, .. } => Some(message_id.clone()),
+            _ => None,
+        }
+    }
+
     /// Whether the job changes something on the server, so it must not be lost offline. A
     /// folder change is not kept: the person sees the folder list, so it needs the server now.
     pub fn is_change(&self) -> bool {
@@ -242,23 +251,11 @@ pub enum Event {
         syncs_items: bool,
     },
     /// The folders of an account, listed again after one was made, renamed or removed.
-    Folders {
-        account_id: String,
-        folders: Vec<RemoteFolder>,
-    },
+    Folders { account_id: String, folders: Vec<RemoteFolder> },
     /// The items of an account's store, replacing what the session had of it.
-    Synced {
-        account_id: String,
-        appointments: Vec<Appointment>,
-        contacts: Vec<Contact>,
-        tasks: Vec<Task>,
-    },
+    Synced { account_id: String, appointments: Vec<Appointment>, contacts: Vec<Contact>, tasks: Vec<Task> },
     /// The store named the item the session knew as `local_id`.
-    ItemSaved {
-        account_id: String,
-        local_id: String,
-        remote_id: String,
-    },
+    ItemSaved { account_id: String, local_id: String, remote_id: String },
     Headers {
         folder_id: String,
         headers: Vec<RemoteHeader>,
@@ -268,11 +265,7 @@ pub enum Event {
         limit: u32,
     },
     /// What the server found for a search in a folder, or why it could not search.
-    Found {
-        folder_id: String,
-        query: String,
-        result: Result<Vec<RemoteHeader>, String>,
-    },
+    Found { folder_id: String, query: String, result: Result<Vec<RemoteHeader>, String> },
     Body {
         message_id: String,
         body: Box<Body>,
@@ -283,37 +276,26 @@ pub enum Event {
         /// The keys an OpenPGP-encrypted message carried inside (not when served from the cache).
         carried: Option<Box<openpgp::Carried>>,
     },
-    Failed {
-        account_id: String,
-        what: String,
-    },
+    /// The account could not connect; `what` is a sentence for the person.
+    Failed { account_id: String, what: String },
+    /// One job went wrong while the account itself works: it stays connected and the person
+    /// is told once. `loading` is what the session was waiting for (a folder or message id).
+    JobFailed { account_id: String, loading: Option<String>, what: String },
+    /// The server no longer has the folder or message a job was for: it was moved or deleted
+    /// elsewhere. Nothing is wrong; the session lets it go.
+    Gone { account_id: String, folder_id: Option<String>, message_id: Option<String> },
     /// The account's mail connected, but the calendar server next to it did not; `what` is a
     /// sentence for the person.
-    ItemsFailed {
-        account_id: String,
-        what: String,
-    },
+    ItemsFailed { account_id: String, what: String },
     /// A change could not reach the server because there is no connection; it waits in the
     /// offline queue until the account connects again.
-    Deferred {
-        account_id: String,
-        job: Box<Job>,
-    },
+    Deferred { account_id: String, job: Box<Job> },
     /// The outcome of a `Send` job; `Err` carries a sentence for the person.
-    Sent {
-        account_id: String,
-        draft_id: u64,
-        result: Result<(), String>,
-    },
+    Sent { account_id: String, draft_id: u64, result: Result<(), String> },
     /// Whether someone is free, as their calendar says; `None` when the server would not tell.
-    Availability {
-        email: String,
-        availability: Option<merel_model::Availability>,
-    },
+    Availability { email: String, availability: Option<merel_model::Availability> },
     /// A browser sign-in finished; `Ok` carries the account to add.
-    SignedIn {
-        result: Result<Box<Account>, String>,
-    },
+    SignedIn { result: Result<Box<Account>, String> },
 }
 
 /// Where a draft handed to [`Session::send`] is.
@@ -428,6 +410,8 @@ pub struct Session {
     /// stays until the server took the message.
     pub scheduled_sends: HashMap<u64, String>,
     scheduled_failures: Vec<String>,
+    /// What went wrong with single jobs since the last call to `take_job_failures`.
+    job_failures: Vec<String>,
     /// The id `draft.save` gave or kept, for the window that saved it.
     pub last_draft: Option<String>,
     next_stored_draft: u64,
@@ -671,6 +655,8 @@ impl Session {
             | Event::Synced { account_id, .. }
             | Event::ItemSaved { account_id, .. }
             | Event::Failed { account_id, .. }
+            | Event::JobFailed { account_id, .. }
+            | Event::Gone { account_id, .. }
             | Event::ItemsFailed { account_id, .. }
             | Event::Deferred { account_id, .. }
             | Event::Sent { account_id, .. } => self.accounts.iter().any(|a| &a.id == account_id),
@@ -983,6 +969,30 @@ impl Session {
             Event::ItemsFailed { account_id, what } => {
                 self.item_errors.insert(account_id, what);
             }
+            Event::JobFailed { loading, what, .. } => {
+                if let Some(key) = loading {
+                    self.loading.remove(&key);
+                }
+                // A refresh that fails each time is said once, not every two minutes.
+                if !self.job_failures.contains(&what) {
+                    self.job_failures.push(what);
+                }
+            }
+            Event::Gone { folder_id, message_id, .. } => {
+                if let Some(folder_id) = folder_id {
+                    self.loading.remove(&folder_id);
+                }
+                if let Some(id) = message_id {
+                    self.loading.remove(&id);
+                    self.messages.retain(|m| m.id != id);
+                    self.bodies.remove(&id);
+                    if self.selected_message.as_deref() == Some(id.as_str()) {
+                        self.selected_message = None;
+                    }
+                    self.prune_marked();
+                    self.recount_unread();
+                }
+            }
             Event::Deferred { account_id, .. } => {
                 *self.queued.entry(account_id.clone()).or_default() += 1;
                 self.status.insert(account_id, AccountStatus::Offline);
@@ -1080,6 +1090,11 @@ impl Session {
         for id in online {
             self.request_sync(&id);
         }
+    }
+
+    /// Sentences about single jobs that went wrong since the last call, for the message bar.
+    pub fn take_job_failures(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.job_failures)
     }
 
     /// New unread messages found by refreshes since the last call, by id.
@@ -1921,5 +1936,29 @@ mod tests {
         s.apply(Event::ItemsFailed { account_id: "a".into(), what: "x".into() });
         s.remove_account("a");
         assert!(s.item_errors.is_empty());
+    }
+    #[test]
+    fn a_job_that_fails_is_said_once_and_leaves_the_account_online() {
+        let mut s = Session::default();
+        s.add_account(account("a"));
+        s.apply(Event::Connected { account_id: "a".into(), folders: Vec::new(), syncs_items: false });
+        s.loading.insert("a/Oud".into());
+        let failed = || Event::JobFailed { account_id: "a".into(), loading: Some("a/Oud".into()), what: "Bij a@b.nl lukte iets niet.".into() };
+        s.apply(failed());
+        s.apply(failed());
+        assert_eq!(s.status.get("a"), Some(&AccountStatus::Online), "the account keeps refreshing");
+        assert!(!s.loading.contains("a/Oud"));
+        assert_eq!(s.take_job_failures(), vec!["Bij a@b.nl lukte iets niet.".to_string()]);
+        assert!(s.take_job_failures().is_empty());
+    }
+
+    #[test]
+    fn a_message_that_is_gone_leaves_the_list() {
+        let mut s = Session::sample();
+        let id = s.messages[0].id.clone();
+        s.selected_message = Some(id.clone());
+        s.loading.insert(id.clone());
+        s.apply(Event::Gone { account_id: SAMPLE_ACCOUNT.into(), folder_id: None, message_id: Some(id.clone()) });
+        assert!(s.message(&id).is_none() && s.selected_message.is_none() && !s.loading.contains(&id));
     }
 }
