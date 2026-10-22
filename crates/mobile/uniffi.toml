@@ -1,0 +1,4 @@
+# UniFFI settings for the Swift and Kotlin bindings.
+[bindings.kotlin]
+# Android flavour: a cleaner that works below Android 13 and the Android annotations.
+android = true
