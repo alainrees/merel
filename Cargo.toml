@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*"]
+# The phone apps are Xcode and Gradle projects; their Rust core is crates/mobile.
+exclude = ["apps/ios", "apps/android"]
 
 [workspace.package]
 version = "0.1.12"
