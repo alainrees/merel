@@ -802,6 +802,8 @@ pub const AVATAR_COLORS: [Color32; 8] = [
 /// One or two letters for a person: the first letters of the first and last word of the
 /// name, or the first letter of the address.
 pub fn initials(name: &str) -> String {
+    // What stands in brackets, such as the company in "Alain Rees (Osso & Picca)", is not the name.
+    let name = name.split('(').next().unwrap_or(name);
     let words: Vec<&str> = name.split_whitespace().filter(|w| w.chars().next().is_some_and(char::is_alphanumeric)).collect();
     let first = |w: &str| w.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
     match words.as_slice() {
@@ -1221,6 +1223,7 @@ mod tests {
         }
         assert_eq!(initials("Marieke de Vries"), "MV");
         assert_eq!(initials("Studio"), "S");
+        assert_eq!(initials("Sanne de Vries (Studio ArtCraft)"), "SV");
         assert_eq!(initials("  "), "");
     }
 

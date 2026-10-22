@@ -1,7 +1,7 @@
 //! The Backstage (the File tab): accounts, and the form that adds one.
 
 use crate::i18n::tr;
-use egui::{Margin, RichText, Ui, vec2};
+use egui::{Margin, RichText, Sense, Ui, vec2};
 use zeroize::Zeroize;
 
 use merel_engine::{AccountStatus, signin};
@@ -44,6 +44,8 @@ pub struct AccountForm {
     pub scroll_to_form: bool,
     /// A certificate or OpenPGP key file picked on an account's card, waiting for its password.
     pub certificate: Option<crate::certificate::Import>,
+    /// The accounts whose Security part is open on their card.
+    pub security_open: Vec<String>,
 }
 
 impl Default for AccountForm {
@@ -71,6 +73,7 @@ impl Default for AccountForm {
             editing: None,
             scroll_to_form: false,
             certificate: None,
+            security_open: Vec::new(),
         }
     }
 }
@@ -358,80 +361,66 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     continue;
                 }
                 helder::card_frame(t).inner_margin(Margin::same(16)).show(ui, |ui| {
-                    ui.set_width(ui.available_width().min(560.0));
-                    ui.label(RichText::new(name).strong().color(t.text));
-                    ui.label(RichText::new(email).color(t.text_dim));
-                    let (txt, col) = match status {
-                        AccountStatus::Online => (tr("account-online"), t.accent_text),
-                        AccountStatus::Connecting => (tr("account-connecting"), t.text_dim),
-                        AccountStatus::Offline => (tr("account-offline"), t.text_dim),
-                        AccountStatus::Error(e) => (e, t.flag),
-                    };
-                    ui.label(RichText::new(txt).size(12.0).color(col));
+                    ui.set_width(ui.available_width().min(640.0));
+                    // The head: who the account is and how it is doing, with its actions on the right.
+                    ui.horizontal(|ui| {
+                        let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
+                        helder::avatar(ui.painter(), rect.center(), 20.0, &name, &email);
+                        ui.vertical(|ui| {
+                            // Room for the buttons on the right; a long name or address is cut short.
+                            ui.set_max_width((ui.available_width() - 260.0).max(160.0));
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            ui.add(egui::Label::new(RichText::new(&name).size(16.0).strong().color(t.text)).truncate());
+                            let (txt, col) = match &status {
+                                AccountStatus::Online => (tr("account-online"), t.accent_text),
+                                AccountStatus::Connecting => (tr("account-connecting"), t.text_dim),
+                                AccountStatus::Offline => (tr("account-offline"), t.text_dim),
+                                AccountStatus::Error(e) => (e.clone(), t.flag),
+                            };
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                ui.add(egui::Label::new(RichText::new(&email).size(13.0).color(t.text_dim)).truncate());
+                                ui.label(RichText::new("·").size(13.0).color(t.text_dim));
+                                ui.add(egui::Label::new(helder::dotted(&txt, col, t)).truncate());
+                            });
+                        });
+                        helder::right(ui, |ui| {
+                            let more = egui::Button::image(Icon::Ellipsis.image(helder::ICON, t.text)).frame_when_inactive(false);
+                            let (r, _) = helder::quiet(ui, t, |ui| {
+                                egui::containers::menu::MenuButton::from_button(more).ui(ui, |ui| {
+                                    if ui.button(tr("account-remove")).on_hover_text(tr("account-remove-hint")).clicked() {
+                                        app.form.confirm_remove = Some(id.clone());
+                                    }
+                                })
+                            });
+                            let label = crate::i18n::tr_args("account-more", &[("name", name.as_str().into())]);
+                            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+                            let editing = app.form.signature_edit.as_ref().is_some_and(|(e, _)| *e == id);
+                            let hint = if signature.is_empty() { tr("account-signature-set") } else { tr("account-signature-edit") };
+                            if ui.add_enabled(!editing, egui::Button::new(tr("account-signature"))).on_hover_text(hint).clicked() {
+                                app.form.signature_edit = Some((id.clone(), signature.clone()));
+                            }
+                            if oauth {
+                                let label = if busy { tr("account-waiting-browser") } else { tr("account-sign-in-again") };
+                                if ui.add_enabled(!busy, egui::Button::new(label)).on_hover_text(tr("account-sign-in-again-hint")).clicked() {
+                                    again = Some(id.clone());
+                                }
+                            } else if ui
+                                .add_enabled(app.form.editing.as_deref() != Some(id.as_str()), egui::Button::new(tr("account-edit-short")))
+                                .on_hover_text(tr("account-edit-hint"))
+                                .clicked()
+                            {
+                                edit = Some(id.clone());
+                            }
+                        });
+                    });
                     // The mail works, the calendar server next to it did not answer.
                     if let Some(e) = app.engine.session.item_errors.get(&id) {
                         ui.label(RichText::new(e).size(12.0).color(t.flag));
                     }
-                    ui.add_space(4.0);
-                    if oauth {
-                        let label = if busy { tr("account-waiting-browser") } else { tr("account-sign-in-again") };
-                        if ui.add_enabled(!busy, egui::Button::new(label)).on_hover_text(tr("account-sign-in-again-hint")).clicked() {
-                            again = Some(id.clone());
-                        }
-                    } else if ui
-                        .add_enabled(app.form.editing.as_deref() != Some(id.as_str()), egui::Button::new(tr("account-edit")))
-                        .on_hover_text(tr("account-edit-hint"))
-                        .clicked()
-                    {
-                        edit = Some(id.clone());
-                    }
-                    ui.add_space(6.0);
-                    let editing = app.form.signature_edit.as_ref().is_some_and(|(e, _)| *e == id);
-                    if editing {
-                        ui.label(RichText::new(tr("account-signature")).strong().color(t.text));
-                        if let Some((_, text)) = app.form.signature_edit.as_mut() {
-                            ui.add(
-                                egui::TextEdit::multiline(text)
-                                    .desired_rows(4)
-                                    .desired_width(f32::INFINITY)
-                                    .hint_text(tr("account-signature-placeholder")),
-                            );
-                        }
-                        ui.label(RichText::new(tr("account-signature-hint")).size(12.0).color(t.text_dim));
-                        ui.horizontal(|ui| {
-                            if ui.button(tr("account-signature-save")).clicked() {
-                                save_signature = app.form.signature_edit.take();
-                            }
-                            if ui.button(tr("cancel")).clicked() {
-                                app.form.signature_edit = None;
-                            }
-                        });
-                    } else {
-                        if !signature.is_empty() {
-                            ui.label(
-                                RichText::new(crate::i18n::tr_args(
-                                    "account-signature-line",
-                                    &[("line", signature.lines().next().unwrap_or("").into())],
-                                ))
-                                .size(12.0)
-                                .color(t.text_dim),
-                            );
-                        }
-                        if ui.button(if signature.is_empty() { tr("account-signature-set") } else { tr("account-signature-edit") }).clicked() {
-                            app.form.signature_edit = Some((id.clone(), signature.clone()));
-                        }
-                    }
-                    let info = app.engine.certificate(&id);
-                    if let Some(a) = crate::certificate::section(ui, t, &mut app.form.certificate, &id, info.as_ref()) {
-                        certificate = Some(a);
-                    }
-                    let key = app.engine.pgp_key(&id);
-                    if let Some(a) = crate::certificate::pgp_section(ui, t, &mut app.form.certificate, &id, key.as_ref()) {
-                        certificate = Some(a);
-                    }
-                    ui.add_space(4.0);
                     if confirming.as_deref() == Some(id.as_str()) {
-                        ui.label(RichText::new(tr("account-remove-question")).size(12.0).color(t.text));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new(tr("account-remove-question")).size(13.0).color(t.text));
                         ui.horizontal(|ui| {
                             if ui
                                 .add(
@@ -447,8 +436,59 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                                 app.form.confirm_remove = None;
                             }
                         });
-                    } else if ui.button(tr("account-remove")).on_hover_text(tr("account-remove-hint")).clicked() {
-                        app.form.confirm_remove = Some(id.clone());
+                    }
+                    if let Some((_, text)) = app.form.signature_edit.as_mut().filter(|(e, _)| *e == id) {
+                        ui.add_space(8.0);
+                        ui.label(RichText::new(tr("account-signature")).strong().color(t.text));
+                        ui.add(
+                            egui::TextEdit::multiline(text)
+                                .desired_rows(4)
+                                .desired_width(f32::INFINITY)
+                                .hint_text(tr("account-signature-placeholder")),
+                        );
+                        ui.label(RichText::new(tr("account-signature-hint")).size(12.0).color(t.text_dim));
+                        ui.horizontal(|ui| {
+                            if ui.add(helder::primary_text(t, &tr("account-signature-save"))).clicked() {
+                                save_signature = app.form.signature_edit.take();
+                            }
+                            if ui.button(tr("cancel")).clicked() {
+                                app.form.signature_edit = None;
+                            }
+                        });
+                    } else if !signature.is_empty() {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(48.0);
+                            let line = crate::i18n::tr_args("account-signature-line", &[("line", signature.lines().next().unwrap_or("").into())]);
+                            ui.label(RichText::new(line).size(12.0).color(t.text_dim));
+                        });
+                    }
+                    // Security: folded away, with what there is in one line.
+                    ui.add_space(8.0);
+                    helder::rule(ui, t);
+                    let info = app.engine.certificate(&id);
+                    let key = app.engine.pgp_key(&id);
+                    let pending = app.form.certificate.as_ref().is_some_and(|i| i.account_id == id);
+                    let open = pending || app.form.security_open.contains(&id);
+                    let summary = format!(
+                        "S/MIME: {} · OpenPGP: {}",
+                        crate::certificate::summary(info.as_ref()),
+                        crate::certificate::pgp_summary(key.as_ref())
+                    );
+                    if security_header(ui, t, &id, &summary, open).clicked() && !pending {
+                        if open {
+                            app.form.security_open.retain(|a| *a != id);
+                        } else {
+                            app.form.security_open.push(id.clone());
+                        }
+                    }
+                    if open {
+                        if let Some(a) = crate::certificate::section(ui, t, &mut app.form.certificate, &id, info.as_ref()) {
+                            certificate = Some(a);
+                        }
+                        if let Some(a) = crate::certificate::pgp_section(ui, t, &mut app.form.certificate, &id, key.as_ref()) {
+                            certificate = Some(a);
+                        }
                     }
                 });
                 ui.add_space(8.0);
@@ -494,6 +534,29 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             form(app, ui, t);
         });
     }
+}
+
+/// The row that opens and closes the Security part of an account's card: a chevron, the word
+/// and what the account has, in one quiet line.
+fn security_header(ui: &mut Ui, t: &Tokens, id: &str, summary: &str, open: bool) -> egui::Response {
+    let title = tr("account-security");
+    let r = ui
+        .horizontal(|ui| {
+            let icon = if open { Icon::ChevronDown } else { Icon::ChevronRight };
+            ui.add(icon.image(16.0, t.text_dim));
+            // Painted, not a label: the row itself carries the name for a screen reader.
+            let galley = ui.painter().layout_no_wrap(title.clone(), egui::FontId::proportional(14.0), t.text);
+            let (rect, _) = ui.allocate_exact_size(galley.size(), Sense::hover());
+            ui.painter().galley(rect.min, galley, t.text);
+            ui.add(egui::Label::new(RichText::new(summary).size(12.0).color(t.text_dim)).truncate());
+        })
+        .response;
+    let r = ui.interact(r.rect, ui.id().with(("security", id)), Sense::click());
+    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, open, &title));
+    if r.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    r
 }
 
 /// The width of the labels before the form's fields.
@@ -813,7 +876,7 @@ mod tests {
         app.tab = Tab::File;
         let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         harness.run();
-        harness.get_by_label("Handtekening instellen").click();
+        harness.get_by_label("Handtekening").click();
         harness.run();
         if let Some((_, text)) = harness.state_mut().form.signature_edit.as_mut() {
             *text = "Groet,\nAlain\u{7}\n\n".into();
@@ -822,7 +885,7 @@ mod tests {
         harness.run();
         let account = harness.state().engine.session.accounts[0].clone();
         assert_eq!(account.signature, "Groet,\nAlain", "control characters and trailing blank lines go");
-        assert!(harness.query_by_label("Handtekening bewerken").is_some());
+        assert!(harness.query_by_label("Handtekening: Groet,").is_some());
         harness.state_mut().open_compose(crate::compose::Kind::New);
         assert_eq!(harness.state().compose.as_ref().map(|c| c.body.as_str()), Some("\n\n-- \nGroet,\nAlain"));
     }
@@ -862,12 +925,17 @@ mod tests {
         app.tab = Tab::File;
         let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         harness.run();
+        // Removing is in the account's menu, and asks first.
+        harness.get_by_label_contains("Meer voor").click();
+        harness.run();
         harness.get_by_label("Account verwijderen").click();
         harness.run();
         assert!(!harness.state().engine.session.is_sample(), "one click only asks");
         harness.get_by_label("Annuleren").click();
         harness.run();
         assert!(harness.query_by_label("Ja, verwijderen").is_none());
+        harness.get_by_label_contains("Meer voor").click();
+        harness.run();
         harness.get_by_label("Account verwijderen").click();
         harness.run();
         harness.get_by_label("Ja, verwijderen").click();
@@ -891,7 +959,7 @@ mod tests {
         app.tab = Tab::File;
         let mut harness = Harness::builder().with_size(vec2(1100.0, 1600.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), app);
         harness.run();
-        harness.get_by_label("Account bewerken").click();
+        harness.get_by_label("Bewerken").click();
         harness.run();
         {
             let f = &harness.state().form;
@@ -907,7 +975,7 @@ mod tests {
         harness.get_by_label("Annuleren").click();
         harness.run();
         assert!(harness.state().form.editing.is_none());
-        harness.get_by_label("Account bewerken").click();
+        harness.get_by_label("Bewerken").click();
         harness.run();
         {
             let f = &mut harness.state_mut().form;
