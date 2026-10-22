@@ -1,0 +1,4 @@
+[env]
+# Opus (audiopus_sys) is built with CMake from a source tree that still asks for CMake 2.8;
+# CMake 4, on the macOS and Windows runners, refuses that unless told the oldest policy to use.
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
