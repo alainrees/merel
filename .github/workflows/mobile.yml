@@ -12,6 +12,9 @@ env:
 jobs:
   ios:
     runs-on: macos-latest
+    env:
+      # The same minimum iOS for the C parts (aws-lc) as for Rust, or the link fails.
+      IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
