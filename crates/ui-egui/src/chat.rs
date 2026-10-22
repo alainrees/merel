@@ -202,6 +202,16 @@ impl MailApp {
             }
         };
         let account_id = form.account_id.clone();
+        // The first chat from an account makes its key: chat needs one, and nobody should have
+        // to find a switch for that first.
+        if !self.engine.chat_ready(&account_id)
+            && let Err(e) = self.engine.enable_chat(&account_id)
+        {
+            if let Some(form) = self.chat.new.as_mut() {
+                form.error = Some(e);
+            }
+            return;
+        }
         let id = match draft.chat.as_ref().and_then(|c| c.group_id.as_deref()) {
             Some(group) => engine_chat::group_chat_id(&account_id, group),
             None => engine_chat::person_chat_id(&account_id, draft.to.first().map(Address::email).unwrap_or("")),
@@ -1009,7 +1019,8 @@ fn new_chat_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let Some(form) = app.chat.new.as_mut() else { return };
     helder::quiet(ui, t, |ui| {
         ui.horizontal(|ui| {
-            start = ui.add_enabled_ui(ready, |ui| helder::primary_button(ui, t, Icon::Send, &tr("chat-start"))).inner.clicked();
+            let can_start = !form.account_id.is_empty();
+            start = ui.add_enabled_ui(can_start, |ui| helder::primary_button(ui, t, Icon::Send, &tr("chat-start"))).inner.clicked();
             helder::bar_separator(ui, t);
             let current = accounts
                 .iter()
@@ -1135,7 +1146,7 @@ fn new_chat_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         }
         ui.add_space(10.0);
         helder::icon_row(ui, t, Icon::ShieldCheck, |ui| {
-            let note = if ready { tr("chat-new-note") } else { tr("chat-enable-first") };
+            let note = if ready { tr("chat-new-note") } else { tr("chat-key-on-start") };
             ui.add(egui::Label::new(RichText::new(note).size(12.5).color(t.text_dim)).wrap());
         });
     });

@@ -766,6 +766,7 @@ chat-pick-account = Kies een account
 chat-via = Via { $email }
 chat-name-hint = Groepsnaam (optioneel)
 chat-first-hint = Typ je eerste bericht…
+chat-key-on-start = Dit account heeft nog geen chatsleutel. Merel maakt die bij Starten; je mail van dit account wordt daarna ondertekend en neemt je sleutel mee.
 chat-enable-first = Zet eerst chat aan voor dit account; dat kan op de beginpagina van Chat.
 chat-invite = Uitnodigingslink
 chat-invite-for = Uitnodiging voor { $email }

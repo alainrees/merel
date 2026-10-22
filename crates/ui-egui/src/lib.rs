@@ -3238,6 +3238,28 @@ mod tests {
     }
 
     #[test]
+    fn the_first_chat_from_an_account_makes_its_key_by_itself() {
+        let mut h = harness();
+        with_a_chat(h.state_mut());
+        h.state_mut().engine.session.accounts[0].protocol = merel_model::Protocol::Microsoft365;
+        assert!(!h.state().engine.chat_ready("a1"));
+        h.state_mut().module = Module::Chat;
+        h.state_mut().new_chat();
+        {
+            let form = h.state_mut().chat.new.as_mut().unwrap();
+            form.people = vec![merel_model::Address::new(Some("Ravi Kumar"), "ravi@example.org").unwrap()];
+            form.text = "Hoi Ravi".into();
+        }
+        h.run();
+        h.get_by_label_contains("Merel maakt die bij Starten");
+        h.get_by_label("Starten").click();
+        h.run_steps(3);
+        assert!(h.state().engine.chat_ready("a1"), "starting made the key");
+        assert!(h.state().chat.new.is_none(), "{:?}", h.state().chat.new.as_ref().and_then(|f| f.error.clone()));
+        assert_eq!(h.state().engine.waiting().len(), 1, "the message waits for Ravi's key");
+    }
+
+    #[test]
     fn a_new_chat_picks_people_from_the_address_book_and_invites_them_by_itself() {
         let mut h = harness();
         with_a_chat(h.state_mut());
