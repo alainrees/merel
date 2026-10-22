@@ -454,7 +454,8 @@ fn round(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str, on: bool, danger: boo
     });
     let center = egui::pos2(rect.center().x, rect.top() + 26.0);
     let (fill, stroke, color) = if danger {
-        (t.flag, Color32::TRANSPARENT, Color32::WHITE)
+        // The red is light in the dark theme: a dark icon on it keeps the contrast.
+        (t.flag, Color32::TRANSPARENT, if t.dark { t.window } else { Color32::WHITE })
     } else if on {
         (t.checked, Color32::TRANSPARENT, t.accent_text)
     } else {
