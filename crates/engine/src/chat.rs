@@ -193,7 +193,7 @@ pub fn new_chat(people: &[Address], name: &str, text: &str) -> Result<Draft, Str
         let mut random = [0u8; 16];
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut random);
         let group_name = if name.is_empty() { unique.iter().map(Address::display).collect::<Vec<_>>().join(", ") } else { name };
-        ChatTag { group_id: Some(ChatTag::new_group_id(random)), group_name: Some(group_name), handshake: None }
+        ChatTag { group_id: Some(ChatTag::new_group_id(random)), group_name: Some(group_name), handshake: None, invite: false }
     } else {
         ChatTag::default()
     };
@@ -213,10 +213,11 @@ fn chat_draft(people: Vec<Address>, tag: ChatTag, text: &str, in_reply_to: Optio
     }
 }
 
-/// Whether `account` lists the chat headers: an IMAP account. Microsoft 365, Exchange and
-/// Gmail list mail through their own interfaces, which do not hand them over yet.
+/// Whether `account` lists the chat headers: an IMAP account, or Microsoft 365, whose Graph
+/// client reads them apart. Exchange and Gmail list mail through interfaces that do not hand
+/// them over yet.
 pub fn can_chat(account: &merel_model::Account) -> bool {
-    account.protocol == merel_model::Protocol::ImapSmtp && account.id != SAMPLE_ACCOUNT
+    matches!(account.protocol, merel_model::Protocol::ImapSmtp | merel_model::Protocol::Microsoft365) && account.id != SAMPLE_ACCOUNT
 }
 
 /// Most encrypted messages opened after one listing to read the header inside.
@@ -372,7 +373,8 @@ mod tests {
         let mut s = Session { accounts: vec![account()], ..Session::default() };
         s.folders = vec![folder("in", FolderKind::Inbox), folder("sent", FolderKind::Sent), folder("junk", FolderKind::Junk)];
         let chat = Some(ChatTag::default());
-        let group = |name: Option<&str>| Some(ChatTag { group_id: Some("G1".into()), group_name: name.map(str::to_string), handshake: None });
+        let group =
+            |name: Option<&str>| Some(ChatTag { group_id: Some("G1".into()), group_name: name.map(str::to_string), handshake: None, invite: false });
         s.messages = vec![
             message("m1", "in", "sanne@example.org", &["alain@voorbeeld.nl"], 100, chat.clone()),
             message("m2", "sent", "alain@voorbeeld.nl", &["sanne@example.org"], 200, chat.clone()),
@@ -453,7 +455,10 @@ mod tests {
     fn a_chat_message_from_the_server_is_recognised() {
         let raw = b"From: Sanne <sanne@example.org>\r\nTo: alain@voorbeeld.nl\r\nSubject: [...]\r\nChat-Version: 1.0\r\nChat-Group-ID: Ab-9_x\r\nChat-Group-Name: =?utf-8?q?Caf=C3=A9_Rees?=\r\n\r\n";
         let header = merel_mime::parse_header(raw);
-        assert_eq!(header.chat, Some(ChatTag { group_id: Some("Ab-9_x".into()), group_name: Some("Café Rees".into()), handshake: None }));
+        assert_eq!(
+            header.chat,
+            Some(ChatTag { group_id: Some("Ab-9_x".into()), group_name: Some("Café Rees".into()), handshake: None, invite: false })
+        );
         assert_eq!(merel_mime::parse_header(b"From: a@b.nl\r\nSubject: x\r\n\r\n").chat, None);
     }
 

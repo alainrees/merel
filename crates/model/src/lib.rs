@@ -11,6 +11,7 @@ mod chat;
 mod contact;
 mod groups;
 mod junk;
+mod online;
 mod quicksteps;
 pub mod rich;
 mod rules;
@@ -28,6 +29,7 @@ pub use chat::{CHAT_VERSION, ChatTag, Handshake, MAX_GROUP_ID, MAX_GROUP_NAME as
 pub use contact::{Contact, ContactError, MAX_PHOTO, Phone, PhoneKind, Photo, Place, PlaceKind};
 pub use groups::{ContactGroup, ContactGroupError, MAX_GROUP_MEMBERS, MAX_GROUP_NAME, mailbox};
 pub use junk::{JunkLevel, JunkLists, MAX_JUNK_ENTRY, entry_covers, junk_entry};
+pub use online::{MAX_LINK as MAX_MEETING_LINK, MeetingLink, Service as MeetingService, find_meeting_link, meeting_link};
 pub use quicksteps::{MAX_QUICK_STEP_NAME, QuickStep, QuickStepError};
 pub use rules::{MAX_RULE_TEXT, Rule, RuleError, RuleField};
 pub use safety::{RISKY_EXTENSIONS, Warning, attachment_warnings, authentication_warning, host_of, link_warnings, lookalike, sender_warnings};

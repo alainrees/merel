@@ -20,8 +20,8 @@ use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Utc};
 use merel_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result, kind_from_name};
 use merel_mime::ParsedHeader;
 use merel_model::{
-    Address, Appointment, Attendee, Contact, FolderKind, Frequency, Importance, MAX_PHOTO, Meeting, Phone, PhoneKind, Photo, Place, PlaceKind,
-    Priority, Recurrence, Response, Server, ShowAs, Task, clean_text,
+    Address, Appointment, Attendee, ChatTag, Contact, FolderKind, Frequency, Importance, MAX_PHOTO, Meeting, Phone, PhoneKind, Photo, Place,
+    PlaceKind, Priority, Recurrence, Response, Server, ShowAs, Task, clean_text,
 };
 use merel_secrets::Secret;
 use serde_json::{Value, json};
@@ -63,6 +63,55 @@ pub struct GraphClient {
     /// Each contact's photo as last fetched, with the contact's `changeKey` then, so a
     /// photo is asked for again only once the contact changed.
     photos: HashMap<String, (String, Option<Photo>)>,
+    /// What the headers of recent messages say about chat, by message id; see
+    /// [`GraphClient::look_for_chats`].
+    chat_marks: HashMap<String, ChatMark>,
+    /// Per folder, the newest message whose headers were looked at.
+    chat_looked: HashMap<String, i64>,
+}
+
+/// What a message's own headers say that the listing does not: the chat tag and whether it is
+/// encrypted.
+#[derive(Clone, Debug, Default)]
+struct ChatMark {
+    chat: Option<ChatTag>,
+    encrypted: bool,
+}
+
+/// How far back the headers of messages are looked at for chats, and how many at a time.
+const CHAT_LOOK_BACK: i64 = 14 * 24 * 3600;
+const CHAT_LOOK: u32 = 50;
+/// Most marks kept; past that they start over, and older chat messages keep the tag they got.
+const MAX_CHAT_MARKS: usize = 5000;
+/// The headers a chat message is known by.
+const CHAT_HEADERS: [&str; 8] = [
+    "content-type",
+    "chat-version",
+    "chat-group-id",
+    "chat-group-name",
+    "secure-join",
+    "secure-join-invitenumber",
+    "secure-join-auth",
+    "secure-join-fingerprint",
+];
+/// The subject encrypted mail with protected headers carries outside (Delta Chat, Thunderbird).
+const SEALED_SUBJECT: &str = "[...]";
+
+/// Reads the chat headers out of a message's `internetMessageHeaders`; `None` when Graph gave
+/// none, as for a copy in Verzonden items.
+fn chat_mark(m: &Value) -> Option<ChatMark> {
+    let headers = m.get("internetMessageHeaders").and_then(Value::as_array).filter(|l| !l.is_empty())?;
+    let mut block = String::new();
+    for h in headers {
+        let name = str_of(h, "name");
+        if CHAT_HEADERS.contains(&name.to_ascii_lowercase().as_str()) {
+            let value: String = str_of(h, "value").chars().filter(|c| !c.is_control()).collect();
+            block.push_str(&format!("{name}: {value}\r\n"));
+        }
+    }
+    block.push_str("\r\n");
+    let parsed = merel_mime::parse_header(block.as_bytes());
+    Some(ChatMark { chat: parsed.chat, encrypted: parsed.encrypted })
 }
 
 /// How many requests one `$batch` may carry.
@@ -219,7 +268,9 @@ fn header_of(m: &Value) -> Option<RemoteHeader> {
                 _ => Importance::Normal,
             },
             chat: None,
-            encrypted: false,
+            // Graph lists no Content-Type; the subject protected headers leave outside is
+            // the sign until the message's own headers are read.
+            encrypted: str_of(m, "subject") == SEALED_SUBJECT,
         },
         date,
     })
@@ -258,6 +309,12 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
             .map(|l| l.iter().filter_map(Value::as_str).map(str::to_string).collect())
             .unwrap_or_default(),
         meeting: meeting_of(e),
+        online: e
+            .get("onlineMeeting")
+            .map(|o| str_of(o, "joinUrl"))
+            .filter(|u| !u.is_empty())
+            .or_else(|| e.get("onlineMeetingUrl").and_then(Value::as_str))
+            .map(str::to_string),
     }
     .validated()
     .ok()
@@ -507,6 +564,8 @@ impl GraphClient {
             time_zone,
             task_list: None,
             photos: HashMap::new(),
+            chat_marks: HashMap::new(),
+            chat_looked: HashMap::new(),
         };
         client.known = client.well_known()?;
         Ok(client)
@@ -524,6 +583,8 @@ impl GraphClient {
             time_zone: "Europe/Amsterdam".into(),
             task_list: None,
             photos: HashMap::new(),
+            chat_marks: HashMap::new(),
+            chat_looked: HashMap::new(),
         }
     }
 
@@ -669,6 +730,51 @@ impl GraphClient {
         }
     }
 
+    /// Graph lists none of the headers a chat message is known by, so for the inbox and
+    /// Verzonden items the headers of messages newer than the last look (at most two weeks
+    /// back) are read in one request, and what they say is put on `headers`. A failure only
+    /// leaves the chats out.
+    fn look_for_chats(&mut self, folder: &str, headers: &mut [RemoteHeader]) {
+        let kind = self.known.iter().find(|(id, _)| id == folder).map(|(_, kind)| *kind);
+        if !matches!(kind, Some(FolderKind::Inbox | FolderKind::Sent)) {
+            return;
+        }
+        let since = self.chat_looked.get(folder).copied().unwrap_or(0).max(Utc::now().timestamp() - CHAT_LOOK_BACK);
+        let newest = headers.iter().map(|h| h.date).max().unwrap_or(0);
+        if newest > since || !self.chat_looked.contains_key(folder) {
+            let path = format!(
+                "/me/mailFolders/{}/messages?$filter=receivedDateTime%20ge%20{}Z&$orderby=receivedDateTime%20desc&$top={CHAT_LOOK}&$select=id,receivedDateTime,internetMessageHeaders",
+                encode(folder),
+                utc(since)
+            );
+            match self.call("GET", &path, None) {
+                Ok(page) => {
+                    if self.chat_marks.len() > MAX_CHAT_MARKS {
+                        self.chat_marks.clear();
+                    }
+                    for m in page.get("value").and_then(Value::as_array).into_iter().flatten() {
+                        if let (Some(id), Some(mark)) = (id_of(m), chat_mark(m)) {
+                            self.chat_marks.insert(id, mark);
+                        }
+                    }
+                    self.chat_looked.insert(folder.to_string(), newest.max(since));
+                }
+                Err(e) => log::debug!("{}: no chat headers for a folder: {e}", self.host),
+            }
+        }
+        self.mark_chats(headers);
+    }
+
+    /// Puts the chat marks already read on `headers`.
+    fn mark_chats(&self, headers: &mut [RemoteHeader]) {
+        for h in headers {
+            if let Some(mark) = self.chat_marks.get(&h.id) {
+                h.header.chat = mark.chat.clone();
+                h.header.encrypted = mark.encrypted;
+            }
+        }
+    }
+
     /// The default To Do list's id, looked up once.
     fn task_list(&mut self) -> Result<String> {
         if let Some(id) = &self.task_list {
@@ -810,6 +916,11 @@ impl Mailbox for GraphClient {
         let mut out: Vec<RemoteHeader> =
             page.get("value").and_then(Value::as_array).map(|l| l.iter().filter_map(header_of).collect()).unwrap_or_default();
         out.reverse();
+        if offset == 0 {
+            self.look_for_chats(folder, &mut out);
+        } else {
+            self.mark_chats(&mut out);
+        }
         Ok(out)
     }
 
@@ -820,6 +931,7 @@ impl Mailbox for GraphClient {
             page.get("value").and_then(Value::as_array).map(|l| l.iter().filter_map(header_of).collect()).unwrap_or_default();
         // Search results come by relevance; the listing wants them by date, newest last.
         out.sort_by_key(|h| h.date);
+        self.mark_chats(&mut out);
         Ok(out)
     }
 
@@ -900,7 +1012,7 @@ impl Mailbox for GraphClient {
 impl ItemStore for GraphClient {
     fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>> {
         let path = format!(
-            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity,showAs,categories,attendees,organizer,iCalUId",
+            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity,showAs,categories,attendees,organizer,iCalUId,onlineMeeting,onlineMeetingUrl",
             encode(&utc(from)),
             encode(&utc(to.max(from)))
         );
@@ -1003,6 +1115,21 @@ mod tests {
     }
 
     #[test]
+    fn an_online_meeting_brings_its_link() {
+        let times = json!({ "start": { "dateTime": "2026-10-14T17:46:40" }, "end": { "dateTime": "2026-10-14T18:46:40" } });
+        let e = json!({ "id": "E1", "subject": "Kwartaaloverleg", "start": times["start"], "end": times["end"], "isOnlineMeeting": true,
+            "onlineMeeting": { "joinUrl": "https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0" } });
+        let link = appointment_of(&e).unwrap().meeting_link().unwrap();
+        assert_eq!(link.service, merel_model::MeetingService::Microsoft365);
+        let old = json!({ "id": "E2", "subject": "Oud", "start": times["start"], "end": times["end"], "onlineMeeting": null,
+            "onlineMeetingUrl": "https://meet.example.org/kamer" });
+        assert_eq!(appointment_of(&old).unwrap().online.as_deref(), Some("https://meet.example.org/kamer"));
+        let bad =
+            json!({ "id": "E3", "subject": "Raar", "start": times["start"], "end": times["end"], "onlineMeeting": { "joinUrl": "javascript:x" } });
+        assert_eq!(appointment_of(&bad).unwrap().online, None, "only an https link is kept");
+    }
+
+    #[test]
     fn messages_become_headers() {
         let m = json!({ "id": "AAMk1", "subject": "Hoi & dag", "receivedDateTime": "2026-10-14T17:46:40Z", "isRead": false,
             "hasAttachments": true, "flag": { "flagStatus": "flagged" }, "internetMessageId": "<abc@example.org>", "importance": "low",
@@ -1016,6 +1143,33 @@ mod tests {
         assert_eq!(h.header.message_id.as_deref(), Some("<abc@example.org>"));
         assert_eq!(h.header.importance, Importance::Low);
         assert!(header_of(&json!({ "subject": "no id" })).is_none());
+    }
+
+    #[test]
+    fn chat_headers_mark_the_listed_messages() {
+        let m = json!({ "id": "C1", "internetMessageHeaders": [
+            { "name": "Received", "value": "from a by b" },
+            { "name": "Content-Type", "value": "multipart/encrypted; protocol=\"application/pgp-encrypted\"; boundary=\"x\"" },
+            { "name": "Chat-Version", "value": "1.0" },
+            { "name": "Chat-Group-ID", "value": "abcdefghijk" },
+        ] });
+        let mark = chat_mark(&m).unwrap();
+        assert!(mark.encrypted);
+        assert_eq!(mark.chat.as_ref().and_then(|c| c.group_id.as_deref()), Some("abcdefghijk"));
+        let plain = chat_mark(&json!({ "id": "C2", "internetMessageHeaders": [{ "name": "Subject", "value": "Hoi" }] })).unwrap();
+        assert!(plain.chat.is_none() && !plain.encrypted);
+        assert!(chat_mark(&json!({ "id": "C3", "internetMessageHeaders": [] })).is_none(), "a Verzonden copy has none");
+
+        let mut c = GraphClient::offline();
+        c.chat_marks.insert("C1".into(), mark);
+        let sealed = json!({ "id": "C1", "subject": "[...]", "receivedDateTime": "2026-10-14T17:46:40Z",
+            "from": { "emailAddress": { "name": "Ravi", "address": "ravi@example.org" } } });
+        let other = json!({ "id": "C4", "subject": "[...]", "receivedDateTime": "2026-10-14T17:46:40Z",
+            "from": { "emailAddress": { "name": "Ravi", "address": "ravi@example.org" } } });
+        let mut listed = vec![header_of(&sealed).unwrap(), header_of(&other).unwrap()];
+        c.mark_chats(&mut listed);
+        assert!(listed[0].header.chat.is_some() && listed[0].header.encrypted);
+        assert!(listed[1].header.chat.is_none() && listed[1].header.encrypted, "the sealed subject alone says encrypted");
     }
 
     #[test]

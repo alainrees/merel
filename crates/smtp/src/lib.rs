@@ -223,7 +223,7 @@ mod tests {
         let one = Draft { chat: Some(ChatTag::default()), ..plain.clone() };
         let text = String::from_utf8(build(&from, &one).unwrap().formatted()).unwrap();
         assert!(text.contains("Chat-Version: 1.0\r\n") && !text.contains("Chat-Group"), "{text}");
-        let group = ChatTag { group_id: Some("Ab-9_x".into()), group_name: Some("Familie Rees".into()), handshake: None };
+        let group = ChatTag { group_id: Some("Ab-9_x".into()), group_name: Some("Familie Rees".into()), handshake: None, invite: false };
         let text = String::from_utf8(build(&from, &Draft { chat: Some(group), ..plain.clone() }).unwrap().formatted()).unwrap();
         assert!(text.contains("Chat-Group-ID: Ab-9_x\r\n") && text.contains("Chat-Group-Name: Familie Rees\r\n"), "{text}");
 

@@ -351,6 +351,16 @@ fingerprint in the link and that the secret token came back. At the end both sid
 and the chat header says "geverifieerd". The tokens and verified keys stay on this computer (`invites.json`); a
 handshake message that does not fit gets no answer. Group invitations are not taken yet.
 
+The Vergaderen module, between Chat and Personen, lists the online meetings of today or the coming seven days: every
+appointment with a link to join. Microsoft 365 and Google name the link with the event (`onlineMeeting.joinUrl`,
+`hangoutLink` or the video entry of `conferenceData`), Outlook's and Google's invitations in an iCalendar property of
+their own (`X-MICROSOFT-SKYPETEAMSMEETINGURL`, `X-GOOGLE-CONFERENCE`); otherwise Merel takes the first link in the
+location or the notes to a service people meet with (Microsoft 365, Zoom, Google Meet, Jitsi Meet, Webex, Whereby). Only
+an `https` link without spaces or a user name before the host counts. A meeting shows how long until it starts, its
+organiser and attendees with their answers, and from a quarter of an hour before the start a "Deelnemen" button, which
+opens the link in the browser (the service's own app takes over when it is installed). A link someone sent can be pasted
+on the start page to join, and "Vergadering plannen" opens a new appointment.
+
 A message can be put off, Outlook's "Sluimeren": the right-click menu's "Sluimeren" offers Later vandaag (three
 hours on), Morgen, Dit weekend (Saturday) or Volgende week (Monday), at eight in the morning. The message leaves the
 list until then and comes back unread, with a notice; the "Gesluimerd" filter on the Beeld tab shows

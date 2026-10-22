@@ -556,6 +556,8 @@ pub fn appointment_of(event: &Component, id: String) -> Option<Appointment> {
         show_as: show_as_of(event),
         categories: categories_of(event),
         meeting: meeting_of(event),
+        // Outlook and Google name the meeting's link in a property of their own.
+        online: ["X-MICROSOFT-SKYPETEAMSMEETINGURL", "X-GOOGLE-CONFERENCE"].iter().map(|p| event.text(p)).find(|u| !u.is_empty()),
     }
     .validated()
     .ok()
@@ -1107,6 +1109,18 @@ mod tests {
         let windows = rules.replace("Eigen zone:", "W. Europe Standard Time:");
         let a = appointment_of(parse(&windows)[0].find("VEVENT").unwrap(), "x".into()).unwrap();
         assert_eq!((a.start, a.end), (ten_utc, nov), "a Windows name is its IANA zone");
+    }
+
+    #[test]
+    fn an_invitation_names_its_meeting_link() {
+        let teams = EVENT.replace(
+            "LOCATION:Kantine\r\n",
+            "LOCATION:Online\r\nX-MICROSOFT-SKYPETEAMSMEETINGURL:https://teams.microsoft.com/l/meetup-join/19%3am\r\n",
+        );
+        let a = appointment_of(parse(&teams)[0].find("VEVENT").unwrap(), "x".into()).unwrap();
+        assert_eq!(a.online.as_deref(), Some("https://teams.microsoft.com/l/meetup-join/19%3am"));
+        let plain = appointment_of(parse(EVENT)[0].find("VEVENT").unwrap(), "x".into()).unwrap();
+        assert_eq!(plain.online, None);
     }
 
     #[test]

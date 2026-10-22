@@ -21,6 +21,7 @@ use merel_mime::{Body, Encryption, ParsedHeader};
 use merel_model::{Address, ChatTag, Draft, FolderKind, Handshake};
 use serde::{Deserialize, Serialize};
 
+use crate::drafts::now;
 use crate::openpgp::Carried;
 use crate::{Engine, SAMPLE_ACCOUNT, config};
 
@@ -33,6 +34,10 @@ const MAX_HANDLED: usize = 500;
 const MAX_JOINING: usize = 20;
 /// How long an opened invitation waits for the other side: a week.
 const JOIN_FOR: i64 = 7 * 24 * 3600;
+/// The chat messages held back at a time.
+const MAX_WAITING: usize = 100;
+/// How long before Merel mails the same person an invitation again: a week.
+const INVITE_AGAIN: i64 = 7 * 24 * 3600;
 
 /// What an invitation link says.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +166,32 @@ pub struct Invites {
     verified: BTreeMap<String, String>,
     #[serde(default)]
     handled: Vec<String>,
+    /// Chat messages held back until everyone in them has a key.
+    #[serde(default)]
+    waiting: Vec<Waiting>,
+    /// Address → when Merel last mailed it an invitation by itself.
+    #[serde(default)]
+    invited: BTreeMap<String, i64>,
+}
+
+/// A chat message held back because someone in it has no key yet. Merel mailed them an
+/// invitation; the message goes out, encrypted, once their key comes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Waiting {
+    pub account_id: String,
+    pub draft: Draft,
+    /// When it was written, in seconds since the Unix epoch.
+    pub since: i64,
+}
+
+impl Waiting {
+    /// The chat the message belongs to.
+    pub fn chat_id(&self) -> String {
+        match self.draft.chat.as_ref().and_then(|c| c.group_id.as_deref()) {
+            Some(group) => crate::chat::group_chat_id(&self.account_id, group),
+            None => crate::chat::person_chat_id(&self.account_id, self.draft.to.first().map(Address::email).unwrap_or("")),
+        }
+    }
 }
 
 /// How an invitation one opened is getting on, for the chat start page.
@@ -183,6 +214,87 @@ impl Engine {
             self.invites.own.entry(account_id.to_string()).or_insert_with(|| Tokens { invitenumber: new_token(24), auth: new_token(24) }).clone();
         self.save_invites();
         Ok(Invite { fingerprint: info.fingerprint, addr, name, invitenumber: tokens.invitenumber, auth: tokens.auth }.link())
+    }
+
+    /// Sends a chat message, or, when someone in it has no key yet, mails them an invitation
+    /// (only the link, never the message) and holds the message until their key comes, as it
+    /// does through the invitation or any encrypted mail from them. `Ok(None)` then; see
+    /// [`Engine::waiting`].
+    pub fn send_or_invite(&mut self, account_id: &str, draft: Draft) -> Result<Option<u64>, String> {
+        let sent = self.hold_or_send(account_id, draft);
+        self.dispatch();
+        sent
+    }
+
+    /// [`Engine::send_or_invite`] without handing the mail to the worker yet.
+    fn hold_or_send(&mut self, account_id: &str, draft: Draft) -> Result<Option<u64>, String> {
+        if draft.chat.is_none() || !draft.encrypt {
+            return Err(merel_i18n::tr("chat-encrypted-only"));
+        }
+        if draft.body.trim().is_empty() && draft.attachments.is_empty() {
+            return Err(merel_i18n::tr("chat-type-first"));
+        }
+        if !self.chat_ready(account_id) {
+            return Err(merel_i18n::tr("chat-turn-on-first"));
+        }
+        let missing = self.keys.openpgp.missing(draft.to.iter(), now());
+        if missing.is_empty() {
+            return Ok(Some(self.session.send(account_id, draft)));
+        }
+        if self.invites.waiting.len() >= MAX_WAITING {
+            return Err(crate::chat::missing_chat_text(&missing));
+        }
+        let link = self.invite_link(account_id)?;
+        let at = now();
+        for addr in &missing {
+            let key = addr.to_lowercase();
+            if self.invites.invited.get(&key).is_some_and(|t| at - t < INVITE_AGAIN) {
+                continue;
+            }
+            let Some(person) = draft.to.iter().find(|a| a.email().eq_ignore_ascii_case(addr)).cloned() else { continue };
+            let invitation = Draft {
+                to: vec![person],
+                subject: merel_i18n::tr("chat-invite-mail-subject"),
+                body: format!("{}\n\n{link}", merel_i18n::tr("chat-invite-mail-text")),
+                chat: Some(ChatTag { invite: true, ..ChatTag::default() }),
+                encrypt: false,
+                ..Draft::default()
+            };
+            self.session.send(account_id, invitation);
+            self.invites.invited.insert(key, at);
+        }
+        self.invites.waiting.push(Waiting { account_id: account_id.to_string(), draft, since: at });
+        self.save_invites();
+        Ok(None)
+    }
+
+    /// The chat messages held back for a key, oldest first.
+    pub fn waiting(&self) -> &[Waiting] {
+        &self.invites.waiting
+    }
+
+    /// Drops the messages held back in `chat_id`.
+    pub fn cancel_waiting(&mut self, chat_id: &str) {
+        self.invites.waiting.retain(|w| w.chat_id() != chat_id);
+        self.save_invites();
+    }
+
+    /// Sends the held-back messages whose people all have a key by now.
+    pub(crate) fn send_waiting(&mut self) {
+        if self.invites.waiting.is_empty() {
+            return;
+        }
+        let at = now();
+        let (ready, rest): (Vec<Waiting>, Vec<Waiting>) =
+            std::mem::take(&mut self.invites.waiting).into_iter().partition(|w| self.keys.openpgp.missing(w.draft.to.iter(), at).is_empty());
+        self.invites.waiting = rest;
+        if ready.is_empty() {
+            return;
+        }
+        for w in ready {
+            self.session.send(&w.account_id, w.draft);
+        }
+        self.save_invites();
     }
 
     /// Makes a new invitation link for `account_id`; the old one stops working.
@@ -499,6 +611,45 @@ mod tests {
         for wrong in ["https://example.org/#x", "https://i.delta.chat/#123&a=a@b.nl&i=x&s=y", &link.replace("&s=auth2", "&s=a;b")] {
             assert!(parse_invite(wrong).is_err(), "{wrong}");
         }
+    }
+
+    #[test]
+    fn a_first_message_waits_for_the_key_while_an_invitation_goes_out() {
+        let alain = account("a1", "Alain Rees", "alain@voorbeeld.nl");
+        let bob = account("b1", "Bob", "bob@example.org");
+        let (mut a, mut b) = (engine(&alain), engine(&bob));
+        a.enable_chat("a1").unwrap();
+        b.enable_chat("b1").unwrap();
+        let draft = crate::chat::new_chat(std::slice::from_ref(&bob.address), "", "Zullen we om tien uur beginnen?").unwrap();
+        assert_eq!(a.hold_or_send("a1", draft.clone()).unwrap(), None, "held back");
+        assert_eq!(a.waiting().len(), 1);
+        assert_eq!(a.waiting()[0].chat_id(), crate::chat::person_chat_id("a1", "bob@example.org"));
+
+        // Only the invitation goes out: unencrypted, a chat message with the link, and not a
+        // word of the message itself.
+        let out = sent(&mut a, &alain);
+        assert_eq!(out.len(), 1);
+        let text = String::from_utf8_lossy(&out[0]).into_owned();
+        assert!(!merel_pgp::is_encrypted(&out[0]) && text.contains("Chat-Version: 1.0") && text.contains("i.delta.chat"), "{text}");
+        assert!(!text.contains("tien uur") && text.contains("Autocrypt:"), "{text}");
+        // A second message to Bob the same week sends no second invitation.
+        let again = crate::chat::new_chat(std::slice::from_ref(&bob.address), "", "En de begroting?").unwrap();
+        assert_eq!(a.hold_or_send("a1", again).unwrap(), None);
+        assert!(sent(&mut a, &alain).is_empty());
+
+        // Bob answers from Delta Chat, encrypted to the key the invitation brought: now Alain has
+        // his key, and both messages go out, encrypted.
+        let mut b_in = out[0].clone();
+        deliver(&mut b, &bob, 1, &std::mem::take(&mut b_in));
+        let reply = crate::chat::new_chat(std::slice::from_ref(&alain.address), "", "Prima!").unwrap();
+        assert!(b.hold_or_send("b1", reply).unwrap().is_some(), "Bob has Alain's key from the invitation");
+        let answer = sent(&mut b, &bob).remove(0);
+        assert!(merel_pgp::is_encrypted(&answer));
+        deliver(&mut a, &alain, 1, &answer);
+        assert!(a.waiting().is_empty());
+        let out = sent(&mut a, &alain);
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|raw| merel_pgp::is_encrypted(raw)));
     }
 
     #[test]

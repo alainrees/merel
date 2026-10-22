@@ -236,6 +236,12 @@ impl MailApp {
         }
     }
 
+    /// Opens a new chat with the selected contact, at their first address.
+    pub fn chat_selected_contact(&mut self) {
+        let Some(address) = self.engine.session.selected_contact().and_then(|c| c.addresses().into_iter().next()) else { return };
+        self.chat_with(address);
+    }
+
     /// Opens a new message to the selected contact's first address.
     pub fn mail_selected_contact(&mut self) {
         let Some(c) = self.engine.session.selected_contact().cloned() else { return };
@@ -417,7 +423,7 @@ fn contact_fields(app: &MailApp, c: &Contact) -> Vec<Field> {
     if app.can_chat()
         && let Some(e) = c.emails.first()
     {
-        out.extend(Field::link(Icon::MessagesSquare, tr("contacts-chat"), e, Act::Chat(e.clone())));
+        out.extend(Field::link(Icon::MessagesSquare, tr("contacts-chat-label"), e, Act::Chat(e.clone())));
     }
     out.extend(phone_fields(c, &[PhoneKind::Mobile, PhoneKind::Work, PhoneKind::Home, PhoneKind::Other]));
     out.extend(Field::text(Icon::Building, tr("contacts-company"), &c.company));
@@ -607,7 +613,11 @@ fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     match act {
         Some(Act::Mail(e)) => app.mail_contact_at(&c, &e),
-        Some(Act::Chat(e)) => app.chat_with(&e),
+        Some(Act::Chat(e)) => {
+            if let Some(address) = c.addresses().into_iter().find(|a| a.email().eq_ignore_ascii_case(&e)) {
+                app.chat_with(address);
+            }
+        }
         Some(Act::Call(n)) => {
             if let Some(link) = tel_link(&n) {
                 let _ = open::that_detached(link);
@@ -953,6 +963,9 @@ pub fn ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     if crate::ribbon_action(ui, t, "✉", &tr("contacts-send-mail"), has_mail) {
         app.mail_selected_contact();
+    }
+    if crate::ribbon_action(ui, t, "💬", &tr("contacts-chat"), has_mail) {
+        app.chat_selected_contact();
     }
     crate::ribbon_separator(ui);
     if crate::ribbon_action(ui, t, "🗑", &tr("delete"), has) {

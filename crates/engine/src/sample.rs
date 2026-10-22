@@ -209,6 +209,7 @@ fn appointments() -> Vec<Appointment> {
                 show_as: merel_model::ShowAs::Busy,
                 categories: if i == 0 { vec!["Blauwe categorie".into()] } else { Vec::new() },
                 meeting: None,
+                online: None,
             })
         })
         .collect();
@@ -232,6 +233,7 @@ fn appointments() -> Vec<Appointment> {
             show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
+            online: None,
         });
     }
     list

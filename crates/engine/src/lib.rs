@@ -1526,6 +1526,7 @@ impl Engine {
             None => self.learn_autocrypt(message_id, header.from.as_ref(), raw),
         }
         self.handle_handshake(message_id, header, body, carried.as_deref());
+        self.send_waiting();
     }
 
     fn dispatch(&mut self) {
@@ -1804,6 +1805,7 @@ mod tests {
                 show_as: merel_model::ShowAs::Busy,
                 categories: Vec::new(),
                 meeting: None,
+                online: None,
             }],
             contacts: Vec::new(),
             tasks: Vec::new(),
