@@ -51,5 +51,5 @@ dependencies {
     implementation("androidx.core:core-ktx:1.16.0")
     // UniFFI's Kotlin bindings call the Rust core through JNA.
     implementation("net.java.dev.jna:jna:5.17.0@aar")
-    implementation("rustls:rustls-platform-verifier:$rustlsVerifierVersion")
+    implementation("org.rustls:rustls-platform-verifier:$rustlsVerifierVersion")
 }

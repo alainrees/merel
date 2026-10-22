@@ -15,7 +15,7 @@ dependencyResolutionManagement {
         // Android's own trust store for Merel's Rust core.
         maven {
             url = uri("https://github.com/rustls/rustls-platform-verifier/raw/maven-archive/android-release-support/maven/")
-            content { includeGroup("rustls") }
+            content { includeGroup("org.rustls") }
         }
     }
 }
