@@ -27,7 +27,10 @@ pub use calendar::{
     MAX_OCCURRENCES, MAX_REMINDER, Meeting, Recurrence, Response, ShowAs, describe_recurrence,
 };
 pub use categories::{Category, CategoryColor, MAX_CATEGORY_NAME, MAX_ITEM_CATEGORIES, category_keyword, clean_categories};
-pub use chat::{CHAT_VERSION, ChatTag, Handshake, MAX_GROUP_ID, MAX_GROUP_NAME as MAX_CHAT_GROUP_NAME, fingerprint_of, token as chat_token};
+pub use chat::{
+    CHAT_VERSION, CallSignal, CallStep, ChatTag, Handshake, MAX_GROUP_ID, MAX_GROUP_NAME as MAX_CHAT_GROUP_NAME, MAX_SDP, fingerprint_of,
+    token as chat_token,
+};
 pub use contact::{Contact, ContactError, MAX_PHOTO, Phone, PhoneKind, Photo, Place, PlaceKind};
 pub use groups::{ContactGroup, ContactGroupError, MAX_GROUP_MEMBERS, MAX_GROUP_NAME, mailbox};
 pub use junk::{JunkLevel, JunkLists, MAX_JUNK_ENTRY, entry_covers, junk_entry};

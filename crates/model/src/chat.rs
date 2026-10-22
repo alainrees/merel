@@ -30,6 +30,97 @@ pub struct ChatTag {
     /// message that waits for the key. Not a header; the other side reads it as a chat message.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invite: bool,
+    /// Set on a step of setting up a meeting between Merel users (`Merel-Call`), which only
+    /// travels encrypted. Only a [`CallStep::Ring`] is a message to show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<CallSignal>,
+}
+
+/// Most bytes of a session description a call step carries.
+pub const MAX_SDP: usize = 64 * 1024;
+
+/// A step of setting up a meeting in Merel's own meeting room: picture and sound go straight
+/// between the computers (WebRTC), and these steps, sent as encrypted chat messages, are how
+/// they find each other. In a group every pair connects once: the one whose address sorts
+/// first makes the offer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallSignal {
+    /// The meeting room, a token Merel makes when the meeting starts.
+    pub room: String,
+    pub step: CallStep,
+    /// The session description of an offer or an answer (SDP).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sdp: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CallStep {
+    /// Someone started a meeting and asks the chat to join; the sender is in it.
+    Ring,
+    /// The sender joined.
+    Join,
+    /// To one person: the sender's connection offer.
+    Offer,
+    /// To one person: the answer to their offer.
+    Answer,
+    /// The sender left.
+    Leave,
+}
+
+impl CallStep {
+    pub fn name(self) -> &'static str {
+        match self {
+            CallStep::Ring => "ring",
+            CallStep::Join => "join",
+            CallStep::Offer => "offer",
+            CallStep::Answer => "answer",
+            CallStep::Leave => "leave",
+        }
+    }
+
+    fn from_name(name: &str) -> Option<CallStep> {
+        [CallStep::Ring, CallStep::Join, CallStep::Offer, CallStep::Answer, CallStep::Leave].into_iter().find(|s| s.name() == name)
+    }
+}
+
+impl CallSignal {
+    /// The `Merel-Call` header value: `offer; room=Ab-9_x`.
+    pub fn header(&self) -> String {
+        format!("{}; room={}", self.step.name(), self.room)
+    }
+
+    /// The `Merel-Call-Sdp` header value: the session description in base64, so its lines
+    /// survive as one header.
+    pub fn sdp_header(&self) -> Option<String> {
+        use base64::Engine as _;
+        self.sdp.as_ref().map(|s| base64::engine::general_purpose::STANDARD.encode(s))
+    }
+
+    /// The step these header values make; `None` for anything malformed. An offer or answer
+    /// needs its session description; the others carry none.
+    pub fn from_headers(call: Option<&str>, sdp: Option<&str>) -> Option<CallSignal> {
+        use base64::Engine as _;
+        let (step, rest) = call?.trim().split_once(';')?;
+        let step = CallStep::from_name(step.trim())?;
+        let room = token(rest.trim().strip_prefix("room=")?)?;
+        let sdp = match step {
+            CallStep::Offer | CallStep::Answer => {
+                let b64: String = sdp?.chars().filter(|c| !c.is_whitespace()).collect();
+                if b64.len() > MAX_SDP * 4 / 3 + 4 {
+                    return None;
+                }
+                let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
+                let text = String::from_utf8(bytes).ok()?;
+                Some(text).filter(|t| !t.is_empty() && t.len() <= MAX_SDP && t.starts_with("v=0"))
+            }
+            _ => None,
+        };
+        if matches!(step, CallStep::Offer | CallStep::Answer) && sdp.is_none() {
+            return None;
+        }
+        Some(CallSignal { room, step, sdp })
+    }
 }
 
 /// A step of the handshake that makes an invitation link into a verified chat (Delta Chat's
@@ -91,7 +182,7 @@ impl ChatTag {
             .and(group_name)
             .map(|n| clean_text(n.trim()).chars().take(MAX_GROUP_NAME).collect::<String>())
             .filter(|n| !n.is_empty());
-        Some(ChatTag { group_id, group_name, handshake: None, invite: false })
+        Some(ChatTag { group_id, group_name, handshake: None, invite: false, call: None })
     }
 
     /// A new group id: 16 characters from `random`, of the alphabet Delta Chat uses.
@@ -115,6 +206,20 @@ mod tests {
         assert_eq!(group.group_name.as_deref(), Some("Familie Rees"));
         assert_eq!(ChatTag::from_headers(Some("1.0"), Some("a/b"), Some("x")), Some(ChatTag::default()), "not a token");
         assert_eq!(ChatTag::from_headers(Some("1.0"), Some(&"a".repeat(65)), None), Some(ChatTag::default()));
+    }
+
+    #[test]
+    fn a_call_step_round_trips_through_its_headers_and_rejects_junk() {
+        let offer = CallSignal { room: "Ab-9_x".into(), step: CallStep::Offer, sdp: Some("v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\n".into()) };
+        assert_eq!(offer.header(), "offer; room=Ab-9_x");
+        let sdp = offer.sdp_header().unwrap();
+        assert_eq!(CallSignal::from_headers(Some(&offer.header()), Some(&format!("{} \r\n {}", &sdp[..10], &sdp[10..]))), Some(offer));
+        let join = CallSignal::from_headers(Some(" join ;room=R1"), Some("djA=")).unwrap();
+        assert_eq!((join.step, join.sdp), (CallStep::Join, None), "a join carries no description");
+        assert_eq!(CallSignal::from_headers(Some("offer; room=R1"), None), None, "an offer needs its description");
+        assert_eq!(CallSignal::from_headers(Some("offer; room=R1"), Some("aGFsbG8=")), None, "not a session description");
+        assert_eq!(CallSignal::from_headers(Some("dial; room=R1"), None), None);
+        assert_eq!(CallSignal::from_headers(Some("ring; room=a/b"), None), None);
     }
 
     #[test]

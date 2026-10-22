@@ -616,13 +616,19 @@ mod tests {
         let gossip = base64::engine::general_purpose::STANDARD.encode(gossip);
         let raw = format!(
             "From: Alain Tester <alain@voorbeeld.nl>\r\nTo: jij@example.org\r\nSubject: Chatbericht\r\nChat-Version: 1.0\r\n\
-             Secure-Join: vc-request-with-auth\r\nSecure-Join-Auth: geheimtoken\r\nAutocrypt-Gossip: addr=jij@example.org; keydata={gossip}\r\n\
+             Secure-Join: vc-request-with-auth\r\nSecure-Join-Auth: geheimtoken\r\nMerel-Call: offer; room=R1\r\nMerel-Call-Sdp: dj0wDQo=\r\nAutocrypt-Gossip: addr=jij@example.org; keydata={gossip}\r\n\
              Content-Type: text/plain; charset=utf-8\r\n\r\nHoi\r\n"
         );
         let raw = with_header(raw.as_bytes(), &me.autocrypt_header("alain@voorbeeld.nl"));
         let encrypted = encrypt_message(&me, &raw, &[jij()], true, NOW).unwrap();
         let outside = String::from_utf8_lossy(&encrypted);
-        assert!(!outside.contains("geheimtoken") && !outside.contains("Secure-Join") && !outside.contains("Autocrypt-Gossip"), "{outside}");
+        assert!(
+            !outside.contains("geheimtoken")
+                && !outside.contains("Secure-Join")
+                && !outside.contains("Merel-Call")
+                && !outside.contains("Autocrypt-Gossip"),
+            "{outside}"
+        );
         assert!(outside.contains("Chat-Version: 1.0") && outside.contains("Autocrypt: addr=alain@voorbeeld.nl"));
 
         // The first message from someone checks out with the key it brings along.
@@ -632,7 +638,12 @@ mod tests {
         assert_eq!(opened.autocrypt.as_ref().map(|(a, k)| (a.as_str(), k)), Some(("alain@voorbeeld.nl", &me.public())));
         assert_eq!(opened.gossip, vec![("jij@example.org".to_string(), jij())]);
         let plain = String::from_utf8_lossy(&opened.plain);
-        assert!(plain.contains("Secure-Join-Auth: geheimtoken") && plain.contains("protected-headers=\"v1\""), "{plain}");
+        assert!(
+            plain.contains("Secure-Join-Auth: geheimtoken")
+                && plain.contains("Merel-Call-Sdp: dj0wDQo=")
+                && plain.contains("protected-headers=\"v1\""),
+            "{plain}"
+        );
         assert_eq!(plain.matches("Subject:").count(), 1, "{plain}");
     }
 

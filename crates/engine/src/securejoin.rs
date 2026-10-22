@@ -227,7 +227,7 @@ impl Engine {
     }
 
     /// [`Engine::send_or_invite`] without handing the mail to the worker yet.
-    fn hold_or_send(&mut self, account_id: &str, draft: Draft) -> Result<Option<u64>, String> {
+    pub(crate) fn hold_or_send(&mut self, account_id: &str, draft: Draft) -> Result<Option<u64>, String> {
         if draft.chat.is_none() || !draft.encrypt {
             return Err(merel_i18n::tr("chat-encrypted-only"));
         }
@@ -511,14 +511,14 @@ fn signed_by(body: &Body, carried: Option<&Carried>) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use merel_model::{Account, Auth, Folder, Server, Tls};
     use merel_secrets::Secret;
 
     use super::*;
     use crate::Job;
 
-    fn account(id: &str, name: &str, email: &str) -> Account {
+    pub(crate) fn account(id: &str, name: &str, email: &str) -> Account {
         Account {
             id: id.into(),
             name: name.into(),
@@ -533,7 +533,7 @@ mod tests {
         }
     }
 
-    fn engine(a: &Account) -> Engine {
+    pub(crate) fn engine(a: &Account) -> Engine {
         let mut e = Engine::sample();
         e.add_account(a.clone(), Secret::new("x")).unwrap();
         e.session.folders.push(Folder {
@@ -549,7 +549,7 @@ mod tests {
     }
 
     /// What `e` sends next from `a`, as it goes on the wire.
-    fn sent(e: &mut Engine, a: &Account) -> Vec<Vec<u8>> {
+    pub(crate) fn sent(e: &mut Engine, a: &Account) -> Vec<Vec<u8>> {
         e.session
             .take_jobs()
             .into_iter()
@@ -565,7 +565,7 @@ mod tests {
 
     /// Delivers `raw` into the inbox of `e`'s account `a` as message `n`, and lets `e` read it
     /// as the worker would hand it over.
-    fn deliver(e: &mut Engine, a: &Account, n: u32, raw: &[u8]) {
+    pub(crate) fn deliver(e: &mut Engine, a: &Account, n: u32, raw: &[u8]) {
         let folder = format!("{}/INBOX", a.id);
         let header = merel_mime::parse_header(raw);
         let listed = merel_mailbox::RemoteHeader {
