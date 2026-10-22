@@ -88,6 +88,13 @@ impl Engine {
         self.calls.calls.iter().find(|c| c.room == room)
     }
 
+    /// Puts a meeting in the list as if its steps had come in: for front-end tests and
+    /// screenshots, which have no second computer.
+    #[doc(hidden)]
+    pub fn add_call(&mut self, call: Call) {
+        self.calls.calls.push(call);
+    }
+
     /// What the media side must do, in order; each task is handed out once.
     pub fn take_call_tasks(&mut self) -> Vec<CallTask> {
         std::mem::take(&mut self.calls.tasks)

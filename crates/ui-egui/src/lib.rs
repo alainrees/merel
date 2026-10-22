@@ -43,6 +43,7 @@ pub mod reminders;
 pub mod remote;
 pub mod resend;
 pub mod rich_edit;
+pub mod room;
 pub mod rules;
 pub mod search_folders;
 mod signature;
@@ -143,6 +144,8 @@ pub struct MailApp {
     pub tasks: tasks::State,
     pub chat: chat::State,
     pub meet: meet::State,
+    /// Merel's own meeting room (see [`room`]).
+    pub room: room::State,
     /// What the last action has to say, shown at the top of the window (see [`notice`]).
     notice: Option<notice::Notice>,
     /// The message whose body is on screen; when it changes, its pictures leave the cache.
@@ -302,6 +305,7 @@ impl MailApp {
             tasks: tasks::State::default(),
             chat: chat::State::default(),
             meet: meet::State::default(),
+            room: room::State::default(),
             notice: None,
             unsubscribe: None,
             receipts_sent: Default::default(),
@@ -378,6 +382,7 @@ impl MailApp {
         // Decoders for pictures embedded in mail; a no-op after the first frame.
         egui_extras::install_image_loaders(ui.ctx());
         self.engine.poll();
+        room::tick(self, &ui.ctx().clone());
         self.wake_snoozed();
         self.tick_read_timer(ui.ctx());
         self.tick_updates(ui.ctx());
@@ -417,6 +422,7 @@ impl MailApp {
         compose::follow_sending(self);
         compose::show(self, &ctx, &t);
         chat::windows(self, &ctx, &t);
+        room::window(self, &ctx, &t);
         calendar::window(self, &ctx, &t);
         calendar::goto_window(self, &ctx, &t);
         calendars::window(self, &ctx, &t);
@@ -3182,6 +3188,53 @@ mod tests {
         h.get_by_label("Annuleren").click();
         h.run();
         assert!(h.state().chat.new.is_none());
+    }
+
+    #[test]
+    fn a_chat_calls_only_encrypted_and_joins_a_meeting_that_rings() {
+        let mut h = harness();
+        with_a_chat(h.state_mut());
+        h.state_mut().room.no_media = true;
+        h.state_mut().module = Module::Chat;
+        let id = merel_engine::chat::person_chat_id("a1", "sanne@example.org");
+        h.state_mut().chat.selected = Some(id.clone());
+        h.run();
+        h.get_by_label("Bellen").click();
+        h.run();
+        assert!(h.state().chat.error.as_deref().unwrap().contains("nog geen sleutel van Sanne de Vries"), "{:?}", h.state().chat.error);
+        assert!(h.state().room.open.is_none());
+
+        // Sanne rings, and is in the room already.
+        let sanne = merel_model::Address::new(Some("Sanne de Vries"), "sanne@example.org").unwrap();
+        h.state_mut().engine.add_call(merel_engine::Call {
+            room: "R1".into(),
+            account_id: "a1".into(),
+            chat_id: id.clone(),
+            group: None,
+            people: vec![sanne],
+            started_by: "sanne@example.org".into(),
+            joined: false,
+            present: ["sanne@example.org".to_string()].into(),
+            last: 1_792_000_000,
+        });
+        h.run();
+        h.get_by_label_contains("Sanne de Vries wil met je vergaderen");
+        h.get_by_label("Deelnemen").click();
+        h.run_steps(3);
+        assert_eq!(h.state().room.open.as_deref(), Some("R1"));
+        assert!(h.state().engine.call("R1").unwrap().joined);
+        assert!(!h.state().engine.session.outbox.is_empty(), "the others hear that this computer joined");
+        h.get_by_label_contains("Sanne de Vries · verbinden");
+        h.get_by_label("Microfoon").click();
+        h.run_steps(3);
+        assert!(h.state().room.muted);
+        h.get_by_label("Personen").click();
+        h.run_steps(3);
+        h.get_by_label("Personen (2)");
+        h.get_by_label("Verlaten").click();
+        h.run_steps(3);
+        assert!(h.state().room.open.is_none());
+        assert!(!h.state().engine.call("R1").unwrap().joined);
     }
 
     #[test]

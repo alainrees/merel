@@ -132,11 +132,14 @@ pub enum Icon {
     Video,
     Link,
     Copy,
+    Mic,
+    MicOff,
+    PhoneOff,
 }
 
 impl Icon {
     /// Every icon, for the test that each one loads.
-    pub const ALL: [Icon; 102] = [
+    pub const ALL: [Icon; 105] = [
         Icon::Archive,
         Icon::Bell,
         Icon::Calendar,
@@ -239,6 +242,9 @@ impl Icon {
         Icon::Video,
         Icon::Link,
         Icon::Copy,
+        Icon::Mic,
+        Icon::MicOff,
+        Icon::PhoneOff,
     ];
 
     /// The image's uri and its SVG source.
@@ -351,6 +357,9 @@ impl Icon {
             Icon::Video => svg!("video"),
             Icon::Link => svg!("link"),
             Icon::Copy => svg!("copy"),
+            Icon::Mic => svg!("mic"),
+            Icon::MicOff => svg!("mic-off"),
+            Icon::PhoneOff => svg!("phone-off"),
         }
     }
 

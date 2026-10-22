@@ -485,6 +485,7 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                 ui.label(RichText::new(line).size(12.5).color(t.text_dim));
             });
         });
+        helder::right(ui, |ui| call_button(app, ui, t, chat));
     });
     ui.add_space(8.0);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
@@ -540,6 +541,23 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
     });
 }
 
+/// Bellen, or Deelnemen while the others are in a meeting of this chat, or Terug naar het
+/// gesprek while this computer is in one.
+fn call_button(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
+    if let Some(room) = crate::room::joined_in(app, &chat.id).map(|c| c.room.clone()) {
+        if helder::secondary(ui, t, |ui| helder::tool_button(ui, t, Icon::Phone, &tr("call-back"))).clicked() {
+            app.room.open = Some(room);
+        }
+    } else if let Some(room) = crate::room::ringing_in(app, &chat.id).map(|c| c.room.clone()) {
+        if helder::primary_button(ui, t, Icon::Phone, &tr("meet-join")).clicked() {
+            crate::room::join(app, &room);
+        }
+    } else if helder::secondary(ui, t, |ui| helder::tool_button(ui, t, Icon::Phone, &tr("call-start"))).on_hover_text(tr("call-start-help")).clicked()
+    {
+        crate::room::start(app, &chat.id);
+    }
+}
+
 /// "Vandaag" between two thin lines.
 fn day_line(ui: &mut Ui, t: &Tokens, text: &str) {
     ui.add_space(8.0);
@@ -562,6 +580,7 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
     let mine = session.chat_is_mine(id);
     let text = session.chat_text(id).unwrap_or_else(|| tr("chat-loading"));
     let invite = invite_in(&text).map(str::to_string);
+    let ring = m.chat.as_ref().and_then(|c| c.call.as_ref()).is_some_and(|c| c.step == merel_model::CallStep::Ring);
     let max = (ui.available_width() * 0.7).min(480.0);
     let mut accept = None;
     // Your own messages line up on the right, the others' on the left, as in any chat.
@@ -603,6 +622,14 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                                     accept = Some(link.clone());
                                 }
                             }
+                        }
+                        None if ring => {
+                            ui.horizontal(|ui| {
+                                ui.add(Icon::Phone.image(16.0, t.text));
+                                let line =
+                                    if mine { tr("call-ring-mine") } else { tr_args("call-ring-theirs", &[("name", m.from.display().into())]) };
+                                ui.add(egui::Label::new(RichText::new(line).size(14.0).color(t.text)).wrap());
+                            });
                         }
                         None => {
                             ui.add(egui::Label::new(RichText::new(text.as_str()).size(14.0).color(t.text)).wrap());
