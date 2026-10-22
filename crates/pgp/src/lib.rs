@@ -615,7 +615,7 @@ mod tests {
         let gossip = jij().to_bytes();
         let gossip = base64::engine::general_purpose::STANDARD.encode(gossip);
         let raw = format!(
-            "From: Alain Tester <alain@voorbeeld.nl>\r\nTo: jij@example.org\r\nSubject: Chatbericht\r\nChat-Version: 1.0\r\n\
+            "From: Alain Tester <alain@voorbeeld.nl>\r\nTo: jij@example.org\r\nSubject: Chatbericht\r\nChat-Version: 1.0\r\nChat-Group-ID: G1abc\r\nChat-Group-Name: Ontwerpteam\r\n\
              Secure-Join: vc-request-with-auth\r\nSecure-Join-Auth: geheimtoken\r\nMerel-Call: offer; room=R1\r\nMerel-Call-Sdp: dj0wDQo=\r\nAutocrypt-Gossip: addr=jij@example.org; keydata={gossip}\r\n\
              Content-Type: text/plain; charset=utf-8\r\n\r\nHoi\r\n"
         );
@@ -626,6 +626,8 @@ mod tests {
             !outside.contains("geheimtoken")
                 && !outside.contains("Secure-Join")
                 && !outside.contains("Merel-Call")
+                && !outside.contains("Ontwerpteam")
+                && !outside.contains("Chat-Group")
                 && !outside.contains("Autocrypt-Gossip"),
             "{outside}"
         );
@@ -641,6 +643,7 @@ mod tests {
         assert!(
             plain.contains("Secure-Join-Auth: geheimtoken")
                 && plain.contains("Merel-Call-Sdp: dj0wDQo=")
+                && plain.contains("Chat-Group-Name: Ontwerpteam")
                 && plain.contains("protected-headers=\"v1\""),
             "{plain}"
         );
