@@ -328,6 +328,13 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
 /// The steps the wizard shows as dots: offer, download, check, install.
 const STEPS: usize = 4;
 
+/// Ends Merel so the new version can start: closes the main window. The update window is a
+/// window of its own, and a plain Close from inside it would shut only that one, leaving Merel
+/// running and the new version waiting for it.
+fn quit(ctx: &egui::Context) {
+    ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
+}
+
 /// The update under way: a progress bar while it downloads, then the check, the install and
 /// the button that starts the new version; or what went wrong, with the release page.
 fn progress(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
@@ -399,7 +406,7 @@ fn progress(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
                     if helder::primary_button(ui, t, Icon::RefreshCw, &restart_label()).clicked() {
                         let handover = install::hand_over(&app.engine);
                         match restart.start(handover.as_ref()) {
-                            Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                            Ok(()) => quit(ctx),
                             Err(e) => {
                                 log::warn!("could not start the new version: {e}");
                                 if let Some(key) = &handover {
@@ -444,6 +451,42 @@ fn progress(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Runs `inside` in a window of its own, as eframe does, and returns the commands meant for
+    /// the main window.
+    fn root_commands(inside: fn(&egui::Context)) -> Vec<egui::ViewportCommand> {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        fn input(id: egui::ViewportId) -> egui::RawInput {
+            egui::RawInput { viewport_id: id, viewports: std::iter::once((id, egui::ViewportInfo::default())).collect(), ..Default::default() }
+        }
+        let commands = Rc::new(RefCell::new(Vec::new()));
+        let seen = commands.clone();
+        egui::Context::set_immediate_viewport_renderer(move |ctx, mut viewport| {
+            let mut out = ctx.run_ui(input(viewport.ids.this), |ui| (viewport.viewport_ui_cb)(ui));
+            out.textures_delta.clear();
+            seen.borrow_mut().extend(out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.commands.clone()).unwrap_or_default());
+        });
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(false);
+        let mut out = ctx.run_ui(input(egui::ViewportId::ROOT), |ui| {
+            let builder = egui::ViewportBuilder::default().with_title("Bijwerken");
+            ui.ctx().show_viewport_immediate(egui::ViewportId::from_hash_of("update"), builder, |ui, class| {
+                assert!(class == egui::ViewportClass::Immediate, "a window of its own");
+                inside(ui.ctx());
+            });
+        });
+        out.textures_delta.clear();
+        commands.borrow_mut().extend(out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.commands.clone()).unwrap_or_default());
+        commands.take()
+    }
+
+    #[test]
+    fn starting_again_from_the_update_window_closes_merel_itself() {
+        assert!(root_commands(quit).contains(&egui::ViewportCommand::Close));
+        // What it did before: only the update window closed, and Merel kept running.
+        assert!(!root_commands(|ctx| ctx.send_viewport_cmd(egui::ViewportCommand::Close)).contains(&egui::ViewportCommand::Close));
+    }
 
     #[test]
     fn only_plain_version_numbers_count() {
