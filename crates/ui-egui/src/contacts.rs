@@ -1,11 +1,11 @@
 //! The contacts module: a searchable list, a contact card, and the form to add or change one.
 
 use crate::i18n::tr;
-use egui::{Align2, Color32, CornerRadius, FontId, Margin, RichText, Sense, Ui, vec2};
+use egui::{Align, Align2, Color32, CornerRadius, FontId, Layout, Margin, RichText, Sense, Ui, vec2};
 use serde_json::json;
 
 use merel_engine::CommandError;
-use merel_model::Contact;
+use merel_model::{Contact, PhoneKind, Photo, Place, PlaceKind};
 
 use crate::helder::{self, Icon};
 use crate::{ComposeKind, MailApp, Module, Tokens};
@@ -18,6 +18,16 @@ pub struct State {
     /// The contact group whose card is shown, if any; a contact click clears it.
     pub group: Option<String>,
     pub group_editor: Option<crate::groups::Editor>,
+    /// The tab of the card on show.
+    pub tab: CardTab,
+}
+
+/// The tabs of a contact card, as Outlook has them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CardTab {
+    #[default]
+    Contact,
+    Organisation,
 }
 
 /// The search box's widget id, so Ctrl+E can put the cursor there.
@@ -32,8 +42,16 @@ pub struct Editor {
     pub first: String,
     pub last: String,
     pub emails: Vec<String>,
-    pub phones: Vec<String>,
+    pub phones: Vec<(PhoneKind, String)>,
     pub company: String,
+    pub job_title: String,
+    pub department: String,
+    pub office: String,
+    pub places: Vec<Place>,
+    pub website: String,
+    /// The day of birth as dag-maand-jaar, as typed or picked.
+    pub birthday: String,
+    pub photo: Option<Photo>,
     pub notes: String,
     /// The formatting of the notes, with the bar over them as in the message window.
     pub notes_editor: crate::rich_edit::Editor,
@@ -53,6 +71,13 @@ impl Default for Editor {
             emails: Vec::new(),
             phones: Vec::new(),
             company: String::new(),
+            job_title: String::new(),
+            department: String::new(),
+            office: String::new(),
+            places: Vec::new(),
+            website: String::new(),
+            birthday: String::new(),
+            photo: None,
             notes: String::new(),
             notes_editor: crate::rich_edit::Editor::new(NOTES, "", None),
             error: None,
@@ -82,8 +107,20 @@ impl Editor {
             first,
             last,
             emails: c.emails.clone(),
-            phones: c.phones.clone(),
+            phones: c.phones.iter().map(|p| (p.kind, p.number.clone())).collect(),
             company: c.company.clone(),
+            job_title: c.job_title.clone(),
+            department: c.department.clone(),
+            office: c.office.clone(),
+            places: c.places.clone(),
+            website: c.website.clone(),
+            birthday: c
+                .birthday
+                .as_deref()
+                .and_then(|b| chrono::NaiveDate::parse_from_str(b, "%Y-%m-%d").ok())
+                .map(|d| d.format("%d-%m-%Y").to_string())
+                .unwrap_or_default(),
+            photo: c.photo.clone(),
             notes: c.notes.clone(),
             notes_editor: crate::rich_edit::Editor::new(NOTES, &c.notes, c.notes_rich.clone()),
             error: None,
@@ -101,13 +138,32 @@ impl Editor {
         [self.first.trim(), self.last.trim()].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" ")
     }
 
+    /// The day of birth as `YYYY-MM-DD`: empty for none, `None` for what is not a day.
+    pub fn birthday(&self) -> Option<String> {
+        let b = self.birthday.trim();
+        if b.is_empty() {
+            return Some(String::new());
+        }
+        crate::calendar::parse_date(b).map(|d| d.format("%Y-%m-%d").to_string())
+    }
+
     /// The `contact.save` parameters.
     pub fn params(&self) -> serde_json::Value {
+        use base64::Engine as _;
+        let phones: Vec<serde_json::Value> =
+            self.phones.iter().filter(|(_, n)| !n.trim().is_empty()).map(|(kind, n)| json!({ "kind": kind, "number": n.trim() })).collect();
         let mut p = json!({
             "name": self.name(),
             "emails": split(&self.emails),
-            "phones": split(&self.phones),
+            "phones": phones,
             "company": self.company,
+            "job_title": self.job_title,
+            "department": self.department,
+            "office": self.office,
+            "website": self.website,
+            "birthday": self.birthday().unwrap_or_default(),
+            "places": self.places,
+            "photo": self.photo.as_ref().map(|p| base64::engine::general_purpose::STANDARD.encode(&p.0)),
             "notes": self.notes,
             "notes_rich": self.notes_editor.stored(&self.notes),
         });
@@ -180,15 +236,23 @@ impl MailApp {
         }
     }
 
-    /// Opens a new message to the selected contact's first address.
     /// Opens a new chat with the selected contact, at their first address.
     pub fn chat_selected_contact(&mut self) {
         let Some(address) = self.engine.session.selected_contact().and_then(|c| c.addresses().into_iter().next()) else { return };
         self.chat_with(address);
     }
 
+    /// Opens a new message to the selected contact's first address.
     pub fn mail_selected_contact(&mut self) {
-        let Some(address) = self.engine.session.selected_contact().and_then(|c| c.addresses().into_iter().next()) else { return };
+        let Some(c) = self.engine.session.selected_contact().cloned() else { return };
+        if let Some(e) = c.emails.first() {
+            self.mail_contact_at(&c, e);
+        }
+    }
+
+    /// Opens a new message to `email`, named after the contact.
+    fn mail_contact_at(&mut self, contact: &Contact, email: &str) {
+        let Some(address) = contact.addresses().into_iter().find(|a| a.email().eq_ignore_ascii_case(email)) else { return };
         self.open_compose(ComposeKind::New);
         if let Some(c) = self.compose.as_mut() {
             c.to = format!("{} <{}>", address.display(), address.email());
@@ -247,9 +311,9 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     );
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &c.name));
                     let rect = r.rect.shrink2(vec2(8.0, 4.0));
-                    let p = ui.painter();
                     let badge = egui::Rect::from_min_size(rect.left_top(), vec2(34.0, 34.0)).translate(vec2(0.0, 1.0));
-                    helder::avatar(p, badge.center(), 17.0, &c.name, c.emails.first().map(String::as_str).unwrap_or(""));
+                    helder::portrait(ui, badge.center(), 17.0, &c.name, c.emails.first().map(String::as_str).unwrap_or(""), c.photo.as_ref());
+                    let p = ui.painter();
                     let x = rect.left() + 44.0;
                     p.text(egui::pos2(x, rect.top() + 2.0), Align2::LEFT_TOP, &c.name, FontId::proportional(13.5), t.text);
                     let sub = c.emails.first().cloned().unwrap_or_else(|| c.company.clone());
@@ -272,11 +336,188 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         });
 }
 
-fn row(ui: &mut Ui, t: &Tokens, icon: Icon, value: &str, hint: &str) {
-    if value.is_empty() {
-        return;
+/// What a field on the card does when its value is clicked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Act {
+    Mail(String),
+    Chat(String),
+    Call(String),
+    Web(String),
+    Notes,
+}
+
+/// One field of the card: an icon, what it is, and its value in lines.
+struct Field {
+    icon: Icon,
+    label: String,
+    lines: Vec<String>,
+    act: Option<Act>,
+}
+
+impl Field {
+    fn text(icon: Icon, label: String, value: &str) -> Option<Field> {
+        let lines: Vec<String> = value.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect();
+        (!lines.is_empty()).then_some(Field { icon, label, lines, act: None })
     }
-    helder::icon_row(ui, t, icon, |ui| ui.label(RichText::new(value).size(14.0).color(t.text))).on_hover_text(hint);
+
+    fn link(icon: Icon, label: String, value: &str, act: Act) -> Option<Field> {
+        Field::text(icon, label, value).map(|f| Field { act: Some(act), ..f })
+    }
+}
+
+pub fn phone_label(kind: PhoneKind) -> String {
+    match kind {
+        PhoneKind::Mobile => tr("contacts-mobile"),
+        PhoneKind::Work => tr("contacts-phone-work"),
+        PhoneKind::Home => tr("contacts-phone-home"),
+        PhoneKind::Other => tr("contacts-phone"),
+    }
+}
+
+pub fn place_label(kind: PlaceKind) -> String {
+    match kind {
+        PlaceKind::Work => tr("contacts-address-work"),
+        PlaceKind::Home => tr("contacts-address-home"),
+        PlaceKind::Other => tr("contacts-address-other"),
+    }
+}
+
+/// The number as a `tel:` link, which the computer hands to its phone app: digits and a
+/// leading plus only.
+fn tel_link(number: &str) -> Option<String> {
+    let digits: String = number.chars().enumerate().filter(|(i, c)| c.is_ascii_digit() || (*i == 0 && *c == '+')).map(|(_, c)| c).collect();
+    (digits.trim_start_matches('+').len() >= 3).then(|| format!("tel:{digits}"))
+}
+
+fn phone_fields(c: &Contact, kinds: &[PhoneKind]) -> Vec<Field> {
+    let mut sorted: Vec<&merel_model::Phone> = c.phones.iter().filter(|p| kinds.contains(&p.kind)).collect();
+    sorted.sort_by_key(|p| kinds.iter().position(|k| *k == p.kind));
+    sorted.into_iter().filter_map(|p| Field::link(Icon::Phone, phone_label(p.kind), &p.number, Act::Call(p.number.clone()))).collect()
+}
+
+fn place_fields(c: &Contact, kinds: &[PlaceKind]) -> Vec<Field> {
+    kinds
+        .iter()
+        .flat_map(|k| c.places.iter().filter(move |p| p.kind == *k))
+        .filter_map(|p| Field::text(Icon::MapPin, place_label(p.kind), &p.lines().join("\n")))
+        .collect()
+}
+
+fn birthday_text(c: &Contact) -> String {
+    c.birthday
+        .as_deref()
+        .and_then(|b| chrono::NaiveDate::parse_from_str(b, "%Y-%m-%d").ok())
+        .map(|d| {
+            use chrono::Datelike;
+            format!("{} {} {}", d.day(), crate::calendar::month_name(d.month()), d.year())
+        })
+        .unwrap_or_default()
+}
+
+/// The fields of the tab Contactpersoon, in Outlook's order.
+fn contact_fields(app: &MailApp, c: &Contact) -> Vec<Field> {
+    let mut out: Vec<Field> = Vec::new();
+    for e in &c.emails {
+        out.extend(Field::link(Icon::Mail, tr("contacts-email-label"), e, Act::Mail(e.clone())));
+    }
+    if app.can_chat()
+        && let Some(e) = c.emails.first()
+    {
+        out.extend(Field::link(Icon::MessagesSquare, tr("contacts-chat-label"), e, Act::Chat(e.clone())));
+    }
+    out.extend(phone_fields(c, &[PhoneKind::Mobile, PhoneKind::Work, PhoneKind::Home, PhoneKind::Other]));
+    out.extend(Field::text(Icon::Building, tr("contacts-company"), &c.company));
+    out.extend(Field::text(Icon::User, tr("contacts-job-title"), &c.job_title));
+    out.extend(place_fields(c, &[PlaceKind::Work, PlaceKind::Home, PlaceKind::Other]));
+    if let Some(link) = c.website_link() {
+        out.extend(Field::link(Icon::Globe, tr("contacts-website"), &c.website, Act::Web(link)));
+    }
+    out.extend(Field::text(Icon::Calendar, tr("contacts-birthday"), &birthday_text(c)));
+    if !app.engine.session.item_accounts.is_empty() {
+        out.extend(Field::text(Icon::Folder, tr("contacts-stored-in"), &store_name(&app.engine.session, c.account_id.as_deref())));
+    }
+    out
+}
+
+/// The fields of the tab Organisatie.
+fn organisation_fields(c: &Contact) -> Vec<Field> {
+    let mut out: Vec<Field> = Vec::new();
+    out.extend(Field::text(Icon::Building, tr("contacts-company"), &c.company));
+    out.extend(Field::text(Icon::Users, tr("contacts-department"), &c.department));
+    out.extend(Field::text(Icon::User, tr("contacts-job-title"), &c.job_title));
+    out.extend(Field::text(Icon::MapPin, tr("contacts-office"), &c.office));
+    out.extend(phone_fields(c, &[PhoneKind::Work]));
+    out.extend(place_fields(c, &[PlaceKind::Work]));
+    if let Some(link) = c.website_link() {
+        out.extend(Field::link(Icon::Globe, tr("contacts-website"), &c.website, Act::Web(link)));
+    }
+    out
+}
+
+/// The fields side by side in up to three columns, as Outlook lays out a contact; returns
+/// what was clicked.
+fn field_grid(ui: &mut Ui, t: &Tokens, fields: &[Field]) -> Option<Act> {
+    const GAP: f32 = 24.0;
+    let width = ui.available_width();
+    let columns = ((width + GAP) / (220.0 + GAP)).floor().clamp(1.0, 3.0) as usize;
+    let cell = (width - GAP * (columns - 1) as f32) / columns as f32;
+    let mut act = None;
+    for row in fields.chunks(columns) {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = GAP;
+            for f in row {
+                ui.allocate_ui_with_layout(vec2(cell, 0.0), Layout::left_to_right(Align::Min), |ui| {
+                    ui.set_width(cell);
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let (rect, _) = ui.allocate_exact_size(vec2(24.0, 22.0), Sense::hover());
+                    f.icon.image(20.0, t.text_dim).paint_at(ui, egui::Rect::from_center_size(rect.center(), vec2(20.0, 20.0)));
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        ui.label(RichText::new(&f.label).size(12.5).color(t.text_dim));
+                        for line in &f.lines {
+                            match &f.act {
+                                Some(a) => {
+                                    let r = ui
+                                        .add(egui::Label::new(RichText::new(line).size(14.0).color(t.accent_text)).sense(Sense::click()).wrap())
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                                    let r = match a {
+                                        Act::Mail(_) => r.on_hover_text(tr("contacts-mail-hint")),
+                                        Act::Chat(_) => r.on_hover_text(tr("contacts-chat-hint")),
+                                        Act::Call(_) => r.on_hover_text(tr("contacts-call-hint")),
+                                        Act::Web(_) => r.on_hover_text(tr("contacts-website-hint")),
+                                        Act::Notes => r,
+                                    };
+                                    if r.clicked() {
+                                        act = Some(a.clone());
+                                    }
+                                }
+                                None => {
+                                    ui.add(egui::Label::new(RichText::new(line).size(14.0).color(t.text)).wrap());
+                                }
+                            }
+                        }
+                    });
+                });
+            }
+        });
+        ui.add_space(14.0);
+    }
+    act
+}
+
+/// A square button with only an icon on a grey face, as under the name on Outlook's card.
+fn quick_button(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str, enabled: bool) -> egui::Response {
+    let color = if enabled { t.text } else { t.text_disabled };
+    let r = ui.add_enabled(
+        enabled,
+        egui::Button::image(icon.image(18.0, color))
+            .fill(t.window)
+            .stroke(egui::Stroke::NONE)
+            .corner_radius(helder::CONTROL_RADIUS)
+            .min_size(vec2(40.0, 40.0)),
+    );
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    r.on_hover_text(label)
 }
 
 fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
@@ -298,56 +539,95 @@ fn card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         });
     });
     ui.add_space(12.0);
-    ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(vec2(72.0, 72.0), Sense::hover());
-        helder::avatar(ui.painter(), rect.center(), 34.0, &c.name, c.emails.first().map(String::as_str).unwrap_or(""));
-        ui.add_space(8.0);
+    let email = c.emails.first().cloned();
+    let mobile = c.phone(PhoneKind::Mobile).or_else(|| c.phones.first().map(|p| p.number.as_str())).map(str::to_string);
+    let mut act = None;
+    ui.horizontal_top(|ui| {
+        let (rect, _) = ui.allocate_exact_size(vec2(96.0, 96.0), Sense::hover());
+        helder::portrait(ui, rect.center(), 46.0, &c.name, email.as_deref().unwrap_or(""), c.photo.as_ref());
+        ui.add_space(12.0);
         ui.vertical(|ui| {
             ui.label(RichText::new(&c.name).size(22.0).strong().color(t.text));
-            if !c.company.is_empty() {
-                ui.label(RichText::new(&c.company).size(14.0).color(t.text_dim));
+            let sub = [c.job_title.as_str(), c.company.as_str()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
+            if !sub.is_empty() {
+                ui.label(RichText::new(sub).size(14.0).color(t.text_dim));
             }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                if quick_button(ui, t, Icon::Mail, &tr("contacts-quick-mail"), email.is_some()).clicked() {
+                    act = email.clone().map(Act::Mail);
+                }
+                if app.can_chat() && quick_button(ui, t, Icon::MessagesSquare, &tr("contacts-quick-chat"), email.is_some()).clicked() {
+                    act = email.clone().map(Act::Chat);
+                }
+                if quick_button(ui, t, Icon::Phone, &tr("contacts-quick-call"), mobile.as_deref().and_then(tel_link).is_some()).clicked() {
+                    act = mobile.clone().map(Act::Call);
+                }
+            });
         });
     });
-    let mut chat = false;
-    if !c.emails.is_empty() {
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            chat = helder::secondary(ui, t, |ui| helder::tool_button(ui, t, Icon::MessagesSquare, &tr("contacts-chat"))).clicked();
-        });
-    }
-    helder::rule(ui, t);
-    let mut mail = false;
-    for e in &c.emails {
-        helder::icon_row(ui, t, Icon::Mail, |ui| {
-            if ui
-                .add(egui::Button::new(RichText::new(e).size(14.0).color(t.accent_text)).frame(false))
-                .on_hover_text(tr("contacts-mail-hint"))
-                .clicked()
-            {
-                mail = true;
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        for (tab, label) in [(CardTab::Contact, tr("contacts-tab-contact")), (CardTab::Organisation, tr("contacts-tab-organisation"))] {
+            if helder::tab(ui, t, &label, app.contacts.tab == tab).clicked() {
+                app.contacts.tab = tab;
             }
-        });
-    }
-    for p in &c.phones {
-        row(ui, t, Icon::Phone, p, &tr("contacts-phone"));
-    }
-    row(ui, t, Icon::Building, &c.company, &tr("contacts-company"));
-    if !app.engine.session.item_accounts.is_empty() {
-        row(ui, t, Icon::Folder, &store_name(&app.engine.session, c.account_id.as_deref()), &tr("contacts-stored-in"));
-    }
-    if !c.notes.is_empty() {
-        helder::rule(ui, t);
-        helder::icon_row(ui, t, Icon::Notes, |ui| ui.add(egui::Label::new(RichText::new(&c.notes).size(14.0).color(t.text)).wrap()));
-    }
+        }
+    });
+    ui.painter().hline(ui.min_rect().x_range(), ui.cursor().top() - ui.spacing().item_spacing.y / 2.0, egui::Stroke::new(1.0, t.card_border));
+    ui.add_space(16.0);
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        match app.contacts.tab {
+            CardTab::Contact => {
+                ui.label(RichText::new(tr("contacts-details")).size(16.0).strong().color(t.text));
+                ui.add_space(10.0);
+                let fields = contact_fields(app, &c);
+                if let Some(a) = field_grid(ui, t, &fields) {
+                    act = Some(a);
+                }
+                // The notes span the card, with a way to add some when there are none.
+                let notes = match Field::text(Icon::Notes, tr("contacts-notes"), &c.notes) {
+                    Some(f) => f,
+                    None => Field { icon: Icon::Notes, label: tr("contacts-notes"), lines: vec![tr("contacts-add-notes")], act: Some(Act::Notes) },
+                };
+                ui.scope(|ui| {
+                    if let Some(a) = field_grid(ui, t, std::slice::from_ref(&notes)) {
+                        act = Some(a);
+                    }
+                });
+            }
+            CardTab::Organisation => {
+                let fields = organisation_fields(&c);
+                if fields.is_empty() {
+                    ui.label(RichText::new(tr("contacts-no-organisation")).size(14.0).color(t.text_dim));
+                } else if let Some(a) = field_grid(ui, t, &fields) {
+                    act = Some(a);
+                }
+            }
+        }
+    });
     if export {
         app.export_selected_contact();
     }
-    if mail {
-        app.mail_selected_contact();
-    }
-    if chat {
-        app.chat_selected_contact();
+    match act {
+        Some(Act::Mail(e)) => app.mail_contact_at(&c, &e),
+        Some(Act::Chat(e)) => {
+            if let Some(address) = c.addresses().into_iter().find(|a| a.email().eq_ignore_ascii_case(&e)) {
+                app.chat_with(address);
+            }
+        }
+        Some(Act::Call(n)) => {
+            if let Some(link) = tel_link(&n) {
+                let _ = open::that_detached(link);
+            }
+        }
+        Some(Act::Web(link)) => {
+            let _ = open::that_detached(link);
+        }
+        Some(Act::Notes) => app.edit_selected_contact(),
+        None => {}
     }
 }
 
@@ -385,6 +665,155 @@ fn rows(ui: &mut Ui, t: &Tokens, icon: Icon, values: &mut Vec<String>, hint: &st
     });
 }
 
+/// A choice of kinds shown as a small menu, such as Mobiel or Werk for a phone number.
+fn kind_select<K: Copy + PartialEq>(ui: &mut Ui, t: &Tokens, kind: &mut K, kinds: &[(K, String)], id: &str) {
+    let shown = kinds.iter().find(|(k, _)| k == kind).map(|(_, n)| n.clone()).unwrap_or_default();
+    ui.push_id(id, |ui| {
+        helder::select(ui, t, &shown, 110.0, |ui| {
+            for (k, name) in kinds {
+                if ui.selectable_label(k == kind, name).clicked() {
+                    *kind = *k;
+                    ui.close();
+                }
+            }
+        });
+    });
+}
+
+fn phone_kinds() -> [(PhoneKind, String); 4] {
+    [
+        (PhoneKind::Mobile, tr("contacts-mobile")),
+        (PhoneKind::Work, tr("contacts-kind-work")),
+        (PhoneKind::Home, tr("contacts-kind-home")),
+        (PhoneKind::Other, tr("contacts-kind-other")),
+    ]
+}
+
+fn place_kinds() -> [(PlaceKind, String); 3] {
+    [(PlaceKind::Work, tr("contacts-kind-work")), (PlaceKind::Home, tr("contacts-kind-home")), (PlaceKind::Other, tr("contacts-kind-other"))]
+}
+
+/// The phone numbers, each with its kind; a new row is a mobile number first, as Outlook
+/// offers, then a work number.
+fn phone_rows(ui: &mut Ui, t: &Tokens, phones: &mut Vec<(PhoneKind, String)>, width: f32) {
+    if phones.is_empty() {
+        phones.push((PhoneKind::Mobile, String::new()));
+    }
+    let kinds = phone_kinds();
+    let hint = tr("contacts-phone-number");
+    let many = phones.len() > 1;
+    let mut remove = None;
+    for (i, (kind, number)) in phones.iter_mut().enumerate() {
+        ui.push_id(("phone", i), |ui| {
+            helder::icon_row(ui, t, Icon::Phone, |ui| {
+                kind_select(ui, t, kind, &kinds, "kind");
+                helder::underline_field(ui, t, number, &hint, (width - 44.0 - 122.0).max(120.0), false);
+                if many
+                    && helder::quiet(ui, t, |ui| {
+                        helder::icon_button(ui, t, Icon::X, &crate::i18n::tr_args("contacts-remove-row", &[("what", hint.as_str().into())]))
+                    })
+                    .clicked()
+                {
+                    remove = Some(i);
+                }
+            });
+        });
+    }
+    if let Some(i) = remove {
+        phones.remove(i);
+    }
+    ui.horizontal(|ui| {
+        helder::indent(ui);
+        if helder::quiet(ui, t, |ui| helder::add_link(ui, t, &tr("contacts-add-phone"))).clicked() {
+            let kind = if phones.iter().any(|(k, _)| *k == PhoneKind::Mobile) { PhoneKind::Work } else { PhoneKind::Mobile };
+            phones.push((kind, String::new()));
+        }
+    });
+}
+
+/// The postal addresses, each as street, postal code and city, region and country.
+fn place_rows(ui: &mut Ui, t: &Tokens, places: &mut Vec<Place>, width: f32) {
+    let kinds = place_kinds();
+    let field = width - 44.0;
+    let mut remove = None;
+    for (i, place) in places.iter_mut().enumerate() {
+        ui.push_id(("place", i), |ui| {
+            helder::icon_row(ui, t, Icon::MapPin, |ui| {
+                kind_select(ui, t, &mut place.kind, &kinds, "kind");
+                ui.add_space((field - 110.0 - 40.0 - 12.0).max(0.0));
+                let what = place_label(place.kind);
+                if helder::quiet(ui, t, |ui| {
+                    helder::icon_button(ui, t, Icon::X, &crate::i18n::tr_args("contacts-remove-row", &[("what", what.into())]))
+                })
+                .clicked()
+                {
+                    remove = Some(i);
+                }
+            });
+            ui.horizontal(|ui| {
+                helder::indent(ui);
+                helder::underline_field(ui, t, &mut place.street, &tr("contacts-street"), field, false);
+            });
+            ui.horizontal(|ui| {
+                helder::indent(ui);
+                helder::underline_field(ui, t, &mut place.postal_code, &tr("contacts-postal-code"), 110.0, false);
+                helder::underline_field(ui, t, &mut place.city, &tr("contacts-city"), (field - 122.0).max(100.0), false);
+            });
+            ui.horizontal(|ui| {
+                helder::indent(ui);
+                let half = (field - 12.0) / 2.0;
+                helder::underline_field(ui, t, &mut place.region, &tr("contacts-region"), half, false);
+                helder::underline_field(ui, t, &mut place.country, &tr("contacts-country"), half, false);
+            });
+            ui.add_space(6.0);
+        });
+    }
+    if let Some(i) = remove {
+        places.remove(i);
+    }
+    ui.horizontal(|ui| {
+        helder::indent(ui);
+        if helder::quiet(ui, t, |ui| helder::add_link(ui, t, &tr("contacts-add-address"))).clicked() {
+            let used: Vec<PlaceKind> = places.iter().map(|p| p.kind).collect();
+            let kind = [PlaceKind::Work, PlaceKind::Home, PlaceKind::Other].into_iter().find(|k| !used.contains(k)).unwrap_or(PlaceKind::Other);
+            places.push(Place { kind, ..Place::default() });
+        }
+    });
+}
+
+/// The most a picture file may be to be read.
+const MAX_PICTURE_FILE: u64 = 20 * 1024 * 1024;
+/// A chosen picture is cut square and made this many pixels wide, as servers keep them.
+const PICTURE_SIDE: u32 = 256;
+
+/// A picture chosen on the computer as a contact photo: read with limits, cut square from
+/// the middle, made [`PICTURE_SIDE`] pixels and stored as JPEG. Decoding and encoding it
+/// anew also leaves out whatever else the file carried, such as where it was taken.
+pub fn picture_from_file(path: &std::path::Path) -> Result<Photo, String> {
+    let bad = || tr("contacts-photo-unreadable");
+    let meta = std::fs::metadata(path).map_err(|_| bad())?;
+    if !meta.is_file() || meta.len() > MAX_PICTURE_FILE {
+        return Err(tr("contacts-photo-too-large"));
+    }
+    picture_from_bytes(&std::fs::read(path).map_err(|_| bad())?).ok_or_else(bad)
+}
+
+pub fn picture_from_bytes(bytes: &[u8]) -> Option<Photo> {
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(12_000);
+    limits.max_image_height = Some(12_000);
+    limits.max_alloc = Some(256 * 1024 * 1024);
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
+    reader.limits(limits);
+    let img = reader.decode().ok()?;
+    let side = img.width().min(img.height());
+    let square = img.crop_imm((img.width() - side) / 2, (img.height() - side) / 2, side, side);
+    let small = if side > PICTURE_SIDE { square.resize_exact(PICTURE_SIDE, PICTURE_SIDE, image::imageops::FilterType::Lanczos3) } else { square };
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85).encode_image(&small.to_rgb8()).ok()?;
+    Photo::new(out)
+}
+
 fn heading(ui: &mut Ui, t: &Tokens, text: &str) {
     ui.horizontal(|ui| {
         helder::indent(ui);
@@ -409,18 +838,40 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         let width = ui.available_width().min(620.0);
         ui.horizontal_top(|ui| {
             // The contact's picture: its initials once there is a name, else a person.
-            let (rect, _) = ui.allocate_exact_size(vec2(96.0, 96.0), Sense::hover());
-            let name = editor.name();
-            let email = editor.emails.first().cloned().unwrap_or_default();
-            if name.is_empty() && email.trim().is_empty() {
-                ui.painter().circle(rect.center(), 46.0, t.window, egui::Stroke::new(1.5, t.control_border));
-                Icon::User.image(44.0, t.text_dim).paint_at(ui, egui::Rect::from_center_size(rect.center(), vec2(44.0, 44.0)));
-            } else {
-                helder::avatar(ui.painter(), rect.center(), 46.0, &name, &email);
-            }
+            ui.vertical(|ui| {
+                ui.set_width(110.0);
+                let (rect, _) = ui.allocate_exact_size(vec2(96.0, 96.0), Sense::hover());
+                let name = editor.name();
+                let email = editor.emails.first().cloned().unwrap_or_default();
+                if name.is_empty() && email.trim().is_empty() && editor.photo.is_none() {
+                    ui.painter().circle(rect.center(), 46.0, t.window, egui::Stroke::new(1.5, t.control_border));
+                    Icon::User.image(44.0, t.text_dim).paint_at(ui, egui::Rect::from_center_size(rect.center(), vec2(44.0, 44.0)));
+                } else {
+                    helder::portrait(ui, rect.center(), 46.0, &name, &email, editor.photo.as_ref());
+                }
+                ui.add_space(4.0);
+                ui.spacing_mut().item_spacing.y = 2.0;
+                let link = |ui: &mut Ui, text: String| {
+                    ui.add_sized([96.0, 22.0], egui::Button::new(RichText::new(text).size(13.0).color(t.accent_text)).frame(false))
+                };
+                if link(ui, if editor.photo.is_some() { tr("contacts-photo-change") } else { tr("contacts-photo-add") }).clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .set_title(tr("contacts-photo-pick"))
+                        .add_filter(tr("contacts-photo-files"), &["jpg", "jpeg", "png", "gif", "webp", "bmp"])
+                        .pick_file()
+                {
+                    match picture_from_file(&path) {
+                        Ok(photo) => editor.photo = Some(photo),
+                        Err(e) => editor.error = Some(e),
+                    }
+                }
+                if editor.photo.is_some() && link(ui, tr("contacts-photo-remove")).clicked() {
+                    editor.photo = None;
+                }
+            });
             ui.add_space(12.0);
             ui.vertical(|ui| {
-                let field = (width - 108.0).max(200.0);
+                let field = (width - 130.0).max(200.0);
                 ui.label(RichText::new(if editor.id.is_some() { tr("contacts-edit-title") } else { tr("new-contact") }).size(13.0).color(t.text_dim));
                 ui.spacing_mut().item_spacing.y = 10.0;
                 helder::underline_field(ui, t, &mut editor.first, &tr("contacts-first-name"), field, true);
@@ -436,11 +887,25 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         rows(ui, t, Icon::Mail, &mut editor.emails, &tr("contacts-email"), &tr("contacts-add-email"), width);
         helder::rule(ui, t);
         heading(ui, t, &tr("contacts-phones"));
-        rows(ui, t, Icon::Phone, &mut editor.phones, &tr("contacts-phone-number"), &tr("contacts-add-phone"), width);
+        phone_rows(ui, t, &mut editor.phones, width);
         helder::rule(ui, t);
         heading(ui, t, &tr("contacts-work"));
-        helder::icon_row(ui, t, Icon::Building, |ui| {
-            helder::underline_field(ui, t, &mut editor.company, &tr("contacts-company"), width - 44.0, false)
+        for (icon, value, hint) in [
+            (Icon::Building, &mut editor.company, tr("contacts-company")),
+            (Icon::User, &mut editor.job_title, tr("contacts-job-title")),
+            (Icon::Users, &mut editor.department, tr("contacts-department")),
+            (Icon::MapPin, &mut editor.office, tr("contacts-office")),
+        ] {
+            helder::icon_row(ui, t, icon, |ui| helder::underline_field(ui, t, value, &hint, width - 44.0, false));
+        }
+        helder::rule(ui, t);
+        heading(ui, t, &tr("contacts-addresses"));
+        place_rows(ui, t, &mut editor.places, width);
+        helder::rule(ui, t);
+        heading(ui, t, &tr("contacts-more"));
+        helder::icon_row(ui, t, Icon::Globe, |ui| helder::underline_field(ui, t, &mut editor.website, &tr("contacts-website"), width - 44.0, false));
+        helder::icon_row(ui, t, Icon::Calendar, |ui| {
+            crate::date_picker::field(ui, t, &mut editor.birthday, &tr("contacts-birthday-field"), 200.0, &tr("contacts-birthday-pick"));
         });
         helder::rule(ui, t);
         helder::notes_box(ui, t, &mut editor.notes_editor, &mut editor.notes, width - 44.0, 100.0);
@@ -452,6 +917,10 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             });
         }
     });
+    if save && editor.birthday().is_none() {
+        editor.error = Some(tr("contacts-bad-birthday"));
+        save = false;
+    }
     if save {
         match app.engine.run("contact.save", &editor.params()) {
             Ok(()) => cancel = true,
@@ -566,10 +1035,7 @@ mod tests {
             name: "Sanne".into(),
             emails: vec!["a@b.nl".into(), "c@d.nl".into()],
             phones: vec!["06".into()],
-            company: String::new(),
-            notes: String::new(),
-            account_id: None,
-            notes_rich: None,
+            ..Contact::default()
         };
         let e = Editor::from_contact(&c);
         assert_eq!(e.emails, ["a@b.nl", "c@d.nl"]);

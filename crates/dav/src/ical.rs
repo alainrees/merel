@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz;
-use merel_model::{Appointment, Attendee, Contact, Meeting, Priority, Response, ShowAs, Task, clean_text};
+use merel_model::{Appointment, Attendee, Contact, Meeting, Phone, PhoneKind, Photo, Place, PlaceKind, Priority, Response, ShowAs, Task, clean_text};
 
 /// One `NAME;PARAM=value:value` line, with the value as written (escapes intact).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -853,25 +853,145 @@ pub fn write_task(todo: &mut Component, t: &Task) {
     stamp(todo);
 }
 
+/// A structured value (`N`, `ORG`, `ADR`) split at its unescaped semicolons, each part
+/// unescaped.
+fn parts(raw: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut part = String::new();
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                part.push(c);
+                if let Some(n) = chars.next() {
+                    part.push(n);
+                }
+            }
+            ';' => out.push(unescape(&std::mem::take(&mut part))),
+            c => part.push(c),
+        }
+    }
+    out.push(unescape(&part));
+    out
+}
+
+/// The `TYPE`s of a vCard property in lower case: `TYPE=WORK,VOICE` and `TYPE=WORK;TYPE=VOICE`
+/// alike, and vCard 2.1's bare `TEL;CELL`.
+fn types(p: &Prop) -> Vec<String> {
+    p.params
+        .iter()
+        .flat_map(|(k, v)| {
+            if k.eq_ignore_ascii_case("TYPE") {
+                v.trim_matches('"').split(',').map(|t| t.trim().to_ascii_lowercase()).collect::<Vec<_>>()
+            } else if v.is_empty() {
+                vec![k.to_ascii_lowercase()]
+            } else {
+                Vec::new()
+            }
+        })
+        .collect()
+}
+
+fn phone_kind(p: &Prop) -> PhoneKind {
+    let t = types(p);
+    let has = |x: &str| t.iter().any(|y| y == x);
+    if has("cell") {
+        PhoneKind::Mobile
+    } else if has("work") {
+        PhoneKind::Work
+    } else if has("home") {
+        PhoneKind::Home
+    } else {
+        PhoneKind::Other
+    }
+}
+
+fn place_kind(p: &Prop) -> PlaceKind {
+    let t = types(p);
+    if t.iter().any(|x| x == "work") {
+        PlaceKind::Work
+    } else if t.iter().any(|x| x == "home") {
+        PlaceKind::Home
+    } else {
+        PlaceKind::Other
+    }
+}
+
+/// An inline `PHOTO`: vCard 3's `ENCODING=b` and vCard 4's `data:` URI. A photo behind a
+/// link is never fetched, so it gives `None`.
+fn photo_of(p: &Prop) -> Option<Photo> {
+    use base64::Engine as _;
+    let raw: String = p.raw.chars().filter(|c| !c.is_whitespace()).collect();
+    let data = if p.param("ENCODING").is_some_and(|e| e.eq_ignore_ascii_case("b") || e.eq_ignore_ascii_case("base64")) {
+        raw
+    } else {
+        let lower = raw.to_ascii_lowercase();
+        if !lower.starts_with("data:image/") {
+            return None;
+        }
+        let (head, data) = raw.split_once(',')?;
+        if !head.to_ascii_lowercase().ends_with(";base64") {
+            return None;
+        }
+        data.to_string()
+    };
+    // A base64 text four thirds the size of the largest photo is all that is decoded.
+    if data.len() > merel_model::MAX_PHOTO / 3 * 4 + 8 {
+        return None;
+    }
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let bytes = b64.decode(&data).ok().or_else(|| base64::engine::general_purpose::STANDARD_NO_PAD.decode(data.trim_end_matches('=')).ok())?;
+    Photo::new(bytes)
+}
+
+/// `BDAY` as `YYYY-MM-DD`, from `19800215`, `1980-02-15` or a date-time.
+fn birthday_of(raw: &str) -> Option<String> {
+    let day = raw.trim().get(..10).unwrap_or(raw.trim());
+    NaiveDate::parse_from_str(day, "%Y-%m-%d")
+        .or_else(|_| NaiveDate::parse_from_str(raw.trim().get(..8).unwrap_or(""), "%Y%m%d"))
+        .ok()
+        .map(|d| d.format("%Y-%m-%d").to_string())
+}
+
 /// The contact in a VCARD.
 pub fn contact_of(card: &Component, id: String) -> Option<Contact> {
     let mut name = card.text("FN").trim().to_string();
     if name.is_empty() {
-        let n = card.text("N");
-        let mut parts = n.split(';');
-        let family = parts.next().unwrap_or("").trim();
-        let given = parts.next().unwrap_or("").trim();
+        let n = card.prop("N").map(|p| parts(&p.raw)).unwrap_or_default();
+        let family = n.first().map(|s| s.trim()).unwrap_or("");
+        let given = n.get(1).map(|s| s.trim()).unwrap_or("");
         name = format!("{given} {family}").trim().to_string();
     }
-    let values = |prop: &str| -> Vec<String> {
-        card.props.iter().filter(|p| p.name.eq_ignore_ascii_case(prop)).map(|p| p.text().trim().to_string()).filter(|v| !v.is_empty()).collect()
-    };
+    fn all<'a>(card: &'a Component, prop: &'a str) -> impl Iterator<Item = &'a Prop> + 'a {
+        card.props.iter().filter(move |p| p.name.eq_ignore_ascii_case(prop))
+    }
+    let values = |prop: &str| -> Vec<String> { all(card, prop).map(|p| p.text().trim().to_string()).filter(|v| !v.is_empty()).collect() };
+    let org = card.prop("ORG").map(|p| parts(&p.raw)).unwrap_or_default();
+    let places = all(card, "ADR")
+        .map(|p| {
+            let a = parts(&p.raw);
+            let at = |i: usize| a.get(i).map(|s| s.trim().to_string()).unwrap_or_default();
+            // PO box, extended address, street, city, region, postal code, country.
+            let street = [at(0), at(1), at(2)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n");
+            Place { kind: place_kind(p), street, city: at(3), region: at(4), postal_code: at(5), country: at(6) }
+        })
+        .collect();
     Contact {
         id,
         name,
         emails: values("EMAIL").into_iter().filter(|e| merel_model::Address::new(None, e).is_ok()).collect(),
-        phones: values("TEL").into_iter().map(|t| t.trim_start_matches("tel:").to_string()).collect(),
-        company: card.text("ORG").split(';').next().unwrap_or("").trim().to_string(),
+        phones: all(card, "TEL")
+            .map(|p| Phone::new(phone_kind(p), p.text().trim().trim_start_matches("tel:")))
+            .filter(|p| !p.number.is_empty())
+            .collect(),
+        company: org.first().map(|s| s.trim().to_string()).unwrap_or_default(),
+        department: org.get(1).map(|s| s.trim().to_string()).unwrap_or_default(),
+        job_title: card.text("TITLE"),
+        office: card.text("X-MEREL-OFFICE"),
+        places,
+        website: values("URL").into_iter().next().unwrap_or_default(),
+        birthday: card.prop("BDAY").and_then(|p| birthday_of(&p.raw)),
+        photo: all(card, "PHOTO").find_map(photo_of),
         notes: card.text("NOTE"),
         account_id: None,
         notes_rich: None,
@@ -881,18 +1001,58 @@ pub fn contact_of(card: &Component, id: String) -> Option<Contact> {
 }
 
 pub fn write_contact(card: &mut Component, c: &Contact) {
+    use base64::Engine as _;
     card.set_text("FN", &c.name);
     let (given, family) = c.name.split_once(' ').unwrap_or((c.name.as_str(), ""));
     card.set("N", Some(Prop { name: "N".into(), params: Vec::new(), raw: format!("{};{};;;", escape(family.trim()), escape(given.trim())) }));
-    card.set("ORG", (!c.company.is_empty()).then(|| Prop::new("ORG", &c.company)));
+    let org = match (c.company.is_empty(), c.department.is_empty()) {
+        (true, true) => None,
+        (_, true) => Some(escape(&c.company)),
+        _ => Some(format!("{};{}", escape(&c.company), escape(&c.department))),
+    };
+    card.set("ORG", org.map(|raw| Prop { name: "ORG".into(), params: Vec::new(), raw }));
+    card.set_text("TITLE", &c.job_title);
+    card.set_text("X-MEREL-OFFICE", &c.office);
+    card.set_text("URL", &c.website);
+    card.set("BDAY", c.birthday.as_ref().map(|b| Prop::new("BDAY", b)));
     card.set_text("NOTE", &c.notes);
     card.set("EMAIL", None);
     card.set("TEL", None);
+    card.set("ADR", None);
     for e in &c.emails {
         card.props.push(Prop::new("EMAIL", e));
     }
     for p in &c.phones {
-        card.props.push(Prop::new("TEL", p));
+        let prop = Prop::new("TEL", &p.number);
+        card.props.push(match p.kind {
+            PhoneKind::Mobile => prop.with("TYPE", "CELL"),
+            PhoneKind::Work => prop.with("TYPE", "WORK,VOICE"),
+            PhoneKind::Home => prop.with("TYPE", "HOME,VOICE"),
+            PhoneKind::Other => prop,
+        });
+    }
+    for a in &c.places {
+        let raw = [String::new(), String::new(), escape(&a.street), escape(&a.city), escape(&a.region), escape(&a.postal_code), escape(&a.country)]
+            .join(";");
+        let prop = Prop { name: "ADR".into(), params: Vec::new(), raw };
+        card.props.push(match a.kind {
+            PlaceKind::Work => prop.with("TYPE", "WORK"),
+            PlaceKind::Home => prop.with("TYPE", "HOME"),
+            PlaceKind::Other => prop,
+        });
+    }
+    // A photo behind a link stays as the server has it; one kept here replaces it.
+    match &c.photo {
+        Some(photo) => {
+            let kind = photo.mime().and_then(|m| m.strip_prefix("image/")).unwrap_or("jpeg").to_ascii_uppercase();
+            let raw = base64::engine::general_purpose::STANDARD.encode(&photo.0);
+            card.set("PHOTO", Some(Prop { name: "PHOTO".into(), params: vec![("ENCODING".into(), "b".into()), ("TYPE".into(), kind)], raw }));
+        }
+        None => {
+            if card.props.iter().any(|p| p.name.eq_ignore_ascii_case("PHOTO") && photo_of(p).is_some()) {
+                card.set("PHOTO", None);
+            }
+        }
     }
     if card.prop("VERSION").is_none() {
         card.props.insert(0, Prop::new("VERSION", "3.0"));
@@ -1178,12 +1338,15 @@ mod tests {
         let mut card = parse(card_text).remove(0);
         let c = contact_of(&card, "c:1".into()).unwrap();
         assert_eq!((c.name.as_str(), c.company.as_str(), c.notes.as_str()), ("Sanne de Vries", "Bakkerij Jansen", "Klant"));
-        assert_eq!((c.emails.clone(), c.phones.clone()), (vec!["sanne@example.org".to_string()], vec!["+31 6 1234".to_string()]));
+        assert_eq!((c.emails.clone(), c.phones.clone()), (vec!["sanne@example.org".to_string()], vec![Phone::new(PhoneKind::Mobile, "+31 6 1234")]));
+        assert_eq!(c.department, "Verkoop");
+        assert!(c.photo.is_none(), "a photo behind a link is not fetched");
         let changed = Contact {
             name: "Sanne Jansen".into(),
             emails: vec!["s@j.nl".into(), "sanne@example.org".into()],
             phones: vec![],
             company: String::new(),
+            department: String::new(),
             ..c.clone()
         };
         write_contact(&mut card, &changed);
@@ -1196,6 +1359,35 @@ mod tests {
         assert_eq!(c2.emails, vec!["s@j.nl".to_string(), "sanne@example.org".to_string()]);
         let only_n = parse("BEGIN:VCARD\r\nN:Jansen;Piet;;;\r\nEND:VCARD\r\n").remove(0);
         assert_eq!(contact_of(&only_n, "c".into()).unwrap().name, "Piet Jansen");
+    }
+
+    #[test]
+    fn a_full_card_is_read_and_written_back() {
+        use base64::Engine as _;
+        let png = [b"\x89PNG\r\n\x1a\n".as_slice(), &[7; 120]].concat();
+        let photo = base64::engine::general_purpose::STANDARD.encode(&png);
+        let text = format!(
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Alain Rees\r\nORG:Cyber Inc.;Security\r\nTITLE:Directeur\r\nTEL;TYPE=WORK,VOICE:020 1\r\nTEL;TYPE=CELL:06 1\r\nTEL;TYPE=HOME;TYPE=VOICE:070 1\r\nADR;TYPE=WORK:;;Wibautstraat 3;Amsterdam;Noord-Holland;1091 GH;Nederland\r\nADR;TYPE=HOME:;;Jacob van der Doesstraat 1\\, achter;Den Haag;Zuid-Holland;;\r\nURL:https://cyberinc.nl\r\nBDAY:19800215\r\nPHOTO;ENCODING=b;TYPE=PNG:{photo}\r\nEND:VCARD\r\n"
+        );
+        let mut card = parse(&text).remove(0);
+        let c = contact_of(&card, "c:1".into()).unwrap();
+        assert_eq!((c.company.as_str(), c.department.as_str(), c.job_title.as_str()), ("Cyber Inc.", "Security", "Directeur"));
+        assert_eq!((c.phone(PhoneKind::Work), c.phone(PhoneKind::Mobile), c.phone(PhoneKind::Home)), (Some("020 1"), Some("06 1"), Some("070 1")));
+        let work = c.place(PlaceKind::Work).unwrap();
+        assert_eq!((work.street.as_str(), work.postal_code.as_str(), work.city.as_str()), ("Wibautstraat 3", "1091 GH", "Amsterdam"));
+        assert_eq!(c.place(PlaceKind::Home).unwrap().street, "Jacob van der Doesstraat 1, achter");
+        assert_eq!((c.website.as_str(), c.birthday.as_deref()), ("https://cyberinc.nl", Some("1980-02-15")));
+        assert_eq!(c.photo.as_ref().map(|p| p.0.clone()), Some(png.clone()));
+
+        let v4 = format!("BEGIN:VCARD\r\nFN:X\r\nPHOTO:data:image/png;base64,{photo}\r\nEND:VCARD\r\n");
+        assert!(contact_of(&parse(&v4)[0], "c".into()).unwrap().photo.is_some(), "vCard 4 puts it in a data: URI");
+
+        write_contact(&mut card, &c);
+        let back = contact_of(&parse(&card.serialize())[0], "c:1".into()).unwrap();
+        assert_eq!(back, c, "{}", card.serialize());
+        write_contact(&mut card, &Contact { photo: None, places: Vec::new(), ..c.clone() });
+        let text = card.serialize();
+        assert!(!text.contains("PHOTO") && !text.contains("ADR"), "{text}");
     }
 
     #[test]

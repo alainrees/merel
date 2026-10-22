@@ -3348,6 +3348,65 @@ mod tests {
     }
 
     #[test]
+    fn a_contact_card_shows_its_details_on_two_tabs_and_the_form_changes_them() {
+        use merel_model::PhoneKind;
+        let mut h = harness();
+        h.state_mut().module = Module::People;
+        h.run();
+        h.get_by_label("Sanne de Vries").click();
+        h.run();
+        for label in [
+            "Contactgegevens",
+            "Mobiel",
+            "06 12345678",
+            "Telefoon (werk)",
+            "Adres (werk)",
+            "Keizersgracht 123",
+            "1015 CJ Amsterdam",
+            "Functie",
+            "Art director",
+        ] {
+            h.get_by_label(label);
+        }
+        h.get_by_label("Mailen").click();
+        h.run();
+        assert_eq!(h.state().compose.as_ref().map(|c| c.to.as_str()), Some("Sanne de Vries <sanne@example.org>"));
+        h.state_mut().compose = None;
+        h.get_by_label("Organisatie").click();
+        h.run();
+        h.get_by_label("Afdeling");
+        h.get_by_label("Design");
+        assert!(h.query_by_label("Contactgegevens").is_none() && h.query_by_label("Mobiel").is_none(), "the organisation alone");
+        h.get_by_label("Contactpersoon").click();
+        h.run();
+        h.get_by_label("Voeg hier je notities toe").click();
+        h.run();
+        {
+            let e = h.state_mut().contacts.editor.as_mut().expect("the notes link opens the form");
+            assert_eq!(e.phones[0], (PhoneKind::Mobile, "06 12345678".to_string()));
+            e.job_title = "Creative director".into();
+            e.birthday = "12-04-1986".into();
+            e.places[0].city = "Haarlem".into();
+            e.phones.push((PhoneKind::Home, "023 1".into()));
+        }
+        h.run();
+        h.get_by_label("Opslaan").click();
+        h.run();
+        let c = h.state().engine.session.selected_contact().unwrap().clone();
+        assert_eq!((c.job_title.as_str(), c.birthday.as_deref(), c.places[0].city.as_str()), ("Creative director", Some("1986-04-12"), "Haarlem"));
+        assert_eq!(c.phone(PhoneKind::Home), Some("023 1"));
+        h.get_by_label("12 april 1986");
+
+        h.state_mut().edit_selected_contact();
+        h.state_mut().contacts.editor.as_mut().unwrap().birthday = "31-02-2000".into();
+        h.run();
+        h.get_by_label("Opslaan").click();
+        h.run();
+        let e = h.state().contacts.editor.as_ref().expect("a wrong day keeps the form open");
+        assert!(e.error.as_deref().is_some_and(|m| m.contains("verjaardag")));
+    }
+
+    #[test]
     fn compose_completes_addresses_from_contacts() {
         let mut h = harness();
         h.run();
@@ -3593,7 +3652,10 @@ mod tests {
             h.get_by_label("Opslaan").click();
             h.run();
         }
-        let mut h = harness();
+        // Tall enough that the notes, under the addresses, are in view without scrolling.
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(vec2(1280.0, 1400.0))
+            .build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(Engine::sample()));
         h.state_mut().module = Module::People;
         h.state_mut().new_contact();
         if let Some(e) = h.state_mut().contacts.editor.as_mut() {
