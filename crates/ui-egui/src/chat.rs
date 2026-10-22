@@ -179,6 +179,23 @@ impl MailApp {
         }
     }
 
+    /// Accepts the invitation `link` that came by mail to `account_id`, and shows the chats'
+    /// start page with what happens next. In a browser the link leads to Delta Chat's own page,
+    /// which only Delta Chat can follow; read in Merel it is taken here.
+    pub fn open_invite(&mut self, account_id: &str, link: &str) {
+        let chat_accounts = self.chat_accounts();
+        let account_id = if chat_accounts.iter().any(|id| id == account_id) {
+            account_id.to_string()
+        } else {
+            chat_accounts.into_iter().next().unwrap_or_default()
+        };
+        let account_id = account_id.as_str();
+        self.module = crate::Module::Chat;
+        self.chat.selected = None;
+        self.chat.accept_account = account_id.to_string();
+        self.chat.accept_note = Some(self.take_invite(account_id, link));
+    }
+
     /// Accepts the invitation `link` on `account_id`; says what happens next.
     fn take_invite(&mut self, account_id: &str, link: &str) -> Result<String, String> {
         self.engine.accept_invite(account_id, link)?;
@@ -329,7 +346,7 @@ fn day_label(d: NaiveDate) -> String {
 }
 
 /// The invitation link in a message's text, when it carries one.
-fn invite_in(text: &str) -> Option<&str> {
+pub(crate) fn invite_in(text: &str) -> Option<&str> {
     let at = text.find(INVITE_LINK)?;
     let link = &text[at..];
     Some(link.split(char::is_whitespace).next().unwrap_or(link))

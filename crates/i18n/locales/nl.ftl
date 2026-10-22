@@ -779,7 +779,12 @@ chat-invite-renew-hint = De oude link en QR-code werken daarna niet meer.
 chat-invite-close = Sluiten
 chat-invite-qr = QR-code van de uitnodigingslink
 chat-invite-mail-subject = Chat je met me?
-chat-invite-mail-text = Ik wil graag end-to-end versleuteld met je chatten. Open deze link in Merel of in Delta Chat (gratis, voor telefoon en computer, zie delta.chat):
+chat-invite-mail-text =
+    Ik wil graag end-to-end versleuteld met je chatten.
+    Gebruik je Merel? Dan staat boven deze mail de knop Chat openen.
+    Anders installeer je eerst Delta Chat (gratis, voor telefoon en computer, zie delta.chat) en open je daarna de link hieronder op hetzelfde apparaat. Zonder Merel of Delta Chat werkt de link niet.
+chat-invite-in-mail = { $name } nodigt je in deze mail uit voor een versleutelde chat.
+chat-invite-open = Chat openen
 chat-accept = Uitnodiging aannemen
 chat-accept-hint = Plak een uitnodigingslink (https://i.delta.chat/#…)
 chat-accept-button = Aannemen
