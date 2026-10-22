@@ -251,6 +251,12 @@ fn appointment_of(e: &Value) -> Option<Appointment> {
             .map(|l| l.iter().filter_map(Value::as_str).map(str::to_string).collect())
             .unwrap_or_default(),
         meeting: meeting_of(e),
+        online: e
+            .get("onlineMeeting")
+            .map(|o| str_of(o, "joinUrl"))
+            .filter(|u| !u.is_empty())
+            .or_else(|| e.get("onlineMeetingUrl").and_then(Value::as_str))
+            .map(str::to_string),
     }
     .validated()
     .ok()
@@ -757,7 +763,7 @@ impl Mailbox for GraphClient {
 impl ItemStore for GraphClient {
     fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>> {
         let path = format!(
-            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity,showAs,categories,attendees,organizer,iCalUId",
+            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity,showAs,categories,attendees,organizer,iCalUId,onlineMeeting,onlineMeetingUrl",
             encode(&utc(from)),
             encode(&utc(to.max(from)))
         );
@@ -848,6 +854,21 @@ mod tests {
         let people: Vec<(&str, bool, Response)> = m.attendees.iter().map(|a| (a.email.as_str(), a.optional, a.response)).collect();
         assert_eq!(people, [("sanne@example.org", false, Response::Accepted), ("ravi@example.org", true, Response::Tentative)]);
         assert!(appointment_of(&json!({ "id": "E2", "start": e["start"], "end": e["end"], "attendees": [] })).unwrap().meeting.is_none());
+    }
+
+    #[test]
+    fn an_online_meeting_brings_its_link() {
+        let times = json!({ "start": { "dateTime": "2026-10-14T17:46:40" }, "end": { "dateTime": "2026-10-14T18:46:40" } });
+        let e = json!({ "id": "E1", "subject": "Kwartaaloverleg", "start": times["start"], "end": times["end"], "isOnlineMeeting": true,
+            "onlineMeeting": { "joinUrl": "https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0" } });
+        let link = appointment_of(&e).unwrap().meeting_link().unwrap();
+        assert_eq!(link.service, merel_model::MeetingService::Microsoft365);
+        let old = json!({ "id": "E2", "subject": "Oud", "start": times["start"], "end": times["end"], "onlineMeeting": null,
+            "onlineMeetingUrl": "https://meet.example.org/kamer" });
+        assert_eq!(appointment_of(&old).unwrap().online.as_deref(), Some("https://meet.example.org/kamer"));
+        let bad =
+            json!({ "id": "E3", "subject": "Raar", "start": times["start"], "end": times["end"], "onlineMeeting": { "joinUrl": "javascript:x" } });
+        assert_eq!(appointment_of(&bad).unwrap().online, None, "only an https link is kept");
     }
 
     #[test]

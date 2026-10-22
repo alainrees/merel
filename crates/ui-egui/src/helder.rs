@@ -129,11 +129,14 @@ pub enum Icon {
     IndentLess,
     AddressBook,
     TriangleAlert,
+    Video,
+    Link,
+    Copy,
 }
 
 impl Icon {
     /// Every icon, for the test that each one loads.
-    pub const ALL: [Icon; 99] = [
+    pub const ALL: [Icon; 102] = [
         Icon::Archive,
         Icon::Bell,
         Icon::Calendar,
@@ -233,6 +236,9 @@ impl Icon {
         Icon::IndentLess,
         Icon::AddressBook,
         Icon::TriangleAlert,
+        Icon::Video,
+        Icon::Link,
+        Icon::Copy,
     ];
 
     /// The image's uri and its SVG source.
@@ -342,6 +348,9 @@ impl Icon {
             Icon::IndentLess => svg!("indent-decrease"),
             Icon::AddressBook => svg!("book-user"),
             Icon::TriangleAlert => svg!("triangle-alert"),
+            Icon::Video => svg!("video"),
+            Icon::Link => svg!("link"),
+            Icon::Copy => svg!("copy"),
         }
     }
 
@@ -651,7 +660,7 @@ pub fn ribbon_icon_only(label: &str) -> bool {
 /// Whether a ribbon button is its ribbon's blue main button: making something new.
 pub fn ribbon_primary(label: &str) -> bool {
     let label = &*crate::i18n::dutch(label);
-    matches!(label, "Nieuwe e-mail" | "Nieuwe afspraak" | "Nieuw contact" | "Nieuwe taak" | "Nieuwe chat")
+    matches!(label, "Nieuwe e-mail" | "Nieuwe afspraak" | "Nieuw contact" | "Nieuwe taak" | "Nieuwe chat" | "Vergadering plannen")
 }
 
 /// The icon of a ribbon button, by its label, else by the glyph it had before the Helder style.
@@ -672,6 +681,9 @@ pub fn ribbon_icon(label: &str, glyph: &str) -> Option<Icon> {
         "Vlag" => Icon::Flag,
         "Nieuwe afspraak" => Icon::CalendarPlus,
         "Vandaag" => Icon::CalendarCheck,
+        "Komende 7 dagen" => Icon::CalendarRange,
+        "Vergadering plannen" => Icon::Video,
+        "Deelnemen via link" => Icon::Link,
         "Ga naar datum" => Icon::CalendarSearch,
         "Dag" => Icon::CalendarDay,
         "Werkweek" => Icon::Columns,

@@ -279,6 +279,7 @@ mod tests {
             show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
+            online: None,
         }
     }
 

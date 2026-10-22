@@ -73,6 +73,7 @@ fn appointment_of(node: Node<'_, '_>) -> Option<Appointment> {
         },
         categories: categories_of(node),
         meeting: meeting_of(node),
+        online: None,
     }
     .validated()
     .ok()
@@ -699,6 +700,7 @@ mod tests {
             show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
             meeting: None,
+            online: None,
         };
         let xml = appointment_fields(&a).create();
         assert_eq!(
