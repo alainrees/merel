@@ -76,6 +76,7 @@ fn appointment_of(node: Node<'_, '_>) -> Option<Appointment> {
         categories: categories_of(node),
         meeting: meeting_of(node),
         online: None,
+        make_online: false,
     }
     .validated()
     .ok()
@@ -722,6 +723,7 @@ mod tests {
             categories: Vec::new(),
             meeting: None,
             online: None,
+            make_online: false,
         };
         let xml = appointment_fields(&a).create();
         assert_eq!(

@@ -291,6 +291,10 @@ pub struct Editor {
     pub show_as: ShowAs,
     /// The category names on the appointment.
     pub categories: Vec<String>,
+    /// The link to join it online that the server made, if any.
+    pub online: Option<String>,
+    /// "Onlinevergadering": has the server of a Microsoft 365 or Google calendar make one on save.
+    pub make_online: bool,
     pub error: Option<String>,
 }
 
@@ -358,6 +362,8 @@ impl Editor {
             private: false,
             show_as: merel_model::ShowAs::Busy,
             categories: Vec::new(),
+            online: None,
+            make_online: false,
             error: None,
         }
     }
@@ -378,6 +384,8 @@ impl Editor {
         e.private = a.private;
         e.show_as = a.show_as;
         e.categories = a.categories.clone();
+        e.online = a.online.clone();
+        e.make_online = a.make_online;
         e.end_date = end.format(DATE_FORMAT).to_string();
         e.end_time = end.format(TIME_FORMAT).to_string();
         e.notes = a.notes.clone();
@@ -489,6 +497,7 @@ impl Editor {
             "private": self.private,
             "show_as": self.show_as,
             "categories": self.categories,
+            "make_online": self.make_online,
         });
         if recurrence.is_some() {
             // The engine keeps the occurrences that were skipped; the window never lists them.
@@ -2441,6 +2450,7 @@ fn form(
             categories: Vec::new(),
             meeting: None,
             online: None,
+            make_online: false,
         });
         ui.horizontal_wrapped(|ui| {
             helder::indent(ui);
@@ -2505,6 +2515,7 @@ fn form(
         editor.repeat = None;
     }
     helder::icon_row(ui, t, Icon::MapPin, |ui| helder::underline_field(ui, t, &mut editor.location, &tr("calendar-add-location"), wide, false));
+    online_row(ui, t, editor, current.as_deref().is_some_and(|c| session.makes_online(c)));
     ui.add_space(4.0);
     // The notes with Outlook's formatting bar over them, as in the message window.
     ui.add_space(6.0);
@@ -2515,6 +2526,28 @@ fn form(
             helder::indent(ui);
             ui.add(egui::Label::new(RichText::new(e).color(t.flag)).wrap());
         });
+    }
+}
+
+/// "Onlinevergadering": the link the server made, with Deelnemen; else, in a calendar whose
+/// server makes them (`makes`), the switch that asks for one on save.
+fn online_row(ui: &mut Ui, t: &Tokens, editor: &mut Editor, makes: bool) {
+    if let Some(link) = editor.online.as_deref().and_then(merel_model::meeting_link) {
+        helder::icon_row(ui, t, Icon::Video, |ui| {
+            ui.label(RichText::new(tr("calendar-online")).color(t.text));
+            if helder::toggle_button(ui, t, Icon::Link, &tr("meet-join"), false).clicked() {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(link.url));
+            }
+        });
+        return;
+    }
+    if !makes {
+        editor.make_online = false;
+        return;
+    }
+    helder::icon_row(ui, t, Icon::Video, |ui| helder::toggle(ui, t, &mut editor.make_online, &tr("calendar-online")));
+    if editor.make_online {
+        helder::note(ui, t, &tr("calendar-online-note"));
     }
 }
 
@@ -2611,6 +2644,7 @@ mod tests {
             categories: Vec::new(),
             meeting: None,
             online: None,
+            make_online: false,
         };
         let moved = to_local(dropped_start(&a, d(2026, 10, 23), None).unwrap());
         assert_eq!((moved.date(), moved.time()), (d(2026, 10, 23), NaiveTime::from_hms_opt(14, 0, 0).unwrap()), "a month drop keeps the time");
@@ -2683,6 +2717,7 @@ mod tests {
             categories: Vec::new(),
             meeting: None,
             online: None,
+            make_online: false,
         };
         assert!(Editor::from_appointment(&a, None).private);
         assert_eq!(chip_title(&a), "🔒 Dokter");
@@ -2800,6 +2835,7 @@ mod tests {
             categories: Vec::new(),
             meeting: None,
             online: None,
+            make_online: false,
         };
         let back = Editor::from_appointment(&a, None);
         assert_eq!((back.start_date.as_str(), back.end_date.as_str()), ("21-10-2026", "21-10-2026"));
@@ -2863,6 +2899,7 @@ mod tests {
             categories: Vec::new(),
             meeting: None,
             online: None,
+            make_online: false,
         };
         let back = Editor::from_appointment(&a, Some(a.start + 86_400 * 61));
         assert_eq!((back.repeat, back.interval.as_str(), back.ends, back.count.as_str()), (Some(Frequency::Monthly), "2", Ends::AfterCount, "8"));

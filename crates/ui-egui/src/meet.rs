@@ -398,6 +398,7 @@ mod tests {
             notes_rich: None,
             meeting: None,
             online: None,
+            make_online: false,
         }
     }
 

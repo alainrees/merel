@@ -558,6 +558,7 @@ pub fn appointment_of(event: &Component, id: String) -> Option<Appointment> {
         meeting: meeting_of(event),
         // Outlook and Google name the meeting's link in a property of their own.
         online: ["X-MICROSOFT-SKYPETEAMSMEETINGURL", "X-GOOGLE-CONFERENCE"].iter().map(|p| event.text(p)).find(|u| !u.is_empty()),
+        make_online: false,
     }
     .validated()
     .ok()

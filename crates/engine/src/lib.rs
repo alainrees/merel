@@ -1806,6 +1806,7 @@ mod tests {
                 categories: Vec::new(),
                 meeting: None,
                 online: None,
+                make_online: false,
             }],
             contacts: Vec::new(),
             tasks: Vec::new(),
