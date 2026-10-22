@@ -168,6 +168,11 @@ pub trait ItemStore {
     /// Creates the item when its id is empty, replaces it otherwise; returns the store's id.
     fn save(&mut self, item: &Item) -> Result<String>;
     fn delete(&mut self, id: &str) -> Result<()>;
+    /// Whether `email` is free at `now` and when they work, for a store that can tell;
+    /// `None` when it cannot.
+    fn availability(&mut self, _email: &str, _now: i64) -> Result<Option<merel_model::Availability>> {
+        Ok(None)
+    }
 }
 
 /// Which special folder a name denotes, in English or Dutch; `Other` when it is an ordinary one.

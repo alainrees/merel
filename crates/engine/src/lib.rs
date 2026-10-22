@@ -182,6 +182,11 @@ pub enum Job {
         account_id: String,
         path: String,
     },
+    /// Ask whether `email` is free now and when they work.
+    Availability {
+        account_id: String,
+        email: String,
+    },
 }
 
 impl Job {
@@ -203,7 +208,8 @@ impl Job {
             | Job::DeleteItem { account_id, .. }
             | Job::CreateFolder { account_id, .. }
             | Job::RenameFolder { account_id, .. }
-            | Job::DeleteFolder { account_id, .. } => account_id,
+            | Job::DeleteFolder { account_id, .. }
+            | Job::Availability { account_id, .. } => account_id,
         }
     }
 
@@ -296,6 +302,11 @@ pub enum Event {
         account_id: String,
         draft_id: u64,
         result: Result<(), String>,
+    },
+    /// Whether someone is free, as their calendar says; `None` when the server would not tell.
+    Availability {
+        email: String,
+        availability: Option<merel_model::Availability>,
     },
     /// A browser sign-in finished; `Ok` carries the account to add.
     SignedIn {
@@ -439,6 +450,9 @@ pub struct Session {
     pub item_accounts: HashSet<String>,
     /// Why an account's calendar and address book could not be reached while its mail could.
     pub item_errors: HashMap<String, String>,
+    /// What Microsoft 365 said about people's calendars, by lower-case address: when it was
+    /// asked, and the answer once it came.
+    pub availability: HashMap<String, (i64, Option<merel_model::Availability>)>,
     /// Rules for incoming mail, every account's together, in the order they run.
     pub rules: Vec<Rule>,
     rules_dirty: bool,
@@ -660,7 +674,7 @@ impl Session {
             | Event::Sent { account_id, .. } => self.accounts.iter().any(|a| &a.id == account_id),
             Event::Headers { folder_id, .. } | Event::Found { folder_id, .. } => self.folder(folder_id).is_some(),
             Event::Body { message_id, .. } => self.message(message_id).is_some(),
-            Event::SignedIn { .. } => true,
+            Event::SignedIn { .. } | Event::Availability { .. } => true,
         }
     }
 
@@ -973,6 +987,12 @@ impl Session {
             }
             Event::Synced { account_id, appointments, contacts, tasks } => self.apply_synced(&account_id, appointments, contacts, tasks),
             Event::ItemSaved { account_id, local_id, remote_id } => self.apply_saved(&account_id, &local_id, &remote_id),
+            Event::Availability { email, availability } => {
+                let asked = self.availability.get(&email).map(|(at, _)| *at).unwrap_or_else(drafts::now);
+                // A question that got no answer keeps what was known.
+                let known = self.availability.get(&email).and_then(|(_, a)| a.clone());
+                self.availability.insert(email, (asked, availability.or(known)));
+            }
             Event::SignedIn { result } => match result {
                 Ok(account) => {
                     self.sign_in = Some(Some(Ok(())));

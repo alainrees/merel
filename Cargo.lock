@@ -3417,6 +3417,7 @@ version = "0.1.7"
 dependencies = [
  "base64 0.23.1",
  "chrono",
+ "chrono-tz",
  "iana-time-zone",
  "log",
  "merel-mailbox",

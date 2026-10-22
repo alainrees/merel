@@ -341,6 +341,15 @@ fn run(c: &mut dyn Mailbox, account: &Account, keys: &Keys, job: &Job) -> Result
             items_of(c)?.delete(id)?;
             None
         }
+        // Someone's calendar may be closed to this account; that is no failure of the account.
+        Job::Availability { email, .. } => {
+            let now = chrono::Utc::now().timestamp();
+            let availability = items_of(c)?.availability(email, now).unwrap_or_else(|e| {
+                log::warn!("{}: no availability for a contact: {e}", account.id);
+                None
+            });
+            Some(Event::Availability { email: email.clone(), availability })
+        }
         Job::Headers { folder_id, path, offset, limit, .. } => {
             Some(Event::Headers { folder_id: folder_id.clone(), headers: c.headers(path, *offset, *limit)?, offset: *offset, limit: *limit })
         }
