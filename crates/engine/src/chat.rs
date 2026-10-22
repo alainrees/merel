@@ -213,10 +213,11 @@ fn chat_draft(people: Vec<Address>, tag: ChatTag, text: &str, in_reply_to: Optio
     }
 }
 
-/// Whether `account` lists the chat headers: an IMAP account. Microsoft 365, Exchange and
-/// Gmail list mail through their own interfaces, which do not hand them over yet.
+/// Whether `account` lists the chat headers: an IMAP account, or Microsoft 365, whose Graph
+/// client reads them apart. Exchange and Gmail list mail through interfaces that do not hand
+/// them over yet.
 pub fn can_chat(account: &merel_model::Account) -> bool {
-    account.protocol == merel_model::Protocol::ImapSmtp && account.id != SAMPLE_ACCOUNT
+    matches!(account.protocol, merel_model::Protocol::ImapSmtp | merel_model::Protocol::Microsoft365) && account.id != SAMPLE_ACCOUNT
 }
 
 /// Most encrypted messages opened after one listing to read the header inside.
