@@ -129,7 +129,12 @@ pub(crate) fn response_messages<'a>(doc: &'a Document<'a>, lenient: bool) -> Res
             }
             let code = text(m, "ResponseCode").unwrap_or("error");
             let what = text(m, "MessageText").unwrap_or("");
-            return Err(MailboxError::Protocol(clip(&format!("{code}: {what}"))));
+            let line = clip(&format!("{code}: {what}"));
+            return Err(if matches!(code, "ErrorItemNotFound" | "ErrorFolderNotFound") {
+                MailboxError::NotFound(line)
+            } else {
+                MailboxError::Protocol(line)
+            });
         }
         out.push(Some(m));
     }
@@ -655,13 +660,13 @@ mod tests {
     }
 
     #[test]
-    fn error_replies_become_protocol_errors() {
+    fn error_replies_become_errors_and_a_missing_folder_says_so() {
         let xml = reply(
             "<m:FindItemResponseMessage ResponseClass=\"Error\"><m:MessageText>No such folder.</m:MessageText><m:ResponseCode>ErrorFolderNotFound</m:ResponseCode></m:FindItemResponseMessage>",
         );
         let doc = parse(&xml).unwrap();
         match response_messages(&doc, false) {
-            Err(MailboxError::Protocol(m)) => assert_eq!(m, "ErrorFolderNotFound: No such folder."),
+            Err(MailboxError::NotFound(m)) => assert_eq!(m, "ErrorFolderNotFound: No such folder."),
             other => panic!("{other:?}"),
         }
         assert_eq!(response_messages(&doc, true).unwrap(), vec![None]);

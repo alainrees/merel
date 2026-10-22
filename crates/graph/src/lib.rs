@@ -198,6 +198,9 @@ fn title_of(v: &Value, key: &str) -> String {
     if t.is_empty() { "(Zonder titel)".into() } else { t }
 }
 
+/// The error codes Graph gives for a message, folder or item that is not (or no longer) there.
+const NOT_FOUND: [&str; 3] = ["ErrorItemNotFound", "ErrorFolderNotFound", "itemNotFound"];
+
 /// Graph's `error` object as a line: the message, with the code when that says more.
 fn error_text(e: &Value) -> String {
     let (message, code) = (clean_text(str_of(e, "message")), clean_text(str_of(e, "code")));
@@ -737,7 +740,13 @@ impl GraphClient {
             401 => Err(MailboxError::Login),
             404 if method == "DELETE" => Ok(Value::Null),
             _ => {
-                Err(MailboxError::Protocol(value.get("error").map(error_text).filter(|m| !m.is_empty()).unwrap_or_else(|| format!("HTTP {status}"))))
+                let error = value.get("error");
+                let text = error.map(error_text).filter(|m| !m.is_empty()).unwrap_or_else(|| format!("HTTP {status}"));
+                if status == 404 || error.is_some_and(|e| NOT_FOUND.contains(&str_of(e, "code"))) {
+                    Err(MailboxError::NotFound(text))
+                } else {
+                    Err(MailboxError::Protocol(text))
+                }
             }
         }
     }
@@ -978,8 +987,12 @@ impl Mailbox for GraphClient {
                 let Some(id) = id_of(&f) else { continue };
                 let name = clean_text(str_of(&f, "displayName"));
                 if depth < MAX_FOLDER_DEPTH && f.get("childFolderCount").and_then(Value::as_u64).unwrap_or(0) > 0 {
-                    for c in self.list(&format!("/me/mailFolders/{}/childFolders?$top=250&{select}", encode(&id)))? {
-                        next.push((c, Some(id.clone())));
+                    // A folder removed while the list was read, or one Outlook keeps to itself,
+                    // leaves its subfolders out rather than the whole mailbox.
+                    match self.list(&format!("/me/mailFolders/{}/childFolders?$top=250&{select}", encode(&id))) {
+                        Ok(children) => next.extend(children.into_iter().map(|c| (c, Some(id.clone())))),
+                        Err(MailboxError::NotFound(e)) => log::debug!("{}: no subfolders for a folder: {e}", self.host),
+                        Err(e) => return Err(e),
                     }
                 }
                 out.push(RemoteFolder { path: id.clone(), kind: self.kind_of(&id, &name), name, selectable: true, parent });
@@ -1026,7 +1039,8 @@ impl Mailbox for GraphClient {
         match status {
             200..=299 => Ok(bytes),
             401 => Err(MailboxError::Login),
-            _ => Err(MailboxError::Protocol(format!("HTTP {status}"))),
+            // The reply says why, as JSON: a message moved or deleted elsewhere is no failure.
+            _ => Err(Self::reply("GET", status, &bytes).err().unwrap_or_else(|| MailboxError::Protocol(format!("HTTP {status}")))),
         }
     }
 
@@ -1456,5 +1470,16 @@ mod tests {
         let task = json!({ "id": "T", "title": "Bellen", "body": { "contentType": "html", "content": "<p>Om tien uur</p>" } });
         assert_eq!(task_of(&task).unwrap().notes.trim(), "Om tien uur");
         assert!(matches!(todo_step(MailboxError::Protocol("x".into()), "taken"), MailboxError::Protocol(m) if m == "x (To Do-taken)"));
+    }
+
+    #[test]
+    fn a_message_or_folder_that_is_gone_says_so() {
+        let gone = br#"{"error":{"code":"ErrorItemNotFound","message":"The specified object was not found in the store., The process failed to get the correct properties."}}"#;
+        assert!(matches!(GraphClient::reply("PATCH", 404, gone), Err(MailboxError::NotFound(m)) if m.ends_with("(ErrorItemNotFound)")));
+        assert!(matches!(GraphClient::reply("GET", 400, gone), Err(MailboxError::NotFound(_))), "the code counts, whatever the status");
+        assert!(matches!(GraphClient::reply("GET", 404, b""), Err(MailboxError::NotFound(m)) if m == "HTTP 404"));
+        assert!(matches!(GraphClient::reply("DELETE", 404, gone), Ok(Value::Null)), "deleting what is gone is done");
+        let other = br#"{"error":{"code":"ErrorAccessDenied","message":"Access is denied."}}"#;
+        assert!(matches!(GraphClient::reply("GET", 403, other), Err(MailboxError::Protocol(_))));
     }
 }

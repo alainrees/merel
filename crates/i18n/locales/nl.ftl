@@ -1602,6 +1602,7 @@ conn-server-error = De server gaf een fout: { $error }
 conn-cannot-connect = Kan geen verbinding maken met { $host }.
 conn-refused-message = De server weigerde het bericht: { $error }
 conn-items-failed = Agenda en adresboek: { $error }
+conn-job-failed = Bij { $account } lukte iets niet: { $error }
 
 ## Browser sign-in
 

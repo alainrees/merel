@@ -408,6 +408,10 @@ impl MailApp {
         if let Some(failure) = self.engine.session.take_scheduled_failures().pop() {
             self.notice = Some(Notice::error(failure));
         }
+        // A message or folder that could not be fetched or changed; the account stays connected.
+        if let Some(failure) = self.engine.session.take_job_failures().pop() {
+            self.notice = Some(Notice::warning(failure));
+        }
         let title = window_title(self.engine.session.inbox_unread());
         if self.title.as_deref() != Some(title.as_str()) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));

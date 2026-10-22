@@ -33,6 +33,10 @@ pub enum MailboxError {
     Protocol(String),
     #[error("the name is not allowed: {0:?}")]
     BadName(String),
+    /// The message, folder or item asked for is no longer there (moved or deleted elsewhere,
+    /// or by another device). The connection itself is fine.
+    #[error("the server no longer has it: {0}")]
+    NotFound(String),
 }
 
 pub type Result<T> = std::result::Result<T, MailboxError>;

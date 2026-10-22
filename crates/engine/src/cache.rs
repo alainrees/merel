@@ -102,7 +102,8 @@ impl Cache {
             Event::Connected { account_id, .. }
             | Event::Folders { account_id, .. }
             | Event::Synced { account_id, .. }
-            | Event::ItemSaved { account_id, .. } => Some(account_id.clone()),
+            | Event::ItemSaved { account_id, .. }
+            | Event::Gone { account_id, .. } => Some(account_id.clone()),
             Event::Headers { folder_id, .. } | Event::Found { folder_id, .. } => session.folder(folder_id).map(|f| f.account_id.clone()),
             Event::Body { message_id, raw, .. } => {
                 let account = session.message(message_id).and_then(|m| session.folder(&m.folder_id)).map(|f| f.account_id.clone());
@@ -118,7 +119,12 @@ impl Cache {
                 }
                 Some(account_id.clone())
             }
-            Event::Failed { .. } | Event::ItemsFailed { .. } | Event::Sent { .. } | Event::SignedIn { .. } | Event::Availability { .. } => None,
+            Event::Failed { .. }
+            | Event::JobFailed { .. }
+            | Event::ItemsFailed { .. }
+            | Event::Sent { .. }
+            | Event::SignedIn { .. }
+            | Event::Availability { .. } => None,
         };
         if let Some(account) = account.filter(|a| a != SAMPLE_ACCOUNT) {
             self.dirty.insert(account);
