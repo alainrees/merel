@@ -2369,6 +2369,27 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         }
         ui.add_space(8.0);
     }
+    // A chat invitation sent by mail. Its link leads to a web page only Delta Chat can follow,
+    // so Merel offers to take it here. Not in the Junk folder.
+    if !in_junk
+        && let Some(link) = body.as_ref().and_then(|b| chat::invite_in(&b.text)).map(str::to_string)
+        && let Ok(invite) = merel_engine::securejoin::parse_invite(&link)
+    {
+        let name = if invite.name.is_empty() { invite.addr.clone() } else { invite.name.clone() };
+        let mut open = false;
+        egui::Frame::new().fill(t.checked).corner_radius(4).inner_margin(8).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(crate::i18n::tr_args("chat-invite-in-mail", &[("name", name.into())])).color(t.text));
+                open = ui.small_button(tr("chat-invite-open")).clicked();
+            });
+        });
+        ui.add_space(8.0);
+        if open {
+            let account_id = app.engine.session.folder(&m.folder_id).map(|f| f.account_id.clone()).unwrap_or_default();
+            app.open_invite(&account_id, &link);
+            return;
+        }
+    }
     if !in_junk && let Some(targets) = body.as_ref().map(|b| b.unsubscribe.as_slice()).filter(|u| !u.is_empty()) {
         let mut ask = false;
         egui::Frame::new().fill(t.checked).corner_radius(4).inner_margin(8).show(ui, |ui| {
@@ -2513,11 +2534,18 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             .auto_shrink(false)
             .show(ui, |ui| html::show(ui, t, doc, &b.images, &message_id, remote.as_ref(), !in_junk))
             .inner;
-        if let Some(html::Clicked::Mailto(address)) = clicked {
-            let signature = app.engine.session.current_account().map(|a| a.signature.clone()).unwrap_or_default();
-            let mut c = Compose::new(ComposeKind::New, None).with_signature(&signature);
-            c.to = address;
-            app.compose = Some(c);
+        match clicked {
+            Some(html::Clicked::Mailto(address)) => {
+                let signature = app.engine.session.current_account().map(|a| a.signature.clone()).unwrap_or_default();
+                let mut c = Compose::new(ComposeKind::New, None).with_signature(&signature);
+                c.to = address;
+                app.compose = Some(c);
+            }
+            Some(html::Clicked::Invite(link)) => {
+                let account_id = app.engine.session.folder(&m.folder_id).map(|f| f.account_id.clone()).unwrap_or_default();
+                app.open_invite(&account_id, &link);
+            }
+            None => {}
         }
         return;
     }
@@ -4259,6 +4287,26 @@ mod tests {
         assert!(h.state().engine.session.appointments.iter().any(|a| a.title == "Kickoff" && a.calendar_id == "local"));
         h.get_by_label("Staat al in je agenda.");
         assert!(h.query_by_label("Aan agenda toevoegen").is_none());
+    }
+
+    #[test]
+    fn a_chat_invitation_by_mail_is_taken_in_merel_not_in_the_browser() {
+        let mut h = harness();
+        with_a_chat(h.state_mut());
+        {
+            let s = &mut h.state_mut().engine.session;
+            let text =
+                "Ik wil graag chatten.\n\nhttps://i.delta.chat/#1234567890ABCDEF1234567890ABCDEF12345678&i=abc&s=def&a=bob%40example.org&n=Bob\n";
+            s.bodies.insert("m3".into(), merel_engine::Body { text: text.into(), ..Default::default() });
+            s.selected_message = Some("m3".into());
+        }
+        h.run();
+        h.get_by_label("Bob nodigt je in deze mail uit voor een versleutelde chat.");
+        h.get_by_label("Chat openen").click();
+        h.run_steps(3);
+        assert_eq!(h.state().module, Module::Chat);
+        assert!(matches!(&h.state().chat.accept_note, Some(Ok(n)) if n.contains("Bob")), "{:?}", h.state().chat.accept_note);
+        h.get_by_label("Uitnodiging aangenomen. Zodra Bob antwoordt, staat de chat klaar.");
     }
 
     #[test]

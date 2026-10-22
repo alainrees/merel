@@ -782,7 +782,12 @@ chat-invite-renew-hint = The old link and QR code stop working.
 chat-invite-close = Close
 chat-invite-qr = QR code of the invitation link
 chat-invite-mail-subject = Will you chat with me?
-chat-invite-mail-text = I'd like to chat with you, end-to-end encrypted. Open this link in Merel or in Delta Chat (free, for phone and computer, see delta.chat):
+chat-invite-mail-text =
+    I'd like to chat with you, end-to-end encrypted.
+    Do you use Merel? Then the Open chat button is above this email.
+    Otherwise, install Delta Chat first (free, for phone and computer, see delta.chat) and then open the link below on the same device. Without Merel or Delta Chat the link does not work.
+chat-invite-in-mail = { $name } invites you to an encrypted chat in this email.
+chat-invite-open = Open chat
 chat-accept = Accept an invitation
 chat-accept-hint = Paste an invitation link (https://i.delta.chat/#…)
 chat-accept-button = Accept
