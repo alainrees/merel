@@ -702,7 +702,7 @@ pub fn ribbon_icon(label: &str, glyph: &str) -> Option<Icon> {
         "Onder" => Icon::PanelBottom,
         "Uit" => Icon::EyeOff,
         "Compact" => Icon::Rows,
-        "Gesprekken" | "Nieuwe chat" => Icon::MessagesSquare,
+        "Gesprekken" | "Nieuwe chat" | "Chatten" => Icon::MessagesSquare,
         "Alle chats" => Icon::ArrowLeft,
         "Groepen" => Icon::ListTree,
         "Weeknummers" => Icon::Hash,

@@ -412,6 +412,7 @@ impl MailApp {
         let ctx = ui.ctx().clone();
         compose::follow_sending(self);
         compose::show(self, &ctx, &t);
+        chat::windows(self, &ctx, &t);
         calendar::window(self, &ctx, &t);
         calendar::goto_window(self, &ctx, &t);
         calendars::window(self, &ctx, &t);
@@ -3171,12 +3172,44 @@ mod tests {
         assert_eq!(h.state().chat.input, "Ja, tot dan", "what was typed stays");
         assert!(h.state().engine.session.outbox.is_empty(), "nothing went out");
 
-        h.get_by_label("Nieuwe chat").click();
+        h.get_all_by_label("Nieuwe chat").next().unwrap().click();
         h.run();
         assert_eq!(h.state().chat.new.as_ref().map(|f| f.account_id.as_str()), Some("a1"));
         h.get_by_label("Annuleren").click();
         h.run();
         assert!(h.state().chat.new.is_none());
+    }
+
+    #[test]
+    fn a_new_chat_picks_people_from_the_address_book_and_invites_them_by_itself() {
+        let mut h = harness();
+        with_a_chat(h.state_mut());
+        h.state_mut().engine.enable_chat("a1").unwrap();
+        h.state_mut().engine.session.contacts.push(merel_model::Contact {
+            id: "c1".into(),
+            name: "Ravi Kumar".into(),
+            emails: vec!["ravi@example.org".into()],
+            ..Default::default()
+        });
+        h.state_mut().module = Module::Chat;
+        h.state_mut().new_chat();
+        h.state_mut().chat.new.as_mut().unwrap().typed = "rav".into();
+        h.run();
+        h.get_by_label("Ravi Kumar").click();
+        h.run();
+        let form = h.state().chat.new.as_ref().unwrap();
+        assert_eq!((form.people.len(), form.typed.as_str()), (1, ""));
+        h.get_by_label("Ravi Kumar weghalen");
+        h.state_mut().chat.new.as_mut().unwrap().text = "Zullen we om tien uur beginnen?".into();
+        h.run();
+        h.get_by_label("Starten").click();
+        h.run_steps(3);
+        assert!(h.state().chat.new.is_none(), "the window closes");
+        let id = merel_engine::chat::person_chat_id("a1", "ravi@example.org");
+        assert_eq!(h.state().chat.selected.as_deref(), Some(id.as_str()));
+        assert_eq!(h.state().engine.waiting().len(), 1, "the message waits for Ravi's key");
+        h.get_by_label("Zullen we om tien uur beginnen?");
+        h.get_by_label_contains("Wacht tot Ravi Kumar de uitnodiging aanneemt");
     }
 
     #[test]
@@ -3199,7 +3232,9 @@ mod tests {
         h.run();
         assert!(h.state().compose.as_ref().is_some_and(|c| c.body.contains(&link) && c.account_id == "a1"));
         h.state_mut().compose = None;
+        h.get_by_label("Sluiten").click();
         h.run();
+        assert!(h.state().chat.invite.is_none());
 
         h.state_mut().chat.accept = "geen link".into();
         h.run();
