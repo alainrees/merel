@@ -318,6 +318,20 @@ impl MerelCore {
     }
 }
 
+/// What the Android app calls once at start, before any connection: hands the platform
+/// certificate verifier the app's context, so TLS is checked by Android's own trust store.
+#[cfg(target_os = "android")]
+mod android {
+    use jni::errors::ThrowRuntimeExAndDefault;
+    use jni::objects::{JClass, JObject};
+    use jni::{EnvUnowned, jni_mangle};
+
+    #[jni_mangle("nl.merel.app.MerelNative")]
+    pub fn init<'caller>(mut unowned_env: EnvUnowned<'caller>, _class: JClass<'caller>, context: JObject<'caller>) {
+        unowned_env.with_env(|env| rustls_platform_verifier::android::init_with_env(env, context)).resolve::<ThrowRuntimeExAndDefault>();
+    }
+}
+
 fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }

@@ -3938,10 +3938,12 @@ dependencies = [
 name = "merel-mobile"
 version = "0.1.12"
 dependencies = [
+ "jni",
  "log",
  "merel-engine",
  "merel-model",
  "merel-secrets",
+ "rustls-platform-verifier",
  "serde_json",
  "thiserror 2.0.21",
  "uniffi",
