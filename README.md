@@ -483,6 +483,10 @@ unsigned, and the app then offers only the release page.
 The packaging files live in `packaging/`: the app icon, `macos/bundle.sh` with `Info.plist`,
 `windows/merel.iss` for Inno Setup and `linux/` with the desktop entry and the AppImage script.
 
+## iPhone and Android
+
+The phone apps are on their way: native screens (SwiftUI on the iPhone, Jetpack Compose on Android) on top of the same engine as the desktop. `crates/mobile` puts that engine behind a UniFFI interface; the `Mobile` workflow builds it for both phones and writes the Swift and Kotlin bindings.
+
 ## License
 
 Merel is licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or

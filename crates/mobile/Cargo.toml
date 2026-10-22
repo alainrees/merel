@@ -1,0 +1,38 @@
+[package]
+name = "merel-mobile"
+description = "Merel's core for the iPhone and Android apps: the engine behind a UniFFI interface for Swift and Kotlin."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+# A static library for the iPhone app, a shared one for Android, an ordinary one for tests.
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[[bin]]
+# Writes the Swift and Kotlin bindings from the built library:
+# cargo run -p merel-mobile --bin uniffi-bindgen -- generate --library <lib> --language swift --out-dir <dir>
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+merel-engine = { workspace = true }
+merel-model = { workspace = true }
+merel-secrets = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+uniffi = { version = "0.32", features = ["cli"] }
+
+# UniFFI's generated glue between Rust and Swift/Kotlin is `unsafe` by nature; this crate's own
+# code has none. Every other crate keeps the workspace's `unsafe_code = "forbid"`.
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

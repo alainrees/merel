@@ -33,6 +33,7 @@ merel-sign = { path = "crates/sign" }
 merel-notify = { path = "crates/notify" }
 merel-i18n = { path = "crates/i18n" }
 merel-call = { path = "crates/call" }
+merel-mobile = { path = "crates/mobile" }
 
 # foundation
 thiserror = "2"
