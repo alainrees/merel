@@ -28,5 +28,7 @@
   <string>11.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Merel gebruikt de microfoon alleen tijdens een vergadering, zodat de anderen je horen.</string>
 </dict>
 </plist>

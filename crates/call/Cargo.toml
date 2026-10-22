@@ -1,0 +1,25 @@
+[package]
+name = "merel-call"
+description = "Merel's own meeting room: sound straight between the computers over WebRTC, encrypted end to end."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+log = { workspace = true }
+sha2 = { workspace = true }
+# WebRTC in pure Rust: ICE, DTLS-SRTP and RTP. The rtc crate is its protocol core, for the
+# codec and track types.
+webrtc = "0.21"
+rtc = "0.21"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+async-trait = "0.1"
+bytes = "1"
+# Opus, the codec every WebRTC end speaks, built from its own source.
+audiopus = "0.3.0-rc.0"
+# The computer's microphone and speakers (Core Audio, WASAPI, ALSA).
+cpal = "0.18"
+
+[lints]
+workspace = true
