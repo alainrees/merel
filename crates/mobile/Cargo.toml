@@ -25,6 +25,12 @@ thiserror = { workspace = true }
 log = { workspace = true }
 uniffi = { version = "0.32", features = ["cli"] }
 
+# Android checks server certificates with its own trust store through the JVM; the app hands
+# rustls-platform-verifier its context once at start (see `android` in src/lib.rs).
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22"
+rustls-platform-verifier = { workspace = true }
+
 # UniFFI's generated glue between Rust and Swift/Kotlin is `unsafe` by nature; this crate's own
 # code has none. Every other crate keeps the workspace's `unsafe_code = "forbid"`.
 [lints.rust]

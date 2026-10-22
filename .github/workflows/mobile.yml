@@ -1,6 +1,7 @@
 name: Mobile
 # Builds Merel's core (crates/mobile) for the iPhone and Android with the Swift and Kotlin
-# bindings the apps call it through, and the iPhone app (apps/ios) for the simulator.
+# bindings the apps call it through, the iPhone app (apps/ios) for the simulator and the
+# Android app (apps/android) as a debug APK.
 on:
   push:
     branches: [main]
@@ -42,15 +43,16 @@ jobs:
           targets: aarch64-linux-android, x86_64-linux-android
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-ndk --locked
-      - name: Core for Android phones and the emulator
-        run: cargo ndk -t arm64-v8a -t x86_64 -o jniLibs build -p merel-mobile --lib --release
-      - name: Kotlin bindings
-        run: |
-          cargo build -p merel-mobile --lib
-          cargo run -p merel-mobile --bin uniffi-bindgen -- generate --library target/debug/libmerel_mobile.so --language kotlin --out-dir bindings/kotlin
+      - name: Core for Android phones and the emulator, with the Kotlin bindings
+        run: apps/android/scripts/build-core.sh
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android app
+        working-directory: apps/android
+        run: ./gradlew --no-daemon assembleDebug lintDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: merel-core-android
-          path: |
-            jniLibs
-            bindings/kotlin
+          name: merel-android-apk
+          path: apps/android/app/build/outputs/apk/debug/app-debug.apk
