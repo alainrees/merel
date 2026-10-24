@@ -502,12 +502,28 @@ impl Indexer {
         }
         self.searched = Some(key);
         let query = search::Query::parse(&s.search);
-        let terms = Terms { words: &query.words, from: &query.from, to: &query.to, subject: &query.subject };
+        let terms = Terms {
+            words: &query.words,
+            either: &query.either,
+            phrases: &query.phrases,
+            not: &query.not,
+            from: &query.from,
+            to: &query.to,
+            subject: &query.subject,
+            attachments: &query.attachment_names,
+            after: query.after,
+            before: query.before,
+        };
         if terms.is_empty() {
             s.index_hits = None;
             return;
         }
-        let folders = if s.search_all { None } else { s.selected_folder.as_deref().map(|id| s.members(id)) };
+        // `map:` and `account:` choose the folders themselves, else the scope menu does.
+        let folders = match s.search_folders(&query) {
+            Some(places) => Some(places.into_iter().collect()),
+            None if s.search_all => None,
+            None => s.selected_folder.as_deref().map(|id| s.members(id)),
+        };
         let known: HashSet<String> = s.contacts.iter().flat_map(|c| c.emails.iter().map(|e| e.to_lowercase())).collect();
         let scope = Scope { folders, limit: MAX_HITS, now: now(), known };
         // The last word may still be half typed, until a space follows it.
