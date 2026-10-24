@@ -8,6 +8,10 @@
 //! newest first, a few at a time. Once a day each folder is paged through again, which is also
 //! when messages that left the server leave the index.
 //!
+//! The text inside attachments (PDF, Office, plain text; see [`merel_extract`]) is read in the
+//! background only, by the crawl: opening a message indexes its own text at once and leaves
+//! the attachments to the next fetch, so reading one never holds up the window.
+//!
 //! The text of a message that came encrypted stays out of the index: what was sent end to end
 //! encrypted is not kept readable by a search, even sealed.
 
@@ -18,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use merel_mailbox::RemoteHeader;
 use merel_model::{FolderKind, MessageHeader};
-use merel_search::{Index, Scope, Sealer, Snippet, Terms};
+use merel_search::{Attached, Index, Scope, Sealer, Snippet, Terms};
 use merel_store::Store;
 use serde::{Deserialize, Serialize};
 
@@ -268,17 +272,22 @@ impl Indexer {
                     }
                 }
             }
-            Event::Body { message_id, body, raw, .. } => {
+            Event::Body { message_id, body, .. } => {
                 let Some(m) = s.message(message_id) else { return };
                 let Some(account) = s.folder(&m.folder_id).map(|f| f.account_id.clone()) else { return };
-                // Served from the cache the raw message is not passed on; the index has it then.
-                if raw.is_empty() && index.has_text(message_id) {
+                // A message does not change; once its text is in, opening it again adds nothing.
+                if index.has_text(message_id) {
                     return;
                 }
                 let encrypted = body.encrypted.is_some() || m.sealed != merel_model::Sealed::No;
                 let text = if encrypted { "" } else { body.text.as_str() };
-                let names: Vec<String> = if encrypted { Vec::new() } else { body.attachments.iter().map(|a| a.name.clone()).collect() };
-                if let Err(e) = index.add_text(&account, m, text, &names) {
+                let attachments: Vec<Attached> =
+                    if encrypted { Vec::new() } else { body.attachments.iter().map(|a| Attached::named(&a.name)).collect() };
+                // Attachments with text to read wait for the crawl, off this thread.
+                let readable = !encrypted && body.attachments.iter().any(|a| merel_extract::kind(&a.name, &a.mime, &a.bytes).is_some());
+                let result =
+                    if readable { index.add_opened(&account, m, text, &attachments) } else { index.add_text(&account, m, text, &attachments) };
+                if let Err(e) = result {
                     log::warn!("search index: {e}");
                 }
             }
@@ -564,20 +573,24 @@ fn load_state(dir: &Path, sealer: &dyn Sealer) -> CrawlState {
 pub struct IndexedText {
     pub message_id: String,
     pub text: String,
-    pub attachments: Vec<String>,
+    pub attachments: Vec<Attached>,
     /// The server no longer has the message.
     pub gone: bool,
 }
 
-/// What the index keeps of a raw message: its text and the names of its attachments; nothing
-/// of one that came encrypted.
-pub fn text_of(raw: &[u8]) -> (String, Vec<String>) {
+/// What the index keeps of a raw message: its text and its attachments, with the text inside
+/// them where it can be read; nothing of one that came encrypted.
+pub fn text_of(raw: &[u8]) -> (String, Vec<Attached>) {
     if merel_pgp::is_encrypted(raw) || merel_smime::is_encrypted(raw) {
         return (String::new(), Vec::new());
     }
     let body = merel_mime::parse_body(raw);
-    let names = body.attachments.iter().map(|a| a.name.clone()).collect();
-    (body.text, names)
+    let attachments = body
+        .attachments
+        .iter()
+        .map(|a| Attached { name: a.name.clone(), text: merel_extract::text(&a.name, &a.mime, &a.bytes).unwrap_or_default() })
+        .collect();
+    (body.text, attachments)
 }
 
 /// For the worker: the headers a page for the index listed.
@@ -766,6 +779,37 @@ mod tests {
         s.search = "1234".into();
         ix.search(&mut s);
         assert!(s.current_index_hits().is_some_and(|h| h.scores.is_empty()), "the opened encrypted text stays out");
+    }
+
+    #[test]
+    fn the_text_inside_an_attachment_is_read_by_the_crawl_not_when_the_message_opens() {
+        let mut s = session();
+        let mut ix = Indexer::in_memory();
+        let page = vec![remote(1, "Offerte", now() - 3_600)];
+        s.apply(Event::Headers { folder_id: "a/INBOX".into(), headers: page.clone(), offset: 0, limit: 200 });
+        ix.tick(&s, true);
+        ix.note_event(&s, &headers_event("a", "a/INBOX", 0, PAGE, Ok(page)));
+        let raw = b"From: x@y.nl\r\nSubject: Offerte\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nZie bijlage.\r\n--b\r\nContent-Type: text/csv; name=prijzen.csv\r\nContent-Disposition: attachment; filename=prijzen.csv\r\n\r\nartikel;prijs\r\naanrecht graniet;1250\r\n--b--\r\n".to_vec();
+        let body = merel_mime::parse_body(&raw);
+        assert_eq!(body.attachments.len(), 1);
+        ix.note_event(
+            &s,
+            &Event::Body { message_id: "a/INBOX#1".into(), body: Box::new(body), header: Box::default(), raw: raw.clone(), carried: None },
+        );
+        let jobs = ix.tick(&s, true);
+        let Some(Job::IndexTexts { ids, .. }) = jobs.first() else { panic!("the attachment is still to be read: {jobs:?}") };
+        assert_eq!(ids, &[("a/INBOX#1".to_string(), "1".to_string())]);
+        let (text, attachments) = text_of(&raw);
+        assert_eq!(attachments, [Attached { name: "prijzen.csv".into(), text: "artikel;prijs\naanrecht graniet;1250".into() }]);
+        let texts = vec![IndexedText { message_id: "a/INBOX#1".into(), text, attachments, gone: false }];
+        ix.note_event(&s, &Event::IndexTexts { account_id: "a".into(), texts, failed: None });
+        assert!(ix.tick(&s, true).is_empty());
+        s.search = "graniet".into();
+        s.search_all = true;
+        ix.search(&mut s);
+        assert_eq!(s.visible_messages().iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["a/INBOX#1"]);
+        let snip = s.current_index_hits().and_then(|h| h.snippets.get("a/INBOX#1").cloned());
+        assert_eq!(snip.and_then(|x| x.attachment), Some("prijzen.csv".to_string()));
     }
 
     #[test]

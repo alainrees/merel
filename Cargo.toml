@@ -37,6 +37,7 @@ merel-i18n = { path = "crates/i18n" }
 merel-call = { path = "crates/call" }
 merel-mobile = { path = "crates/mobile" }
 merel-search = { path = "crates/search" }
+merel-extract = { path = "crates/extract" }
 
 # foundation
 thiserror = "2"
@@ -86,6 +87,10 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 # search: the local full-text index (stemming, typo tolerance, ranking); lz4 is pure Rust, no mmap
 # since the index lives decrypted in memory only.
 tantivy = { version = "0.27", default-features = false, features = ["lz4-compression", "stemmer"] }
+# search: the text inside attachments. Pure Rust; both read untrusted files with limits on
+# what a compressed stream may grow to.
+lopdf = { version = "0.46", default-features = false }
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 # calendar: date arithmetic and the computer's time zone
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

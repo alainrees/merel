@@ -4,7 +4,7 @@
 //!
 //! Built on Tantivy. Each message is one document: its header (kept whole, so a hit can be
 //! listed without the server), the sender, the recipients, the subject, the text and the names
-//! of the attachments. Words are lower-cased and stripped of accents, so `cafe` finds `café`;
+//! and text of the attachments. Words are lower-cased and stripped of accents, so `cafe` finds `café`;
 //! they are also kept as Dutch and English stems, so `factuur` finds `facturen`. A word that
 //! is not there at all is still found with a typing error or two (`fatcuur`), and the word
 //! being typed counts as the start of a word. Hits are ranked by how well they match, with a
@@ -47,6 +47,8 @@ const COMMIT_AFTER: Duration = Duration::from_secs(5);
 pub const MAX_TEXT: usize = 64 * 1024;
 /// How much of a hit's text is read for its snippet.
 const SNIPPET_SCAN: usize = 16 * 1024;
+/// The most text of all attachments of one message that is indexed.
+pub const MAX_ATTACHED: usize = 256 * 1024;
 /// How long a snippet is, about.
 const SNIPPET_CHARS: usize = 160;
 
@@ -67,6 +69,8 @@ struct Fields {
     to: Field,
     text: Field,
     attachments: Field,
+    /// The text inside the attachments, one value per attachment: its name on the first line.
+    attached: Field,
     stem_nl: Field,
     stem_en: Field,
 }
@@ -93,6 +97,7 @@ fn schema() -> (Schema, Fields) {
         to: b.add_text_field("to", words(FOLD, false)),
         text: b.add_text_field("text", words(FOLD, true)),
         attachments: b.add_text_field("attachments", words(FOLD, false)),
+        attached: b.add_text_field("attached", words(FOLD, true)),
         stem_nl: b.add_text_field("stem_nl", stems(STEM_NL)),
         stem_en: b.add_text_field("stem_en", stems(STEM_EN)),
     };
@@ -176,9 +181,24 @@ pub struct Scope {
 /// A piece of a hit's text around the words found, with where those words are in it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Snippet {
+    /// The attachment the words were found in; `None` for the message itself.
+    pub attachment: Option<String>,
     pub text: String,
     /// Byte ranges in `text` of the words that matched.
     pub marks: Vec<Range<usize>>,
+}
+
+/// An attachment as the index keeps it: its name and, when it could be read, its text.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Attached {
+    pub name: String,
+    pub text: String,
+}
+
+impl Attached {
+    pub fn named(name: &str) -> Attached {
+        Attached { name: name.to_string(), text: String::new() }
+    }
 }
 
 /// One message the index found.
@@ -323,17 +343,23 @@ impl Index {
         if self.contains(&header.id) {
             return Ok(false);
         }
-        self.write(account_id, header, None, &[])?;
+        self.write(account_id, header, None, &[], false)?;
         Ok(true)
     }
 
-    /// Adds or replaces a message with its text and the names of its attachments. `text` is
-    /// empty for a message whose content stays out of the index (it came encrypted).
-    pub fn add_text(&mut self, account_id: &str, header: &MessageHeader, text: &str, attachments: &[String]) -> Result<()> {
-        self.write(account_id, header, Some(text), attachments)
+    /// Adds or replaces a message with its text and its attachments. `text` is empty for a
+    /// message whose content stays out of the index (it came encrypted).
+    pub fn add_text(&mut self, account_id: &str, header: &MessageHeader, text: &str, attachments: &[Attached]) -> Result<()> {
+        self.write(account_id, header, Some(text), attachments, true)
     }
 
-    fn write(&mut self, account_id: &str, header: &MessageHeader, text: Option<&str>, attachments: &[String]) -> Result<()> {
+    /// Adds or replaces a message with its text while the text inside its attachments is still
+    /// to be read: [`Index::without_text`] keeps listing it until [`Index::add_text`] comes.
+    pub fn add_opened(&mut self, account_id: &str, header: &MessageHeader, text: &str, attachments: &[Attached]) -> Result<()> {
+        self.write(account_id, header, Some(text), attachments, false)
+    }
+
+    fn write(&mut self, account_id: &str, header: &MessageHeader, text: Option<&str>, attachments: &[Attached], whole: bool) -> Result<()> {
         let f = self.fields;
         self.writer.delete_term(self.id_term(&header.id));
         let mut doc = TantivyDocument::default();
@@ -344,17 +370,30 @@ impl Index {
         let mut kept = header.clone();
         kept.preview.clear();
         doc.add_text(f.header, serde_json::to_string(&kept).unwrap_or_default());
-        doc.add_u64(f.full, u64::from(text.is_some()));
+        doc.add_u64(f.full, u64::from(text.is_some() && whole));
         doc.add_i64(f.date, header.date);
         doc.add_text(f.subject, &header.subject);
         doc.add_text(f.from, format!("{} {}", header.from.display(), header.from.email()));
         let to: Vec<String> = header.to.iter().map(|a| format!("{} {}", a.display(), a.email())).collect();
         doc.add_text(f.to, to.join(" "));
         let text = text.map(|t| cut(t, MAX_TEXT)).unwrap_or_default();
-        let names = attachments.join(" ");
+        let names: Vec<&str> = attachments.iter().map(|a| a.name.as_str()).collect();
+        let names = names.join(" ");
         doc.add_text(f.text, text);
         doc.add_text(f.attachments, &names);
-        let all = format!("{}\n{}\n{}", header.subject, text, names);
+        let mut all = format!("{}\n{}\n{}", header.subject, text, names);
+        let mut room = MAX_ATTACHED;
+        for a in attachments.iter().filter(|a| !a.text.is_empty()) {
+            let inside = cut(&a.text, room);
+            if inside.is_empty() {
+                break;
+            }
+            room -= inside.len();
+            // Names never hold a line break, so the first line tells which attachment it was.
+            doc.add_text(f.attached, format!("{}\n{inside}", a.name.replace(['\n', '\r'], " ")));
+            all.push('\n');
+            all.push_str(inside);
+        }
         doc.add_text(f.stem_nl, &all);
         doc.add_text(f.stem_en, &all);
         self.writer.add_document(doc)?;
@@ -511,7 +550,7 @@ impl Index {
         for phrase in terms.phrases {
             let words: Vec<String> = tokens(&mut self.fold, phrase).into_iter().map(|(t, _)| t).collect();
             let mut any: Vec<(Occur, Box<dyn Query>)> = Vec::new();
-            for (field, boost) in [(f.subject, 3.0), (f.text, 1.0), (f.attachments, 1.5)] {
+            for (field, boost) in [(f.subject, 3.0), (f.text, 1.0), (f.attachments, 1.5), (f.attached, 0.8)] {
                 let query: Box<dyn Query> = match words.as_slice() {
                     [] => continue,
                     [one] => Box::new(TermQuery::new(Term::from_field_text(field, one), IndexRecordOption::WithFreqs)),
@@ -540,7 +579,7 @@ impl Index {
         }
         for excluded in terms.not {
             let words: Vec<String> = tokens(&mut self.fold, excluded).into_iter().map(|(t, _)| t).collect();
-            for field in [f.subject, f.from, f.to, f.text, f.attachments] {
+            for field in [f.subject, f.from, f.to, f.text, f.attachments, f.attached] {
                 let query: Box<dyn Query> = match words.as_slice() {
                     [] => continue,
                     [one] => Box::new(TermQuery::new(Term::from_field_text(field, one), IndexRecordOption::Basic)),
@@ -604,8 +643,17 @@ impl Index {
         // Snippets for the hits near the top: what a person reads before refining the search.
         for (hit, address) in hits.iter_mut().take(100) {
             let Ok(doc) = searcher.doc::<TantivyDocument>(*address) else { continue };
-            let Some(text) = doc.get_first(f.text).and_then(|v| v.as_str()) else { continue };
+            let text = doc.get_first(f.text).and_then(|v| v.as_str()).unwrap_or_default();
             hit.snippet = snippet(&mut self.fold, &mut self.stem_nl, &mut self.stem_en, text, &all_forms);
+            // Not in the message itself: then where in an attachment.
+            for value in doc.get_all(f.attached) {
+                if hit.snippet.is_some() {
+                    break;
+                }
+                let Some((name, inside)) = value.as_str().and_then(|v| v.split_once('\n')) else { continue };
+                hit.snippet = snippet(&mut self.fold, &mut self.stem_nl, &mut self.stem_en, inside, &all_forms)
+                    .map(|snip| Snippet { attachment: Some(name.to_string()), ..snip });
+            }
         }
         hits.into_iter().map(|(h, _)| h).collect()
     }
@@ -637,12 +685,12 @@ fn word_query(f: Fields, form: &Form, prefix: bool) -> BooleanQuery {
         (Occur::Should, Box::new(BoostQuery::new(Box::new(TermQuery::new(term(field, &form.folded), IndexRecordOption::WithFreqs)), boost)))
     };
     let mut any: Vec<(Occur, Box<dyn Query>)> =
-        vec![exact(f.subject, 3.0), exact(f.from, 3.0), exact(f.to, 2.0), exact(f.text, 1.0), exact(f.attachments, 1.5)];
+        vec![exact(f.subject, 3.0), exact(f.from, 3.0), exact(f.to, 2.0), exact(f.text, 1.0), exact(f.attachments, 1.5), exact(f.attached, 0.8)];
     for (field, stem) in [(f.stem_nl, &form.nl), (f.stem_en, &form.en)] {
         any.push((Occur::Should, Box::new(BoostQuery::new(Box::new(TermQuery::new(term(field, stem), IndexRecordOption::WithFreqs)), 0.8))));
     }
     let distance = typos(&form.folded);
-    for field in [f.subject, f.from, f.to, f.text, f.attachments] {
+    for field in [f.subject, f.from, f.to, f.text, f.attachments, f.attached] {
         if prefix && !form.folded.is_empty() {
             any.push((Occur::Should, Box::new(BoostQuery::new(Box::new(FuzzyTermQuery::new_prefix(term(field, &form.folded), 0, true)), 0.5))));
         }
@@ -738,7 +786,7 @@ fn snippet(fold: &mut TextAnalyzer, nl: &mut TextAnalyzer, en: &mut TextAnalyzer
     // Line breaks become spaces, byte for byte, so the marks stay where they are.
     let piece: String = scan[start..end].chars().map(|c| if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c }).collect();
     let marks = found.into_iter().filter(|r| r.start >= start && r.end <= end).map(|r| r.start - start..r.end - start).collect();
-    Some(Snippet { text: piece, marks })
+    Some(Snippet { attachment: None, text: piece, marks })
 }
 
 #[cfg(test)]
@@ -785,7 +833,7 @@ mod tests {
             "a",
             &header(2, "Jan Bakker", "Verbouwing keuken", 999_500_000),
             "De aannemer begint maandag met de nieuwe keuken.",
-            &["plattegrond.pdf".into()],
+            &[Attached::named("plattegrond.pdf")],
         )
         .unwrap();
         i.add_header("a", &header(3, "Piet", "Invoices for October", 999_900_000)).unwrap();
@@ -808,6 +856,41 @@ mod tests {
         assert_eq!(find(&mut i, &["plattegrond"]), ["2"], "an attachment's name counts");
         assert_eq!(find(&mut i, &["sanne"]), ["1"], "the sender counts");
         assert!(find(&mut i, &["kat"]).is_empty(), "a short word must be exact");
+    }
+
+    #[test]
+    fn words_inside_an_attachment_are_found_with_a_snippet_that_names_it() {
+        let mut i = sample();
+        let quote = Attached { name: "offerte-2026.pdf".into(), text: "Prijsopgave\nAanrecht van graniet, levering in week 46.".into() };
+        i.add_text("a", &header(4, "Keukenstudio", "Zie bijlage", 999_950_000), "Zie de bijlage.", &[quote]).unwrap();
+        i.commit_if_due(true).unwrap();
+        let w = words(&["graniet"]);
+        let hits = i.search(Terms { words: &w, ..Default::default() }, &scope(), false);
+        assert_eq!(ids(&hits), ["4"]);
+        let snip = hits[0].snippet.clone().unwrap();
+        assert_eq!(snip.attachment.as_deref(), Some("offerte-2026.pdf"));
+        assert_eq!(&snip.text[snip.marks[0].clone()], "graniet");
+        let p = words(&["levering in week"]);
+        assert_eq!(ids(&i.search(Terms { phrases: &p, ..Default::default() }, &scope(), false)), ["4"]);
+        let w = words(&["aanrechten"]);
+        assert_eq!(ids(&i.search(Terms { words: &w, ..Default::default() }, &scope(), false)), ["4"], "stems reach inside too");
+        // A hit in the message itself shows the message, not the attachment.
+        let w = words(&["bijlage"]);
+        let hits = i.search(Terms { words: &w, ..Default::default() }, &scope(), false);
+        assert_eq!(hits[0].snippet.as_ref().and_then(|s| s.attachment.clone()), None);
+    }
+
+    #[test]
+    fn an_opened_message_waits_for_its_attachments_to_be_read() {
+        let mut i = Index::in_memory().unwrap();
+        let h = header(1, "Jan", "Factuur", 5);
+        i.add_opened("a", &h, "tekst", &[Attached::named("factuur.pdf")]).unwrap();
+        i.commit_if_due(true).unwrap();
+        assert!(!i.has_text(&h.id));
+        assert_eq!(i.without_text("a", 0, 5).len(), 1, "the crawl fetches it to read the attachment");
+        i.add_text("a", &h, "tekst", &[Attached { name: "factuur.pdf".into(), text: "bedrag".into() }]).unwrap();
+        i.commit_if_due(true).unwrap();
+        assert!(i.has_text(&h.id) && i.without_text("a", 0, 5).is_empty());
     }
 
     #[test]

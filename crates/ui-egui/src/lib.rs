@@ -2219,6 +2219,12 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         let snippet = app.engine.session.current_index_hits().and_then(|h| h.snippets.get(&m.id));
                         match snippet {
                             Some(snip) => {
+                                let folder = match &snip.attachment {
+                                    Some(name) => {
+                                        format!("{folder}{} ", crate::i18n::tr_args("search-in-attachment", &[("name", name.as_str().into())]))
+                                    }
+                                    None => folder,
+                                };
                                 let job = snippet_job(&folder, snip, 48, t);
                                 let galley = ui.fonts_mut(|f| f.layout_job(job));
                                 p.galley(egui::pos2(x, rect.top() + 52.0 - galley.size().y / 2.0), galley, t.text_dim);
@@ -6303,7 +6309,7 @@ mod tests {
         let t = Tokens::light();
         let text = "Beste Alain, na lang wachten heeft de aannemer eindelijk gebeld over de keuken.";
         let start = text.find("aannemer").unwrap();
-        let snip = merel_search::Snippet { text: text.into(), marks: std::iter::once(start..start + 8).collect() };
+        let snip = merel_search::Snippet { attachment: None, text: text.into(), marks: std::iter::once(start..start + 8).collect() };
         let job = snippet_job("Inbox · ", &snip, 48, &t);
         assert!(job.text.starts_with("Inbox · …"), "{}", job.text);
         assert!(job.text.contains("aannemer") && job.text.ends_with('…'), "{}", job.text);

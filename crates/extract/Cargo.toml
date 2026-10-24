@@ -1,0 +1,19 @@
+[package]
+name = "merel-extract"
+description = "The text inside attachments (PDF, Word, Excel, PowerPoint, OpenDocument, plain text) for the search index."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+merel-mime = { workspace = true }
+lopdf = { workspace = true }
+zip = { workspace = true }
+roxmltree = { workspace = true }
+log = { workspace = true }
+
+[dev-dependencies]
+
+[lints]
+workspace = true
