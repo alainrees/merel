@@ -2247,6 +2247,9 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                                 p.galley(egui::pos2(x, rect.top() + 52.0 - galley.size().y / 2.0), galley, t.text_dim);
                             }
                             None => {
+                                // Found on meaning alone: says why it is here without the words.
+                                let related = app.engine.session.current_index_hits().is_some_and(|h| h.related.contains(&m.id));
+                                let folder = if related { format!("{folder}{} ", crate::i18n::tr("search-related")) } else { folder };
                                 p.text(
                                     egui::pos2(x, rect.top() + 52.0),
                                     egui::Align2::LEFT_CENTER,

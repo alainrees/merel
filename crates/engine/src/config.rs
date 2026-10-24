@@ -55,6 +55,11 @@ pub fn index_dir(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("search-index")
 }
 
+/// Where the model for search on meaning is kept, once downloaded.
+pub fn model_dir(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("search-model")
+}
+
 /// The mail rules file that goes with an accounts file.
 pub fn rules_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("rules.json")

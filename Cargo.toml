@@ -38,6 +38,7 @@ merel-call = { path = "crates/call" }
 merel-mobile = { path = "crates/mobile" }
 merel-search = { path = "crates/search" }
 merel-extract = { path = "crates/extract" }
+merel-semantic = { path = "crates/semantic" }
 
 # foundation
 thiserror = "2"
@@ -91,6 +92,12 @@ tantivy = { version = "0.27", default-features = false, features = ["lz4-compres
 # what a compressed stream may grow to.
 lopdf = { version = "0.46", default-features = false }
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# search on meaning: a small multilingual embedding model run on the CPU, pure Rust (no ONNX
+# runtime, no Python); the model itself is downloaded only when the person switches it on.
+candle-core = { version = "0.11", default-features = false }
+candle-nn = { version = "0.11", default-features = false }
+candle-transformers = { version = "0.11", default-features = false }
+tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
 
 # calendar: date arithmetic and the computer's time zone
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

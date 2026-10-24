@@ -1,0 +1,22 @@
+[package]
+name = "merel-semantic"
+description = "Search on meaning: a small multilingual embedding model on this computer, and the vectors of the mail."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+candle-core = { workspace = true }
+candle-nn = { workspace = true }
+candle-transformers = { workspace = true }
+tokenizers = { workspace = true }
+ureq = { workspace = true }
+rustls = { workspace = true }
+sha2 = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+
+[lints]
+workspace = true

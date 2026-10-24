@@ -102,7 +102,13 @@ the text and the attachments: `bedrag:>100`, `bedrag:<50`, `bedrag:100-500` or `
 `heeft:bedrag`, `heeft:iban`, `heeft:zending`, `heeft:ordernummer` and `heeft:factuurnummer` keep mail that holds one.
 An opened message shows what was recognised in a "Herkend:" strip: a click on an order or invoice number searches all mail
 for it, a parcel code with a known carrier (PostNL, DHL, DPD, UPS, GLS) opens that carrier's page, an amount or IBAN is
-copied (not in the Junk folder). A phrase in quotes must occur as it stands, `-woord`
+copied (not in the Junk folder). Search on meaning, which "Bestand > Zoeken" switches on (it is off until then), also
+finds mail about the same subject without the words: a search for `verbouwing` brings up the builder's mail about the
+kitchen. Switching it on downloads an open language model once (`intfloat/multilingual-e5-small` from Hugging Face, at a
+fixed revision, checked by SHA-256; trimmed to the Latin-script vocabulary and stored at half precision), and from then
+on everything runs on this computer: in the background, at an easy pace, Merel turns each message it has the text of into
+a vector, sealed on disk like the index, and a search mixes the closest messages in under the ones with the words
+(reciprocal rank fusion). Such a row says "Over hetzelfde". Switching it off throws the model and the vectors away. A phrase in quotes must occur as it stands, `-woord`
 leaves out what holds it, and `OF` between words lets either do (the English `from:`, `to:`, `subject:`, `has:attachment`,
 `is:unread`, `is:flagged`, `date:`, `before:`, `after:`, `folder:`, `attachment:`, `category:`, `OR`, `today`, `this-week`
 and so on too); the rest are plain words that may occur anywhere. While a word is typed, a list under the box suggests

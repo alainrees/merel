@@ -485,6 +485,31 @@ impl Index {
             .collect()
     }
 
+    /// A page of the ids of the messages the index holds with their text (committed), newest
+    /// first: `limit` of them from `offset` on.
+    pub fn ids_with_text(&self, offset: usize, limit: usize) -> Vec<String> {
+        let query = TermQuery::new(Term::from_field_u64(self.fields.full, 1), IndexRecordOption::Basic);
+        let searcher = self.reader.searcher();
+        let collector = TopDocs::with_limit(limit.max(1)).and_offset(offset).order_by_fast_field::<i64>("date", tantivy::Order::Desc);
+        let Ok(top) = searcher.search(&query, &collector) else { return Vec::new() };
+        top.into_iter()
+            .filter_map(|(_, a)| searcher.doc::<TantivyDocument>(a).ok())
+            .filter_map(|d| d.get_first(self.fields.id).and_then(|v| v.as_str()).map(str::to_string))
+            .filter(|id| !self.removed.contains(id))
+            .collect()
+    }
+
+    /// The header and text the index keeps for a message (committed).
+    pub fn stored_text(&self, id: &str) -> Option<(MessageHeader, String)> {
+        if self.removed.contains(id) {
+            return None;
+        }
+        let doc = self.committed_doc(id)?;
+        let header = self.header_of(&doc)?;
+        let text = doc.get_first(self.fields.text).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        Some((header, text))
+    }
+
     /// The newest messages of an account (from `since` on) whose text the index does not have
     /// yet, at most `n`, newest first.
     pub fn without_text(&self, account_id: &str, since: i64, n: usize) -> Vec<MessageHeader> {
