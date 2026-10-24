@@ -728,6 +728,131 @@ pub(crate) fn scope_folder() -> String {
 pub(crate) fn scope_all() -> String {
     tr("search-scope-all")
 }
+/// The date choices of the search chips: the date word and its label.
+fn search_dates() -> [(&'static str, String); 6] {
+    [
+        ("vandaag", tr("search-date-today")),
+        ("gisteren", tr("search-date-yesterday")),
+        ("deze-week", tr("search-date-this-week")),
+        ("vorige-week", tr("search-date-last-week")),
+        ("deze-maand", tr("search-date-this-month")),
+        ("dit-jaar", tr("search-date-this-year")),
+    ]
+}
+
+/// A chip that opens a menu, showing the choice made (or its name) and a chevron.
+fn chip_menu(ui: &mut Ui, t: &Tokens, name: &str, chosen: Option<&str>, add: impl FnOnce(&mut Ui)) {
+    let on = chosen.is_some();
+    let text = chosen.map(|c| format!("{name}: {c}")).unwrap_or_else(|| name.to_string());
+    let button = egui::Button::new(RichText::new(text).size(13.0).color(if on { t.accent_text } else { t.text }))
+        .right_text(helder::Icon::ChevronDown.image(12.0, t.text_dim))
+        .fill(if on { t.checked } else { egui::Color32::TRANSPARENT })
+        .frame_when_inactive(on)
+        .stroke(egui::Stroke::NONE)
+        .corner_radius(14)
+        .min_size(vec2(0.0, 28.0));
+    let (r, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, add);
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+}
+
+/// The chips under a search: Datum, Van and Map, each a menu that puts the search word in the
+/// box (or takes it out), so nobody has to know the words.
+fn search_chips(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    use merel_engine::search::{operator_value, with_operator};
+    let session = &app.engine.session;
+    let text = session.search.clone();
+    // The senders and folders of what was found, most first.
+    let mut senders: Vec<(String, String, usize)> = Vec::new();
+    let mut folders: Vec<(String, String, usize)> = Vec::new();
+    for m in session.visible_messages() {
+        match senders.iter_mut().find(|s| s.1.eq_ignore_ascii_case(m.from.email())) {
+            Some(s) => s.2 += 1,
+            None => senders.push((m.from.display().to_string(), m.from.email().to_string(), 1)),
+        }
+        if let Some(f) = session.folder(&m.folder_id) {
+            match folders.iter_mut().find(|x| x.1 == f.name) {
+                Some(x) => x.2 += 1,
+                None => folders.push((f.id.clone(), f.name.clone(), 1)),
+            }
+        }
+    }
+    senders.sort_by_key(|x| std::cmp::Reverse(x.2));
+    senders.truncate(8);
+    folders.sort_by_key(|x| std::cmp::Reverse(x.2));
+    folders.truncate(8);
+    let dates = search_dates();
+    let date = operator_value(&text, "datum").map(|v| dates.iter().find(|(w, _)| *w == v).map(|(_, l)| l.clone()).unwrap_or(v));
+    let from = operator_value(&text, "van");
+    let folder = operator_value(&text, "map");
+    let mut pick: Option<String> = None;
+    helder::quiet(ui, t, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            chip_menu(ui, t, &tr("search-chip-date"), date.as_deref(), |ui| {
+                for (word, label) in &dates {
+                    if ui.button(label).clicked() {
+                        pick = Some(with_operator(&text, "datum", word));
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                if ui.button(tr("search-chip-any-date")).clicked() {
+                    pick = Some(with_operator(&text, "datum", ""));
+                    ui.close();
+                }
+            });
+            chip_menu(ui, t, &tr("search-chip-from"), from.as_deref(), |ui| {
+                for (name, email, n) in &senders {
+                    if ui.button(format!("{name} ({n})")).on_hover_text(email).clicked() {
+                        pick = Some(with_operator(&text, "van", email));
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                if ui.button(tr("search-chip-anyone")).clicked() {
+                    pick = Some(with_operator(&text, "van", ""));
+                    ui.close();
+                }
+            });
+            chip_menu(ui, t, &tr("search-chip-folder"), folder.as_deref(), |ui| {
+                for (_, name, n) in &folders {
+                    if ui.button(format!("{name} ({n})")).clicked() {
+                        pick = Some(with_operator(&text, "map", &name.to_lowercase()));
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                if ui.button(tr("search-chip-any-folder")).clicked() {
+                    pick = Some(with_operator(&text, "map", ""));
+                    ui.close();
+                }
+            });
+        });
+    });
+    if let Some(text) = pick {
+        let text = text.trim_end().to_string();
+        app.engine.session.search = if text.is_empty() { text } else { format!("{text} ") };
+    }
+}
+
+/// What the search box suggests for the word being typed: the engine's (people, search words,
+/// folders, dates), then earlier searches that start with what is typed.
+fn suggestions(session: &merel_engine::Session, recents: &[String], limit: usize) -> Vec<merel_engine::suggest::Suggestion> {
+    let text = session.search.as_str();
+    let mut out = session.search_suggestions(text, limit);
+    let typed = text.trim().to_lowercase();
+    if typed.chars().count() >= 2 && !text.ends_with(char::is_whitespace) {
+        for r in recents {
+            if out.len() >= limit {
+                break;
+            }
+            if r.to_lowercase().starts_with(&typed) && r.trim() != text.trim() && !out.iter().any(|o| o.text.trim() == r.trim()) {
+                out.push(merel_engine::suggest::Suggestion { label: r.clone(), detail: view::recent_menu(), text: format!("{} ", r.trim()) });
+            }
+        }
+    }
+    out
+}
+
 /// How search results stand, in the search box's menu.
 pub(crate) fn rank_best() -> String {
     tr("search-rank-best")
@@ -762,6 +887,7 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
     let mut save_search = false;
     let mut remember: Option<String> = None;
     let mut recent_pick: Option<Option<String>> = None;
+    let mut suggestion_pick: Option<String> = None;
     let recents = app.view.recent_searches.clone();
     let inset = app.title_bar_inset;
     let title = app.title.clone().unwrap_or_else(|| "Merel".to_string());
@@ -816,6 +942,18 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                     let tail: f32 = ui.data(|d| d.get_temp(tail_id)).unwrap_or(120.0);
                     ui.horizontal_centered(|ui| {
                         ui.add(helder::Icon::Search.image(16.0, t.text_dim));
+                        // Suggestions for the word being typed, from what the box held last frame;
+                        // Tab takes the first one.
+                        let box_id = egui::Id::new(SEARCH_BOX);
+                        let hover_id = egui::Id::new("search-suggestions-hovered");
+                        let focused = ui.memory(|m| m.has_focus(box_id)) || ui.data(|d| d.get_temp::<bool>(hover_id)).unwrap_or(false);
+                        let options = if focused { suggestions(session, &recents, 8) } else { Vec::new() };
+                        if ui.memory(|m| m.has_focus(box_id))
+                            && let Some(first) = options.first()
+                            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+                        {
+                            suggestion_pick = Some(first.text.clone());
+                        }
                         let box_r = ui
                             .add(
                                 egui::TextEdit::singleline(&mut session.search)
@@ -831,6 +969,24 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                         if box_r.lost_focus() && !session.search.trim().is_empty() {
                             remember = Some(session.search.clone());
                         }
+                        let shown = egui::Popup::from_response(&box_r)
+                            .open(focused && !options.is_empty() && suggestion_pick.is_none())
+                            .align(egui::RectAlign::BOTTOM_START)
+                            .width(box_r.rect.width().max(320.0))
+                            .show(|ui| {
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                for o in &options {
+                                    let button = egui::Button::new(RichText::new(&o.label).size(13.0).color(t.text))
+                                        .right_text(RichText::new(&o.detail).size(12.0).color(t.text_dim))
+                                        .frame_when_inactive(false)
+                                        .min_size(vec2(ui.available_width(), 28.0));
+                                    if ui.add(button).clicked() {
+                                        suggestion_pick = Some(o.text.clone());
+                                    }
+                                }
+                            });
+                        let hovered = shown.is_some_and(|r| r.response.contains_pointer());
+                        ui.data_mut(|d| d.insert_temp(hover_id, hovered));
                         let start = ui.cursor().min.x;
                         helder::quiet(ui, t, |ui| {
                             ui.spacing_mut().button_padding = vec2(6.0, 3.0);
@@ -907,6 +1063,17 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                 });
             });
         });
+    if let Some(text) = suggestion_pick {
+        // The chosen word goes in, and the cursor waits after it for the next.
+        app.engine.session.search = text.clone();
+        let id = egui::Id::new(SEARCH_BOX);
+        let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+        let end = egui::text::CCursor::new(text.chars().count());
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
+        state.store(ui.ctx(), id);
+        ui.memory_mut(|m| m.request_focus(id));
+        ui.data_mut(|d| d.insert_temp(egui::Id::new("search-suggestions-hovered"), false));
+    }
     if save_search {
         app.ask_search_folder();
     }
@@ -1852,6 +2019,11 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         }
                     });
                 });
+                // While searching: when, from whom and where, without typing search words.
+                if searching {
+                    ui.add_space(2.0);
+                    search_chips(app, ui, t);
+                }
                 // The server can look where Merel has not: older mail, and the text itself.
                 let session = &app.engine.session;
                 if session.can_search_server() {
@@ -3250,6 +3422,54 @@ mod tests {
         h.state_mut().engine.session.search = "niets-hiervan".into();
         h.run();
         assert!(h.query_by_label_contains("Geen berichten gevonden").is_some());
+    }
+
+    #[test]
+    fn the_search_box_suggests_search_words_and_tab_or_a_click_takes_one() {
+        let mut h = harness();
+        h.run();
+        let id = egui::Id::new(SEARCH_BOX);
+        h.state_mut().engine.session.search = "onder".into();
+        h.ctx.memory_mut(|m| m.request_focus(id));
+        h.run();
+        assert!(h.query_by_label_contains("woord in het onderwerp").is_some(), "the suggestion shows under the box");
+        h.get_by_label_contains("woord in het onderwerp").click();
+        h.run();
+        assert_eq!(h.state().engine.session.search, "onderwerp:");
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(id), "the cursor stays in the box");
+        h.state_mut().engine.session.search = "datum:vor".into();
+        h.run();
+        h.key_press(egui::Key::Tab);
+        h.run();
+        assert_eq!(h.state().engine.session.search, "datum:vorige-week ", "Tab takes the first");
+        h.state_mut().engine.session.search = "keuken ".into();
+        h.run();
+        assert!(h.query_by_label_contains("woord in het onderwerp").is_none(), "nothing after a finished word");
+    }
+
+    #[test]
+    fn the_search_chips_put_a_date_or_a_sender_in_the_box_and_take_it_out() {
+        let mut h = harness();
+        h.run();
+        h.state_mut().engine.session.search = "donderdag".into();
+        h.run();
+        h.get_by_label(&tr("search-chip-date")).click();
+        h.run();
+        h.get_by_label(&tr("search-date-this-week")).click();
+        h.run();
+        assert_eq!(h.state().engine.session.search, "donderdag datum:deze-week ");
+        h.get_by_label(&tr("search-chip-date")).click();
+        h.run();
+        h.get_by_label(&tr("search-chip-any-date")).click();
+        h.run();
+        assert_eq!(h.state().engine.session.search, "donderdag ");
+        let sender = h.state().engine.session.visible_messages()[0].from.clone();
+        h.get_by_label(&tr("search-chip-from")).click();
+        h.run();
+        h.get_by_label(&format!("{} (1)", sender.display())).click();
+        h.run();
+        assert_eq!(h.state().engine.session.search, format!("donderdag van:{} ", sender.email()));
+        assert_eq!(h.state().engine.session.visible_messages().len(), 1);
     }
 
     #[test]

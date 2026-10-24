@@ -36,6 +36,7 @@ pub mod search;
 pub mod securejoin;
 pub mod signin;
 pub mod snooze;
+pub mod suggest;
 pub mod sync;
 pub mod tasks;
 pub mod templates;
@@ -716,6 +717,8 @@ impl Session {
         let now = snooze::now();
         let hits = self.current_hits().map(|h| &h.ids);
         let found = self.current_index_hits();
+        // `map:` and `account:` narrow the search to some folders.
+        let places = self.search_folders(&query);
         // The selected folder, or each account's folder behind an "Alle accounts" one.
         let members = self.selected_folder.as_deref().map(|id| self.members(id)).unwrap_or_default();
         let mut list: Vec<&MessageHeader> = self
@@ -727,10 +730,11 @@ impl Session {
                     in_folder
                 } else {
                     // The server searched the plain words only; its hits still owe the operators.
-                    ((in_folder || self.search_all) && query.matches(m))
+                    ((in_folder || self.search_all || places.is_some()) && query.matches(m))
                         || ((hits.is_some_and(|ids| ids.contains(&m.id)) || found.is_some_and(|f| f.scores.contains_key(&m.id))) && query.keeps(m))
                 }
             })
+            .filter(|m| places.as_ref().is_none_or(|p| p.contains(&m.folder_id)))
             .filter(|m| self.filter.keeps(m))
             // Snoozed mail is out of sight until its moment, and the only thing the "Gesluimerd"
             // filter shows.
@@ -748,6 +752,34 @@ impl Session {
             None => list.sort_by(|a, b| self.sort.order(a, b)),
         }
         list
+    }
+
+    /// The folders a search's `map:` and `account:` words leave: each word must occur in the
+    /// folder's name or path, or in the account's name or address. `None` when it has neither.
+    pub fn search_folders(&self, q: &search::Query) -> Option<HashSet<String>> {
+        if q.folders.is_empty() && q.accounts.is_empty() {
+            return None;
+        }
+        let accounts: HashSet<&str> = self
+            .accounts
+            .iter()
+            .filter(|a| {
+                let hay = format!("{}\n{}", a.name, a.address.email()).to_lowercase();
+                q.accounts.iter().all(|w| hay.contains(w.as_str()))
+            })
+            .map(|a| a.id.as_str())
+            .collect();
+        Some(
+            self.folders
+                .iter()
+                .filter(|f| q.accounts.is_empty() || accounts.contains(f.account_id.as_str()))
+                .filter(|f| {
+                    let hay = format!("{}\n{}", f.name, f.path).to_lowercase();
+                    q.folders.iter().all(|w| hay.contains(w.as_str()))
+                })
+                .map(|f| f.id.clone())
+                .collect(),
+        )
     }
 
     /// The search index's answer for the search box as it stands now.

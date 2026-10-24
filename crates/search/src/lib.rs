@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use merel_model::MessageHeader;
 use tantivy::collector::{Count, TopDocs};
-use tantivy::query::{AllQuery, BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, Query, RangeQuery, TermQuery};
+use tantivy::query::{AllQuery, BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, PhraseQuery, Query, RangeQuery, TermQuery};
 use tantivy::schema::{FAST, Field, INDEXED, IndexRecordOption, STORED, STRING, Schema, TextFieldIndexing, TextOptions, Value};
 use tantivy::tokenizer::{AsciiFoldingFilter, Language, LowerCaser, RemoveLongFilter, SimpleTokenizer, Stemmer, TextAnalyzer};
 use tantivy::{DocAddress, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Term};
@@ -126,16 +126,37 @@ fn tokens(analyzer: &mut TextAnalyzer, text: &str) -> Vec<(String, Range<usize>)
 /// What to look for: the words of the search box, as [`merel_engine::search::Query`] read them.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Terms<'a> {
-    /// Words that may occur anywhere.
+    /// Words that may occur anywhere; every one must.
     pub words: &'a [String],
+    /// Groups of words of which one must occur.
+    pub either: &'a [Vec<String>],
+    /// Phrases that must occur as they stand.
+    pub phrases: &'a [String],
+    /// Words or phrases that must not occur.
+    pub not: &'a [String],
     pub from: &'a [String],
     pub to: &'a [String],
     pub subject: &'a [String],
+    /// Words in an attachment's name.
+    pub attachments: &'a [String],
+    /// From this moment (seconds since the epoch) on, inclusive.
+    pub after: Option<i64>,
+    /// Before this moment, exclusive.
+    pub before: Option<i64>,
 }
 
 impl Terms<'_> {
     pub fn is_empty(&self) -> bool {
-        self.words.is_empty() && self.from.is_empty() && self.to.is_empty() && self.subject.is_empty()
+        self.words.is_empty()
+            && self.either.is_empty()
+            && self.phrases.is_empty()
+            && self.not.is_empty()
+            && self.from.is_empty()
+            && self.to.is_empty()
+            && self.subject.is_empty()
+            && self.attachments.is_empty()
+            && self.after.is_none()
+            && self.before.is_none()
     }
 }
 
@@ -458,17 +479,58 @@ impl Index {
         let f = self.fields;
         let mut must: Vec<(Occur, Box<dyn Query>)> = Vec::new();
         let mut all_forms: Vec<(Form, bool)> = Vec::new();
+        // Whether anything in the query gives a score; without, the newest come first.
+        let mut scored = false;
         let last = terms.words.len().saturating_sub(1);
         for (i, word) in terms.words.iter().enumerate() {
             let forms = self.forms(word);
             let n = forms.len();
             for (j, form) in forms.into_iter().enumerate() {
-                let prefix = typing && i == last && j + 1 == n;
+                let prefix = typing && i == last && j + 1 == n && terms.either.is_empty();
                 must.push((Occur::Must, Box::new(word_query(f, &form, prefix))));
                 all_forms.push((form, prefix));
+                scored = true;
             }
         }
-        for (field, words) in [(f.from, terms.from), (f.to, terms.to), (f.subject, terms.subject)] {
+        for group in terms.either {
+            let mut any: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+            for word in group {
+                let forms = self.forms(word);
+                let parts: Vec<(Occur, Box<dyn Query>)> =
+                    forms.iter().map(|form| (Occur::Must, Box::new(word_query(f, form, false)) as Box<dyn Query>)).collect();
+                all_forms.extend(forms.into_iter().map(|form| (form, false)));
+                if !parts.is_empty() {
+                    any.push((Occur::Should, Box::new(BooleanQuery::new(parts))));
+                }
+            }
+            if !any.is_empty() {
+                must.push((Occur::Must, Box::new(BooleanQuery::new(any))));
+                scored = true;
+            }
+        }
+        for phrase in terms.phrases {
+            let words: Vec<String> = tokens(&mut self.fold, phrase).into_iter().map(|(t, _)| t).collect();
+            let mut any: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+            for (field, boost) in [(f.subject, 3.0), (f.text, 1.0), (f.attachments, 1.5)] {
+                let query: Box<dyn Query> = match words.as_slice() {
+                    [] => continue,
+                    [one] => Box::new(TermQuery::new(Term::from_field_text(field, one), IndexRecordOption::WithFreqs)),
+                    many => Box::new(PhraseQuery::new(many.iter().map(|w| Term::from_field_text(field, w)).collect())),
+                };
+                any.push((Occur::Should, Box::new(BoostQuery::new(query, boost))));
+            }
+            if !any.is_empty() {
+                must.push((Occur::Must, Box::new(BooleanQuery::new(any))));
+                // The words of a phrase are marked in the snippet too.
+                for (folded, _) in tokens(&mut self.fold, phrase) {
+                    let nl = tokens(&mut self.stem_nl, &folded).into_iter().next().map(|x| x.0).unwrap_or_else(|| folded.clone());
+                    let en = tokens(&mut self.stem_en, &folded).into_iter().next().map(|x| x.0).unwrap_or_else(|| folded.clone());
+                    all_forms.push((Form { folded, nl, en }, false));
+                }
+                scored = true;
+            }
+        }
+        for (field, words) in [(f.from, terms.from), (f.to, terms.to), (f.subject, terms.subject), (f.attachments, terms.attachments)] {
             for word in words {
                 for form in self.forms(word) {
                     let term = Term::from_field_text(field, &form.folded);
@@ -476,9 +538,29 @@ impl Index {
                 }
             }
         }
-        if must.is_empty() {
-            // Only punctuation in the box.
-            return Vec::new();
+        for excluded in terms.not {
+            let words: Vec<String> = tokens(&mut self.fold, excluded).into_iter().map(|(t, _)| t).collect();
+            for field in [f.subject, f.from, f.to, f.text, f.attachments] {
+                let query: Box<dyn Query> = match words.as_slice() {
+                    [] => continue,
+                    [one] => Box::new(TermQuery::new(Term::from_field_text(field, one), IndexRecordOption::Basic)),
+                    many => Box::new(PhraseQuery::new(many.iter().map(|w| Term::from_field_text(field, w)).collect())),
+                };
+                must.push((Occur::MustNot, query));
+            }
+        }
+        if terms.after.is_some() || terms.before.is_some() {
+            let from = terms.after.map_or(std::ops::Bound::Unbounded, |a| std::ops::Bound::Included(Term::from_field_i64(f.date, a)));
+            let to = terms.before.map_or(std::ops::Bound::Unbounded, |b| std::ops::Bound::Excluded(Term::from_field_i64(f.date, b)));
+            must.push((Occur::Must, Box::new(RangeQuery::new(from, to))));
+        }
+        if !must.iter().any(|(o, _)| *o == Occur::Must) {
+            if must.is_empty() {
+                // Only punctuation in the box.
+                return Vec::new();
+            }
+            // Only words to leave out: everything else.
+            must.push((Occur::Must, Box::new(AllQuery)));
         }
         if let Some(folders) = &scope.folders {
             let any: Vec<(Occur, Box<dyn Query>)> = folders
@@ -494,7 +576,15 @@ impl Index {
         let searcher = self.reader.searcher();
         let limit = scope.limit.max(1);
         // More than asked, as the push for recent mail and known people reorders them.
-        let Ok(top) = searcher.search(&query, &TopDocs::with_limit(limit * 2).order_by_score()) else { return Vec::new() };
+        let top: Vec<(f32, DocAddress)> = if scored {
+            let Ok(top) = searcher.search(&query, &TopDocs::with_limit(limit * 2).order_by_score()) else { return Vec::new() };
+            top
+        } else {
+            // Nothing to rank by (a sender, a date): the newest first, all scoring alike.
+            let collector = TopDocs::with_limit(limit).order_by_fast_field::<i64>("date", tantivy::Order::Desc);
+            let Ok(top) = searcher.search(&query, &collector) else { return Vec::new() };
+            top.into_iter().map(|(date, a)| (1.0 + (date.unwrap_or(0).max(0) as f32) * 1e-12, a)).collect()
+        };
         let mut hits: Vec<(Hit, DocAddress)> = top
             .into_iter()
             .filter_map(|(score, address)| {
@@ -718,6 +808,34 @@ mod tests {
         assert_eq!(find(&mut i, &["plattegrond"]), ["2"], "an attachment's name counts");
         assert_eq!(find(&mut i, &["sanne"]), ["1"], "the sender counts");
         assert!(find(&mut i, &["kat"]).is_empty(), "a short word must be exact");
+    }
+
+    #[test]
+    fn phrases_exclusions_either_attachments_and_dates_narrow_the_hits() {
+        let mut i = sample();
+        let s = scope();
+        let find = |i: &mut Index, t: Terms<'_>| {
+            let mut v = ids(&i.search(t, &s, false));
+            v.sort();
+            v
+        };
+        let p = words(&["nieuwe keuken"]);
+        assert_eq!(find(&mut i, Terms { phrases: &p, ..Default::default() }), ["2"]);
+        let p = words(&["keuken nieuwe"]);
+        assert!(find(&mut i, Terms { phrases: &p, ..Default::default() }).is_empty(), "the words in that order");
+        let either = vec![words(&["aannemer", "factuur"])];
+        assert_eq!(find(&mut i, Terms { either: &either, ..Default::default() }), ["1", "2"]);
+        let w = words(&["de"]);
+        let not = words(&["keuken"]);
+        assert_eq!(find(&mut i, Terms { words: &w, not: &not, ..Default::default() }), ["1"]);
+        let only_not = words(&["utrecht"]);
+        assert_eq!(find(&mut i, Terms { not: &only_not, ..Default::default() }), ["2", "3"], "everything but");
+        let pdf = words(&["pdf"]);
+        assert_eq!(find(&mut i, Terms { attachments: &pdf, ..Default::default() }), ["2"]);
+        assert_eq!(find(&mut i, Terms { after: Some(999_400_000), ..Default::default() }), ["2", "3"]);
+        assert_eq!(find(&mut i, Terms { after: Some(999_400_000), before: Some(999_600_000), ..Default::default() }), ["2"]);
+        let dated = i.search(Terms { before: Some(2_000_000_000), ..Default::default() }, &s, false);
+        assert_eq!(ids(&dated), ["3", "2", "1"], "nothing to rank by: newest first");
     }
 
     #[test]
