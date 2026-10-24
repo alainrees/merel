@@ -24,7 +24,9 @@ flag, read/unread), and reading a message. Calendar, chat, contacts and tasks fo
    Mode when iOS asks.
 
 After pulling new code: `apps/ios/scripts/build-core.sh`, then `xcodegen` (it picks up new
-files), then Run.
+files), then Run. Xcode rewrites `Merel/Localizable.xcstrings` while it builds; if `git pull`
+refuses because of that file, drop the change first with
+`git checkout -- apps/ios/Merel/Localizable.xcstrings`.
 
 With a free Apple ID the app runs for 7 days; then press Run again. The App Store and
 TestFlight need the paid Apple Developer Program.
