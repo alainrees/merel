@@ -264,7 +264,9 @@ pub fn compact(weights: &[u8], tokenizer: &str) -> Result<(Vec<u8>, String)> {
     tensors.insert(name, embeddings);
     let half: HashMap<String, Tensor> =
         tensors.into_iter().map(|(n, t)| t.to_dtype(DType::F16).map(|t| (n, t))).collect::<std::result::Result<_, _>>()?;
-    let path = std::env::temp_dir().join(format!("merel-compact-{}.safetensors", std::process::id()));
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("merel-compact-{}-{n}.safetensors", std::process::id()));
     candle_core::safetensors::save(&half, &path)?;
     let bytes = std::fs::read(&path);
     let _ = std::fs::remove_file(&path);

@@ -143,7 +143,10 @@ pub fn test_model() -> Option<(Vec<u8>, String)> {
         add(&format!("{p}output.LayerNorm.weight"), &[hidden]);
         add(&format!("{p}output.LayerNorm.bias"), &[hidden]);
     }
-    let path = std::env::temp_dir().join(format!("merel-tiny-{}.safetensors", std::process::id()));
+    // Tests run side by side: each gets a file of its own.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("merel-tiny-{}-{n}.safetensors", std::process::id()));
     candle_core::safetensors::save(&tensors, &path).ok()?;
     let bytes = std::fs::read(&path).ok()?;
     let _ = std::fs::remove_file(&path);
