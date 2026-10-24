@@ -6,13 +6,27 @@ options:
   deploymentTarget:
     iOS: "17.0"
   developmentLanguage: nl
+  # Marks the project as checked against Xcode's recommended settings (below), so Xcode does not
+  # offer to "update to recommended settings" on a file that xcodegen would overwrite anyway.
+  xcodeVersion: "27.0"
+# The bundle identifier and Apple ID team: Config/Merel.xcconfig, and your own in
+# Config/Local.xcconfig (scripts/signing.sh), so `xcodegen` keeps them. Set on the project, so the
+# target inherits the team.
+configFiles:
+  Debug: Config/Merel.xcconfig
+  Release: Config/Merel.xcconfig
 settings:
   base:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
-    # Your own Apple ID team comes from Config/Local.xcconfig (see the target); CI builds unsigned.
+    # Your own Apple ID team comes from Config/Local.xcconfig (see configFiles); CI builds unsigned.
     CODE_SIGN_STYLE: Automatic
+    # Xcode's recommended settings.
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED: YES
+    STRING_CATALOG_GENERATE_SYMBOLS: YES
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
 targets:
   Merel:
     type: application
@@ -28,11 +42,6 @@ targets:
       - sdk: Security.framework
       - sdk: SystemConfiguration.framework
       - sdk: libresolv.tbd
-    # The bundle identifier and Apple ID team: Config/Merel.xcconfig, and your own in
-    # Config/Local.xcconfig (scripts/signing.sh), so `xcodegen` keeps them.
-    configFiles:
-      Debug: Config/Merel.xcconfig
-      Release: Config/Merel.xcconfig
     settings:
       base:
         TARGETED_DEVICE_FAMILY: "1"
