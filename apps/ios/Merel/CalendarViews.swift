@@ -186,6 +186,17 @@ struct AllDayChip: View {
     }
 }
 
+/// Where `epoch` falls on `day`'s clock face, in hours from 0 to 24. Uses the wall clock, so a day
+/// with a daylight saving change (23 or 25 hours long) still lines up with its hour labels.
+func clockHours(_ epoch: Int64, on day: Date) -> CGFloat {
+    let cal = Calendar.current
+    let t = Date(timeIntervalSince1970: TimeInterval(epoch))
+    if t <= day { return 0 }
+    guard let next = cal.date(byAdding: .day, value: 1, to: day), t < next else { return 24 }
+    let c = cal.dateComponents([.hour, .minute, .second], from: t)
+    return CGFloat(c.hour ?? 0) + CGFloat(c.minute ?? 0) / 60 + CGFloat(c.second ?? 0) / 3600
+}
+
 /// The day's hours with its appointments on them, and a red line at the current time today.
 struct TimeLine: View {
     let day: Date
@@ -194,7 +205,6 @@ struct TimeLine: View {
     private let gutter: CGFloat = 56
 
     var body: some View {
-        let dayStart = day.timeIntervalSince1970
         let placed = lanes(appointments)
         ScrollViewReader { reader in
             ScrollView {
@@ -220,8 +230,8 @@ struct TimeLine: View {
                         let width = geo.size.width - gutter - 8
                         ForEach(placed, id: \.row) { p in
                             let a = p.row
-                            let top = max(0, CGFloat(Double(a.start) - dayStart) / 3600 * hour)
-                            let bottom = min(24 * hour, CGFloat(Double(a.end) - dayStart) / 3600 * hour)
+                            let top = clockHours(a.start, on: day) * hour
+                            let bottom = clockHours(a.end, on: day) * hour
                             let laneWidth = width / CGFloat(p.of)
                             NavigationLink(value: OpenAppointment(id: a.id, start: a.start)) {
                                 AppointmentBlock(appointment: a, height: max(26, bottom - top - 2))
@@ -231,7 +241,7 @@ struct TimeLine: View {
                             .offset(x: gutter + CGFloat(p.lane) * laneWidth, y: top + 10 + 1)
                         }
                         if Calendar.current.isDateInToday(day) {
-                            let y = CGFloat(Date.now.timeIntervalSince1970 - dayStart) / 3600 * hour + 10
+                            let y = clockHours(Int64(Date.now.timeIntervalSince1970), on: day) * hour + 10
                             HStack(spacing: 0) {
                                 Circle().fill(Helder.flag).frame(width: 9, height: 9)
                                 Rectangle().fill(Helder.flag).frame(height: 2)
