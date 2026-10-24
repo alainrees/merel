@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 merel-model = { workspace = true }
+merel-extract = { workspace = true }
 tantivy = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -7,6 +7,8 @@
 //! refused (entities that expand), and a reader that panics on a broken file costs only that
 //! attachment's text. What comes out is capped as well.
 
+pub mod recognize;
+
 use std::io::{Cursor, Read};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 

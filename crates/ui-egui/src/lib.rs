@@ -38,6 +38,7 @@ pub mod notifications;
 pub mod print;
 pub mod quicksteps;
 pub mod receipt;
+pub mod recognized;
 pub mod release_notes;
 pub mod reminders;
 pub mod remote;
@@ -814,6 +815,21 @@ fn search_chips(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ui.close();
                 }
             });
+            for (label, word, aliases) in [
+                (tr("search-chip-attachment"), "heeft:bijlage", &["has:attachment", "heeft:bijlagen", "bijlage:ja", "attachment:yes"][..]),
+                (tr("search-chip-unread"), "is:ongelezen", &["is:unread"][..]),
+            ] {
+                let on = text.split_whitespace().any(|w| w.eq_ignore_ascii_case(word) || aliases.iter().any(|a| w.eq_ignore_ascii_case(a)));
+                let button = egui::Button::new(RichText::new(&label).size(13.0).color(if on { t.accent_text } else { t.text }))
+                    .fill(if on { t.checked } else { egui::Color32::TRANSPARENT })
+                    .frame_when_inactive(on)
+                    .stroke(egui::Stroke::NONE)
+                    .corner_radius(14)
+                    .min_size(vec2(0.0, 28.0));
+                if ui.add(button).clicked() {
+                    pick = Some(merel_engine::search::toggle_word(&text, word, aliases));
+                }
+            }
             chip_menu(ui, t, &tr("search-chip-folder"), folder.as_deref(), |ui| {
                 for (_, name, n) in &folders {
                     if ui.button(format!("{name} ({n})")).clicked() {
@@ -2685,6 +2701,23 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     {
         app.send_read_receipt(&message_id);
     }
+    // Amounts, an IBAN, a parcel code, order and invoice numbers in the text; not in the Junk
+    // folder, where a code or a link is not to be trusted.
+    if !in_junk && let Some(b) = body.as_ref() {
+        let found = recognized::found_in(ui, &message_id, &b.text);
+        match recognized::strip(ui, t, &found) {
+            Some(recognized::Pick::Search(q)) => {
+                app.engine.session.search = q;
+                app.engine.session.search_all = true;
+            }
+            Some(recognized::Pick::Copy(v)) => {
+                ui.ctx().copy_text(v);
+                app.notice = Some(Notice::success(tr("recognized-copied")));
+            }
+            Some(recognized::Pick::Open(link)) => ui.ctx().open_url(egui::OpenUrl::new_tab(link)),
+            None => {}
+        }
+    }
     let rich = body.as_ref().and_then(|b| b.rich.as_ref());
     let blocked = rich.map(|d| d.remote_images).unwrap_or(0);
     // A sender the person put on the safe senders list gets their pictures without asking, as
@@ -3488,6 +3521,12 @@ mod tests {
         h.run();
         assert_eq!(h.state().engine.session.search, format!("donderdag van:{} ", sender.email()));
         assert_eq!(h.state().engine.session.visible_messages().len(), 1);
+        h.get_by_label(&tr("search-chip-unread")).click();
+        h.run();
+        assert_eq!(h.state().engine.session.search, format!("donderdag van:{} is:ongelezen ", sender.email()));
+        h.get_by_label(&tr("search-chip-unread")).click();
+        h.run();
+        assert_eq!(h.state().engine.session.search, format!("donderdag van:{} ", sender.email()), "a second click takes it out");
     }
 
     #[test]
