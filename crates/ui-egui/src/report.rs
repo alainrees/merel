@@ -17,8 +17,8 @@ pub enum Destination {
     Mail(&'static str),
 }
 
-/// The team's address for reports.
-pub const DESTINATION: Destination = Destination::Mail("meldingen@merel.invalid");
+/// The team's address for reports; a temporary one until Merel goes live.
+pub const DESTINATION: Destination = Destination::Mail("support@2lrn4.com");
 
 /// The message to the team: `source` without the person in it, attached.
 pub fn draft(source: &[u8], who: &Redaction) -> Result<Draft, String> {
