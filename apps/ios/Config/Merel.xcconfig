@@ -1,0 +1,8 @@
+// Build settings of the Merel target that differ per person. The defaults below are for CI,
+// which builds unsigned; your own Apple ID team and bundle identifier go in Local.xcconfig next
+// to this file (not in git), written once by scripts/signing.sh. XcodeGen keeps both when it
+// makes the project again.
+PRODUCT_BUNDLE_IDENTIFIER = nl.merel.app
+DEVELOPMENT_TEAM =
+
+#include? "Local.xcconfig"
