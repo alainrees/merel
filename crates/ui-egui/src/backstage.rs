@@ -273,6 +273,7 @@ pub enum Page {
     #[default]
     Accounts,
     Notifications,
+    Search,
 }
 
 pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
@@ -293,6 +294,9 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             if helder::nav_item(ui, t, Icon::Bell, &crate::notifications::page_label(), app.file_page == Page::Notifications).clicked() {
                 app.file_page = Page::Notifications;
             }
+            if helder::nav_item(ui, t, Icon::Search, &crate::search_page::page_label(), app.file_page == Page::Search).clicked() {
+                app.file_page = Page::Search;
+            }
             for action in FileAction::ALL {
                 if helder::nav_item(ui, t, action.icon(), &action.label(), false).clicked() {
                     run(app, action);
@@ -305,6 +309,9 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             Page::Accounts => page(app, ui, t),
             Page::Notifications => {
                 egui::ScrollArea::vertical().show(ui, |ui| crate::notifications::page(app, ui, t));
+            }
+            Page::Search => {
+                egui::ScrollArea::vertical().show(ui, |ui| crate::search_page::page(app, ui, t));
             }
         });
     });

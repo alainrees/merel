@@ -125,7 +125,24 @@ fn failure(account_id: &str, job: &Job, what: String) -> Event {
     match job {
         Job::Send { draft_id, .. } => Event::Sent { account_id: account_id.to_string(), draft_id: *draft_id, result: Err(what) },
         Job::Search { folder_id, query, .. } => Event::Found { folder_id: folder_id.clone(), query: query.clone(), result: Err(what) },
+        Job::IndexHeaders { .. } | Job::IndexTexts { .. } => index_failure(job, what),
         _ => Event::Failed { account_id: account_id.to_string(), what },
+    }
+}
+
+/// A job for the search index that did not get through: the index rests and tries again;
+/// nothing is said to the person, who did not ask for it.
+fn index_failure(job: &Job, what: String) -> Event {
+    match job {
+        Job::IndexHeaders { account_id, folder_id, offset, limit, .. } => {
+            crate::indexing::headers_event(account_id, folder_id, *offset, *limit, Err(what))
+        }
+        Job::IndexTexts { account_id, ids, .. } => Event::IndexTexts {
+            account_id: account_id.clone(),
+            texts: Vec::new(),
+            failed: Some((what, ids.first().map(|(id, _)| id.clone()).unwrap_or_default())),
+        },
+        _ => Event::JobFailed { account_id: job.account_id().to_string(), loading: None, what },
     }
 }
 
@@ -136,6 +153,7 @@ fn job_failure(account: &Account, job: &Job, e: &MailboxError) -> Event {
     let what = describe(e);
     match job {
         Job::Connect { .. } | Job::Send { .. } | Job::Search { .. } => failure(&account.id, job, what),
+        Job::IndexHeaders { .. } | Job::IndexTexts { .. } => index_failure(job, what),
         Job::Sync { account_id, .. } => {
             Event::ItemsFailed { account_id: account_id.clone(), what: merel_i18n::tr_args("conn-items-failed", &[("error", what.into())]) }
         }
@@ -162,6 +180,10 @@ fn gone(c: &mut dyn Mailbox, account: &Account, job: &Job, e: &MailboxError) -> 
             out
         }
         Job::Body { message_id, .. } => vec![Event::Gone { account_id, folder_id: None, message_id: Some(message_id.clone()) }],
+        // The folder went; the index lets it go and the next listing of folders says so.
+        Job::IndexHeaders { folder_id, .. } | Job::IndexTexts { folder_id, .. } => {
+            vec![Event::Gone { account_id, folder_id: Some(folder_id.clone()), message_id: None }, index_failure(job, describe(e))]
+        }
         // Deleted already, or moved on: what the change wanted is done or moot, and the next
         // refresh shows where the message is now.
         Job::Flag { .. }
@@ -408,6 +430,34 @@ fn run(c: &mut dyn Mailbox, account: &Account, keys: &Keys, job: &Job) -> Result
         }
         Job::Headers { folder_id, path, offset, limit, .. } => {
             Some(Event::Headers { folder_id: folder_id.clone(), headers: c.headers(path, *offset, *limit)?, offset: *offset, limit: *limit })
+        }
+        Job::IndexHeaders { account_id, folder_id, path, offset, limit } => {
+            Some(crate::indexing::headers_event(account_id, folder_id, *offset, *limit, Ok(c.headers(path, *offset, *limit)?)))
+        }
+        Job::IndexTexts { account_id, path, ids, .. } => {
+            let mut texts = Vec::with_capacity(ids.len());
+            for (message_id, id) in ids {
+                match c.body(path, id) {
+                    Ok(raw) => {
+                        let (text, attachments) = crate::indexing::text_of(&raw);
+                        texts.push(crate::indexing::IndexedText { message_id: message_id.clone(), text, attachments, gone: false });
+                    }
+                    // Moved or deleted elsewhere since it was listed.
+                    Err(MailboxError::NotFound(_)) => {
+                        texts.push(crate::indexing::IndexedText { message_id: message_id.clone(), gone: true, ..Default::default() })
+                    }
+                    Err(e) if texts.is_empty() => return Err(e),
+                    // What came is kept; the rest is asked again later.
+                    Err(e) => {
+                        return Ok(vec![Event::IndexTexts {
+                            account_id: account_id.clone(),
+                            texts,
+                            failed: Some((describe(&e), message_id.clone())),
+                        }]);
+                    }
+                }
+            }
+            Some(Event::IndexTexts { account_id: account_id.clone(), texts, failed: None })
         }
         Job::Search { folder_id, path, query, .. } => {
             let result = c.search(path, query, crate::SEARCH_LIMIT).map_err(|e| describe(&e));

@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 merel-model = { workspace = true }
 merel-engine = { workspace = true }
+merel-search = { workspace = true }
 merel-smime = { workspace = true }
 merel-secrets = { workspace = true }
 merel-html = { workspace = true }
