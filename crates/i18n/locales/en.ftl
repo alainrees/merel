@@ -1918,6 +1918,7 @@ suggest-attachment = name of an attachment, for example pdf
 suggest-category = category
 suggest-is = unread or flagged
 suggest-has-attachment = only messages with an attachment
+search-in-attachment = In attachment { $name }:
 search-chip-date = Date
 search-chip-from = From
 search-chip-folder = Folder

@@ -21,6 +21,7 @@ merel-oauth = { workspace = true }
 merel-secrets = { workspace = true }
 merel-store = { workspace = true }
 merel-search = { workspace = true }
+merel-extract = { workspace = true }
 merel-pgp = { workspace = true }
 merel-smime = { workspace = true }
 chrono = { workspace = true }

@@ -1903,6 +1903,7 @@ suggest-attachment = naam van een bijlage, bijvoorbeeld pdf
 suggest-category = categorie
 suggest-is = ongelezen of gemarkeerd
 suggest-has-attachment = alleen berichten met een bijlage
+search-in-attachment = In bijlage { $name }:
 search-chip-date = Datum
 search-chip-from = Van
 search-chip-folder = Map

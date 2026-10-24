@@ -85,7 +85,10 @@ or the last 5, 2 or 1 years; older mail is found by sender, recipients and subje
 works without a connection and answers at once: accents do not matter (`cafe` finds `café`), Dutch and English word
 forms count (`factuur` finds `facturen`), a typing error or two is forgiven (`fatcuur`), the word being typed counts as
 the start of a word, hits stand best match first (subject and sender weigh most, recent mail and known people rise; the
-scope menu switches to newest first) and each row shows the piece of text where the words were found, marked. The index
+scope menu switches to newest first) and each row shows the piece of text where the words were found, marked. The
+words inside attachments count too: the text of PDF, Word, Excel, PowerPoint and OpenDocument files, HTML, forwarded
+messages and plain text (csv, an e-invoice in XML) is read in the background, on this computer, with limits on what a
+file may unpack to, and a hit there says "In bijlage offerte.pdf:" before its piece of text. The index
 is sealed on disk under the offline cache's key (one sealed file per index file, decrypted in memory only), the text of
 encrypted mail stays out of it, a day later each folder is paged through again so mail that left the server leaves the
 index, and "Bestand > Zoeken" shows how far it is, switches it off (which deletes it) or clears it. Outlook's search words work in it:
