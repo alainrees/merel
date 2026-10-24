@@ -62,7 +62,7 @@ pub fn plain_source(m: &MessageHeader, text: &str) -> Vec<u8> {
 impl MailApp {
     /// The message as it arrived when the cache still holds its source, else a plain copy of
     /// its envelope and text.
-    fn source_of(&self, m: &MessageHeader) -> Vec<u8> {
+    pub(crate) fn source_of(&self, m: &MessageHeader) -> Vec<u8> {
         match self.engine.raw_message(&m.id) {
             Some(raw) => raw.to_vec(),
             None => plain_source(m, self.engine.session.bodies.get(&m.id).map(|b| b.text.as_str()).unwrap_or(&m.preview)),

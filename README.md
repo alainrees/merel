@@ -58,6 +58,10 @@ Junk Email. The window also sets the level, as Outlook's junk options do: "Stand
 senders, "Hoog" also a sender whose header shows signs of phishing (a contact's name with another address, a
 look-alike of a known domain), and "Alleen veilige lijsten" everything that is not from a contact, a safe sender or
 one of your own addresses. The lists live on your computer; nothing about your mail is sent anywhere to be checked.
+When something gets past all that, "Melden" over the message (or "Melden als phishing of spam" in its right-click
+menu) sends its source to the Merel team so the check can learn from it: only on that click, from your own account,
+as an attached `.eml` with your names and addresses replaced by "Ontvanger" (in encoded text parts too), after
+which the message moves to Junk.
 "Gesprek negeren" (in a message's right-click menu, or Ctrl+Delete) is Outlook's Ignore: the messages of
 that conversation (same subject, prefixes aside) in the inbox go to "Verwijderde items", and so does every message
 that arrives in it afterwards; a strip above such a message has "Niet meer negeren", which brings them back. The

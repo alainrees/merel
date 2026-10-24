@@ -41,6 +41,7 @@ pub mod receipt;
 pub mod release_notes;
 pub mod reminders;
 pub mod remote;
+pub mod report;
 pub mod resend;
 pub mod rich_edit;
 pub mod room;
@@ -2509,6 +2510,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     let mut reply: Option<ComposeKind> = None;
     let mut sender = false;
+    let mut report = false;
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
         helder::avatar(ui.painter(), rect.center(), 20.0, m.from.display(), m.from.email());
@@ -2537,6 +2539,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     (tr("contact-add"), tr("contact-add-hint"), helder::Icon::UserPlus)
                 };
                 sender = header_button(ui, t, icon, &label).on_hover_text(hint).clicked();
+                report = helder::tool_button(ui, t, helder::Icon::ShieldAlert, &tr("report-button")).on_hover_text(tr("report-hint")).clicked();
                 if !in_junk {
                     for (icon, label, kind) in [
                         (helder::Icon::Forward, &header_forward(), ComposeKind::Forward),
@@ -2553,6 +2556,10 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     });
     if sender {
         app.open_or_add_sender(&m.from);
+    }
+    if report {
+        app.report_message(&m);
+        return;
     }
     if let Some(kind) = reply {
         app.open_compose(kind);
@@ -2588,12 +2595,17 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(tr("phishing-advice")).size(12.0).color(t.text_dim));
                     block = ui.small_button(tr("block-sender")).on_hover_text(tr("block-sender-hint")).clicked();
+                    report = ui.small_button(tr("report-menu")).on_hover_text(tr("report-hint")).clicked();
                 });
             },
         );
         ui.add_space(8.0);
         if block {
             app.run("junk.block", json!({ "id": message_id }));
+            return;
+        }
+        if report {
+            app.report_message(&m);
             return;
         }
     }

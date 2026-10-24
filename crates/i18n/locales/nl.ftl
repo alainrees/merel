@@ -505,6 +505,10 @@ unsubscribe-by-web = Merel opent { $host } in je browser; daar meld je je af bij
 
 ## Bericht als bestand
 
+report-button = Melden
+report-menu = Melden als phishing of spam
+report-hint = Stuurt deze mail naar het Merel-team, zodat de controle op phishing en spam beter wordt. Je naam en adres gaan niet mee; de mail gaat daarna naar Ongewenste e-mail.
+report-sent = Bedankt, je melding gaat naar het Merel-team.
 eml-forward = Doorsturen als bijlage
 eml-not-from-junk = Uit de map Ongewenst wordt niets doorgestuurd.
 eml-save-as = Opslaan als…
