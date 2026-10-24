@@ -26,6 +26,7 @@ pub mod groups;
 pub mod ignore;
 pub mod indexing;
 pub mod junk;
+pub mod meaning;
 pub mod meetings;
 pub mod openpgp;
 pub mod quicksteps;
@@ -1597,6 +1598,15 @@ impl Engine {
 
     pub fn index_settings(&self) -> &indexing::IndexSettings {
         self.indexer.settings()
+    }
+
+    /// Where search on meaning is; `None` while it is off.
+    pub fn meaning_status(&self) -> Option<meaning::MeaningStatus> {
+        self.indexer.meaning_status()
+    }
+
+    pub fn retry_meaning(&mut self) {
+        self.indexer.retry_meaning();
     }
 
     /// Whether there is a search index to ask (it is on and its key was there).

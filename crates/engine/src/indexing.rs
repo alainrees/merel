@@ -26,6 +26,7 @@ use merel_search::{Attached, Index, Scope, Sealer, Snippet, Terms};
 use merel_store::Store;
 use serde::{Deserialize, Serialize};
 
+use crate::meaning::{Meaning, MeaningStatus};
 use crate::{AccountStatus, Event, Job, SAMPLE_ACCOUNT, Session, config, message_of, search};
 
 /// How many headers one job lists.
@@ -53,11 +54,14 @@ pub struct IndexSettings {
     pub enabled: bool,
     /// How many years back the index fetches the text of messages; `None` for all mail.
     pub years: Option<u32>,
+    /// Search on meaning ([`crate::meaning`]): off until the person switches it on, since it
+    /// downloads a model.
+    pub meaning: bool,
 }
 
 impl Default for IndexSettings {
     fn default() -> Self {
-        IndexSettings { enabled: true, years: None }
+        IndexSettings { enabled: true, years: None, meaning: false }
     }
 }
 
@@ -97,6 +101,8 @@ pub struct IndexHits {
     pub scores: HashMap<String, f32>,
     /// A piece of each hit's text around the words found.
     pub snippets: HashMap<String, Snippet>,
+    /// Hits found on meaning alone, without the words.
+    pub related: HashSet<String>,
 }
 
 /// The offline cache's key, sealing the index files.
@@ -138,6 +144,9 @@ pub struct Indexer {
     /// When the next jobs were last looked for, and whether a job just ended.
     last_plan: Option<Instant>,
     kick: bool,
+    /// Search on meaning, when switched on, and where its model lives.
+    meaning: Option<Meaning>,
+    model_dir: Option<PathBuf>,
 }
 
 impl Indexer {
@@ -161,12 +170,53 @@ impl Indexer {
             sealer: Some(sealer),
             settings_path: Some(config::search_path(path)),
             settings,
+            model_dir: Some(config::model_dir(path)),
             ..Indexer::default()
         };
         if me.settings.enabled {
             me.start();
         }
         me
+    }
+
+    /// Starts search on meaning when it is switched on and the index runs.
+    fn start_meaning(&mut self) {
+        if self.meaning.is_some() || !self.settings.meaning || self.index.is_none() {
+            return;
+        }
+        let Some(model_dir) = &self.model_dir else { return };
+        self.meaning = Some(Meaning::start(model_dir.clone(), self.dir.clone(), self.sealer.clone(), true));
+    }
+
+    /// Switches search on meaning off: the model and the vectors go.
+    fn stop_meaning(&mut self) -> Result<(), String> {
+        match self.meaning.take() {
+            Some(m) => m.remove(),
+            None => match &self.model_dir {
+                Some(dir) => merel_semantic::setup::remove(dir).map_err(|e| e.to_string()),
+                None => Ok(()),
+            },
+        }
+    }
+
+    /// Where search on meaning is, for "Bestand > Zoeken"; `None` while it is off.
+    pub fn meaning_status(&self) -> Option<MeaningStatus> {
+        self.meaning.as_ref().map(Meaning::status)
+    }
+
+    /// Tries downloading the model again.
+    pub fn retry_meaning(&mut self) {
+        if let Some(m) = &mut self.meaning {
+            m.retry();
+        }
+    }
+
+    /// For tests: search on meaning with the model in `dir`, the vectors in memory.
+    #[cfg(test)]
+    pub(crate) fn with_meaning(mut self, dir: PathBuf) -> Indexer {
+        self.settings.meaning = true;
+        self.meaning = Some(Meaning::start(dir, None, None, false));
+        self
     }
 
     fn start(&mut self) {
@@ -178,6 +228,7 @@ impl Indexer {
             }
             Err(e) => log::warn!("search index disabled: {e}"),
         }
+        self.start_meaning();
     }
 
     pub fn is_on(&self) -> bool {
@@ -192,6 +243,7 @@ impl Indexer {
     /// there and fetches no older text.
     pub fn set_settings(&mut self, settings: IndexSettings) -> Result<(), String> {
         let was_on = self.settings.enabled;
+        let meaning_was = self.settings.meaning && was_on;
         self.settings = settings;
         if let Some(path) = &self.settings_path {
             config::save_json(path, &self.settings).map_err(|e| e.to_string())?;
@@ -200,6 +252,12 @@ impl Indexer {
             self.wipe()?;
         } else if !was_on && self.settings.enabled && self.index.is_none() {
             self.start();
+        }
+        let meaning_on = self.settings.meaning && self.settings.enabled;
+        if meaning_was && !meaning_on {
+            self.stop_meaning()?;
+        } else if meaning_on {
+            self.start_meaning();
         }
         Ok(())
     }
@@ -218,6 +276,9 @@ impl Indexer {
     }
 
     fn wipe(&mut self) -> Result<(), String> {
+        if let Some(m) = &mut self.meaning {
+            m.clear();
+        }
         self.index = None;
         self.state = CrawlState::default();
         self.state_dirty = false;
@@ -287,18 +348,31 @@ impl Indexer {
                 let readable = !encrypted && body.attachments.iter().any(|a| merel_extract::kind(&a.name, &a.mime, &a.bytes).is_some());
                 let result =
                     if readable { index.add_opened(&account, m, text, &attachments) } else { index.add_text(&account, m, text, &attachments) };
-                if let Err(e) = result {
-                    log::warn!("search index: {e}");
+                match result {
+                    Err(e) => log::warn!("search index: {e}"),
+                    Ok(()) if !readable => {
+                        if let Some(meaning) = &mut self.meaning {
+                            meaning.note_text(message_id);
+                        }
+                    }
+                    Ok(()) => {}
                 }
             }
             Event::Gone { folder_id, message_id, .. } => {
                 if let Some(id) = message_id {
                     index.delete(id);
+                    if let Some(meaning) = &mut self.meaning {
+                        meaning.forget(id);
+                    }
                 }
                 if let Some(f) = folder_id {
                     index.delete_folder(f);
                     self.state.folders.remove(f);
                     self.state_dirty = true;
+                    if let Some(meaning) = &mut self.meaning {
+                        let prefix = format!("{f}#");
+                        meaning.forget_where(|id| id.starts_with(&prefix));
+                    }
                 }
             }
             Event::IndexHeaders { account_id, folder_id, offset, limit, result } => {
@@ -361,11 +435,14 @@ impl Indexer {
                     let header = s.message(&t.message_id).cloned().or_else(|| index.stored(&t.message_id));
                     match (t.gone, header) {
                         (true, _) | (false, None) => index.delete(&t.message_id),
-                        (false, Some(h)) => {
-                            if let Err(e) = index.add_text(account_id, &h, &t.text, &t.attachments) {
-                                log::warn!("search index: {e}");
+                        (false, Some(h)) => match index.add_text(account_id, &h, &t.text, &t.attachments) {
+                            Err(e) => log::warn!("search index: {e}"),
+                            Ok(()) => {
+                                if let Some(meaning) = &mut self.meaning {
+                                    meaning.note_text(&t.message_id);
+                                }
                             }
-                        }
+                        },
                     }
                 }
                 if let Some((what, first)) = failed {
@@ -387,6 +464,9 @@ impl Indexer {
         if let Some(index) = &mut self.index {
             for id in ids {
                 index.delete(id);
+                if let Some(meaning) = &mut self.meaning {
+                    meaning.forget(id);
+                }
             }
         }
     }
@@ -394,6 +474,10 @@ impl Indexer {
     pub fn remove_account(&mut self, account_id: &str) {
         if let Some(index) = &mut self.index {
             index.delete_account(account_id);
+        }
+        if let Some(meaning) = &mut self.meaning {
+            let prefix = format!("{account_id}/");
+            meaning.forget_where(|id| id.starts_with(&prefix));
         }
         self.state.folders.retain(|f, _| !f.starts_with(&format!("{account_id}/")));
         self.state_dirty = true;
@@ -410,6 +494,12 @@ impl Indexer {
                 false
             }
         };
+        if let Some(meaning) = &mut self.meaning
+            && meaning.tick(index, force)
+        {
+            // The search's words came back from the model: the answer may change.
+            self.searched = None;
+        }
         if self.state_dirty && (written || force) {
             self.save_state();
         }
@@ -543,6 +633,7 @@ impl Indexer {
         let mut answer = IndexHits { query: s.search.clone(), all: s.search_all, folder: s.selected_folder.clone(), ..IndexHits::default() };
         let listed: HashSet<String> = s.messages.iter().map(|m| m.id.clone()).collect();
         let mut joined: Vec<MessageHeader> = Vec::new();
+        let ids: Vec<String> = hits.iter().map(|h| h.header.id.clone()).collect();
         for hit in hits {
             if !listed.contains(&hit.header.id) && s.folder(&hit.header.folder_id).is_some() {
                 joined.push(hit.header.clone());
@@ -550,6 +641,37 @@ impl Indexer {
             answer.scores.insert(hit.header.id.clone(), hit.score);
             if let Some(snip) = hit.snippet {
                 answer.snippets.insert(hit.header.id.clone(), snip);
+            }
+        }
+        // Messages about the same thing, also without the words: only for plain words, and held
+        // to the search's scope and its other search words.
+        let words: Vec<&str> = query.words.iter().chain(&query.phrases).chain(query.either.iter().flatten()).map(String::as_str).collect();
+        if let Some(meaning) = &mut self.meaning
+            && !words.is_empty()
+            && query.not.is_empty()
+            && query.attachment_names.is_empty()
+            && query.amount.is_none()
+            && query.has.is_empty()
+        {
+            let allowed = |id: &str| {
+                index.stored(id).is_some_and(|h| {
+                    scope.folders.as_ref().is_none_or(|f| f.contains(&h.folder_id)) && s.folder(&h.folder_id).is_some() && query.keeps(&h)
+                })
+            };
+            let related: Vec<String> = meaning.related(&words.join(" "), allowed).into_iter().map(|(id, _)| id).collect();
+            if !related.is_empty() {
+                answer.scores = crate::meaning::fuse(&ids, &related).into_iter().collect();
+                for id in related {
+                    if ids.contains(&id) {
+                        continue;
+                    }
+                    if !listed.contains(&id)
+                        && let Some(h) = index.stored(&id)
+                    {
+                        joined.push(h);
+                    }
+                    answer.related.insert(id);
+                }
             }
         }
         if !joined.is_empty() {
@@ -562,6 +684,9 @@ impl Indexer {
     /// Writes everything now; for when the window closes.
     pub fn flush(&mut self, s: &Session) {
         let _ = self.tick(s, true);
+        if let Some(meaning) = &mut self.meaning {
+            meaning.flush();
+        }
     }
 }
 
@@ -821,10 +946,62 @@ mod tests {
         ix.note_event(&s, &Event::Headers { folder_id: "a/INBOX".into(), headers: vec![remote(1, "Een", 1)], offset: 0, limit: 200 });
         ix.tick(&s, true);
         assert!(ix.is_on());
-        ix.set_settings(IndexSettings { enabled: false, years: None }).unwrap();
+        ix.set_settings(IndexSettings { enabled: false, ..IndexSettings::default() }).unwrap();
         assert!(!ix.is_on());
         assert!(ix.tick(&s, true).is_empty());
         ix.clear().unwrap();
         assert!(!ix.is_on(), "clearing does not switch it on");
+    }
+
+    #[test]
+    fn search_on_meaning_adds_mail_about_the_same_thing_and_switching_it_off_removes_the_model() {
+        let dir = std::env::temp_dir().join(format!("merel-meaning-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        merel_semantic::setup::tests_support::prepare(&dir);
+        let mut s = session();
+        let mut ix = Indexer::in_memory().with_meaning(dir.clone());
+        // The tiny test model knows no meaning: let every message count as close.
+        if let Some(m) = &mut ix.meaning {
+            m.loosen();
+        }
+        ix.tick(&s, true);
+        let page = vec![remote(1, "Offerte", now() - 60), remote(2, "Planning", now() - 120)];
+        ix.note_event(&s, &headers_event("a", "a/INBOX", 0, PAGE, Ok(page)));
+        ix.tick(&s, true);
+        let texts = vec![text("a/INBOX#1", "aannemer factuur"), text("a/INBOX#2", "keuken")];
+        ix.note_event(&s, &Event::IndexTexts { account_id: "a".into(), texts, failed: None });
+        let read_all = |ix: &mut Indexer, s: &Session| {
+            let until = Instant::now() + Duration::from_secs(60);
+            while ix.meaning_status().is_some_and(|m| m.vectors < 2) && Instant::now() < until {
+                ix.tick(s, true);
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        };
+        read_all(&mut ix, &s);
+        assert_eq!(ix.meaning_status().map(|m| (m.model, m.vectors)), Some((crate::meaning::ModelState::Ready, 2)));
+
+        s.selected_folder = Some("a/INBOX".into());
+        s.search = "aannemer ".into();
+        ix.search(&mut s);
+        let visible = |s: &Session| s.visible_messages().iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+        assert_eq!(visible(&s), ["a/INBOX#1"], "the words first, while the model reads the search");
+        let until = Instant::now() + Duration::from_secs(60);
+        while s.current_index_hits().is_none_or(|h| h.related.is_empty()) && Instant::now() < until {
+            ix.tick(&s, true);
+            ix.search(&mut s);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(visible(&s), ["a/INBOX#1", "a/INBOX#2"], "the message with the words stays on top");
+        assert!(s.current_index_hits().is_some_and(|h| h.related.contains("a/INBOX#2") && !h.related.contains("a/INBOX#1")));
+        s.search = "aannemer van:niemand ".into();
+        ix.search(&mut s);
+        assert!(visible(&s).is_empty(), "the other search words hold for related mail too");
+
+        ix.forget(&["a/INBOX#2".to_string()]);
+        assert_eq!(ix.meaning_status().map(|m| m.vectors), Some(1));
+        ix.set_settings(IndexSettings { meaning: false, ..IndexSettings::default() }).unwrap();
+        assert!(ix.meaning_status().is_none());
+        assert!(!merel_semantic::setup::is_ready(&dir), "switching off throws the model away");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

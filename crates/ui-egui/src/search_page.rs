@@ -1,9 +1,11 @@
 //! Bestand > Zoeken: the search index on this computer. Whether Merel keeps one, how far back
-//! it fetches the text of messages, how far it got, and a way to throw it away.
+//! it fetches the text of messages, how far it got, and a way to throw it away. And search on
+//! meaning, which downloads a model when switched on.
 
 use crate::i18n::{tr, tr_args};
 use egui::{RichText, Ui};
 use merel_engine::indexing::IndexSettings;
+use merel_engine::meaning::{self, ModelState};
 
 use crate::{MailApp, Notice, Tokens, helder};
 
@@ -15,6 +17,9 @@ pub fn enabled_label() -> String {
 }
 pub fn clear_label() -> String {
     tr("search-index-clear")
+}
+pub fn meaning_label() -> String {
+    tr("search-meaning-on")
 }
 
 /// The choices for how far back, in years; `None` is all mail.
@@ -71,6 +76,48 @@ pub fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
         }
     }
+    let mut retry = false;
+    if settings.enabled {
+        section(ui, &tr("search-meaning-section"));
+        helder::toggle(ui, t, &mut settings.meaning, &meaning_label());
+        hint(ui, &tr_args("search-meaning-hint", &[("mb", meaning::download_megabytes().into())]));
+        if let Some(status) = app.engine.meaning_status().filter(|_| before.meaning) {
+            let mb = |bytes: u64| (bytes / 1_000_000).into();
+            let line = match &status.model {
+                ModelState::Off => None,
+                ModelState::Downloading { done, total } => {
+                    Some(tr_args("search-meaning-downloading", &[("done", mb(*done)), ("total", mb((*total).max(*done)))]))
+                }
+                ModelState::Preparing => Some(tr("search-meaning-preparing")),
+                ModelState::Ready => {
+                    Some(tr_args("search-meaning-ready", &[("count", status.vectors.into()), ("size", size(status.model_size).into())]))
+                }
+                ModelState::Failed(e) => Some(tr_args("search-meaning-failed", &[("error", e.as_str().into())])),
+            };
+            if let Some(line) = line {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(44.0);
+                    ui.add(egui::Label::new(RichText::new(line).size(13.0).color(t.text)).wrap());
+                });
+            }
+            match status.model {
+                ModelState::Failed(_) => {
+                    ui.horizontal(|ui| {
+                        ui.add_space(44.0);
+                        retry = ui.button(tr("search-meaning-retry")).clicked();
+                    });
+                }
+                ModelState::Ready if !status.busy => {}
+                _ => {
+                    if status.model == ModelState::Ready {
+                        hint(ui, &tr("search-meaning-busy"));
+                    }
+                    ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+                }
+            }
+        }
+    }
     let mut clear = false;
     if settings.enabled {
         section(ui, &tr("search-index-span"));
@@ -86,6 +133,9 @@ pub fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     if settings != before {
         save(app, settings);
+    }
+    if retry {
+        app.engine.retry_meaning();
     }
     if clear {
         app.notice = Some(match app.engine.clear_index() {
