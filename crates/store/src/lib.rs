@@ -28,6 +28,7 @@ pub const MAX_ONE_BODY: usize = 4 * 1024 * 1024;
 
 const MAGIC: &[u8; 4] = b"MCC1";
 const IDENTITY_MAGIC: &[u8; 4] = b"MCI1";
+const BLOB_MAGIC: &[u8; 4] = b"MCB1";
 const KEY_LEN: usize = 32;
 
 #[derive(Debug, thiserror::Error)]
@@ -212,6 +213,21 @@ impl Store {
     pub fn remove_identity(&self, account_id: &str, kind: KeyKind) {
         let _ = std::fs::remove_file(self.identity_path(account_id, kind));
     }
+
+    /// Seals `plain` under the cache key for another part of Merel that keeps its own files
+    /// (the search index), bound to `tag` so one sealed file cannot stand in for another.
+    pub fn seal_blob(&self, tag: &str, plain: &[u8]) -> Result<Vec<u8>, StoreError> {
+        self.seal(BLOB_MAGIC, &blob_aad(tag), plain.to_vec())
+    }
+
+    /// What [`Store::seal_blob`] sealed under `tag`; `None` for anything else.
+    pub fn open_blob(&self, tag: &str, bytes: Vec<u8>) -> Option<Zeroizing<Vec<u8>>> {
+        self.unseal(BLOB_MAGIC, &blob_aad(tag), bytes)
+    }
+}
+
+fn blob_aad(tag: &str) -> Vec<u8> {
+    format!("blob\0{tag}").into_bytes()
 }
 
 /// Which private key of an account a sealed file holds.
@@ -384,6 +400,19 @@ mod tests {
         assert!(store.load_identity("a1", KeyKind::Certificate).is_none());
         store.remove("a1");
         assert!(store.load_identity("a1", KeyKind::OpenPgp).is_none() && store.load("a1").is_none());
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn a_blob_is_sealed_under_its_tag() {
+        let secrets = MemoryStore::default();
+        let d = dir("blob");
+        let store = Store::open(d.clone(), &secrets).unwrap();
+        let sealed = store.seal_blob("meta.json", b"zoekindex").unwrap();
+        assert!(!sealed.windows(4).any(|w| w == b"zoek"), "nothing readable");
+        assert_eq!(store.open_blob("meta.json", sealed.clone()).as_deref().map(Vec::as_slice), Some(&b"zoekindex"[..]));
+        assert!(store.open_blob("other.idx", sealed.clone()).is_none(), "bound to its tag");
+        assert!(Store::open(d.clone(), &MemoryStore::default()).unwrap().open_blob("meta.json", sealed).is_none(), "another key");
         let _ = std::fs::remove_dir_all(d);
     }
 

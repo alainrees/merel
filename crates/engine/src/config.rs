@@ -45,6 +45,16 @@ pub fn tasks_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("tasks.json")
 }
 
+/// The search index settings that go with an accounts file.
+pub fn search_path(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("search.json")
+}
+
+/// The directory of the sealed search index that goes with an accounts file.
+pub fn index_dir(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("search-index")
+}
+
 /// The mail rules file that goes with an accounts file.
 pub fn rules_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("rules.json")

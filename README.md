@@ -74,7 +74,17 @@ runs as a program. The checks run on your computer only and never decide for you
 message is shown with its links, attachments and pictures from the internet switched off, as Outlook does; "Geen
 ongewenst" brings it back with everything working. A search box above the
 message list narrows it by subject, sender, recipient or preview text, in the current folder or
-across every folder of every account (it searches what Merel has fetched so far). Outlook's search words work in it:
+across every folder of every account. Like Outlook and Apple Mail, Merel keeps a search index of all mail on this
+computer (`merel-search`, built on Tantivy): it pages quietly through every folder in the background, one small job per
+account at a time, and fetches the text of each message, newest first, as far back as "Bestand > Zoeken" says (all mail,
+or the last 5, 2 or 1 years; older mail is found by sender, recipients and subject). A search then covers old mail too,
+works without a connection and answers at once: accents do not matter (`cafe` finds `café`), Dutch and English word
+forms count (`factuur` finds `facturen`), a typing error or two is forgiven (`fatcuur`), the word being typed counts as
+the start of a word, hits stand best match first (subject and sender weigh most, recent mail and known people rise; the
+scope menu switches to newest first) and each row shows the piece of text where the words were found, marked. The index
+is sealed on disk under the offline cache's key (one sealed file per index file, decrypted in memory only), the text of
+encrypted mail stays out of it, a day later each folder is paged through again so mail that left the server leaves the
+index, and "Bestand > Zoeken" shows how far it is, switches it off (which deletes it) or clears it. Outlook's search words work in it:
 `van:sanne`, `aan:jan` and `onderwerp:offerte` look in one field, `heeft:bijlage`, `is:ongelezen` and `is:gemarkeerd` keep
 only such messages (the English `from:`, `to:`, `subject:`, `has:attachment`, `is:unread` and `is:flagged` too), and the
 rest are plain words that may occur anywhere. "Zoek op de server" asks the mail server itself, which also looks in older mail and in the text of the messages; the server gets the plain words, and what it finds is then held to the same search words here. "Zoekmap" next to the box saves the search under a name, as an Outlook search folder: it is listed under "Zoekmappen" in the folder pane with its words, scope and list filter, a click runs it again, and its menu removes it (`view.json`). The 🕒 menu next to the box lists the last ten searches, as Outlook's "Recente zoekopdrachten": a click searches those words again, "Lijst wissen" forgets them (`view.json`). Sending over SMTP: new mail,

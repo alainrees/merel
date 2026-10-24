@@ -24,6 +24,7 @@ pub mod folders;
 pub mod followup;
 pub mod groups;
 pub mod ignore;
+pub mod indexing;
 pub mod junk;
 pub mod meetings;
 pub mod openpgp;
@@ -96,6 +97,22 @@ pub enum Job {
         message_id: String,
         path: String,
         id: String,
+    },
+    /// A page of a folder's headers for the search index, which the session does not list.
+    IndexHeaders {
+        account_id: String,
+        folder_id: String,
+        path: String,
+        offset: u32,
+        limit: u32,
+    },
+    /// The text of a few messages of one folder for the search index: each message's session
+    /// id and the id the server knows it by. Nothing of it reaches the session.
+    IndexTexts {
+        account_id: String,
+        folder_id: String,
+        path: String,
+        ids: Vec<(String, String)>,
     },
     /// Ask the server which messages of a folder match `query`.
     Search {
@@ -198,6 +215,8 @@ impl Job {
             | Job::Headers { account_id, .. }
             | Job::Body { account_id, .. }
             | Job::Search { account_id, .. }
+            | Job::IndexHeaders { account_id, .. }
+            | Job::IndexTexts { account_id, .. }
             | Job::Flag { account_id, .. }
             | Job::Move { account_id, .. }
             | Job::Delete { account_id, .. }
@@ -264,6 +283,11 @@ pub enum Event {
         /// The limit the job asked for; fewer headers than this means the folder's start.
         limit: u32,
     },
+    /// A page of headers for the search index, or why it did not come.
+    IndexHeaders { account_id: String, folder_id: String, offset: u32, limit: u32, result: Result<Vec<RemoteHeader>, String> },
+    /// The text of messages for the search index. `failed` says why the rest did not come,
+    /// with the id of the message that failed.
+    IndexTexts { account_id: String, texts: Vec<indexing::IndexedText>, failed: Option<(String, String)> },
     /// What the server found for a search in a folder, or why it could not search.
     Found { folder_id: String, query: String, result: Result<Vec<RemoteHeader>, String> },
     Body {
@@ -402,6 +426,13 @@ pub struct Session {
     pub server_hits: Option<ServerHits>,
     /// Why the last server search gave nothing, when it failed.
     pub search_error: Option<String>,
+    /// What the search index found for the search box; see [`indexing::Indexer::search`].
+    pub index_hits: Option<indexing::IndexHits>,
+    /// Whether search results stand newest first rather than best match first.
+    pub search_newest: bool,
+    /// Messages that left their place since the engine last looked (deleted, moved), for the
+    /// search index to forget.
+    pub(crate) left: Vec<String>,
     /// Drafts handed to `send`, by draft id.
     pub outbox: HashMap<u64, SendState>,
     /// Messages being written that were put aside, every account's together.
@@ -659,7 +690,9 @@ impl Session {
             | Event::Gone { account_id, .. }
             | Event::ItemsFailed { account_id, .. }
             | Event::Deferred { account_id, .. }
-            | Event::Sent { account_id, .. } => self.accounts.iter().any(|a| &a.id == account_id),
+            | Event::Sent { account_id, .. }
+            | Event::IndexHeaders { account_id, .. }
+            | Event::IndexTexts { account_id, .. } => self.accounts.iter().any(|a| &a.id == account_id),
             Event::Headers { folder_id, .. } | Event::Found { folder_id, .. } => self.folder(folder_id).is_some(),
             Event::Body { message_id, .. } => self.message(message_id).is_some(),
             Event::SignedIn { .. } | Event::Availability { .. } => true,
@@ -682,6 +715,7 @@ impl Session {
         let query = search::Query::parse(&self.search);
         let now = snooze::now();
         let hits = self.current_hits().map(|h| &h.ids);
+        let found = self.current_index_hits();
         // The selected folder, or each account's folder behind an "Alle accounts" one.
         let members = self.selected_folder.as_deref().map(|id| self.members(id)).unwrap_or_default();
         let mut list: Vec<&MessageHeader> = self
@@ -693,7 +727,8 @@ impl Session {
                     in_folder
                 } else {
                     // The server searched the plain words only; its hits still owe the operators.
-                    ((in_folder || self.search_all) && query.matches(m)) || (hits.is_some_and(|ids| ids.contains(&m.id)) && query.keeps(m))
+                    ((in_folder || self.search_all) && query.matches(m))
+                        || ((hits.is_some_and(|ids| ids.contains(&m.id)) || found.is_some_and(|f| f.scores.contains_key(&m.id))) && query.keeps(m))
                 }
             })
             .filter(|m| self.filter.keeps(m))
@@ -704,8 +739,22 @@ impl Session {
             // Chat messages are read in the chat module, as Gmail keeps its chat apart.
             .filter(|m| m.chat.is_none())
             .collect();
-        list.sort_by(|a, b| self.sort.order(a, b));
+        match found.filter(|_| !self.search_newest) {
+            // Best match first, as the index ranked them; what only matched here comes after.
+            Some(f) => {
+                let score = |m: &MessageHeader| f.scores.get(&m.id).copied().unwrap_or(0.0);
+                list.sort_by(|a, b| score(b).total_cmp(&score(a)).then_with(|| self.sort.order(a, b)));
+            }
+            None => list.sort_by(|a, b| self.sort.order(a, b)),
+        }
         list
+    }
+
+    /// The search index's answer for the search box as it stands now.
+    pub fn current_index_hits(&self) -> Option<&indexing::IndexHits> {
+        self.index_hits
+            .as_ref()
+            .filter(|h| h.query == self.search && h.all == self.search_all && h.folder == self.selected_folder && self.is_searching())
     }
 
     /// Whether the message list shows search results rather than a folder.
@@ -820,7 +869,7 @@ impl Session {
         self.marked.retain(|id| self.selected_message.as_ref() != Some(id) && self.messages.iter().any(|m| &m.id == id));
     }
 
-    fn recount_unread(&mut self) {
+    pub(crate) fn recount_unread(&mut self) {
         for f in &mut self.folders {
             let n = self.messages.iter().filter(|m| m.folder_id == f.id && !m.flags.seen).count();
             f.unread = u32::try_from(n).unwrap_or(u32::MAX);
@@ -1005,6 +1054,8 @@ impl Session {
                 let known = self.availability.get(&email).and_then(|(_, a)| a.clone());
                 self.availability.insert(email, (asked, availability.or(known)));
             }
+            // The engine's indexer takes these; the session lists none of it.
+            Event::IndexHeaders { .. } | Event::IndexTexts { .. } => {}
             Event::SignedIn { result } => match result {
                 Ok(account) => {
                     self.sign_in = Some(Some(Ok(())));
@@ -1155,6 +1206,8 @@ pub struct Engine {
     calls: calls::Calls,
     last_refresh: Instant,
     last_item_refresh: Instant,
+    /// The search index over all mail.
+    indexer: indexing::Indexer,
 }
 
 impl Engine {
@@ -1203,6 +1256,7 @@ impl Engine {
             calls: calls::Calls::default(),
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
+            indexer: indexing::Indexer::none(),
         }
     }
 
@@ -1226,6 +1280,7 @@ impl Engine {
             calls: calls::Calls::default(),
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
+            indexer: indexing::Indexer::none(),
         };
         if accounts.is_empty() {
             engine.session = Session::sample();
@@ -1234,6 +1289,7 @@ impl Engine {
             // What the accounts showed last time, until the servers answer.
             engine.cache = cache::Cache::open(engine.config_path.as_deref(), &*engine.secrets);
             engine.cache.restore(&mut engine.session);
+            engine.indexer = indexing::Indexer::open(engine.config_path.as_deref(), engine.cache.store());
             engine.load_identities();
             engine.load_people();
             engine.load_pgp_keys();
@@ -1449,6 +1505,7 @@ impl Engine {
             problems.push(merel_i18n::tr_args("remove-keychain-app", &[("error", e.to_string().into())]));
         }
         self.cache.remove(account_id);
+        self.indexer.remove_account(account_id);
         self.remove_certificate(account_id);
         self.remove_pgp_key(account_id);
         self.session.remove_account(account_id);
@@ -1474,6 +1531,7 @@ impl Engine {
     pub fn run(&mut self, id: &str, params: &serde_json::Value) -> Result<(), CommandError> {
         let r = self.session.run(id, params);
         self.cache.note_commands(&self.session);
+        self.index(false);
         self.dispatch();
         self.persist()?;
         self.cache.save(&self.session, false);
@@ -1483,6 +1541,48 @@ impl Engine {
     /// Writes the offline cache now; for when the window closes.
     pub fn flush(&mut self) {
         self.cache.save(&self.session, true);
+        self.indexer.flush(&self.session);
+    }
+
+    /// Keeps the search index in step: messages that left their place leave it, it writes
+    /// what changed, its next jobs go out, and the search box gets its answer.
+    fn index(&mut self, force: bool) {
+        let left = std::mem::take(&mut self.session.left);
+        self.indexer.forget(&left);
+        let jobs = self.indexer.tick(&self.session, force);
+        if let Some(worker) = &self.worker {
+            for j in jobs {
+                worker.submit(j);
+            }
+        }
+        self.indexer.search(&mut self.session);
+    }
+
+    /// How far the search index is.
+    pub fn index_progress(&self) -> indexing::Progress {
+        self.indexer.progress()
+    }
+
+    pub fn index_settings(&self) -> &indexing::IndexSettings {
+        self.indexer.settings()
+    }
+
+    /// Whether there is a search index to ask (it is on and its key was there).
+    pub fn index_on(&self) -> bool {
+        self.indexer.is_on()
+    }
+
+    pub fn set_index_settings(&mut self, settings: indexing::IndexSettings) -> Result<(), String> {
+        self.indexer.set_settings(settings)?;
+        self.index(false);
+        Ok(())
+    }
+
+    /// Empties the search index; it fills again from the mail.
+    pub fn clear_index(&mut self) -> Result<(), String> {
+        self.indexer.clear()?;
+        self.index(false);
+        Ok(())
     }
 
     /// Queues `draft` for sending; see [`Session::send`].
@@ -1523,6 +1623,7 @@ impl Engine {
                 continue;
             }
             self.cache.note_event(&self.session, &e);
+            self.indexer.note_event(&self.session, &e);
             self.take_in(&mut e);
             // Changes made offline reach the server before anything else does.
             let replay = match &e {
@@ -1551,6 +1652,7 @@ impl Engine {
             }
             changed = true;
         }
+        self.index(false);
         self.dispatch();
         self.cache.save(&self.session, false);
         changed

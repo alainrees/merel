@@ -1,0 +1,18 @@
+[package]
+name = "merel-search"
+description = "The search index: every message's words on this computer, sealed on disk."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+merel-model = { workspace = true }
+tantivy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
