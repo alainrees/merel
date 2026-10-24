@@ -7,6 +7,9 @@
 
 use std::sync::Arc;
 
+mod redact;
+pub use redact::{Redaction, redact};
+
 use mail_parser::{MessageParser, MimeHeaders};
 use merel_html::Document;
 use merel_model::{Address, ChatTag, Importance, clean_text, parse_address_list};

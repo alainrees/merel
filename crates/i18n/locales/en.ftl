@@ -505,6 +505,10 @@ unsubscribe-by-web = Merel opens { $host } in your browser; there you unsubscrib
 
 ## Bericht als bestand
 
+report-button = Report
+report-menu = Report as phishing or spam
+report-hint = Sends this message to the Merel team so the phishing and spam check gets better. Your name and address are left out; the message then moves to Junk Email.
+report-sent = Thank you, your report is on its way to the Merel team.
 eml-forward = Forward as attachment
 eml-not-from-junk = Nothing is forwarded from the Junk folder.
 eml-save-as = Save as…

@@ -39,6 +39,8 @@ pub enum Pick {
     FromSender,
     /// The question before cleaning up the message's conversation.
     Cleanup,
+    /// Sends the message to the Merel team as phishing or spam.
+    Report,
 }
 
 /// How much of a message's text goes into the notes of a task or an appointment.
@@ -79,7 +81,7 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
         let sender = if known_sender { "menu-sender-open" } else { "menu-sender-add" };
         let junk = if in_junk { ("junk-not-junk", "junk.trust") } else { ("block-sender", "junk.block") };
         let ignore = if ignored { ("menu-unignore", "conversation.unignore") } else { ("menu-ignore", "conversation.ignore") };
-        let items: [(String, Pick); 19] = [
+        let items: [(String, Pick); 20] = [
             (tr("mail-reply"), Pick::Compose(ComposeKind::Reply)),
             (tr("mail-reply-all"), Pick::Compose(ComposeKind::ReplyAll)),
             (tr("mail-forward"), Pick::Compose(ComposeKind::Forward)),
@@ -90,6 +92,7 @@ pub fn menu(r: &Response, m: &MessageHeader, known_sender: bool, in_junk: bool, 
             (tr("menu-move-to"), Pick::Move),
             (tr("mail-archive"), Pick::Command("message.archive")),
             (tr("mail-junk"), Pick::Command("message.junk")),
+            (tr("report-menu"), Pick::Report),
             (tr(junk.0), Pick::Command(junk.1)),
             (tr("delete"), Pick::Command("message.delete")),
             (tr(ignore.0), Pick::Command(ignore.1)),
@@ -183,6 +186,7 @@ impl MailApp {
             Pick::Sender => self.open_or_add_sender(&m.from),
             Pick::Rule => self.open_rules(true),
             Pick::Cleanup => self.ask_cleanup_conversation(&m.id),
+            Pick::Report => self.report_message(m),
             Pick::FromSender => {
                 // Outlook's "related messages from sender": the search box takes the address,
                 // over every folder of every account.
