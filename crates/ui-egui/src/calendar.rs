@@ -9,6 +9,7 @@ use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate, NaiveDateTime, 
 use egui::{Align2, Color32, CornerRadius, FontId, Margin, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
+pub(crate) use merel_engine::calendar::{describe_recurrence, repeat_text};
 use merel_engine::{CommandError, tasks::TaskFilter};
 use merel_model::{Appointment, Attendee, Frequency, Meeting, Recurrence, ShowAs, Task};
 
@@ -1591,18 +1592,6 @@ fn search_results(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 /// The "Herhalen" choices of the window, as Outlook names them.
 const REPEATS: [Option<Frequency>; 5] = [None, Some(Frequency::Daily), Some(Frequency::Weekly), Some(Frequency::Monthly), Some(Frequency::Yearly)];
 
-/// "Elke week", "Om de 2 maanden"; "Niet herhalen" for none.
-pub(crate) fn repeat_text(frequency: Option<Frequency>, interval: u32) -> String {
-    let key = match frequency {
-        None => return tr("repeat-never"),
-        Some(Frequency::Daily) => "repeat-daily",
-        Some(Frequency::Weekly) => "repeat-weekly",
-        Some(Frequency::Monthly) => "repeat-monthly",
-        Some(Frequency::Yearly) => "repeat-yearly",
-    };
-    crate::i18n::tr_args(key, &[("count", (interval.max(1) as usize).into())])
-}
-
 /// The unit after "Om de [n]": "dagen", "weken", ….
 pub(crate) fn repeat_unit(frequency: Frequency, interval: u32) -> String {
     let key = match frequency {
@@ -1612,26 +1601,6 @@ pub(crate) fn repeat_unit(frequency: Frequency, interval: u32) -> String {
         Frequency::Yearly => "repeat-unit-yearly",
     };
     crate::i18n::tr_args(key, &[("count", (interval.max(1) as usize).into())])
-}
-
-/// One line that says how a series repeats: "Elke week op maandag en woensdag, 10 keer".
-pub(crate) fn describe_recurrence(r: &Recurrence) -> String {
-    let mut text = repeat_text(Some(r.frequency), r.interval);
-    if r.frequency == Frequency::Weekly {
-        let names: Vec<&str> = r.weekdays.iter().filter(|d| **d < 7).map(|d| crate::i18n::weekday_name(*d as usize)).collect();
-        let days = match names.len() {
-            0 => String::new(),
-            1 => names[0].to_string(),
-            n => crate::i18n::tr_args("list-and", &[("first", names[..n - 1].join(", ").into()), ("last", names[n - 1].into())]),
-        };
-        if !days.is_empty() {
-            text = crate::i18n::tr_args("repeat-on-days", &[("repeat", text.into()), ("days", days.into())]);
-        }
-    }
-    if let Some(c) = r.count {
-        text = crate::i18n::tr_args("repeat-times", &[("repeat", text.into()), ("count", (c as usize).into())]);
-    }
-    text
 }
 
 /// The "Herhalen" row of the window and, when it repeats, how often, which days, and when it

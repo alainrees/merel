@@ -58,4 +58,46 @@
     <string name="flagged">Gemarkeerd</string>
     <string name="with_attachment">met bijlage</string>
     <string name="no_message_open">Geen bericht geopend</string>
+    <string name="today">Vandaag</string>
+    <string name="new_appointment">Nieuwe afspraak</string>
+    <string name="edit_appointment">Afspraak wijzigen</string>
+    <string name="all_day_label">%1$s, hele dag</string>
+    <string name="online_meeting">Onlinevergadering</string>
+    <string name="join">Deelnemen</string>
+    <string name="all_day">Hele dag</string>
+    <string name="edit">Wijzig</string>
+    <string name="appointment_gone">Deze afspraak is er niet meer</string>
+    <string name="attendees">Deelnemers · %1$d</string>
+    <string name="delete_appointment">Afspraak verwijderen?</string>
+    <string name="only_this_one">Alleen deze keer</string>
+    <string name="whole_series">De hele reeks</string>
+    <string name="no_reminder">Geen herinnering</string>
+    <string name="at_start">Bij het begin</string>
+    <string name="one_day_before">1 dag van tevoren</string>
+    <string name="organizer">Organisator</string>
+    <string name="accepted">Geaccepteerd</string>
+    <string name="tentative">Voorlopig</string>
+    <string name="declined">Geweigerd</string>
+    <string name="no_answer">Nog geen antwoord</string>
+    <string name="optional">optioneel</string>
+    <string name="me">%1$s (jij)</string>
+    <string name="need_title">Geef de afspraak een onderwerp.</string>
+    <string name="end_after_start">De afspraak moet eindigen na het begin.</string>
+    <string name="series_on_computer">Een terugkerende afspraak wijzig je voorlopig op de computer.</string>
+    <string name="choose_calendar">Kies een agenda.</string>
+    <string name="save">Bewaar</string>
+    <string name="subject">Onderwerp</string>
+    <string name="location">Locatie</string>
+    <string name="start">Begin</string>
+    <string name="end">Einde</string>
+    <string name="reminder">Herinnering</string>
+    <string name="notes">Notities</string>
+    <plurals name="hours_before">
+        <item quantity="one">%1$d uur van tevoren</item>
+        <item quantity="other">%1$d uur van tevoren</item>
+    </plurals>
+    <plurals name="minutes_before">
+        <item quantity="one">%1$d minuut van tevoren</item>
+        <item quantity="other">%1$d minuten van tevoren</item>
+    </plurals>
 </resources>

@@ -58,4 +58,46 @@
     <string name="flagged">Flagged</string>
     <string name="with_attachment">with attachment</string>
     <string name="no_message_open">No message open</string>
+    <string name="today">Today</string>
+    <string name="new_appointment">New appointment</string>
+    <string name="edit_appointment">Edit appointment</string>
+    <string name="all_day_label">%1$s, all day</string>
+    <string name="online_meeting">Online meeting</string>
+    <string name="join">Join</string>
+    <string name="all_day">All day</string>
+    <string name="edit">Edit</string>
+    <string name="appointment_gone">This appointment is gone</string>
+    <string name="attendees">Attendees · %1$d</string>
+    <string name="delete_appointment">Delete appointment?</string>
+    <string name="only_this_one">Only this one</string>
+    <string name="whole_series">The whole series</string>
+    <string name="no_reminder">No reminder</string>
+    <string name="at_start">At the start</string>
+    <string name="one_day_before">1 day before</string>
+    <string name="organizer">Organiser</string>
+    <string name="accepted">Accepted</string>
+    <string name="tentative">Tentative</string>
+    <string name="declined">Declined</string>
+    <string name="no_answer">No answer yet</string>
+    <string name="optional">optional</string>
+    <string name="me">%1$s (you)</string>
+    <string name="need_title">Give the appointment a subject.</string>
+    <string name="end_after_start">The appointment must end after it starts.</string>
+    <string name="series_on_computer">For now, change a recurring appointment on your computer.</string>
+    <string name="choose_calendar">Choose a calendar.</string>
+    <string name="save">Save</string>
+    <string name="subject">Subject</string>
+    <string name="location">Location</string>
+    <string name="start">Start</string>
+    <string name="end">End</string>
+    <string name="reminder">Reminder</string>
+    <string name="notes">Notes</string>
+    <plurals name="hours_before">
+        <item quantity="one">%1$d hour before</item>
+        <item quantity="other">%1$d hours before</item>
+    </plurals>
+    <plurals name="minutes_before">
+        <item quantity="one">%1$d minute before</item>
+        <item quantity="other">%1$d minutes before</item>
+    </plurals>
 </resources>

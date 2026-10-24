@@ -2,12 +2,52 @@
   "sourceLanguage": "nl",
   "version": "1.0",
   "strings": {
+    "%@ (jij)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ (you)"
+          }
+        }
+      }
+    },
+    "%@, hele dag": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, all day"
+          }
+        }
+      }
+    },
+    "%lld minuten van tevoren": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld minutes before"
+          }
+        }
+      }
+    },
     "%lld ongelezen": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "%lld unread"
+          }
+        }
+      }
+    },
+    "%lld uur van tevoren": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld hours before"
           }
         }
       }
@@ -22,6 +62,16 @@
         }
       }
     },
+    "1 dag van tevoren": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 day before"
+          }
+        }
+      }
+    },
     "Account toevoegen": {
       "localizations": {
         "en": {
@@ -32,12 +82,52 @@
         }
       }
     },
+    "Afspraak verwijderen?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete appointment?"
+          }
+        }
+      }
+    },
+    "Afspraak wijzigen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit appointment"
+          }
+        }
+      }
+    },
     "Agenda": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Calendar"
+          }
+        }
+      }
+    },
+    "Alleen deze keer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only this one"
+          }
+        }
+      }
+    },
+    "Annuleer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
           }
         }
       }
@@ -62,6 +152,16 @@
         }
       }
     },
+    "Begin": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start"
+          }
+        }
+      }
+    },
     "Bericht ophalen…": {
       "localizations": {
         "en": {
@@ -78,6 +178,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Security"
+          }
+        }
+      }
+    },
+    "Bewaar": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
+          }
+        }
+      }
+    },
+    "Bij het begin": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "At the start"
           }
         }
       }
@@ -132,6 +252,56 @@
         }
       }
     },
+    "De afspraak moet eindigen na het begin.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The appointment must end after it starts."
+          }
+        }
+      }
+    },
+    "De hele reeks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The whole series"
+          }
+        }
+      }
+    },
+    "Deelnemen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Join"
+          }
+        }
+      }
+    },
+    "Deelnemers · %lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attendees · %lld"
+          }
+        }
+      }
+    },
+    "Deze afspraak is er niet meer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This appointment is gone"
+          }
+        }
+      }
+    },
     "Dit onderdeel komt binnenkort naar de telefoon.": {
       "localizations": {
         "en": {
@@ -152,12 +322,52 @@
         }
       }
     },
+    "Een terugkerende afspraak wijzig je voorlopig op de computer.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "For now, change a recurring appointment on your computer."
+          }
+        }
+      }
+    },
+    "Einde": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "End"
+          }
+        }
+      }
+    },
+    "Geaccepteerd": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accepted"
+          }
+        }
+      }
+    },
     "Gebruikersnaam (als die anders is dan je adres)": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "User name (if different from your address)"
+          }
+        }
+      }
+    },
+    "Geef de afspraak een onderwerp.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Give the appointment a subject."
           }
         }
       }
@@ -182,6 +392,16 @@
         }
       }
     },
+    "Geen herinnering": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No reminder"
+          }
+        }
+      }
+    },
     "Gelezen": {
       "localizations": {
         "en": {
@@ -198,6 +418,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Flagged"
+          }
+        }
+      }
+    },
+    "Geweigerd": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Declined"
+          }
+        }
+      }
+    },
+    "Hele dag": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All day"
+          }
+        }
+      }
+    },
+    "Herinnering": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reminder"
           }
         }
       }
@@ -228,6 +478,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "You are looking at sample mail. Add your own account to read your mail."
+          }
+        }
+      }
+    },
+    "Kies een agenda.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a calendar."
+          }
+        }
+      }
+    },
+    "Locatie": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Location"
           }
         }
       }
@@ -292,6 +562,36 @@
         }
       }
     },
+    "Nieuwe afspraak": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New appointment"
+          }
+        }
+      }
+    },
+    "Nog geen antwoord": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No answer yet"
+          }
+        }
+      }
+    },
+    "Notities": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notes"
+          }
+        }
+      }
+    },
     "OK": {
       "localizations": {
         "en": {
@@ -312,12 +612,42 @@
         }
       }
     },
+    "Onderwerp": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Subject"
+          }
+        }
+      }
+    },
     "Ongelezen": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Unread"
+          }
+        }
+      }
+    },
+    "Onlinevergadering": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Online meeting"
+          }
+        }
+      }
+    },
+    "Organisator": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Organiser"
           }
         }
       }
@@ -402,6 +732,16 @@
         }
       }
     },
+    "Vandaag": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today"
+          }
+        }
+      }
+    },
     "Verbinden…": {
       "localizations": {
         "en": {
@@ -422,12 +762,32 @@
         }
       }
     },
+    "Voorlopig": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tentative"
+          }
+        }
+      }
+    },
     "Wachtwoord": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Password"
+          }
+        }
+      }
+    },
+    "Wijzig": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit"
           }
         }
       }
@@ -508,6 +868,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "with attachment"
+          }
+        }
+      }
+    },
+    "optioneel": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "optional"
           }
         }
       }

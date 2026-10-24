@@ -12,8 +12,9 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use merel_engine::{AccountStatus, Engine};
-use merel_model::{Account, Address, Auth, FolderKind, Protocol, Server, Tls};
+use merel_engine::calendar::describe_recurrence;
+use merel_engine::{AccountStatus, CommandError, Engine, Session};
+use merel_model::{Account, Address, Appointment, Auth, FolderKind, Protocol, Response, Server, Tls};
 use merel_secrets::{Secret, SecretError, SecretStore};
 
 uniffi::setup_scaffolding!();
@@ -65,7 +66,8 @@ pub enum CoreError {
     #[error("parameters are not valid JSON: {reason}")]
     Params { reason: String },
     /// A field of a form is missing or not valid: `email`, `username`, `password`, `incoming`
-    /// or `outgoing`.
+    /// or `outgoing` of the account form; `title`, `end`, `calendar_id` or `recurrence` of the
+    /// appointment form.
     #[error("invalid {field}")]
     Invalid { field: String },
     /// The engine refused the command; `reason` says why, for the log.
@@ -193,6 +195,90 @@ pub struct ImapAccount {
     pub outgoing: ServerSettings,
 }
 
+/// A calendar: its name, the account it belongs to and the colour of its appointments.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CalendarRow {
+    pub id: String,
+    pub name: String,
+    /// The account's address; `None` for a calendar that lives only on this phone.
+    pub address: Option<String>,
+    /// 0xRRGGBB.
+    pub color: u32,
+}
+
+/// What someone invited to a meeting answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AttendeeAnswer {
+    None,
+    Accepted,
+    Tentative,
+    Declined,
+}
+
+impl From<Response> for AttendeeAnswer {
+    fn from(r: Response) -> Self {
+        match r {
+            Response::None => AttendeeAnswer::None,
+            Response::Accepted => AttendeeAnswer::Accepted,
+            Response::Tentative => AttendeeAnswer::Tentative,
+            Response::Declined => AttendeeAnswer::Declined,
+        }
+    }
+}
+
+/// One person of a meeting: the organiser first, then everyone invited.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AttendeeRow {
+    pub name: String,
+    pub email: String,
+    pub answer: AttendeeAnswer,
+    pub organizer: bool,
+    pub optional: bool,
+    /// One of the person's own addresses.
+    pub me: bool,
+}
+
+/// An appointment, or one occurrence of a recurring one, as the day and the details show it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AppointmentRow {
+    /// The series' id for an occurrence of a recurring appointment.
+    pub id: String,
+    pub calendar_id: String,
+    pub title: String,
+    /// Seconds since the Unix epoch. An all-day appointment runs from midnight to midnight on
+    /// the phone's clock; `end` is exclusive.
+    pub start: i64,
+    pub end: i64,
+    pub all_day: bool,
+    pub location: String,
+    pub notes: String,
+    /// The calendar's colour, 0xRRGGBB.
+    pub color: u32,
+    /// How it repeats, in words ("Elke donderdag"); `None` for a single appointment.
+    pub recurrence: Option<String>,
+    /// Minutes before the start the reminder comes.
+    pub reminder: Option<u32>,
+    /// The link to join it online, only ever https.
+    pub online_url: Option<String>,
+    pub attendees: Vec<AttendeeRow>,
+}
+
+/// What the appointment form gives back.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AppointmentForm {
+    /// `None` for a new appointment.
+    pub id: Option<String>,
+    /// `None`: the appointment's own calendar, or the first one for a new appointment.
+    pub calendar_id: Option<String>,
+    pub title: String,
+    pub start: i64,
+    pub end: i64,
+    pub all_day: bool,
+    pub location: String,
+    pub notes: String,
+    pub reminder: Option<u32>,
+}
+
 /// The engine, shared by the app's screens.
 #[derive(uniffi::Object)]
 pub struct MerelCore {
@@ -303,6 +389,73 @@ impl MerelCore {
         s.visible_messages().into_iter().map(|m| row(m, s.selected_message.as_deref())).collect()
     }
 
+    pub fn calendars(&self) -> Vec<CalendarRow> {
+        let engine = self.engine();
+        let s = &engine.session;
+        s.calendars
+            .iter()
+            .map(|c| CalendarRow {
+                id: c.id.clone(),
+                name: c.name.clone(),
+                address: c.account_id.as_deref().and_then(|id| s.accounts.iter().find(|a| a.id == id)).map(|a| a.address.email().to_string()),
+                color: rgb(c.color),
+            })
+            .collect()
+    }
+
+    /// The appointments touching `[from, to)`, earliest first; a recurring one once per
+    /// occurrence.
+    pub fn appointments(&self, from: i64, to: i64) -> Vec<AppointmentRow> {
+        let engine = self.engine();
+        let s = &engine.session;
+        s.appointments_between(from, to).iter().map(|a| appointment_row(s, a)).collect()
+    }
+
+    /// Saves a new appointment, or changes the one with `form.id`. A recurring appointment is
+    /// changed on the computer for now: the phone's form has no series fields.
+    pub fn save_appointment(&self, form: AppointmentForm) -> Result<(), CoreError> {
+        let mut engine = self.engine();
+        let mut params = serde_json::json!({
+            "title": form.title,
+            "start": form.start,
+            "end": form.end,
+            "all_day": form.all_day,
+            "location": form.location,
+            "notes": form.notes,
+            "reminder": form.reminder,
+        });
+        if let Some(id) = &form.id {
+            let stored = engine.session.appointment(id).ok_or(CoreError::Invalid { field: "id".into() })?;
+            if stored.recurrence.is_some() {
+                return Err(CoreError::Invalid { field: "recurrence".into() });
+            }
+            // What the phone's form does not show stays as it was.
+            params["private"] = stored.private.into();
+            if stored.notes == form.notes
+                && let Some(rich) = &stored.notes_rich
+            {
+                params["notes_rich"] = serde_json::to_value(rich).unwrap_or_default();
+            }
+            params["id"] = id.clone().into();
+        }
+        if let Some(c) = &form.calendar_id {
+            params["calendar_id"] = c.clone().into();
+        }
+        engine.run("appointment.save", &params).map_err(command_error)
+    }
+
+    /// Deletes the appointment `id`; with `occurrence` (its start), only that occurrence of a
+    /// recurring one.
+    pub fn delete_appointment(&self, id: String, occurrence: Option<i64>) -> Result<(), CoreError> {
+        let mut engine = self.engine();
+        let recurring = engine.session.appointment(&id).is_some_and(|a| a.recurrence.is_some());
+        match occurrence {
+            Some(start) if recurring => engine.run("appointment.skip", &serde_json::json!({ "id": id, "start": start })),
+            _ => engine.run("appointment.delete", &serde_json::json!({ "id": id })),
+        }
+        .map_err(command_error)
+    }
+
     /// The selected message, or `None` when nothing is open.
     pub fn open_message(&self) -> Option<MessageView> {
         let engine = self.engine();
@@ -366,6 +519,56 @@ fn imap_account(form: &ImapAccount, now: u64) -> Result<Account, CoreError> {
         dav: None,
         signature: String::new(),
     })
+}
+
+fn rgb([r, g, b]: [u8; 3]) -> u32 {
+    (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b)
+}
+
+/// A field the engine named, for the form; anything else as it is.
+fn command_error(e: CommandError) -> CoreError {
+    match e {
+        CommandError::Param(field) => CoreError::Invalid { field: field.into() },
+        other => CoreError::Command { reason: other.to_string() },
+    }
+}
+
+fn appointment_row(s: &Session, a: &Appointment) -> AppointmentRow {
+    let mine = |email: &str| s.accounts.iter().any(|acc| acc.address.email().eq_ignore_ascii_case(email));
+    let mut attendees = Vec::new();
+    if let Some(m) = &a.meeting {
+        attendees.push(AttendeeRow {
+            name: if m.organizer_name.is_empty() { m.organizer.clone() } else { m.organizer_name.clone() },
+            email: m.organizer.clone(),
+            answer: AttendeeAnswer::Accepted,
+            organizer: true,
+            optional: false,
+            me: mine(&m.organizer),
+        });
+        attendees.extend(m.attendees.iter().filter(|p| !p.email.eq_ignore_ascii_case(&m.organizer)).map(|p| AttendeeRow {
+            name: if p.name.is_empty() { p.email.clone() } else { p.name.clone() },
+            email: p.email.clone(),
+            answer: p.response.into(),
+            organizer: false,
+            optional: p.optional,
+            me: mine(&p.email),
+        }));
+    }
+    AppointmentRow {
+        id: a.id.clone(),
+        calendar_id: a.calendar_id.clone(),
+        title: a.title.clone(),
+        start: a.start,
+        end: a.end,
+        all_day: a.all_day,
+        location: a.location.clone(),
+        notes: a.notes.clone(),
+        color: s.calendar(&a.calendar_id).map_or(rgb(merel_model::CALENDAR_COLORS[0].1), |c| rgb(c.color)),
+        recurrence: a.recurrence.as_ref().map(describe_recurrence),
+        reminder: a.reminder,
+        online_url: a.meeting_link().map(|l| l.url),
+        attendees,
+    }
 }
 
 fn row(m: &merel_model::MessageHeader, selected: Option<&str>) -> MessageRow {
@@ -495,5 +698,122 @@ mod tests {
         assert!(!core.folders().is_empty());
         core.flush();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn day() -> (i64, i64) {
+        let now = now() as i64;
+        (now - 3 * 86_400, now + 3 * 86_400)
+    }
+
+    #[test]
+    fn the_sample_calendar_lists_appointments_with_their_colour() {
+        let core = MerelCore::sample();
+        let calendars = core.calendars();
+        assert!(!calendars.is_empty());
+        let (from, to) = day();
+        let list = core.appointments(from, to);
+        let overleg = list.iter().find(|a| a.title == "Overleg ontwerp").unwrap();
+        assert_eq!(overleg.color, calendars.iter().find(|c| c.id == overleg.calendar_id).unwrap().color);
+        assert!(list.windows(2).all(|w| w[0].start <= w[1].start));
+        assert!(list.iter().any(|a| a.recurrence.is_some()));
+    }
+
+    #[test]
+    fn an_appointment_is_saved_changed_and_deleted() {
+        let core = MerelCore::sample();
+        let (from, to) = day();
+        let start = from + 86_400;
+        let form = AppointmentForm {
+            id: None,
+            calendar_id: None,
+            title: "Tandarts".into(),
+            start,
+            end: start + 3_600,
+            all_day: false,
+            location: "Centrum".into(),
+            notes: "Inbellen: https://zoom.us/j/42".into(),
+            reminder: Some(15),
+        };
+        core.save_appointment(form.clone()).unwrap();
+        let saved = core.appointments(from, to).into_iter().find(|a| a.title == "Tandarts").unwrap();
+        assert_eq!(saved.reminder, Some(15));
+        assert_eq!(saved.online_url.as_deref(), Some("https://zoom.us/j/42"));
+        core.save_appointment(AppointmentForm { id: Some(saved.id.clone()), title: "Tandarts later".into(), ..form.clone() }).unwrap();
+        assert!(core.appointments(from, to).iter().any(|a| a.id == saved.id && a.title == "Tandarts later"));
+        core.delete_appointment(saved.id.clone(), Some(start)).unwrap();
+        assert!(!core.appointments(from, to).iter().any(|a| a.id == saved.id));
+        let field = |f: AppointmentForm| match core.save_appointment(f) {
+            Err(CoreError::Invalid { field }) => field,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(field(AppointmentForm { title: " ".into(), ..form.clone() }), "title");
+        assert_eq!(field(AppointmentForm { end: start, ..form.clone() }), "end");
+        assert_eq!(field(AppointmentForm { calendar_id: Some("nope".into()), ..form }), "calendar_id");
+    }
+
+    #[test]
+    fn one_occurrence_of_a_series_can_go_and_the_series_is_not_edited_here() {
+        let core = MerelCore::sample();
+        let (from, to) = day();
+        let weekly: Vec<AppointmentRow> = core.appointments(from, to + 14 * 86_400).into_iter().filter(|a| a.recurrence.is_some()).collect();
+        let first = weekly[0].clone();
+        let form = AppointmentForm {
+            id: Some(first.id.clone()),
+            calendar_id: None,
+            title: "x".into(),
+            start: first.start,
+            end: first.end,
+            all_day: false,
+            location: String::new(),
+            notes: String::new(),
+            reminder: None,
+        };
+        assert!(matches!(core.save_appointment(form), Err(CoreError::Invalid { field }) if field == "recurrence"));
+        core.delete_appointment(first.id.clone(), Some(first.start)).unwrap();
+        let after = core.appointments(from, to + 14 * 86_400);
+        assert!(!after.iter().any(|a| a.id == first.id && a.start == first.start));
+        assert!(after.iter().any(|a| a.id == first.id));
+    }
+
+    #[test]
+    fn a_meeting_lists_the_organiser_first_and_marks_me() {
+        let core = MerelCore::sample();
+        let me = core.accounts()[0].address.clone();
+        let (from, to) = day();
+        let start = from + 86_400;
+        core.save_appointment(AppointmentForm {
+            id: None,
+            calendar_id: None,
+            title: "Planning".into(),
+            start,
+            end: start + 3_600,
+            all_day: false,
+            location: String::new(),
+            notes: String::new(),
+            reminder: None,
+        })
+        .unwrap();
+        let id = core.appointments(from, to).into_iter().find(|a| a.title == "Planning").unwrap().id;
+        let meeting = serde_json::json!({ "uid": "u1", "organizer": "sanne@example.org", "organizer_name": "Sanne de Vries", "attendees": [
+            { "email": "sanne@example.org", "response": "accepted" },
+            { "email": me, "name": "Alain" },
+            { "email": "ravi@example.org", "name": "Ravi Kumar", "response": "declined", "optional": true },
+        ] });
+        core.run(
+            "appointment.save".into(),
+            serde_json::json!({ "id": id, "title": "Planning", "start": start, "end": start + 3_600, "meeting": meeting }).to_string(),
+        )
+        .unwrap();
+        let row = core.appointments(from, to).into_iter().find(|a| a.id == id).unwrap();
+        let people: Vec<(&str, AttendeeAnswer, bool, bool)> = row.attendees.iter().map(|p| (p.name.as_str(), p.answer, p.organizer, p.me)).collect();
+        assert_eq!(
+            people,
+            [
+                ("Sanne de Vries", AttendeeAnswer::Accepted, true, false),
+                ("Alain", AttendeeAnswer::None, false, true),
+                ("Ravi Kumar", AttendeeAnswer::Declined, false, false),
+            ]
+        );
+        assert!(row.attendees[2].optional);
     }
 }
