@@ -46,6 +46,7 @@ pub mod rich_edit;
 pub mod room;
 pub mod rules;
 pub mod search_folders;
+mod search_page;
 mod signature;
 pub mod tasks;
 pub mod templates;
@@ -727,6 +728,13 @@ pub(crate) fn scope_folder() -> String {
 pub(crate) fn scope_all() -> String {
     tr("search-scope-all")
 }
+/// How search results stand, in the search box's menu.
+pub(crate) fn rank_best() -> String {
+    tr("search-rank-best")
+}
+pub(crate) fn rank_newest() -> String {
+    tr("search-rank-newest")
+}
 fn search_hint() -> String {
     tr("search-hint")
 }
@@ -792,6 +800,7 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                     (full - 2.0 * inset - 48.0).clamp(320.0, 640.0)
                 };
                 ui.add_space(((full - width) / 2.0 - 12.0).max(inset));
+                let index_on = app.engine.index_on();
                 let session = &mut app.engine.session;
                 let field = egui::Frame::new().fill(t.card).corner_radius(helder::CONTROL_RADIUS).inner_margin(Margin {
                     left: 10,
@@ -874,6 +883,18 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                                 if ui.selectable_label(session.search_all, scope_all()).on_hover_text(tr("search-all-hint")).clicked() {
                                     session.search_all = true;
                                     ui.close();
+                                }
+                                // The index ranks what it finds; the person may want the newest on top.
+                                if index_on {
+                                    ui.separator();
+                                    if ui.selectable_label(!session.search_newest, rank_best()).clicked() {
+                                        session.search_newest = false;
+                                        ui.close();
+                                    }
+                                    if ui.selectable_label(session.search_newest, rank_newest()).clicked() {
+                                        session.search_newest = true;
+                                        ui.close();
+                                    }
                                 }
                             });
                         });
@@ -1893,8 +1914,11 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let mut menu_pick: Option<(merel_model::MessageHeader, message_menu::Pick)> = None;
                 let mut open_window: Option<String> = None;
                 // Date groups, as Outlook heads the list, while the list is in date order.
-                let grouped =
-                    app.view.groups && matches!(app.engine.session.sort, merel_engine::view::Sort::Newest | merel_engine::view::Sort::Oldest);
+                // Not while the search index ranks the hits: best match first has no dates to group by.
+                let ranked = app.engine.session.current_index_hits().is_some() && !app.engine.session.search_newest;
+                let grouped = app.view.groups
+                    && !ranked
+                    && matches!(app.engine.session.sort, merel_engine::view::Sort::Newest | merel_engine::view::Sort::Oldest);
                 let today = chrono::Local::now().date_naive();
                 let now_ts = chrono::Local::now().timestamp();
                 let mut last_group: Option<String> = None;
@@ -2015,17 +2039,28 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         if m.flags.seen { t.text } else { t.accent_text },
                     );
                     if !compact {
-                        let preview = match (show_folder, app.engine.session.folder(&m.folder_id)) {
-                            (true, Some(f)) => format!("{} · {}", f.name, m.preview),
-                            _ => m.preview.clone(),
+                        let folder = match (show_folder, app.engine.session.folder(&m.folder_id)) {
+                            (true, Some(f)) => format!("{} · ", f.name),
+                            _ => String::new(),
                         };
-                        p.text(
-                            egui::pos2(x, rect.top() + 52.0),
-                            egui::Align2::LEFT_CENTER,
-                            clip(&preview, 48),
-                            egui::FontId::proportional(12.0),
-                            t.text_dim,
-                        );
+                        // A search shows where the words stand in the text, marked, instead of its start.
+                        let snippet = app.engine.session.current_index_hits().and_then(|h| h.snippets.get(&m.id));
+                        match snippet {
+                            Some(snip) => {
+                                let job = snippet_job(&folder, snip, 48, t);
+                                let galley = ui.fonts_mut(|f| f.layout_job(job));
+                                p.galley(egui::pos2(x, rect.top() + 52.0 - galley.size().y / 2.0), galley, t.text_dim);
+                            }
+                            None => {
+                                p.text(
+                                    egui::pos2(x, rect.top() + 52.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    clip(&format!("{folder}{}", m.preview), 48),
+                                    egui::FontId::proportional(12.0),
+                                    t.text_dim,
+                                );
+                            }
+                        }
                     }
                     if r.clicked() {
                         pick = Some((m.id.clone(), click_modifiers(ui), row_ids.clone()));
@@ -2099,6 +2134,46 @@ impl MailApp {
         }
         self.select_message(id);
     }
+}
+
+/// A search hit's snippet as one line of at most `max` characters after `prefix`: it starts a
+/// little before the first word found, and every word found stands out in the accent colour,
+/// underlined (colour alone would not do for everyone).
+fn snippet_job(prefix: &str, snip: &merel_search::Snippet, max: usize, t: &Tokens) -> egui::text::LayoutJob {
+    let font = egui::FontId::proportional(12.0);
+    let plain = egui::TextFormat { font_id: font.clone(), color: t.text_dim, ..Default::default() };
+    let marked = egui::TextFormat { font_id: font, color: t.accent_text, underline: egui::Stroke::new(1.0, t.accent_text), ..Default::default() };
+    let mut job = egui::text::LayoutJob::default();
+    job.append(prefix, 0.0, plain.clone());
+    let text = snip.text.as_str();
+    let first = snip.marks.first().map(|r| r.start).unwrap_or(0).min(text.len());
+    // A dozen characters of what comes before the first word, as a lead-in.
+    let mut start = first;
+    for _ in 0..12 {
+        match text[..start].char_indices().next_back() {
+            Some((i, _)) => start = i,
+            None => break,
+        }
+    }
+    let room = max.saturating_sub(prefix.chars().count()).max(8);
+    let end = text[start..].char_indices().nth(room).map(|(i, _)| start + i).unwrap_or(text.len());
+    if start > 0 {
+        job.append("…", 0.0, plain.clone());
+    }
+    let mut at = start;
+    for r in &snip.marks {
+        if r.start < at || r.end > end {
+            continue;
+        }
+        job.append(&text[at..r.start], 0.0, plain.clone());
+        job.append(&text[r.start..r.end], 0.0, marked.clone());
+        at = r.end;
+    }
+    job.append(&text[at..end], 0.0, plain.clone());
+    if end < text.len() {
+        job.append("…", 0.0, plain);
+    }
+    job
 }
 
 /// The modifiers held during this frame's click: those on the button-up event, which is what
@@ -5989,6 +6064,31 @@ mod tests {
         h.run();
         assert_eq!(h.state().alerts.len(), 1);
         assert_eq!(h.state().alerts[0].title, "Merel");
+    }
+
+    #[test]
+    fn bestand_zoeken_explains_the_index_and_has_none_for_sample_mail() {
+        let mut h = harness();
+        h.run();
+        h.get_by_label("Bestand").click();
+        h.run();
+        h.get_by_label(&search_page::page_label()).click();
+        h.run();
+        assert!(h.query_by_label_contains("voorbeeldmail").is_some(), "sample mail has no index to set");
+        assert!(h.query_by_label(&search_page::enabled_label()).is_none());
+    }
+
+    #[test]
+    fn a_snippet_marks_the_words_found_and_leads_in_with_a_few_characters() {
+        let t = Tokens::light();
+        let text = "Beste Alain, na lang wachten heeft de aannemer eindelijk gebeld over de keuken.";
+        let start = text.find("aannemer").unwrap();
+        let snip = merel_search::Snippet { text: text.into(), marks: std::iter::once(start..start + 8).collect() };
+        let job = snippet_job("Inbox · ", &snip, 48, &t);
+        assert!(job.text.starts_with("Inbox · …"), "{}", job.text);
+        assert!(job.text.contains("aannemer") && job.text.ends_with('…'), "{}", job.text);
+        let marked = job.sections.iter().filter(|s| s.format.color == t.accent_text && s.format.underline.width > 0.0).count();
+        assert_eq!(marked, 1, "one word found, one marked");
     }
 
     #[test]

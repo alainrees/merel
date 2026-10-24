@@ -10,6 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use merel_secrets::SecretStore;
@@ -21,7 +22,7 @@ use crate::{Event, Job, SAMPLE_ACCOUNT, Session};
 const SAVE_AFTER: Duration = Duration::from_secs(2);
 
 pub struct Cache {
-    store: Option<Store>,
+    store: Option<Arc<Store>>,
     accounts: HashMap<String, AccountCache>,
     dirty: HashSet<String>,
     last_save: Instant,
@@ -43,10 +44,15 @@ impl Cache {
         let mut cache = Cache::none();
         let Some(dir) = accounts_path.and_then(Path::parent) else { return cache };
         match Store::open(dir.join("cache"), secrets) {
-            Ok(store) => cache.store = Some(store),
+            Ok(store) => cache.store = Some(Arc::new(store)),
             Err(e) => log::warn!("offline cache disabled: {e}"),
         }
         cache
+    }
+
+    /// The cache's sealed store, which the search index shares for its key.
+    pub fn store(&self) -> Option<Arc<Store>> {
+        self.store.clone()
     }
 
     /// Whether there is a cache directory with its key; without one nothing is kept.
@@ -124,7 +130,9 @@ impl Cache {
             | Event::ItemsFailed { .. }
             | Event::Sent { .. }
             | Event::SignedIn { .. }
-            | Event::Availability { .. } => None,
+            | Event::Availability { .. }
+            | Event::IndexHeaders { .. }
+            | Event::IndexTexts { .. } => None,
         };
         if let Some(account) = account.filter(|a| a != SAMPLE_ACCOUNT) {
             self.dirty.insert(account);

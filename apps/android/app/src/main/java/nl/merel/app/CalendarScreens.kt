@@ -119,6 +119,17 @@ import uniffi.merel_mobile.CoreException
 
 private val zone: ZoneId get() = ZoneId.systemDefault()
 private fun Long.local(): LocalDateTime = LocalDateTime.ofInstant(Instant.ofEpochSecond(this), zone)
+
+/// Where [epoch] falls on [day]'s clock face, in hours from 0 to 24. Uses the wall clock, so a
+/// day with a daylight saving change (23 or 25 hours long) still lines up with its hour labels.
+private fun clockHours(epoch: Long, day: LocalDate): Float {
+    val t = epoch.local()
+    return when {
+        t.toLocalDate().isBefore(day) -> 0f
+        t.toLocalDate().isAfter(day) -> 24f
+        else -> t.hour + t.minute / 60f + t.second / 3600f
+    }
+}
 private fun LocalDateTime.epoch(): Long = atZone(zone).toEpochSecond()
 private fun calendarColor(rgb: UInt) = Color(0xFF000000L or rgb.toLong())
 private fun String.capitalizedFirst() = replaceFirstChar { it.titlecase(Locale.getDefault()) }
@@ -286,7 +297,6 @@ private fun TimeLine(
     val hour: Dp = 58.dp
     val gutter: Dp = 56.dp
     val top: Dp = 10.dp
-    val dayStart = day.atStartOfDay().epoch()
     val scroll = rememberScrollState()
     val density = LocalDensity.current
     var now by remember { mutableStateOf(LocalDateTime.now()) }
@@ -323,8 +333,8 @@ private fun TimeLine(
             }
             for (p in lanes(list)) {
                 val a = p.row
-                val from = ((a.start - dayStart).coerceAtLeast(0) / 3600f)
-                val to = ((a.end - dayStart).coerceAtMost(24 * 3600L) / 3600f)
+                val from = clockHours(a.start, day)
+                val to = clockHours(a.end, day)
                 val laneWidth = width / p.of
                 val height = (hour * (to - from) - 2.dp).coerceAtLeast(26.dp)
                 AppointmentBlock(
@@ -334,7 +344,7 @@ private fun TimeLine(
                 )
             }
             if (day == now.toLocalDate()) {
-                val y = top + hour * ((now.atZone(zone).toEpochSecond() - dayStart) / 3600f)
+                val y = top + hour * clockHours(now.atZone(zone).toEpochSecond(), day)
                 Row(Modifier.offset(x = gutter - 6.dp, y = y - 4.5.dp).fillMaxWidth().clearAndSetSemantics {}, verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(9.dp).clip(CircleShape).background(h.flag))
                     Box(Modifier.fillMaxWidth().height(2.dp).background(h.flag))

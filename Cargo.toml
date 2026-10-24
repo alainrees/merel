@@ -36,6 +36,7 @@ merel-notify = { path = "crates/notify" }
 merel-i18n = { path = "crates/i18n" }
 merel-call = { path = "crates/call" }
 merel-mobile = { path = "crates/mobile" }
+merel-search = { path = "crates/search" }
 
 # foundation
 thiserror = "2"
@@ -81,6 +82,10 @@ roxmltree = "0.21"
 # SMTP over rustls; aws-lc-rs matches the IMAP side so rustls has one provider. Which root
 # certificates it trusts is chosen per platform in crates/smtp.
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "aws-lc-rs"] }
+
+# search: the local full-text index (stemming, typo tolerance, ranking); lz4 is pure Rust, no mmap
+# since the index lives decrypted in memory only.
+tantivy = { version = "0.27", default-features = false, features = ["lz4-compression", "stemmer"] }
 
 # calendar: date arithmetic and the computer's time zone
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

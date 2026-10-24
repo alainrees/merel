@@ -331,6 +331,7 @@ pub(crate) fn delete_message(s: &mut Session, message_id: &str) -> Result<(), Co
         s.pending.push(Job::Delete { account_id: from.account_id, path: from.path, id: m.remote_id });
     }
     s.messages.retain(|h| h.id != message_id);
+    s.left.push(message_id.to_string());
     s.bodies.remove(message_id);
     s.marked.retain(|id| id != message_id);
     if s.selected_message.as_deref() == Some(message_id) {
@@ -396,6 +397,7 @@ pub(crate) fn move_message(s: &mut Session, message_id: &str, target_id: &str) -
     if let Some(h) = s.messages.iter_mut().find(|h| h.id == message_id) {
         h.folder_id = target.id;
     }
+    s.left.push(message_id.to_string());
     s.marked.retain(|id| id != message_id);
     if s.selected_message.as_deref() == Some(message_id) {
         s.selected_message = None;

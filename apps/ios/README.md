@@ -13,11 +13,20 @@ flag, read/unread), and reading a message. Calendar, chat, contacts and tasks fo
    `rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios`.
 2. In the repository: `apps/ios/scripts/build-core.sh` (builds the core, a few minutes).
 3. `cd apps/ios && xcodegen && open Merel.xcodeproj`.
-4. In Xcode: target Merel > Signing & Capabilities > Team: your Apple ID ("Personal Team").
-   If the bundle identifier is taken, change `nl.merel.app` to something of your own.
+4. Once, so Xcode signs with your Apple ID ("Personal Team") and keeps it after `xcodegen`:
+   `apps/ios/scripts/signing.sh <team-id> <bundle-id>`, for example
+   `apps/ios/scripts/signing.sh 95SUS87Z39 nl.yourname.merel`, then `xcodegen` again. The team id
+   is under Signing & Capabilities once you picked your team there; the bundle identifier must be
+   one nobody else has taken. If Xcode says "0 valid identities", import Apple's intermediate
+   certificate: `curl -O https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer && security import AppleWWDRCAG3.cer -k ~/Library/Keychains/login.keychain-db`.
 5. Connect the iPhone, pick it as the run destination and press Run. On the iPhone, allow the
    developer once under Settings > General > VPN & Device Management, and turn on Developer
    Mode when iOS asks.
+
+After pulling new code: `apps/ios/scripts/build-core.sh`, then `xcodegen` (it picks up new
+files), then Run. Xcode rewrites `Merel/Localizable.xcstrings` while it builds; if `git pull`
+refuses because of that file, drop the change first with
+`git checkout -- apps/ios/Merel/Localizable.xcstrings`.
 
 With a free Apple ID the app runs for 7 days; then press Run again. The App Store and
 TestFlight need the paid Apple Developer Program.
