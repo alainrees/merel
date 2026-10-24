@@ -12,6 +12,9 @@ final class Store: ObservableObject {
     @Published private(set) var messages: [MessageRow] = []
     @Published private(set) var openMessage: MessageView?
     @Published private(set) var isSample = true
+    @Published private(set) var calendars: [CalendarRow] = []
+    /// One up whenever the engine took in news, so the calendar asks for its appointments again.
+    @Published private(set) var revision = 0
     /// The last thing that went wrong, for an alert; cleared when shown.
     @Published var problem: String?
     private var timer: Timer?
@@ -52,6 +55,8 @@ final class Store: ObservableObject {
         messages = core.messages()
         openMessage = core.openMessage()
         isSample = core.isSample()
+        calendars = core.calendars()
+        revision &+= 1
     }
 
     /// The app went to the background: write the offline cache now.
@@ -95,6 +100,43 @@ final class Store: ObservableObject {
         } catch {
             return error.localizedDescription
         }
+    }
+
+    // MARK: Calendar
+
+    /// The appointments touching `[from, to)`, a recurring one once per occurrence.
+    func appointments(from: Date, to: Date) -> [AppointmentRow] {
+        core.appointments(from: Int64(from.timeIntervalSince1970), to: Int64(to.timeIntervalSince1970))
+    }
+
+    func calendar(_ id: String) -> CalendarRow? { calendars.first { $0.id == id } }
+
+    /// Saves the appointment; on failure, what to tell the person.
+    func saveAppointment(_ form: AppointmentForm) -> String? {
+        defer { refresh() }
+        do {
+            try core.saveAppointment(form: form)
+            return nil
+        } catch CoreError.Invalid(let field) {
+            switch field {
+            case "title": return String(localized: "Geef de afspraak een onderwerp.")
+            case "end": return String(localized: "De afspraak moet eindigen na het begin.")
+            case "recurrence": return String(localized: "Een terugkerende afspraak wijzig je voorlopig op de computer.")
+            default: return String(localized: "Kies een agenda.")
+            }
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Deletes the appointment, or with `onlyThis` only this occurrence of a series.
+    func deleteAppointment(_ a: AppointmentRow, onlyThis: Bool) {
+        do {
+            try core.deleteAppointment(id: a.id, occurrence: onlyThis ? a.start : nil)
+        } catch {
+            problem = error.localizedDescription
+        }
+        refresh()
     }
 
     private func fieldName(_ field: String) -> String {

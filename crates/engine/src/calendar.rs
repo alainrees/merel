@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use merel_mailbox::Item;
-use merel_model::{Appointment, AppointmentError, CALENDAR_COLORS, Calendar, MAX_CALENDAR_NAME, Recurrence, clean_text};
+use merel_model::{Appointment, AppointmentError, CALENDAR_COLORS, Calendar, Frequency, MAX_CALENDAR_NAME, Recurrence, clean_text};
 
 use crate::{CommandError, Session};
 
@@ -115,6 +115,38 @@ fn str_param<'a>(params: &'a Value, key: &'static str) -> Option<&'a str> {
 
 fn i64_param(params: &Value, key: &'static str) -> Result<i64, CommandError> {
     params.get(key).and_then(Value::as_i64).ok_or(CommandError::Param(key))
+}
+
+/// "Elke week", "Om de 2 maanden"; "Niet herhalen" for none.
+pub fn repeat_text(frequency: Option<Frequency>, interval: u32) -> String {
+    let key = match frequency {
+        None => return merel_i18n::tr("repeat-never"),
+        Some(Frequency::Daily) => "repeat-daily",
+        Some(Frequency::Weekly) => "repeat-weekly",
+        Some(Frequency::Monthly) => "repeat-monthly",
+        Some(Frequency::Yearly) => "repeat-yearly",
+    };
+    merel_i18n::tr_args(key, &[("count", (interval.max(1) as usize).into())])
+}
+
+/// One line that says how a series repeats: "Elke week op maandag en woensdag, 10 keer".
+pub fn describe_recurrence(r: &Recurrence) -> String {
+    let mut text = repeat_text(Some(r.frequency), r.interval);
+    if r.frequency == Frequency::Weekly {
+        let names: Vec<&str> = r.weekdays.iter().filter(|d| **d < 7).map(|d| merel_i18n::weekday_name(*d as usize)).collect();
+        let days = match names.len() {
+            0 => String::new(),
+            1 => names[0].to_string(),
+            n => merel_i18n::tr_args("list-and", &[("first", names[..n - 1].join(", ").into()), ("last", names[n - 1].into())]),
+        };
+        if !days.is_empty() {
+            text = merel_i18n::tr_args("repeat-on-days", &[("repeat", text.into()), ("days", days.into())]);
+        }
+    }
+    if let Some(c) = r.count {
+        text = merel_i18n::tr_args("repeat-times", &[("repeat", text.into()), ("count", (c as usize).into())]);
+    }
+    text
 }
 
 /// `appointment.select { id }`.
