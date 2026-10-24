@@ -44,6 +44,10 @@ pub struct Query {
     pub attachment: bool,
     pub unread: bool,
     pub flagged: bool,
+    /// `bedrag:`: an amount in the text or an attachment between these, in cents, inclusive.
+    pub amount: Option<(Option<i64>, Option<i64>)>,
+    /// `heeft:iban` and the like: kinds of data the index must have recognised.
+    pub has: Vec<String>,
 }
 
 /// One piece of the search box: what it says, whether it was in quotes, whether a minus led it.
@@ -151,6 +155,32 @@ pub fn date_range(word: &str, today: NaiveDate) -> Option<(NaiveDate, NaiveDate)
     Some(range)
 }
 
+/// The cents an amount word asks for: `>100`, `>=100`, `<50`, `100-500`, `100..500`, `1250`
+/// (any amount from 1250,00 to 1250,99) or `12,50`.
+fn amount_range(value: &str) -> Option<(Option<i64>, Option<i64>)> {
+    let number = |v: &str| merel_extract::recognize::parse_number(v.trim().trim_start_matches(['€', '$', '£']).trim());
+    if let Some(v) = value.strip_prefix(">=") {
+        return Some((Some(number(v)?), None));
+    }
+    if let Some(v) = value.strip_prefix("<=") {
+        return Some((None, Some(number(v)?)));
+    }
+    if let Some(v) = value.strip_prefix('>') {
+        return Some((Some(number(v)? + 1), None));
+    }
+    if let Some(v) = value.strip_prefix('<') {
+        return Some((None, Some(number(v)? - 1)));
+    }
+    if let Some((a, b)) = value.split_once("..").or_else(|| value.split_once('-').filter(|(a, b)| !a.is_empty() && !b.is_empty())) {
+        let (a, b) = (number(a)?, number(b)?);
+        return Some((Some(a.min(b)), Some(a.max(b))));
+    }
+    let cents = number(value)?;
+    // Whole euros mean any cents; with cents, that amount exactly.
+    let whole = !value.contains([',', '.']) || value.ends_with(",-");
+    Some((Some(cents), Some(if whole { cents + 99 } else { cents })))
+}
+
 impl Query {
     pub fn parse(text: &str) -> Query {
         Query::parse_on(text, Local::now().date_naive())
@@ -226,10 +256,36 @@ impl Query {
             "onderwerp" | "subject" => self.subject.push(v),
             "bijlage" | "attachment" if !matches!(value, "ja" | "yes") => self.attachment_names.push(v),
             "bijlage" | "attachment" => self.attachment = true,
-            "heeft" | "has" => match value {
-                "bijlage" | "bijlagen" | "attachment" | "attachments" => self.attachment = true,
-                _ => return false,
-            },
+            "heeft" | "has" => {
+                let kind = match value {
+                    "bijlage" | "bijlagen" | "attachment" | "attachments" => {
+                        self.attachment = true;
+                        return true;
+                    }
+                    "bedrag" | "amount" => "amount",
+                    "iban" => "iban",
+                    "zending" | "pakket" | "trackandtrace" | "track" | "tracking" => "tracking",
+                    "ordernummer" | "order" | "bestelling" => "order",
+                    "factuurnummer" | "factuur" | "invoice" => "invoice",
+                    _ => return false,
+                };
+                if !self.has.iter().any(|k| k == kind) {
+                    self.has.push(kind.to_string());
+                }
+            }
+            "bedrag" | "amount" => {
+                let Some((low, high)) = amount_range(value) else { return false };
+                let (old_low, old_high) = self.amount.unwrap_or((None, None));
+                let low = match (old_low, low) {
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                    (a, b) => a.or(b),
+                };
+                let high = match (old_high, high) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                };
+                self.amount = Some((low, high));
+            }
             "is" => match value {
                 "ongelezen" | "unread" => self.unread = true,
                 "gemarkeerd" | "gevlagd" | "flagged" => self.flagged = true,
@@ -311,7 +367,8 @@ impl Query {
     /// recipients, preview): every word and phrase occurs, one of each `OF` group, none of the
     /// excluded; and every operator holds.
     pub fn matches(&self, m: &MessageHeader) -> bool {
-        if !self.keeps(m) {
+        // What was recognised in the text only the index knows.
+        if !self.keeps(m) || self.amount.is_some() || !self.has.is_empty() {
             return false;
         }
         if self.words.is_empty() && self.either.is_empty() && self.phrases.is_empty() && self.not.is_empty() {
@@ -345,12 +402,28 @@ impl Query {
             && self.from.is_empty()
             && self.to.is_empty()
             && self.subject.is_empty()
-            && self.attachment_names.is_empty())
+            && self.attachment_names.is_empty()
+            && self.amount.is_none()
+            && self.has.is_empty())
+    }
+}
+
+/// `text` with `word` added at the end, or, when it holds it already (or one of `aliases`, in
+/// any case), with every such word taken out: a search word switched on or off.
+pub fn toggle_word(text: &str, word: &str, aliases: &[&str]) -> String {
+    let same = |w: &str| w.eq_ignore_ascii_case(word) || aliases.iter().any(|a| w.eq_ignore_ascii_case(a));
+    if text.split_whitespace().any(same) {
+        let kept: Vec<&str> = text.split_whitespace().filter(|w| !same(w)).collect();
+        kept.join(" ")
+    } else if text.trim().is_empty() {
+        word.to_string()
+    } else {
+        format!("{} {word}", text.trim_end())
     }
 }
 
 /// The keys of the search words in Dutch with their English forms, as the suggestions offer them.
-pub const KEYS: [(&str, &str); 12] = [
+pub const KEYS: [(&str, &str); 14] = [
     ("van:", "from:"),
     ("aan:", "to:"),
     ("cc:", "cc:"),
@@ -363,6 +436,8 @@ pub const KEYS: [(&str, &str); 12] = [
     ("bijlage:", "attachment:"),
     ("categorie:", "category:"),
     ("is:", "is:"),
+    ("heeft:", "has:"),
+    ("bedrag:", "amount:"),
 ];
 
 /// `text` with `key:value` in the place of any word with that key (in either language), or
@@ -472,6 +547,25 @@ mod tests {
         assert_eq!(three.words, ["d"]);
         assert_eq!(Query::parse("of koffie").words, ["of", "koffie"], "a lower-case of is a Dutch word");
         assert_eq!(Query::parse("OF koffie").words, ["of", "koffie"], "nothing to join to");
+    }
+
+    #[test]
+    fn amounts_and_recognised_kinds_are_read_and_left_to_the_index() {
+        assert_eq!(Query::parse("bedrag:>100").amount, Some((Some(10_001), None)));
+        assert_eq!(Query::parse("amount:>=100").amount, Some((Some(10_000), None)));
+        assert_eq!(Query::parse("bedrag:<50").amount, Some((None, Some(4_999))));
+        assert_eq!(Query::parse("bedrag:100-500").amount, Some((Some(10_000), Some(50_000))));
+        assert_eq!(Query::parse("bedrag:500..100").amount, Some((Some(10_000), Some(50_000))));
+        assert_eq!(Query::parse("bedrag:1250").amount, Some((Some(125_000), Some(125_099))), "whole euros: any cents");
+        assert_eq!(Query::parse("bedrag:12,50").amount, Some((Some(1_250), Some(1_250))));
+        assert_eq!(Query::parse("bedrag:€1.250,00").amount, Some((Some(125_000), Some(125_000))));
+        assert_eq!(Query::parse("bedrag:>100 bedrag:<500").amount, Some((Some(10_001), Some(49_999))), "two narrow together");
+        assert_eq!(Query::parse("bedrag:veel").words, ["bedrag:veel"], "no amount: a plain word");
+        let q = Query::parse("heeft:iban has:tracking heeft:ordernummer heeft:factuur heeft:bedrag heeft:iban");
+        assert_eq!(q.has, ["iban", "tracking", "order", "invoice", "amount"]);
+        assert!(q.has_words(), "only the index can answer");
+        let m = crate::Session::sample().messages.first().cloned().expect("sample mail");
+        assert!(!q.matches(&m) && q.keeps(&m), "a listed message waits for the index");
     }
 
     #[test]

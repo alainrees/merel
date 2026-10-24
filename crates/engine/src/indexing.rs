@@ -522,6 +522,8 @@ impl Indexer {
             attachments: &query.attachment_names,
             after: query.after,
             before: query.before,
+            amount: query.amount,
+            has: &query.has,
         };
         if terms.is_empty() {
             s.index_hits = None;

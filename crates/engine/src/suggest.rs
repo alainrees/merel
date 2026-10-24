@@ -27,6 +27,16 @@ const DATE_WORDS: [(&str, &str); 8] = [
     ("vorig-jaar", "last-year"),
 ];
 
+/// What `heeft:` takes, in Dutch and English, with what each means.
+const HAS_WORDS: [(&str, &str, &str); 6] = [
+    ("bijlage", "attachment", "suggest-has-attachment"),
+    ("bedrag", "amount", "suggest-has-amount"),
+    ("iban", "iban", "suggest-has-iban"),
+    ("zending", "tracking", "suggest-has-tracking"),
+    ("ordernummer", "order", "suggest-has-order"),
+    ("factuurnummer", "invoice", "suggest-has-invoice"),
+];
+
 /// What each search word's suggestion says about it.
 fn key_detail(key: &str) -> String {
     let id = match key {
@@ -41,6 +51,8 @@ fn key_detail(key: &str) -> String {
         "account:" => "suggest-account",
         "bijlage:" => "suggest-attachment",
         "categorie:" => "suggest-category",
+        "heeft:" => "suggest-has",
+        "bedrag:" => "suggest-amount",
         _ => "suggest-is",
     };
     merel_i18n::tr(id)
@@ -144,6 +156,15 @@ impl Session {
                             }
                         }
                     }
+                    "heeft" | "has" => {
+                        let english = key == "has";
+                        for (nl, en, id) in HAS_WORDS {
+                            let w = if english { en } else { nl };
+                            if w.starts_with(typed) {
+                                push(format!("{key}:{w}"), merel_i18n::tr(id), format!("{lead}{key}:{w} "));
+                            }
+                        }
+                    }
                     "categorie" | "category" => {
                         for c in &self.categories {
                             if c.name.to_lowercase().contains(typed) {
@@ -208,6 +229,9 @@ mod tests {
         let part: String = inbox.to_lowercase().chars().take(3).collect();
         assert!(texts(&s, &format!("map:{part}")).iter().any(|t| t.starts_with("map:")), "a folder");
         assert_eq!(texts(&s, "is:on"), ["is:ongelezen "]);
+        assert_eq!(texts(&s, "heeft:i"), ["heeft:iban "]);
+        assert_eq!(texts(&s, "has:tr"), ["has:tracking "]);
+        assert!(texts(&s, "bed").contains(&"bedrag:".to_string()));
         assert!(texts(&s, "keuken ").is_empty(), "a finished word asks nothing");
         assert!(texts(&s, "k").is_empty(), "one letter is too little");
         assert!(texts(&s, "").is_empty());

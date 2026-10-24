@@ -4309,6 +4309,7 @@ name = "merel-search"
 version = "0.1.13"
 dependencies = [
  "log",
+ "merel-extract",
  "merel-model",
  "serde",
  "serde_json",
@@ -4407,6 +4408,7 @@ dependencies = [
  "merel-call",
  "merel-dav",
  "merel-engine",
+ "merel-extract",
  "merel-html",
  "merel-i18n",
  "merel-mime",

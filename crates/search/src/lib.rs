@@ -20,6 +20,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use merel_extract::recognize::{What, recognize};
 use merel_model::MessageHeader;
 use tantivy::collector::{Count, TopDocs};
 use tantivy::query::{AllQuery, BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, PhraseQuery, Query, RangeQuery, TermQuery};
@@ -71,6 +72,11 @@ struct Fields {
     attachments: Field,
     /// The text inside the attachments, one value per attachment: its name on the first line.
     attached: Field,
+    /// What was recognised in the text and attachments (`merel_extract::recognize`): the kinds
+    /// ("amount", "iban", …), the codes themselves as words, and the amounts in cents.
+    kinds: Field,
+    codes: Field,
+    amounts: Field,
     stem_nl: Field,
     stem_en: Field,
 }
@@ -98,6 +104,9 @@ fn schema() -> (Schema, Fields) {
         text: b.add_text_field("text", words(FOLD, true)),
         attachments: b.add_text_field("attachments", words(FOLD, false)),
         attached: b.add_text_field("attached", words(FOLD, true)),
+        kinds: b.add_text_field("kinds", STRING),
+        codes: b.add_text_field("codes", words(FOLD, false)),
+        amounts: b.add_i64_field("amounts", INDEXED | FAST),
         stem_nl: b.add_text_field("stem_nl", stems(STEM_NL)),
         stem_en: b.add_text_field("stem_en", stems(STEM_EN)),
     };
@@ -148,6 +157,10 @@ pub struct Terms<'a> {
     pub after: Option<i64>,
     /// Before this moment, exclusive.
     pub before: Option<i64>,
+    /// An amount between these, in cents, inclusive; either end may be open.
+    pub amount: Option<(Option<i64>, Option<i64>)>,
+    /// Kinds of data that must have been recognised ("amount", "iban", "tracking", "order", "invoice").
+    pub has: &'a [String],
 }
 
 impl Terms<'_> {
@@ -162,6 +175,8 @@ impl Terms<'_> {
             && self.attachments.is_empty()
             && self.after.is_none()
             && self.before.is_none()
+            && self.amount.is_none()
+            && self.has.is_empty()
     }
 }
 
@@ -394,6 +409,23 @@ impl Index {
             all.push('\n');
             all.push_str(inside);
         }
+        let mut found = recognize(text);
+        for a in attachments {
+            found.extend(recognize(cut(&a.text, MAX_ATTACHED)));
+        }
+        let mut kinds = HashSet::new();
+        let mut codes = Vec::new();
+        for item in &found {
+            kinds.insert(item.what.kind());
+            match item.what {
+                What::Amount { cents, .. } => doc.add_i64(f.amounts, cents),
+                _ => codes.push(item.value.as_str()),
+            }
+        }
+        for kind in kinds {
+            doc.add_text(f.kinds, kind);
+        }
+        doc.add_text(f.codes, codes.join(" "));
         doc.add_text(f.stem_nl, &all);
         doc.add_text(f.stem_en, &all);
         self.writer.add_document(doc)?;
@@ -588,6 +620,14 @@ impl Index {
                 must.push((Occur::MustNot, query));
             }
         }
+        if let Some((low, high)) = terms.amount {
+            let from = low.map_or(std::ops::Bound::Unbounded, |l| std::ops::Bound::Included(Term::from_field_i64(f.amounts, l)));
+            let to = high.map_or(std::ops::Bound::Unbounded, |h| std::ops::Bound::Included(Term::from_field_i64(f.amounts, h)));
+            must.push((Occur::Must, Box::new(RangeQuery::new(from, to))));
+        }
+        for kind in terms.has {
+            must.push((Occur::Must, Box::new(TermQuery::new(Term::from_field_text(f.kinds, kind), IndexRecordOption::Basic))));
+        }
         if terms.after.is_some() || terms.before.is_some() {
             let from = terms.after.map_or(std::ops::Bound::Unbounded, |a| std::ops::Bound::Included(Term::from_field_i64(f.date, a)));
             let to = terms.before.map_or(std::ops::Bound::Unbounded, |b| std::ops::Bound::Excluded(Term::from_field_i64(f.date, b)));
@@ -684,8 +724,15 @@ fn word_query(f: Fields, form: &Form, prefix: bool) -> BooleanQuery {
     let exact = |field: Field, boost: f32| -> (Occur, Box<dyn Query>) {
         (Occur::Should, Box::new(BoostQuery::new(Box::new(TermQuery::new(term(field, &form.folded), IndexRecordOption::WithFreqs)), boost)))
     };
-    let mut any: Vec<(Occur, Box<dyn Query>)> =
-        vec![exact(f.subject, 3.0), exact(f.from, 3.0), exact(f.to, 2.0), exact(f.text, 1.0), exact(f.attachments, 1.5), exact(f.attached, 0.8)];
+    let mut any: Vec<(Occur, Box<dyn Query>)> = vec![
+        exact(f.subject, 3.0),
+        exact(f.from, 3.0),
+        exact(f.to, 2.0),
+        exact(f.text, 1.0),
+        exact(f.attachments, 1.5),
+        exact(f.attached, 0.8),
+        exact(f.codes, 2.0),
+    ];
     for (field, stem) in [(f.stem_nl, &form.nl), (f.stem_en, &form.en)] {
         any.push((Occur::Should, Box::new(BoostQuery::new(Box::new(TermQuery::new(term(field, stem), IndexRecordOption::WithFreqs)), 0.8))));
     }
@@ -878,6 +925,33 @@ mod tests {
         let w = words(&["bijlage"]);
         let hits = i.search(Terms { words: &w, ..Default::default() }, &scope(), false);
         assert_eq!(hits[0].snippet.as_ref().and_then(|s| s.attachment.clone()), None);
+    }
+
+    #[test]
+    fn amounts_ibans_and_codes_in_text_or_attachment_can_be_asked_for() {
+        let mut i = sample();
+        i.add_text("a", &header(4, "Bol", "Je bestelling", 999_960_000), "Ordernummer 4711-2026, totaal € 129,95. Track & Trace: 3SABCD1234567", &[])
+            .unwrap();
+        let invoice = Attached { name: "factuur.pdf".into(), text: "Factuurnummer F-88\nTe betalen EUR 1.250,00 op NL91 ABNA 0417 1643 00".into() };
+        i.add_text("a", &header(5, "Aannemer", "Factuur", 999_970_000), "Zie bijlage.", &[invoice]).unwrap();
+        i.commit_if_due(true).unwrap();
+        let s = scope();
+        let mut find = |t: Terms<'_>| {
+            let mut v = ids(&i.search(t, &s, false));
+            v.sort();
+            v
+        };
+        assert_eq!(find(Terms { amount: Some((Some(10_001), None)), ..Default::default() }), ["4", "5"]);
+        assert_eq!(find(Terms { amount: Some((Some(100_000), None)), ..Default::default() }), ["5"], "only in the attachment");
+        assert_eq!(find(Terms { amount: Some((None, Some(15_000))), ..Default::default() }), ["4"]);
+        let has = words(&["iban"]);
+        assert_eq!(find(Terms { has: &has, ..Default::default() }), ["5"]);
+        let has = words(&["tracking", "order"]);
+        assert_eq!(find(Terms { has: &has, ..Default::default() }), ["4"]);
+        let w = words(&["NL91ABNA0417164300"]);
+        assert_eq!(find(Terms { words: &w, ..Default::default() }), ["5"], "the IBAN as one word finds it written in groups");
+        let p = words(&["4711-2026"]);
+        assert_eq!(find(Terms { phrases: &p, ..Default::default() }), ["4"], "a click on the order number");
     }
 
     #[test]

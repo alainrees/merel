@@ -10,6 +10,7 @@ license.workspace = true
 merel-model = { workspace = true }
 merel-engine = { workspace = true }
 merel-search = { workspace = true }
+merel-extract = { workspace = true }
 merel-smime = { workspace = true }
 merel-secrets = { workspace = true }
 merel-html = { workspace = true }
