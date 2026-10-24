@@ -2,6 +2,7 @@ package nl.merel.app
 
 import android.app.Application
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -10,7 +11,12 @@ import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.time.LocalDate
+import java.time.ZoneId
 import uniffi.merel_mobile.AccountRow
+import uniffi.merel_mobile.AppointmentForm
+import uniffi.merel_mobile.AppointmentRow
+import uniffi.merel_mobile.CalendarRow
 import uniffi.merel_mobile.CoreException
 import uniffi.merel_mobile.FolderRole
 import uniffi.merel_mobile.FolderRow
@@ -42,6 +48,15 @@ class Store(app: Application) : AndroidViewModel(app) {
     var filter by mutableStateOf("all")
         private set
     var screen by mutableStateOf(MailScreen.Messages)
+    var calendars by mutableStateOf(emptyList<CalendarRow>())
+        private set
+    /** One up whenever the engine took in news, so the calendar asks for its appointments again. */
+    var revision by mutableIntStateOf(0)
+        private set
+    /** The calendar's chosen day, the appointment open on top of it, and the form being edited. */
+    var day by mutableStateOf(LocalDate.now())
+    var openAppointment by mutableStateOf<Pair<String, Long>?>(null)
+    var editing by mutableStateOf<AppointmentForm?>(null)
     /** The last thing that went wrong, for a dialog; cleared when shown. */
     var problem by mutableStateOf<String?>(null)
 
@@ -65,6 +80,8 @@ class Store(app: Application) : AndroidViewModel(app) {
         messages = core.messages()
         openMessage = core.openMessage()
         isSample = core.isSample()
+        calendars = core.calendars()
+        revision++
     }
 
     val selectedFolder: FolderRow? get() = folders.firstOrNull { it.selected }
@@ -104,6 +121,36 @@ class Store(app: Application) : AndroidViewModel(app) {
         } catch (e: CoreException) {
             Result.failure(e)
         }
+
+    /** The appointments of `[from, to)` on the phone's clock, a recurring one once per occurrence. */
+    fun appointments(from: LocalDate, to: LocalDate): List<AppointmentRow> {
+        val zone = ZoneId.systemDefault()
+        return core.appointments(from.atStartOfDay(zone).toEpochSecond(), to.atStartOfDay(zone).toEpochSecond())
+    }
+
+    fun calendar(id: String): CalendarRow? = calendars.firstOrNull { it.id == id }
+
+    /** Saves the appointment; on failure, which field was wrong (or the reason). */
+    fun saveAppointment(form: AppointmentForm): Result<Unit> =
+        try {
+            core.saveAppointment(form)
+            Result.success(Unit)
+        } catch (e: CoreException) {
+            Result.failure(e)
+        } finally {
+            refresh()
+        }
+
+    /** Deletes the appointment, or with [onlyThis] only this occurrence of a series. */
+    fun deleteAppointment(a: AppointmentRow, onlyThis: Boolean) {
+        try {
+            core.deleteAppointment(a.id, if (onlyThis) a.start else null)
+        } catch (e: CoreException) {
+            problem = e.message
+        }
+        openAppointment = null
+        refresh()
+    }
 
     override fun onCleared() {
         core.flush()

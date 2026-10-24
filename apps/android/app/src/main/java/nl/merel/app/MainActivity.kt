@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** The five modules along the bottom, as in the design; mail is the first to be built. */
+/** The five modules along the bottom, as in the design; mail and the calendar are built. */
 @Composable
 fun Root(store: Store) {
     val h = LocalHelder.current
@@ -79,7 +79,11 @@ fun Root(store: Store) {
         },
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
-            if (tab == 0) MailTab(store) else Soon()
+            when (tab) {
+                0 -> MailTab(store)
+                1 -> CalendarTab(store)
+                else -> Soon()
+            }
         }
     }
     store.problem?.let { message ->
