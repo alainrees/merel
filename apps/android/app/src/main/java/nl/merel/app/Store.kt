@@ -101,6 +101,12 @@ class Store(app: Application) : AndroidViewModel(app) {
         private set
     var chatPlaces by mutableStateOf(emptyList<TaskPlace>())
         private set
+    var sendPlaces by mutableStateOf(emptyList<TaskPlace>())
+        private set
+    /** The message being written, shown over the mail screens while it is set. */
+    var composing by mutableStateOf<ComposeForm?>(null)
+    /** Messages handed to the engine that have not gone out yet, to say so when one fails. */
+    private val sending = mutableSetOf<ULong>()
     /** The chat open on screen; its messages, fetched again whenever the engine has news. */
     var openChatId by mutableStateOf<String?>(null)
         private set
@@ -132,6 +138,7 @@ class Store(app: Application) : AndroidViewModel(app) {
                     if (found != messages) messages = found
                 }
                 if (signIn is SignInState.Waiting) followSignIn()
+                if (sending.isNotEmpty()) followSending()
                 if (searchOnMeaning) {
                     val status = core.meaningStatus()
                     if (status != meaningStatus) meaningStatus = status
@@ -156,6 +163,7 @@ class Store(app: Application) : AndroidViewModel(app) {
         contactPlaces = core.contactPlaces()
         chats = core.chats()
         chatPlaces = core.chatPlaces()
+        sendPlaces = core.sendPlaces()
         openChatId?.let { chatMessages = core.chatMessages(it) }
         revision++
     }
@@ -225,6 +233,33 @@ class Store(app: Application) : AndroidViewModel(app) {
     fun openChat(id: String?) {
         openChatId = id
         chatMessages = id?.let { core.openChat(it); core.chatMessages(it) } ?: emptyList()
+    }
+
+    /** Opens the form for a new message, or a reply or forward of the open message. */
+    fun compose(kind: ComposeKind) {
+        composing = core.startCompose(kind)
+    }
+
+    /** Sends the message; a form that is not right fails. A failure on the way out comes later as [problem]. */
+    fun sendMail(form: ComposeForm): Result<Unit> =
+        try {
+            sending += core.sendMail(form)
+            Result.success(Unit)
+        } catch (e: CoreException) {
+            Result.failure(e)
+        }
+
+    private fun followSending() {
+        for (id in sending.toList()) {
+            when (val state = core.sendState(id)) {
+                is SendState.Sent -> sending -= id
+                is SendState.Failed -> {
+                    sending -= id
+                    problem = getApplication<Application>().getString(R.string.not_sent, state.reason)
+                }
+                is SendState.Sending -> {}
+            }
+        }
     }
 
     fun sendInChat(id: String, text: String): Result<Unit> =

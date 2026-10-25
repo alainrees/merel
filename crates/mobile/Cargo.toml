@@ -17,7 +17,9 @@ name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 
 [dependencies]
+chrono = { workspace = true }
 merel-engine = { workspace = true }
+merel-i18n = { workspace = true }
 merel-model = { workspace = true }
 merel-secrets = { workspace = true }
 serde_json = { workspace = true }

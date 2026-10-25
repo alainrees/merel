@@ -186,6 +186,7 @@ struct FolderRowView: View {
 struct MessageList: View {
     @EnvironmentObject private var store: Store
     @State private var query = ""
+    @State private var composing: Composing?
     /// Where the search looks: every folder of every account (the start), or this folder.
     @State private var allFolders = true
 
@@ -249,6 +250,18 @@ struct MessageList: View {
         .refreshable { store.refreshFolder() }
         .navigationTitle(store.selectedFolder?.name ?? String(localized: "Mail"))
         .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    composing = Composing(form: store.startCompose(.new))
+                } label: {
+                    Label("Nieuw bericht", systemImage: "square.and.pencil")
+                }
+            }
+        }
+        .sheet(item: $composing) { item in
+            ComposeView(form: item.form)
+        }
     }
 }
 
@@ -334,6 +347,7 @@ func shortDate(_ seconds: Int64) -> String {
 struct MessageScreen: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
+    @State private var composing: Composing?
 
     var body: some View {
         Group {
@@ -387,6 +401,16 @@ struct MessageScreen: View {
                             Label(m.row.flagged ? "Markering weg" : "Markeren", systemImage: m.row.flagged ? "flag.fill" : "flag")
                         }
                         Spacer()
+                        Menu {
+                            Button("Beantwoorden", systemImage: "arrowshape.turn.up.left") { compose(.reply) }
+                            Button("Allen beantwoorden", systemImage: "arrowshape.turn.up.left.2") { compose(.replyAll) }
+                            Button("Doorsturen", systemImage: "arrowshape.turn.up.right") { compose(.forward) }
+                        } label: {
+                            Label("Beantwoorden", systemImage: "arrowshape.turn.up.left")
+                        } primaryAction: {
+                            compose(.reply)
+                        }
+                        Spacer()
                         Button {
                             store.run("message.archive")
                             dismiss()
@@ -407,5 +431,12 @@ struct MessageScreen: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $composing) { item in
+            ComposeView(form: item.form)
+        }
+    }
+
+    private func compose(_ kind: ComposeKind) {
+        composing = Composing(form: store.startCompose(kind))
     }
 }

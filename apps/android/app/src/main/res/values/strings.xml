@@ -219,4 +219,17 @@
     <string name="accept_hint">Paste the invitation link you received.</string>
     <string name="done">Done</string>
     <string name="accept">Accept</string>
+    <string name="more">More</string>
+    <string name="new_message">New message</string>
+    <string name="reply">Reply</string>
+    <string name="reply_all">Reply all</string>
+    <string name="forward">Forward</string>
+    <string name="not_sent">The message was not sent: %1$s</string>
+    <string name="choose_send_account">Choose the account to send from.</string>
+    <string name="to">To</string>
+    <string name="cc">CC</string>
+    <string name="bcc">BCC</string>
+    <string name="add_cc_bcc">Add CC and BCC</string>
+    <string name="discard_message">Discard this message?</string>
+    <string name="discard">Discard</string>
 </resources>

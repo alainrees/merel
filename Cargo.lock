@@ -4561,9 +4561,11 @@ dependencies = [
 name = "merel-mobile"
 version = "0.1.15"
 dependencies = [
+ "chrono",
  "jni",
  "log",
  "merel-engine",
+ "merel-i18n",
  "merel-model",
  "merel-secrets",
  "rustls-platform-verifier",
