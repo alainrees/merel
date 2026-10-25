@@ -91,6 +91,44 @@ pub struct AccountRow {
     pub name: String,
     pub address: String,
     pub state: ConnectionState,
+    /// Signs in with Microsoft or Google in the browser, so "Opnieuw aanmelden" can renew it.
+    pub signs_in_with_browser: bool,
+}
+
+/// A service whose account signs in in the browser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum SignInProvider {
+    Microsoft365,
+    Gmail,
+}
+
+/// Where a browser sign-in is.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum SignInState {
+    /// None started, or the last one was put away.
+    Idle,
+    /// The browser is open; the provider has not sent the person back yet.
+    Waiting,
+    /// Signed in: the account is added and connecting.
+    Done,
+    Failed {
+        reason: String,
+    },
+}
+
+/// Opens a sign-in link in a browser the app shows, written in Swift (Safari in the app) or
+/// Kotlin (a Custom Tab). The provider sends the person back to `http://127.0.0.1`, where
+/// Merel listens for this one sign-in, as on the computer; the app never sees the password.
+#[uniffi::export(with_foreign)]
+pub trait SignInBrowser: Send + Sync {
+    /// False when no browser could be opened.
+    fn show(&self, url: String) -> bool;
+}
+
+/// Sets the browser sign-in links open in, once, when the app starts.
+#[uniffi::export]
+pub fn set_sign_in_browser(browser: Arc<dyn SignInBrowser>) {
+    merel_engine::signin::set_browser(Box::new(move |url| if browser.show(url.to_string()) { Ok(()) } else { Err("no browser".into()) }));
 }
 
 /// What a folder is for, so the app can pick its icon and its place in the list.
@@ -435,6 +473,43 @@ pub struct AppointmentForm {
     pub reminder: Option<u32>,
 }
 
+/// A chat as the chat list shows it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ChatRow {
+    /// `group:<account>:<group id>` or `person:<account>:<address>`.
+    pub id: String,
+    pub account_id: String,
+    pub account_address: String,
+    /// The group's name, else the other person's name or address.
+    pub title: String,
+    /// The address the avatar is made from: the other person's, or the group's first.
+    pub address: String,
+    pub people: Vec<String>,
+    pub is_group: bool,
+    /// When the last message came, in seconds since the Unix epoch.
+    pub last: i64,
+    pub unread: u32,
+    /// The last message's text, `None` while it is still encrypted on the server.
+    pub preview: Option<String>,
+    pub last_mine: bool,
+    /// The first message waits until the others have answered the invitation Merel sent them.
+    pub waiting: bool,
+}
+
+/// One message in a chat.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ChatMessageRow {
+    pub id: String,
+    /// `None` until it is fetched and decrypted.
+    pub text: Option<String>,
+    pub mine: bool,
+    pub sender_name: String,
+    pub sender_address: String,
+    pub date: i64,
+    /// The invitation link the message holds, to accept it with a tap.
+    pub invite: Option<String>,
+}
+
 /// The engine, shared by the app's screens.
 #[derive(uniffi::Object)]
 pub struct MerelCore {
@@ -487,6 +562,49 @@ impl MerelCore {
         Ok(id)
     }
 
+    /// Starts signing in with Microsoft 365 or Gmail: the browser opens on the provider's page
+    /// and [`sign_in_state`](Self::sign_in_state) follows it. An empty client ID takes Merel's
+    /// own registration with Microsoft; Google needs the person's own client ID and secret.
+    pub fn sign_in(&self, provider: SignInProvider, name: String, email: String, client_id: String, client_secret: String) -> Result<(), CoreError> {
+        let protocol = match provider {
+            SignInProvider::Microsoft365 => Protocol::Microsoft365,
+            SignInProvider::Gmail => Protocol::Gmail,
+        };
+        if Address::new(None, email.trim()).is_err() {
+            return Err(CoreError::Invalid { field: "email".into() });
+        }
+        if protocol.builtin_client_id().is_none() && client_id.trim().is_empty() {
+            return Err(CoreError::Invalid { field: "client_id".into() });
+        }
+        let client_secret = match client_secret.trim() {
+            "" if protocol == Protocol::Gmail => return Err(CoreError::Invalid { field: "client_secret".into() }),
+            "" => None,
+            secret => Some(Secret::new(secret)),
+        };
+        let account = merel_engine::signin::account(protocol, &name, &email, &client_id).map_err(|reason| CoreError::Command { reason })?;
+        self.engine().sign_in(merel_engine::signin::SignIn { account, client_secret });
+        Ok(())
+    }
+
+    /// Signs an account in again in the browser, with the provider's current permissions.
+    pub fn sign_in_again(&self, account_id: String) {
+        self.engine().sign_in_again(&account_id);
+    }
+
+    pub fn sign_in_state(&self) -> SignInState {
+        match &self.engine().session.sign_in {
+            None => SignInState::Idle,
+            Some(None) => SignInState::Waiting,
+            Some(Some(Ok(()))) => SignInState::Done,
+            Some(Some(Err(reason))) => SignInState::Failed { reason: reason.clone() },
+        }
+    }
+
+    /// Puts a finished sign-in away, or stops waiting for one the person left.
+    pub fn clear_sign_in(&self) {
+        self.engine().session.sign_in = None;
+    }
+
     /// True while only the sample mail is there, so the app can offer to add an account.
     pub fn is_sample(&self) -> bool {
         self.engine().session.is_sample()
@@ -517,6 +635,7 @@ impl MerelCore {
                     Some(AccountStatus::Error(reason)) => ConnectionState::Failed { reason: reason.clone() },
                     Some(AccountStatus::Offline) | None => ConnectionState::Offline,
                 },
+                signs_in_with_browser: matches!(a.auth, Auth::OAuth2 { .. }),
             })
             .collect()
     }
@@ -807,6 +926,168 @@ impl MerelCore {
     }
 
     /// The selected message, or `None` when nothing is open.
+    /// Every chat, the one with the latest message first, and those whose first message waits
+    /// for an invitation to be answered.
+    pub fn chats(&self) -> Vec<ChatRow> {
+        let engine = self.engine();
+        let s = &engine.session;
+        let address = |account_id: &str| s.accounts.iter().find(|a| a.id == account_id).map(|a| a.address.email().to_string()).unwrap_or_default();
+        let mut out: Vec<ChatRow> = s
+            .chats()
+            .into_iter()
+            .map(|c| {
+                let last = c.messages.last();
+                ChatRow {
+                    account_address: address(&c.account_id),
+                    address: c.people.first().map(|p| p.email().to_string()).unwrap_or_default(),
+                    people: c.people.iter().map(|p| p.display().to_string()).collect(),
+                    is_group: c.is_group(),
+                    last: c.last,
+                    unread: c.unread as u32,
+                    preview: last.and_then(|id| s.chat_text(id)).map(|t| t.replace('\n', " ")),
+                    last_mine: last.is_some_and(|id| s.chat_is_mine(id)),
+                    waiting: false,
+                    id: c.id,
+                    account_id: c.account_id,
+                    title: c.title,
+                }
+            })
+            .collect();
+        for w in engine.waiting() {
+            let id = w.chat_id();
+            if out.iter().any(|c| c.id == id) {
+                continue;
+            }
+            let group = w.draft.chat.as_ref().filter(|c| c.group_id.is_some());
+            let names: Vec<String> = w.draft.to.iter().map(|a| a.display().to_string()).collect();
+            out.push(ChatRow {
+                id,
+                account_id: w.account_id.clone(),
+                account_address: address(&w.account_id),
+                title: group.and_then(|g| g.group_name.clone()).unwrap_or_else(|| names.join(", ")),
+                address: w.draft.to.first().map(|a| a.email().to_string()).unwrap_or_default(),
+                people: names,
+                is_group: group.is_some(),
+                last: w.since,
+                unread: 0,
+                preview: Some(w.draft.body.replace('\n', " ")),
+                last_mine: true,
+                waiting: true,
+            });
+        }
+        out.sort_by_key(|c| std::cmp::Reverse(c.last));
+        out
+    }
+
+    /// The messages of the chat `id`, oldest first; the first message of a waiting chat too.
+    pub fn chat_messages(&self, id: String) -> Vec<ChatMessageRow> {
+        let engine = self.engine();
+        let s = &engine.session;
+        let Some(chat) = s.chat(&id) else {
+            return engine
+                .waiting()
+                .iter()
+                .filter(|w| w.chat_id() == id)
+                .map(|w| ChatMessageRow {
+                    id: format!("waiting-{}", w.since),
+                    text: Some(w.draft.body.clone()),
+                    mine: true,
+                    sender_name: String::new(),
+                    sender_address: String::new(),
+                    date: w.since,
+                    invite: None,
+                })
+                .collect();
+        };
+        chat.messages
+            .iter()
+            .filter_map(|m| s.message(m))
+            .map(|m| {
+                let text = s.chat_text(&m.id);
+                let invite = text.as_deref().and_then(|t| {
+                    let at = t.find(merel_engine::securejoin::INVITE_LINK)?;
+                    t[at..].split(char::is_whitespace).next().map(str::to_string)
+                });
+                ChatMessageRow {
+                    id: m.id.clone(),
+                    mine: s.chat_is_mine(&m.id),
+                    sender_name: m.from.display().to_string(),
+                    sender_address: m.from.email().to_string(),
+                    date: m.date,
+                    invite,
+                    text,
+                }
+            })
+            .collect()
+    }
+
+    /// Opens the chat `id`: fetches its latest messages and marks them read.
+    pub fn open_chat(&self, id: String) {
+        self.engine().open_chat(&id);
+    }
+
+    /// The accounts that can chat: IMAP and Microsoft 365.
+    pub fn chat_places(&self) -> Vec<TaskPlace> {
+        let engine = self.engine();
+        engine
+            .session
+            .accounts
+            .iter()
+            .filter(|a| merel_engine::chat::can_chat(a))
+            .map(|a| TaskPlace { account_id: a.id.clone(), address: a.address.email().to_string() })
+            .collect()
+    }
+
+    /// Sends `text` in the chat `id`, end-to-end encrypted; to someone without a key yet it
+    /// waits while an invitation goes out.
+    pub fn send_in_chat(&self, id: String, text: String) -> Result<(), CoreError> {
+        let mut engine = self.engine();
+        let chat = engine.session.chat(&id).ok_or(CoreError::Invalid { field: "id".into() })?;
+        let draft = engine.session.chat_reply(&chat, text.trim());
+        engine.send_or_invite(&chat.account_id, draft).map(|_| ()).map_err(|reason| CoreError::Command { reason })
+    }
+
+    /// Starts a chat from `account_id` with `people` (addresses), a group when there are more
+    /// or a `name` is given, and gives its id. The first chat of an account makes its key.
+    pub fn start_chat(&self, account_id: String, people: Vec<String>, name: String, text: String) -> Result<String, CoreError> {
+        let mut addresses = Vec::new();
+        for p in people.iter().map(|p| p.trim()).filter(|p| !p.is_empty()) {
+            addresses.push(Address::new(None, p).map_err(|_| CoreError::Invalid { field: "people".into() })?);
+        }
+        if addresses.is_empty() {
+            return Err(CoreError::Invalid { field: "people".into() });
+        }
+        if text.trim().is_empty() {
+            return Err(CoreError::Invalid { field: "text".into() });
+        }
+        let draft = merel_engine::chat::new_chat(&addresses, &name, text.trim()).map_err(|reason| CoreError::Command { reason })?;
+        let mut engine = self.engine();
+        if !engine.chat_ready(&account_id) {
+            engine.enable_chat(&account_id).map_err(|reason| CoreError::Command { reason })?;
+        }
+        let id = match draft.chat.as_ref().and_then(|c| c.group_id.as_deref()) {
+            Some(group) => merel_engine::chat::group_chat_id(&account_id, group),
+            None => merel_engine::chat::person_chat_id(&account_id, draft.to.first().map(Address::email).unwrap_or("")),
+        };
+        engine.send_or_invite(&account_id, draft).map_err(|reason| CoreError::Command { reason })?;
+        Ok(id)
+    }
+
+    /// The invitation link of `account_id`, to share or show as a QR code; turns chat on.
+    pub fn invite_link(&self, account_id: String) -> Result<String, CoreError> {
+        self.engine().invite_link(&account_id).map_err(|reason| CoreError::Command { reason })
+    }
+
+    /// Accepts an invitation link (or what its QR code says) on `account_id`; the chat with
+    /// the inviter follows once the handshake is done. Gives that chat's id.
+    pub fn accept_invite(&self, account_id: String, link: String) -> Result<String, CoreError> {
+        let mut engine = self.engine();
+        if !engine.chat_ready(&account_id) {
+            engine.enable_chat(&account_id).map_err(|reason| CoreError::Command { reason })?;
+        }
+        engine.accept_invite(&account_id, link.trim()).map_err(|reason| CoreError::Command { reason })
+    }
+
     pub fn open_message(&self) -> Option<MessageView> {
         let engine = self.engine();
         let s = &engine.session;
@@ -1066,6 +1347,46 @@ mod tests {
         assert_eq!(core.messages().len(), 1, "the computer's search words work too");
         core.search(String::new(), true);
         assert!(core.messages().is_empty(), "no search: the open folder again");
+    }
+
+    #[test]
+    fn a_new_chat_checks_its_people_and_text() {
+        let core = MerelCore::sample();
+        let field = |people: Vec<&str>, text: &str| match core.start_chat(
+            "sample".into(),
+            people.into_iter().map(String::from).collect(),
+            String::new(),
+            text.into(),
+        ) {
+            Err(CoreError::Invalid { field }) => field,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(field(vec![], "Hoi"), "people");
+        assert_eq!(field(vec!["geen adres"], "Hoi"), "people");
+        assert_eq!(field(vec!["a@b.nl"], " "), "text");
+        // The sample mail cannot chat: no key is made for it, nothing is sent.
+        assert!(core.chat_places().is_empty());
+        assert!(matches!(core.start_chat("sample".into(), vec!["a@b.nl".into()], String::new(), "Hoi".into()), Err(CoreError::Command { .. })));
+        assert!(core.chat_messages("person:sample:a@b.nl".into()).is_empty());
+    }
+
+    #[test]
+    fn a_browser_sign_in_checks_its_form_first() {
+        let core = MerelCore::sample();
+        let field =
+            |provider, email: &str, id: &str, secret: &str| match core.sign_in(provider, String::new(), email.into(), id.into(), secret.into()) {
+                Err(CoreError::Invalid { field }) => field,
+                other => panic!("{other:?}"),
+            };
+        assert_eq!(field(SignInProvider::Microsoft365, "geen adres", "", ""), "email");
+        assert_eq!(field(SignInProvider::Gmail, "a@gmail.com", "", "s"), "client_id");
+        assert_eq!(field(SignInProvider::Gmail, "a@gmail.com", "id", " "), "client_secret");
+        assert_eq!(core.sign_in_state(), SignInState::Idle);
+        // The sample has no worker to sign in with, and says so.
+        core.sign_in(SignInProvider::Microsoft365, String::new(), "a@outlook.com".into(), String::new(), String::new()).unwrap();
+        assert!(matches!(core.sign_in_state(), SignInState::Failed { .. }));
+        core.clear_sign_in();
+        assert_eq!(core.sign_in_state(), SignInState::Idle);
     }
 
     #[test]

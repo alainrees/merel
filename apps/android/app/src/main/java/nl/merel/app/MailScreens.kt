@@ -78,6 +78,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import uniffi.merel_mobile.AccountRow
 import uniffi.merel_mobile.ConnectionState
+import uniffi.merel_mobile.SignInState
 import uniffi.merel_mobile.FolderRole
 import uniffi.merel_mobile.FolderRow
 import uniffi.merel_mobile.MessageRow
@@ -146,7 +147,7 @@ fun FolderScreen(store: Store) {
                 items(store.allAccountsFolders, key = { it.id }) { folder -> FolderLine(folder, 0) { open(folder) } }
             }
             for (account in store.accounts) {
-                item(key = "head-" + account.id) { AccountHeader(account) }
+                item(key = "head-" + account.id) { AccountHeader(store, account) }
                 items(tree(store.folders, account.id), key = { it.first.id }) { (folder, depth) ->
                     FolderLine(folder, depth) { open(folder) }
                 }
@@ -170,7 +171,7 @@ fun FolderScreen(store: Store) {
 }
 
 @Composable
-private fun AccountHeader(account: AccountRow) {
+private fun AccountHeader(store: Store, account: AccountRow) {
     val h = LocalHelder.current
     Row(Modifier.padding(4.dp, 16.dp, 4.dp, 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(account.address, color = h.dim, style = MaterialTheme.typography.labelLarge, modifier = Modifier.semantics { heading() })
@@ -181,6 +182,12 @@ private fun AccountHeader(account: AccountRow) {
             is ConnectionState.Failed ->
                 Icon(Icons.Outlined.WarningAmber, stringResource(R.string.account_problem) + ": " + s.reason, tint = h.flag)
             is ConnectionState.Online -> Unit
+        }
+        if (account.signsInWithBrowser && account.state is ConnectionState.Failed) {
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { store.signInAgain(account.id) }, enabled = store.signIn !is SignInState.Waiting) {
+                Text(stringResource(R.string.sign_in_again))
+            }
         }
     }
 }

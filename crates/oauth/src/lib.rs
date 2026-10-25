@@ -49,6 +49,25 @@ pub struct Tokens {
     pub expires_in: Duration,
 }
 
+/// Opens a sign-in link where the system's `open` cannot: on a phone the app shows the
+/// browser itself.
+pub type Browser = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+
+static BROWSER: OnceLock<Browser> = OnceLock::new();
+
+/// Sets how sign-in links open, once, before the first sign-in; without it they open in the
+/// system's default browser.
+pub fn set_browser(browser: Browser) {
+    let _ = BROWSER.set(browser);
+}
+
+fn open_in_browser(url: &str) -> Result<(), OAuthError> {
+    match BROWSER.get() {
+        Some(browser) => browser(url).map_err(OAuthError::Browser),
+        None => open::that_detached(url).map_err(|e| OAuthError::Browser(e.to_string())),
+    }
+}
+
 /// How long the browser gets before the sign-in counts as cancelled.
 pub const TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -145,7 +164,7 @@ impl Client {
         let port = listener.local_addr().map_err(|e| OAuthError::Listen(e.to_string()))?.port();
         let request = self.request(&format!("http://127.0.0.1:{port}/"))?;
         if open_browser {
-            open::that_detached(&request.url).map_err(|e| OAuthError::Browser(e.to_string()))?;
+            open_in_browser(&request.url)?;
         }
         let code = wait_for_code(&listener, &request.state, TIMEOUT)?;
         self.exchange(&request, &code)

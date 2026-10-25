@@ -11,7 +11,9 @@ this one; search on meaning, switched on under Mappen > Zoeken, downloads the sm
 once. Tasks: the open ones under Te laat, Vandaag, Morgen and Later, a tap on the circle to finish one,
 and a form for the due date, priority, repeat (tasks on the phone) and where to keep a new one. Contacts:
 the list with search, a contact's card with buttons to mail and call, and a form for the name,
-company, job title, email addresses, phone numbers and notes. Chat follows.
+company, job title, email addresses, phone numbers and notes. Microsoft 365 and Gmail sign in in Safari inside the app, as on the computer: the provider sends
+the person back to a listener on `127.0.0.1`, so Merel never sees the password. Chat works as on the computer: always end-to-end encrypted,
+with Merel or Delta Chat on the other side; a new chat, and an invitation as QR code or link.
 
 ## Running it on your own iPhone (free Apple ID)
 

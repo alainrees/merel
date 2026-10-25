@@ -19,6 +19,8 @@ final class Store: ObservableObject {
     @Published private(set) var taskPlaces: [TaskPlace] = []
     @Published private(set) var allContacts: [ContactRow] = []
     @Published private(set) var contactPlaces: [TaskPlace] = []
+    @Published private(set) var chats: [ChatRow] = []
+    @Published private(set) var chatPlaces: [TaskPlace] = []
     /// Contact pictures already fetched, by contact id.
     private var photos: [String: Data] = [:]
     /// Whether the task list shows the finished tasks too.
@@ -31,6 +33,8 @@ final class Store: ObservableObject {
     @Published private(set) var searchWords = ""
     @Published private(set) var searchOnMeaning = false
     @Published private(set) var meaningStatus: MeaningStatus?
+    /// Where a sign-in with Microsoft or Google is.
+    @Published private(set) var signIn = SignInState.idle
     /// The last thing that went wrong, for an alert; cleared when shown.
     @Published var problem: String?
     private var timer: Timer?
@@ -58,6 +62,7 @@ final class Store: ObservableObject {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try? dir.setResourceValues(values)
+        setSignInBrowser(browser: SafariSignIn.shared)
         return Store(core: MerelCore(dataDir: dir.path, vault: KeychainVault()))
     }
 
@@ -68,6 +73,9 @@ final class Store: ObservableObject {
             // The index and the language model answer a search a moment later.
             let found = core.messages()
             if found != messages { messages = found }
+        }
+        if signIn == .waiting {
+            followSignIn()
         }
         if searchOnMeaning {
             let status = core.meaningStatus()
@@ -93,6 +101,8 @@ final class Store: ObservableObject {
             photos = [:]
         }
         contactPlaces = core.contactPlaces()
+        chats = core.chats()
+        chatPlaces = core.chatPlaces()
         revision &+= 1
     }
 
@@ -162,6 +172,113 @@ final class Store: ObservableObject {
             return String(localized: "Controleer \(fieldName(field)).")
         } catch {
             return error.localizedDescription
+        }
+    }
+
+    // MARK: Chat
+
+    func chatMessages(_ id: String) -> [ChatMessageRow] { core.chatMessages(id: id) }
+    func openChat(_ id: String) { core.openChat(id: id) }
+
+    /// Sends `text` in the chat; on failure, what to tell the person.
+    func send(_ text: String, in chat: String) -> String? {
+        do {
+            try core.sendInChat(id: chat, text: text)
+            refresh()
+            return nil
+        } catch {
+            return chatProblem(error)
+        }
+    }
+
+    /// Starts a chat and gives its id, or what to tell the person.
+    func startChat(from account: String, with people: [String], name: String, text: String) -> Result<String, ChatFailure> {
+        do {
+            let id = try core.startChat(accountId: account, people: people, name: name, text: text)
+            refresh()
+            return .success(id)
+        } catch {
+            return .failure(ChatFailure(message: chatProblem(error)))
+        }
+    }
+
+    func inviteLink(_ account: String) -> Result<String, ChatFailure> {
+        do { return .success(try core.inviteLink(accountId: account)) } catch { return .failure(ChatFailure(message: chatProblem(error))) }
+    }
+
+    /// Accepts an invitation link; on failure, what to tell the person.
+    func acceptInvite(_ link: String, on account: String) -> String? {
+        do {
+            _ = try core.acceptInvite(accountId: account, link: link)
+            refresh()
+            return nil
+        } catch {
+            return chatProblem(error)
+        }
+    }
+
+    private func chatProblem(_ error: Error) -> String {
+        switch error {
+        case CoreError.Invalid(let field) where field == "people": String(localized: "Vul een geldig e-mailadres in.")
+        case CoreError.Invalid(let field) where field == "text": String(localized: "Typ eerst een bericht.")
+        case CoreError.Command(let reason): reason
+        default: error.localizedDescription
+        }
+    }
+
+    // MARK: Signing in with Microsoft or Google
+
+    /// Opens the provider's sign-in page; on a form that is not right, what to tell the person.
+    func signIn(
+        _ provider: SignInProvider, name: String, email: String, clientId: String = "", clientSecret: String = ""
+    ) -> String? {
+        do {
+            try core.signIn(provider: provider, name: name, email: email, clientId: clientId, clientSecret: clientSecret)
+            followSignIn()
+            return nil
+        } catch CoreError.Invalid(let field) {
+            return String(localized: "Controleer \(fieldName(field)).")
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Signs an account in again, for one whose sign-in ran out.
+    func signInAgain(_ accountId: String) {
+        renewing = true
+        core.signInAgain(accountId: accountId)
+        signIn = .waiting
+        followSignIn()
+    }
+
+    /// True while an existing account signs in again, outside "Account toevoegen".
+    private var renewing = false
+
+    /// Puts a finished or abandoned sign-in away.
+    func clearSignIn() {
+        core.clearSignIn()
+        signIn = .idle
+        SafariSignIn.shared.close()
+    }
+
+    private func followSignIn() {
+        let now = core.signInState()
+        guard now != signIn else { return }
+        signIn = now
+        switch now {
+        case .done:
+            SafariSignIn.shared.close()
+            refresh()
+        case .failed(let reason):
+            SafariSignIn.shared.close()
+            if renewing { problem = reason }
+        default:
+            break
+        }
+        if renewing, now != .waiting {
+            renewing = false
+            core.clearSignIn()
+            signIn = .idle
         }
     }
 
@@ -287,7 +404,14 @@ final class Store: ObservableObject {
         case "username": String(localized: "de gebruikersnaam")
         case "password": String(localized: "het wachtwoord")
         case "incoming": String(localized: "de server voor inkomende mail")
+        case "client_id": String(localized: "de client-ID")
+        case "client_secret": String(localized: "het client-secret")
         default: String(localized: "de server voor uitgaande mail")
         }
     }
+}
+
+/// What went wrong with a chat, for a `Result`.
+struct ChatFailure: Error {
+    let message: String
 }

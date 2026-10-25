@@ -17,7 +17,7 @@ struct MerelApp: App {
     }
 }
 
-/// The five modules along the bottom, as in the design; all but chat are built.
+/// The five modules along the bottom, as in the design.
 struct RootView: View {
     @EnvironmentObject private var store: Store
 
@@ -27,7 +27,7 @@ struct RootView: View {
                 .tabItem { Label("Mail", systemImage: "envelope") }
             CalendarTab()
                 .tabItem { Label("Agenda", systemImage: "calendar") }
-            Soon(title: "Chat")
+            ChatsTab()
                 .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
             ContactsTab()
                 .tabItem { Label("Contacten", systemImage: "person.2") }
@@ -41,21 +41,6 @@ struct RootView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(store.problem ?? "")
-        }
-    }
-}
-
-/// A module that is not on the phone yet.
-struct Soon: View {
-    let title: LocalizedStringKey
-
-    var body: some View {
-        NavigationStack {
-            ContentUnavailableView(
-                title, systemImage: "hammer",
-                description: Text("Dit onderdeel komt binnenkort naar de telefoon."))
-                .background(Helder.window)
-                .navigationTitle(title)
         }
     }
 }
