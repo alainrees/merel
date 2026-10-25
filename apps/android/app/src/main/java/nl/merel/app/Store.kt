@@ -121,7 +121,7 @@ class Store(app: Application) : AndroidViewModel(app) {
     }
 
     /** Switches search on meaning on (the language model is downloaded once) or off. */
-    fun setSearchOnMeaning(on: Boolean) {
+    fun switchSearchOnMeaning(on: Boolean) {
         try {
             core.setSearchOnMeaning(on)
         } catch (e: CoreException) {

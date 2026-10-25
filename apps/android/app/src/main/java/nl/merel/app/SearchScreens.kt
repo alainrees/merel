@@ -55,7 +55,7 @@ fun SearchSettingsScreen(store: Store) {
         )
         Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp, 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(
-                Modifier.fillMaxWidth().toggleable(store.searchOnMeaning, role = Role.Switch) { store.setSearchOnMeaning(it) }.padding(vertical = 8.dp),
+                Modifier.fillMaxWidth().toggleable(store.searchOnMeaning, role = Role.Switch) { store.switchSearchOnMeaning(it) }.padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(stringResource(R.string.search_on_meaning), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
