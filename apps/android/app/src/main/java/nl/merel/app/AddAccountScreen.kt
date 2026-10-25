@@ -43,15 +43,29 @@ import uniffi.merel_mobile.ConnectionSecurity
 import uniffi.merel_mobile.CoreException
 import uniffi.merel_mobile.ImapAccount
 import uniffi.merel_mobile.ServerSettings
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import uniffi.merel_mobile.SignInProvider
+import uniffi.merel_mobile.SignInState
 
-/** "Account toevoegen" for an IMAP/SMTP account, such as MXroute. Microsoft 365 and Gmail follow. */
+/**
+ * "Account toevoegen": Microsoft 365 and Gmail sign in in the browser, any other account (such
+ * as MXroute) with IMAP/SMTP and a password.
+ */
 @Composable
 fun AddAccountScreen(store: Store) {
     val h = LocalHelder.current
+    // 0 Microsoft 365, 1 Gmail, 2 another account.
+    var kind by rememberSaveable { mutableIntStateOf(0) }
     var name by rememberSaveable { mutableStateOf("") }
     var email by rememberSaveable { mutableStateOf("") }
     // The password is never put in saved instance state.
-    var password by androidx.compose.runtime.remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     var username by rememberSaveable { mutableStateOf("") }
     var imapHost by rememberSaveable { mutableStateOf("") }
     var imapPort by rememberSaveable { mutableStateOf("993") }
@@ -70,7 +84,10 @@ fun AddAccountScreen(store: Store) {
         TopAppBar(
             title = { Text(stringResource(R.string.add_account)) },
             navigationIcon = {
-                IconButton(onClick = { store.screen = MailScreen.Folders }) { Icon(Icons.Outlined.Close, stringResource(R.string.cancel)) }
+                IconButton(onClick = {
+                    store.clearSignIn()
+                    store.screen = MailScreen.Folders
+                }) { Icon(Icons.Outlined.Close, stringResource(R.string.cancel)) }
             },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = h.window),
         )
@@ -78,6 +95,18 @@ fun AddAccountScreen(store: Store) {
             Modifier.verticalScroll(rememberScrollState()).padding(20.dp, 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                listOf(R.string.microsoft_365, R.string.gmail, R.string.other_account).forEachIndexed { i, label ->
+                    SegmentedButton(kind == i, {
+                        kind = i
+                        store.clearSignIn()
+                    }, SegmentedButtonDefaults.itemShape(i, 3)) { Text(stringResource(label)) }
+                }
+            }
+            if (kind != 2) {
+                SignInFields(store, gmail = kind == 1)
+                return@Column
+            }
             Field(name, { name = it }, R.string.name)
             Field(email, {
                 email = it
@@ -122,6 +151,59 @@ fun AddAccountScreen(store: Store) {
             ) { Text(stringResource(R.string.add)) }
         }
     }
+}
+
+/** Name and address, for Gmail the person's own client ID and secret, and the sign-in button. */
+@Composable
+private fun SignInFields(store: Store, gmail: Boolean) {
+    val h = LocalHelder.current
+    var name by rememberSaveable { mutableStateOf("") }
+    var email by rememberSaveable { mutableStateOf("") }
+    var clientId by rememberSaveable { mutableStateOf("") }
+    var clientSecret by remember { mutableStateOf("") }
+    val provider = if (gmail) "Google" else "Microsoft"
+    val fieldNames = mapOf(
+        "email" to stringResource(R.string.field_email), "client_id" to stringResource(R.string.field_client_id),
+        "client_secret" to stringResource(R.string.field_client_secret),
+    )
+    val checkField = stringResource(R.string.check_field, "%s")
+    LaunchedEffect(store.signIn) {
+        if (store.signIn is SignInState.Done) {
+            store.clearSignIn()
+            store.screen = MailScreen.Folders
+        }
+    }
+    Field(name, { name = it }, R.string.name)
+    Field(email, { email = it }, R.string.email, KeyboardType.Email)
+    if (gmail) {
+        Field(clientId, { clientId = it }, R.string.client_id)
+        OutlinedTextField(
+            clientSecret, { clientSecret = it }, label = { Text(stringResource(R.string.client_secret)) }, singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth(),
+        )
+        Text(stringResource(R.string.google_help), color = h.dim, style = MaterialTheme.typography.bodySmall)
+    } else {
+        Text(stringResource(R.string.microsoft_help), color = h.dim, style = MaterialTheme.typography.bodySmall)
+    }
+    if (store.signIn is SignInState.Waiting) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(24.dp))
+            Text(stringResource(R.string.waiting_for_sign_in, provider), modifier = Modifier.padding(start = 12.dp).weight(1f))
+            TextButton(onClick = { store.clearSignIn() }) { Text(stringResource(R.string.stop)) }
+        }
+    } else {
+        Button(
+            onClick = {
+                store.signIn(if (gmail) SignInProvider.GMAIL else SignInProvider.MICROSOFT365, name, email, clientId, clientSecret)
+                    .onFailure { e -> store.problem = if (e is CoreException.Invalid) checkField.format(fieldNames[e.field] ?: e.field) else e.message }
+            },
+            enabled = email.isNotBlank(),
+            colors = ButtonDefaults.buttonColors(containerColor = h.accent, contentColor = h.onAccent),
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(stringResource(R.string.sign_in_with, provider)) }
+    }
+    (store.signIn as? SignInState.Failed)?.let { Text(it.reason, color = h.flag) }
 }
 
 @Composable

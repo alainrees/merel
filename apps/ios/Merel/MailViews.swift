@@ -126,6 +126,7 @@ struct FolderList: View {
 }
 
 struct AccountHeader: View {
+    @EnvironmentObject private var store: Store
     let account: AccountRow
 
     var body: some View {
@@ -137,6 +138,12 @@ struct AccountHeader: View {
             case .offline: Text("Offline").foregroundStyle(Helder.dim)
             case .failed: Image(systemName: "exclamationmark.triangle").foregroundStyle(Helder.flag)
                 .accessibilityLabel(Text("Probleem met dit account"))
+            }
+            if account.signsInWithBrowser, case .failed = account.state {
+                Spacer()
+                Button("Opnieuw aanmelden") { store.signInAgain(account.id) }
+                    .font(.footnote)
+                    .disabled(store.signIn == .waiting)
             }
         }
         .textCase(nil)

@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        CustomTabSignIn.activity = java.lang.ref.WeakReference(this)
         setContent { MerelTheme { Root(store) } }
     }
 

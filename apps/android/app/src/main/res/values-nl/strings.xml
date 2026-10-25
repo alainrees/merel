@@ -175,4 +175,17 @@
     <string name="number">Nummer</string>
     <string name="add_number">Nummer toevoegen</string>
     <string name="delete_contact_question">Dit contact verwijderen?</string>
+    <string name="microsoft_365">Microsoft 365</string>
+    <string name="gmail">Gmail</string>
+    <string name="other_account">Andere</string>
+    <string name="field_client_id">de client-ID</string>
+    <string name="field_client_secret">het client-secret</string>
+    <string name="client_id">Client-ID</string>
+    <string name="client_secret">Client-secret</string>
+    <string name="google_help">Maak in de Google Cloud Console een OAuth-client van het type Desktop app en vul de client-ID en het client-secret in, dezelfde als op je computer.</string>
+    <string name="microsoft_help">Je logt in bij Microsoft in de browser. Merel ziet je wachtwoord niet en bewaart alleen een sleutel om in te loggen, in de Keystore van deze telefoon.</string>
+    <string name="waiting_for_sign_in">Wachten tot je bent ingelogd bij %1$s…</string>
+    <string name="stop">Stoppen</string>
+    <string name="sign_in_with">Inloggen bij %1$s</string>
+    <string name="sign_in_again">Opnieuw aanmelden</string>
 </resources>

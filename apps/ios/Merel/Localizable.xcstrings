@@ -1,6 +1,5 @@
 {
   "sourceLanguage": "nl",
-  "version": "1.0",
   "strings": {
     "%@ (jij)": {
       "localizations": {
@@ -172,6 +171,16 @@
         }
       }
     },
+    "Andere": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Other"
+          }
+        }
+      }
+    },
     "Annuleer": {
       "localizations": {
         "en": {
@@ -318,6 +327,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Chat"
+          }
+        }
+      }
+    },
+    "Client-ID": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Client ID"
+          }
+        }
+      }
+    },
+    "Client-secret": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Client secret"
           }
         }
       }
@@ -812,6 +841,26 @@
         }
       }
     },
+    "Inloggen bij %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in with %@"
+          }
+        }
+      }
+    },
+    "Je logt in bij Microsoft in Safari. Merel ziet je wachtwoord niet en bewaart alleen een sleutel om in te loggen, in de sleutelhanger van deze iPhone.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You sign in with Microsoft in Safari. Merel does not see your password and keeps only a key to sign in with, in this iPhone's keychain."
+          }
+        }
+      }
+    },
     "Je wachtwoord blijft in de sleutelhanger van deze iPhone. Merel maakt alleen versleutelde verbindingen.": {
       "localizations": {
         "en": {
@@ -888,6 +937,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Location"
+          }
+        }
+      }
+    },
+    "Maak in de Google Cloud Console een OAuth-client van het type Desktop app en vul de client-ID en het client-secret in, dezelfde als op je computer.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create an OAuth client of the type Desktop app in the Google Cloud Console and fill in the client ID and the client secret, the same as on your computer."
           }
         }
       }
@@ -1152,6 +1211,16 @@
         }
       }
     },
+    "Opnieuw aanmelden": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in again"
+          }
+        }
+      }
+    },
     "Opnieuw proberen": {
       "localizations": {
         "en": {
@@ -1248,6 +1317,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Kind"
+          }
+        }
+      }
+    },
+    "Soort account": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kind of account"
+          }
+        }
+      }
+    },
+    "Stoppen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop"
           }
         }
       }
@@ -1472,6 +1561,16 @@
         }
       }
     },
+    "Wachten tot je bent ingelogd bij %@…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting until you have signed in with %@…"
+          }
+        }
+      }
+    },
     "Wachtwoord": {
       "localizations": {
         "en": {
@@ -1582,6 +1681,16 @@
         }
       }
     },
+    "de client-ID": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "the client ID"
+          }
+        }
+      }
+    },
     "de gebruikersnaam": {
       "localizations": {
         "en": {
@@ -1618,6 +1727,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "yesterday"
+          }
+        }
+      }
+    },
+    "het client-secret": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "the client secret"
           }
         }
       }
@@ -1662,5 +1781,6 @@
         }
       }
     }
-  }
+  },
+  "version": "1.0"
 }

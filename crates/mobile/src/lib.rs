@@ -91,6 +91,44 @@ pub struct AccountRow {
     pub name: String,
     pub address: String,
     pub state: ConnectionState,
+    /// Signs in with Microsoft or Google in the browser, so "Opnieuw aanmelden" can renew it.
+    pub signs_in_with_browser: bool,
+}
+
+/// A service whose account signs in in the browser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum SignInProvider {
+    Microsoft365,
+    Gmail,
+}
+
+/// Where a browser sign-in is.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum SignInState {
+    /// None started, or the last one was put away.
+    Idle,
+    /// The browser is open; the provider has not sent the person back yet.
+    Waiting,
+    /// Signed in: the account is added and connecting.
+    Done,
+    Failed {
+        reason: String,
+    },
+}
+
+/// Opens a sign-in link in a browser the app shows, written in Swift (Safari in the app) or
+/// Kotlin (a Custom Tab). The provider sends the person back to `http://127.0.0.1`, where
+/// Merel listens for this one sign-in, as on the computer; the app never sees the password.
+#[uniffi::export(with_foreign)]
+pub trait SignInBrowser: Send + Sync {
+    /// False when no browser could be opened.
+    fn open(&self, url: String) -> bool;
+}
+
+/// Sets the browser sign-in links open in, once, when the app starts.
+#[uniffi::export]
+pub fn set_sign_in_browser(browser: Arc<dyn SignInBrowser>) {
+    merel_engine::signin::set_browser(Box::new(move |url| if browser.open(url.to_string()) { Ok(()) } else { Err("no browser".into()) }));
 }
 
 /// What a folder is for, so the app can pick its icon and its place in the list.
@@ -487,6 +525,49 @@ impl MerelCore {
         Ok(id)
     }
 
+    /// Starts signing in with Microsoft 365 or Gmail: the browser opens on the provider's page
+    /// and [`sign_in_state`](Self::sign_in_state) follows it. An empty client ID takes Merel's
+    /// own registration with Microsoft; Google needs the person's own client ID and secret.
+    pub fn sign_in(&self, provider: SignInProvider, name: String, email: String, client_id: String, client_secret: String) -> Result<(), CoreError> {
+        let protocol = match provider {
+            SignInProvider::Microsoft365 => Protocol::Microsoft365,
+            SignInProvider::Gmail => Protocol::Gmail,
+        };
+        if Address::new(None, email.trim()).is_err() {
+            return Err(CoreError::Invalid { field: "email".into() });
+        }
+        if protocol.builtin_client_id().is_none() && client_id.trim().is_empty() {
+            return Err(CoreError::Invalid { field: "client_id".into() });
+        }
+        let client_secret = match client_secret.trim() {
+            "" if protocol == Protocol::Gmail => return Err(CoreError::Invalid { field: "client_secret".into() }),
+            "" => None,
+            secret => Some(Secret::new(secret)),
+        };
+        let account = merel_engine::signin::account(protocol, &name, &email, &client_id).map_err(|reason| CoreError::Command { reason })?;
+        self.engine().sign_in(merel_engine::signin::SignIn { account, client_secret });
+        Ok(())
+    }
+
+    /// Signs an account in again in the browser, with the provider's current permissions.
+    pub fn sign_in_again(&self, account_id: String) {
+        self.engine().sign_in_again(&account_id);
+    }
+
+    pub fn sign_in_state(&self) -> SignInState {
+        match &self.engine().session.sign_in {
+            None => SignInState::Idle,
+            Some(None) => SignInState::Waiting,
+            Some(Some(Ok(()))) => SignInState::Done,
+            Some(Some(Err(reason))) => SignInState::Failed { reason: reason.clone() },
+        }
+    }
+
+    /// Puts a finished sign-in away, or stops waiting for one the person left.
+    pub fn clear_sign_in(&self) {
+        self.engine().session.sign_in = None;
+    }
+
     /// True while only the sample mail is there, so the app can offer to add an account.
     pub fn is_sample(&self) -> bool {
         self.engine().session.is_sample()
@@ -517,6 +598,7 @@ impl MerelCore {
                     Some(AccountStatus::Error(reason)) => ConnectionState::Failed { reason: reason.clone() },
                     Some(AccountStatus::Offline) | None => ConnectionState::Offline,
                 },
+                signs_in_with_browser: matches!(a.auth, Auth::OAuth2 { .. }),
             })
             .collect()
     }
@@ -1066,6 +1148,25 @@ mod tests {
         assert_eq!(core.messages().len(), 1, "the computer's search words work too");
         core.search(String::new(), true);
         assert!(core.messages().is_empty(), "no search: the open folder again");
+    }
+
+    #[test]
+    fn a_browser_sign_in_checks_its_form_first() {
+        let core = MerelCore::sample();
+        let field =
+            |provider, email: &str, id: &str, secret: &str| match core.sign_in(provider, String::new(), email.into(), id.into(), secret.into()) {
+                Err(CoreError::Invalid { field }) => field,
+                other => panic!("{other:?}"),
+            };
+        assert_eq!(field(SignInProvider::Microsoft365, "geen adres", "", ""), "email");
+        assert_eq!(field(SignInProvider::Gmail, "a@gmail.com", "", "s"), "client_id");
+        assert_eq!(field(SignInProvider::Gmail, "a@gmail.com", "id", " "), "client_secret");
+        assert_eq!(core.sign_in_state(), SignInState::Idle);
+        // The sample has no worker to sign in with, and says so.
+        core.sign_in(SignInProvider::Microsoft365, String::new(), "a@outlook.com".into(), String::new(), String::new()).unwrap();
+        assert!(matches!(core.sign_in_state(), SignInState::Failed { .. }));
+        core.clear_sign_in();
+        assert_eq!(core.sign_in_state(), SignInState::Idle);
     }
 
     #[test]

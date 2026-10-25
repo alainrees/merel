@@ -27,9 +27,12 @@ import uniffi.merel_mobile.MeaningStatus
 import uniffi.merel_mobile.MerelCore
 import uniffi.merel_mobile.MessageRow
 import uniffi.merel_mobile.MessageView
+import uniffi.merel_mobile.SignInProvider
+import uniffi.merel_mobile.SignInState
 import uniffi.merel_mobile.TaskForm
 import uniffi.merel_mobile.TaskPlace
 import uniffi.merel_mobile.TaskRow
+import uniffi.merel_mobile.setSignInBrowser
 
 /** Where the mail tab is: the folder list, a folder's messages, one message, or the account form. */
 enum class MailScreen { Folders, Messages, Message, AddAccount, SearchSettings }
@@ -92,11 +95,17 @@ class Store(app: Application) : AndroidViewModel(app) {
         private set
     var openContact by mutableStateOf<String?>(null)
     var editingContact by mutableStateOf<ContactForm?>(null)
+    /** Where a sign-in with Microsoft or Google is. */
+    var signIn by mutableStateOf<SignInState>(SignInState.Idle)
+        private set
+    /** True while an existing account signs in again, outside "Account toevoegen". */
+    private var renewing = false
     /** The last thing that went wrong, for a dialog; cleared when shown. */
     var problem by mutableStateOf<String?>(null)
 
     init {
         MerelNative.init(app)
+        setSignInBrowser(CustomTabSignIn)
         val dir = File(app.noBackupFilesDir, "merel").apply { mkdirs() }
         core = MerelCore(dir.path, KeystoreVault(app))
         refresh()
@@ -111,6 +120,7 @@ class Store(app: Application) : AndroidViewModel(app) {
                     val found = core.messages()
                     if (found != messages) messages = found
                 }
+                if (signIn is SignInState.Waiting) followSignIn()
                 if (searchOnMeaning) {
                     val status = core.meaningStatus()
                     if (status != meaningStatus) meaningStatus = status
@@ -196,6 +206,52 @@ class Store(app: Application) : AndroidViewModel(app) {
         } catch (e: CoreException) {
             Result.failure(e)
         }
+
+    /** Opens the provider's sign-in page; a form that is not right fails with the field to check. */
+    fun signIn(provider: SignInProvider, name: String, email: String, clientId: String = "", clientSecret: String = ""): Result<Unit> =
+        try {
+            core.signIn(provider, name, email, clientId, clientSecret)
+            followSignIn()
+            Result.success(Unit)
+        } catch (e: CoreException) {
+            Result.failure(e)
+        }
+
+    /** Signs an account in again, for one whose sign-in ran out. */
+    fun signInAgain(accountId: String) {
+        renewing = true
+        core.signInAgain(accountId)
+        signIn = SignInState.Waiting
+        followSignIn()
+    }
+
+    /** Puts a finished or abandoned sign-in away. */
+    fun clearSignIn() {
+        core.clearSignIn()
+        signIn = SignInState.Idle
+    }
+
+    private fun followSignIn() {
+        val now = core.signInState()
+        if (now == signIn) return
+        signIn = now
+        when (now) {
+            is SignInState.Done -> {
+                CustomTabSignIn.close()
+                refresh()
+                screen = MailScreen.Folders
+            }
+            is SignInState.Failed -> {
+                CustomTabSignIn.close()
+                if (renewing) problem = now.reason
+            }
+            else -> {}
+        }
+        if (renewing && now !is SignInState.Waiting) {
+            renewing = false
+            clearSignIn()
+        }
+    }
 
     /** The appointments of `[from, to)` on the phone's clock, a recurring one once per occurrence. */
     fun appointments(from: LocalDate, to: LocalDate): List<AppointmentRow> {

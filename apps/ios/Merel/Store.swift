@@ -31,6 +31,8 @@ final class Store: ObservableObject {
     @Published private(set) var searchWords = ""
     @Published private(set) var searchOnMeaning = false
     @Published private(set) var meaningStatus: MeaningStatus?
+    /// Where a sign-in with Microsoft or Google is.
+    @Published private(set) var signIn = SignInState.idle
     /// The last thing that went wrong, for an alert; cleared when shown.
     @Published var problem: String?
     private var timer: Timer?
@@ -58,6 +60,7 @@ final class Store: ObservableObject {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try? dir.setResourceValues(values)
+        setSignInBrowser(browser: SafariSignIn.shared)
         return Store(core: MerelCore(dataDir: dir.path, vault: KeychainVault()))
     }
 
@@ -68,6 +71,9 @@ final class Store: ObservableObject {
             // The index and the language model answer a search a moment later.
             let found = core.messages()
             if found != messages { messages = found }
+        }
+        if signIn == .waiting {
+            followSignIn()
         }
         if searchOnMeaning {
             let status = core.meaningStatus()
@@ -162,6 +168,62 @@ final class Store: ObservableObject {
             return String(localized: "Controleer \(fieldName(field)).")
         } catch {
             return error.localizedDescription
+        }
+    }
+
+    // MARK: Signing in with Microsoft or Google
+
+    /// Opens the provider's sign-in page; on a form that is not right, what to tell the person.
+    func signIn(
+        _ provider: SignInProvider, name: String, email: String, clientId: String = "", clientSecret: String = ""
+    ) -> String? {
+        do {
+            try core.signIn(provider: provider, name: name, email: email, clientId: clientId, clientSecret: clientSecret)
+            followSignIn()
+            return nil
+        } catch CoreError.Invalid(let field) {
+            return String(localized: "Controleer \(fieldName(field)).")
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Signs an account in again, for one whose sign-in ran out.
+    func signInAgain(_ accountId: String) {
+        renewing = true
+        core.signInAgain(accountId: accountId)
+        signIn = .waiting
+        followSignIn()
+    }
+
+    /// True while an existing account signs in again, outside "Account toevoegen".
+    private var renewing = false
+
+    /// Puts a finished or abandoned sign-in away.
+    func clearSignIn() {
+        core.clearSignIn()
+        signIn = .idle
+        SafariSignIn.shared.close()
+    }
+
+    private func followSignIn() {
+        let now = core.signInState()
+        guard now != signIn else { return }
+        signIn = now
+        switch now {
+        case .done:
+            SafariSignIn.shared.close()
+            refresh()
+        case .failed(let reason):
+            SafariSignIn.shared.close()
+            if renewing { problem = reason }
+        default:
+            break
+        }
+        if renewing, now != .waiting {
+            renewing = false
+            core.clearSignIn()
+            signIn = .idle
         }
     }
 
@@ -287,6 +349,8 @@ final class Store: ObservableObject {
         case "username": String(localized: "de gebruikersnaam")
         case "password": String(localized: "het wachtwoord")
         case "incoming": String(localized: "de server voor inkomende mail")
+        case "client_id": String(localized: "de client-ID")
+        case "client_secret": String(localized: "het client-secret")
         default: String(localized: "de server voor uitgaande mail")
         }
     }

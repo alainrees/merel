@@ -175,4 +175,17 @@
     <string name="number">Number</string>
     <string name="add_number">Add number</string>
     <string name="delete_contact_question">Delete this contact?</string>
+    <string name="microsoft_365">Microsoft 365</string>
+    <string name="gmail">Gmail</string>
+    <string name="other_account">Other</string>
+    <string name="field_client_id">the client ID</string>
+    <string name="field_client_secret">the client secret</string>
+    <string name="client_id">Client ID</string>
+    <string name="client_secret">Client secret</string>
+    <string name="google_help">Create an OAuth client of the type Desktop app in the Google Cloud Console and fill in the client ID and the client secret, the same as on your computer.</string>
+    <string name="microsoft_help">You sign in with Microsoft in the browser. Merel does not see your password and keeps only a key to sign in with, in this phone\'s Keystore.</string>
+    <string name="waiting_for_sign_in">Waiting until you have signed in with %1$s…</string>
+    <string name="stop">Stop</string>
+    <string name="sign_in_with">Sign in with %1$s</string>
+    <string name="sign_in_again">Sign in again</string>
 </resources>

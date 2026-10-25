@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use merel_model::{Account, Auth, Protocol};
+pub use merel_oauth::{Browser, set_browser};
 use merel_oauth::{Client, OAuthError};
 use merel_secrets::{Secret, SecretStore};
 
