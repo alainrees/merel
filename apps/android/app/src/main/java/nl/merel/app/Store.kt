@@ -21,12 +21,13 @@ import uniffi.merel_mobile.CoreException
 import uniffi.merel_mobile.FolderRole
 import uniffi.merel_mobile.FolderRow
 import uniffi.merel_mobile.ImapAccount
+import uniffi.merel_mobile.MeaningStatus
 import uniffi.merel_mobile.MerelCore
 import uniffi.merel_mobile.MessageRow
 import uniffi.merel_mobile.MessageView
 
 /** Where the mail tab is: the folder list, a folder's messages, one message, or the account form. */
-enum class MailScreen { Folders, Messages, Message, AddAccount }
+enum class MailScreen { Folders, Messages, Message, AddAccount, SearchSettings }
 
 /**
  * The app's state: Merel's engine plus what the screens show, refreshed when the engine's
@@ -38,6 +39,18 @@ class Store(app: Application) : AndroidViewModel(app) {
     var accounts by mutableStateOf(emptyList<AccountRow>())
         private set
     var folders by mutableStateOf(emptyList<FolderRow>())
+        private set
+    /** "Alle accounts": the inbox and the other special folders of every account together. */
+    var allAccountsFolders by mutableStateOf(emptyList<FolderRow>())
+        private set
+    /** What the search field holds, and whether it looks in every folder or the open one. */
+    var searchWords by mutableStateOf("")
+        private set
+    var allFolders by mutableStateOf(true)
+        private set
+    var searchOnMeaning by mutableStateOf(false)
+        private set
+    var meaningStatus by mutableStateOf<MeaningStatus?>(null)
         private set
     var messages by mutableStateOf(emptyList<MessageRow>())
         private set
@@ -69,7 +82,17 @@ class Store(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             while (true) {
                 delay(500)
-                if (core.poll()) refresh()
+                if (core.poll()) {
+                    refresh()
+                } else if (searchWords.isNotBlank()) {
+                    // The index and the language model answer a search a moment later.
+                    val found = core.messages()
+                    if (found != messages) messages = found
+                }
+                if (searchOnMeaning) {
+                    val status = core.meaningStatus()
+                    if (status != meaningStatus) meaningStatus = status
+                }
             }
         }
     }
@@ -77,6 +100,9 @@ class Store(app: Application) : AndroidViewModel(app) {
     fun refresh() {
         accounts = core.accounts()
         folders = core.folders()
+        allAccountsFolders = core.allAccountsFolders()
+        searchOnMeaning = core.searchOnMeaning()
+        meaningStatus = core.meaningStatus()
         messages = core.messages()
         openMessage = core.openMessage()
         isSample = core.isSample()
@@ -84,7 +110,30 @@ class Store(app: Application) : AndroidViewModel(app) {
         revision++
     }
 
-    val selectedFolder: FolderRow? get() = folders.firstOrNull { it.selected }
+    val selectedFolder: FolderRow? get() = allAccountsFolders.firstOrNull { it.selected } ?: folders.firstOrNull { it.selected }
+
+    /** Searches every folder of every account, or with [all] false the open folder only. */
+    fun search(words: String, all: Boolean = allFolders) {
+        searchWords = words
+        allFolders = all
+        core.search(if (words.isBlank()) "" else words, all)
+        messages = core.messages()
+    }
+
+    /** Switches search on meaning on (the language model is downloaded once) or off. */
+    fun setSearchOnMeaning(on: Boolean) {
+        try {
+            core.setSearchOnMeaning(on)
+        } catch (e: CoreException) {
+            problem = e.message
+        }
+        refresh()
+    }
+
+    fun retryMeaning() {
+        core.retryMeaning()
+        refresh()
+    }
 
     fun run(command: String, params: Map<String, Any> = emptyMap()) {
         try {

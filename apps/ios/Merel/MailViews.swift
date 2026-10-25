@@ -52,6 +52,17 @@ struct FolderList: View {
                     Text("Je ziet nu voorbeeldmail. Voeg je eigen account toe om je mail te lezen.")
                 }
             }
+            if !store.allAccountsFolders.isEmpty {
+                Section {
+                    ForEach(store.allAccountsFolders, id: \.id) { folder in
+                        NavigationLink(value: MailRoute.folder(folder.id)) {
+                            FolderRowView(folder: folder, depth: 0)
+                        }
+                    }
+                } header: {
+                    Text("Alle accounts").textCase(nil)
+                }
+            }
             ForEach(store.accounts, id: \.id) { account in
                 Section {
                     ForEach(tree(for: account.id), id: \.folder.id) { item in
@@ -63,11 +74,18 @@ struct FolderList: View {
                     AccountHeader(account: account)
                 }
             }
-            if !store.isSample {
-                Button {
-                    addingAccount = true
+            Section {
+                if !store.isSample {
+                    Button {
+                        addingAccount = true
+                    } label: {
+                        Label("Account toevoegen", systemImage: "person.badge.plus")
+                    }
+                }
+                NavigationLink {
+                    SearchSettings()
                 } label: {
-                    Label("Account toevoegen", systemImage: "person.badge.plus")
+                    Label("Zoeken", systemImage: "magnifyingglass")
                 }
             }
         }
@@ -161,21 +179,21 @@ struct FolderRowView: View {
 struct MessageList: View {
     @EnvironmentObject private var store: Store
     @State private var query = ""
+    /// Where the search looks: every folder of every account (the start), or this folder.
+    @State private var allFolders = true
 
-    private var shown: [MessageRow] {
-        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return store.messages }
-        return store.messages.filter {
-            $0.sender.lowercased().contains(q) || $0.senderAddress.lowercased().contains(q)
-                || $0.subject.lowercased().contains(q) || $0.preview.lowercased().contains(q)
-        }
+    private var shown: [MessageRow] { store.messages }
+
+    /// The folder of each row is worth showing when the list holds more than one folder.
+    private var showPlace: Bool {
+        (!store.searchWords.isEmpty && allFolders) || store.selectedFolder?.accountId.isEmpty == true
     }
 
     var body: some View {
         List {
             ForEach(shown, id: \.id) { m in
                 NavigationLink(value: MailRoute.message(m.id)) {
-                    MessageRowView(message: m)
+                    MessageRowView(message: m, showPlace: showPlace)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     Button(role: .destructive) {
@@ -213,6 +231,14 @@ struct MessageList: View {
             }
         }
         .searchable(text: $query, prompt: Text("Zoeken in mail"))
+        .searchScopes($allFolders) {
+            Text("Alle mappen").tag(true)
+            Text("Deze map").tag(false)
+        }
+        .onChange(of: query) { store.search(query, allFolders: allFolders) }
+        .onChange(of: allFolders) { store.search(query, allFolders: allFolders) }
+        // A folder opened afresh shows all its mail; back from a message, the search stays.
+        .onAppear { if query.isEmpty, !store.searchWords.isEmpty { store.search("", allFolders: allFolders) } }
         .refreshable { store.refreshFolder() }
         .navigationTitle(store.selectedFolder?.name ?? String(localized: "Mail"))
         .navigationBarTitleDisplayMode(.large)
@@ -221,6 +247,7 @@ struct MessageList: View {
 
 struct MessageRowView: View {
     let message: MessageRow
+    var showPlace = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -242,6 +269,9 @@ struct MessageRowView: View {
                     .foregroundStyle(message.unread ? Helder.ink : Helder.text)
                     .lineLimit(1)
                 Text(message.preview).font(.subheadline).foregroundStyle(Helder.dim).lineLimit(2)
+                if showPlace || message.related {
+                    Text(place).font(.footnote).foregroundStyle(Helder.dim).lineLimit(1)
+                }
             }
         }
         .padding(.vertical, 4)
@@ -263,7 +293,20 @@ struct MessageRowView: View {
         parts.append(shortDate(message.date))
         if message.hasAttachments { parts.append(String(localized: "met bijlage")) }
         parts.append(message.preview)
+        if showPlace || message.related { parts.append(place) }
         return parts.joined(separator: ", ")
+    }
+
+    /// "Postvak IN · jij@example.org", with "Over hetzelfde" in front of a message found on
+    /// meaning alone.
+    private var place: String {
+        var parts: [String] = []
+        if message.related { parts.append(String(localized: "Over hetzelfde")) }
+        if showPlace {
+            parts.append(message.folderName)
+            if !message.accountAddress.isEmpty { parts.append(message.accountAddress) }
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

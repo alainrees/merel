@@ -146,6 +146,40 @@ pub struct MessageRow {
     pub has_attachments: bool,
     pub categories: Vec<String>,
     pub selected: bool,
+    /// The folder the message is in and its account's address: the list shows them when it
+    /// holds more than one folder (a search in all folders, an "Alle accounts" folder).
+    pub folder_name: String,
+    pub account_address: String,
+    /// Found on meaning alone, without the search's words ("Over hetzelfde").
+    pub related: bool,
+}
+
+/// Where search on meaning is: the small language model on the phone.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum MeaningState {
+    /// Fetching the model, `done` of `total` bytes.
+    Downloading {
+        done: u64,
+        total: u64,
+    },
+    /// Making the downloaded model ready.
+    Preparing,
+    Ready,
+    Failed {
+        reason: String,
+    },
+}
+
+/// What the search settings show while search on meaning is on.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct MeaningStatus {
+    pub state: MeaningState,
+    /// Messages the model has read.
+    pub messages: u64,
+    /// Whether it is still reading messages.
+    pub busy: bool,
+    /// Bytes the model takes on the phone.
+    pub model_bytes: u64,
 }
 
 /// The open message: its envelope and, once it has arrived, its text.
@@ -382,11 +416,69 @@ impl MerelCore {
             .collect()
     }
 
+    /// The "Alle accounts" folders, which show the mail of every account together (Postvak IN,
+    /// Concepten, …); none while there is only one account. Their `account_id` is empty.
+    pub fn all_accounts_folders(&self) -> Vec<FolderRow> {
+        let engine = self.engine();
+        let s = &engine.session;
+        s.unified_folders()
+            .into_iter()
+            .map(|f| FolderRow {
+                selected: s.selected_folder.as_deref() == Some(f.id.as_str()),
+                id: f.id,
+                account_id: String::new(),
+                parent_id: None,
+                name: f.name,
+                role: f.kind.into(),
+                unread: f.unread,
+            })
+            .collect()
+    }
+
     /// The open folder's messages, filtered, searched and sorted as the session says.
     pub fn messages(&self) -> Vec<MessageRow> {
         let engine = self.engine();
         let s = &engine.session;
-        s.visible_messages().into_iter().map(|m| row(m, s.selected_message.as_deref())).collect()
+        s.visible_messages().into_iter().map(|m| row(s, m)).collect()
+    }
+
+    /// Searches as the computer's search box does: the search index, words such as `van:` and
+    /// `bijlage:`, the text of attachments. `all_folders` looks in every folder of every
+    /// account, else in the open folder (whose server is asked too). An empty `words` ends
+    /// the search; [`MerelCore::messages`] lists what was found, best first.
+    pub fn search(&self, words: String, all_folders: bool) {
+        self.engine().search(words.trim_start(), all_folders);
+    }
+
+    /// Whether search on meaning is switched on.
+    pub fn search_on_meaning(&self) -> bool {
+        self.engine().index_settings().meaning
+    }
+
+    /// Switches search on meaning on (the model is downloaded once, see
+    /// [`meaning_download_megabytes`]) or off (the model and its vectors are removed).
+    pub fn set_search_on_meaning(&self, on: bool) -> Result<(), CoreError> {
+        let mut engine = self.engine();
+        let settings = merel_engine::indexing::IndexSettings { meaning: on, ..engine.index_settings().clone() };
+        engine.set_index_settings(settings).map_err(|reason| CoreError::Command { reason })
+    }
+
+    /// Where search on meaning is; `None` while it is off.
+    pub fn meaning_status(&self) -> Option<MeaningStatus> {
+        use merel_engine::meaning::ModelState;
+        let status = self.engine().meaning_status()?;
+        let state = match status.model {
+            ModelState::Downloading { done, total } => MeaningState::Downloading { done, total },
+            ModelState::Preparing | ModelState::Off => MeaningState::Preparing,
+            ModelState::Ready => MeaningState::Ready,
+            ModelState::Failed(reason) => MeaningState::Failed { reason },
+        };
+        Some(MeaningStatus { state, messages: status.vectors as u64, busy: status.busy, model_bytes: status.model_size })
+    }
+
+    /// Tries the download again after it failed.
+    pub fn retry_meaning(&self) {
+        self.engine().retry_meaning();
     }
 
     pub fn calendars(&self) -> Vec<CalendarRow> {
@@ -463,7 +555,7 @@ impl MerelCore {
         let m = s.selected()?;
         let body = s.selected_body();
         Some(MessageView {
-            row: row(m, Some(m.id.as_str())),
+            row: row(s, m),
             to: m.to.iter().map(|a| a.email().to_string()).collect(),
             text: body.map(|b| b.text.clone()),
             attachments: body.map(|b| b.attachments.iter().map(|a| a.name.clone()).collect()).unwrap_or_default(),
@@ -571,7 +663,9 @@ fn appointment_row(s: &Session, a: &Appointment) -> AppointmentRow {
     }
 }
 
-fn row(m: &merel_model::MessageHeader, selected: Option<&str>) -> MessageRow {
+fn row(s: &Session, m: &merel_model::MessageHeader) -> MessageRow {
+    let folder = s.folder(&m.folder_id);
+    let account = folder.and_then(|f| s.accounts.iter().find(|a| a.id == f.account_id));
     MessageRow {
         id: m.id.clone(),
         sender: m.from.display().to_string(),
@@ -583,8 +677,17 @@ fn row(m: &merel_model::MessageHeader, selected: Option<&str>) -> MessageRow {
         flagged: m.flags.flagged,
         has_attachments: m.has_attachments,
         categories: m.categories.clone(),
-        selected: selected == Some(m.id.as_str()),
+        selected: s.selected_message.as_deref() == Some(m.id.as_str()),
+        folder_name: folder.map(|f| f.name.clone()).unwrap_or_default(),
+        account_address: account.map(|a| a.address.email().to_string()).unwrap_or_default(),
+        related: s.current_index_hits().is_some_and(|h| h.related.contains(&m.id)),
     }
+}
+
+/// How many megabytes switching search on meaning on downloads, for the switch's explanation.
+#[uniffi::export]
+pub fn meaning_download_megabytes() -> u64 {
+    merel_engine::meaning::download_megabytes()
 }
 
 #[cfg(test)]
@@ -622,6 +725,30 @@ mod tests {
         assert_eq!(open.row.id, first);
         assert!(open.row.selected);
         assert!(core.messages().iter().any(|m| m.id == first && m.selected));
+    }
+
+    #[test]
+    fn search_looks_in_every_folder_or_the_open_one() {
+        let core = MerelCore::sample();
+        let deleted = core.folders().into_iter().find(|f| f.role == FolderRole::Deleted).unwrap();
+        core.run("folder.select".into(), format!(r#"{{"id":"{}"}}"#, deleted.id)).unwrap();
+        core.search("planning".into(), false);
+        assert!(core.messages().is_empty(), "the open folder has no such mail");
+        core.search("planning".into(), true);
+        let found = core.messages();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].subject, "Planning voor donderdag");
+        assert_eq!(found[0].folder_name, "Postvak IN");
+        assert_eq!(found[0].account_address, "jij@example.org");
+        core.search("van:sanne".into(), true);
+        assert_eq!(core.messages().len(), 1, "the computer's search words work too");
+        core.search(String::new(), true);
+        assert!(core.messages().is_empty(), "no search: the open folder again");
+    }
+
+    #[test]
+    fn one_account_has_no_all_accounts_folders() {
+        assert!(MerelCore::sample().all_accounts_folders().is_empty());
     }
 
     #[test]

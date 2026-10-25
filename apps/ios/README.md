@@ -4,8 +4,11 @@ A native SwiftUI app on top of Merel's Rust core (`crates/mobile`, through UniFF
 screens follow the approved designs in the project's `ontwerp/mobiel/` folder.
 
 What works now: sample mail, adding an IMAP/SMTP account (password in the iOS keychain), the
-folder tree, the message list with search, pull to refresh and swipe actions (archive, delete,
-flag, read/unread), and reading a message. Calendar, chat, contacts and tasks follow.
+folder tree with "Alle accounts" on top, the message list with pull to refresh and swipe actions
+(archive, delete, flag, read/unread), reading a message, and the calendar. Search works as on the
+computer (the search index, search words such as `van:`, the text of attachments), in all folders or
+this one; search on meaning, switched on under Mappen > Zoeken, downloads the small language model
+once. Chat, contacts and tasks follow.
 
 ## Running it on your own iPhone (free Apple ID)
 

@@ -77,8 +77,8 @@ from a domain you know (your contacts', your own), failed SPF/DKIM/DMARC checks 
 runs as a program. The checks run on your computer only and never decide for you. In the Junk folder itself a
 message is shown with its links, attachments and pictures from the internet switched off, as Outlook does; "Geen
 ongewenst" brings it back with everything working. A search box above the
-message list narrows it by subject, sender, recipient or preview text, in the current folder or
-across every folder of every account. Like Outlook and Apple Mail, Merel keeps a search index of all mail on this
+message list narrows it by subject, sender, recipient or preview text, across every folder of every account
+(the start) or in the current folder, as last chosen in the menu next to the box. Like Outlook and Apple Mail, Merel keeps a search index of all mail on this
 computer (`merel-search`, built on Tantivy): it pages quietly through every folder in the background, one small job per
 account at a time, and fetches the text of each message, newest first, as far back as "Bestand > Zoeken" says (all mail,
 or the last 5, 2 or 1 years; older mail is found by sender, recipients and subject). A search then covers old mail too,

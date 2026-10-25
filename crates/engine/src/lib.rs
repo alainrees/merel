@@ -1591,6 +1591,19 @@ impl Engine {
         self.indexer.search(&mut self.session);
     }
 
+    /// Searches for `words` at once, in every folder of every account or in the selected folder
+    /// only (whose server is asked too), as a phone's search field does: the index answers
+    /// before this returns, [`Session::visible_messages`] lists the result.
+    pub fn search(&mut self, words: &str, all: bool) {
+        self.session.search = words.to_string();
+        self.session.search_all = all;
+        if !all {
+            self.session.request_server_search();
+            self.dispatch();
+        }
+        self.indexer.search(&mut self.session);
+    }
+
     /// How far the search index is.
     pub fn index_progress(&self) -> indexing::Progress {
         self.indexer.progress()

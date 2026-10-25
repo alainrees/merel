@@ -137,6 +137,9 @@ pub struct ViewPrefs {
     /// What was last typed in the mail search box, newest first, as Outlook's "Recente
     /// zoekopdrachten"; at most [`RECENT_SEARCHES`].
     pub recent_searches: Vec<String>,
+    /// Whether the search box looks in every folder of every account ("Alle mappen", the
+    /// start) or in the open folder only ("Deze map"), as last chosen next to the box.
+    pub search_all: bool,
     /// The calendars whose tick box in the side pane is off, by id: their appointments stay
     /// out of the views, the search list and the printed page, as in Outlook when a calendar is
     /// unticked. Reminders still come.
@@ -186,6 +189,7 @@ impl Default for ViewPrefs {
             favorites: Vec::new(),
             search_folders: Vec::new(),
             recent_searches: Vec::new(),
+            search_all: true,
             hidden_calendars: Vec::new(),
             update_check: None,
             skipped_version: None,

@@ -296,6 +296,7 @@ impl MailApp {
         i18n::set(view.language.language());
         engine.session.relabel();
         engine.session.sort = view.sort;
+        engine.session.search_all = view.search_all;
         let mut app = MailApp {
             engine,
             module: Module::Mail,
@@ -902,6 +903,7 @@ pub(crate) fn list_filter() -> String {
 fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
     let searching = app.engine.session.is_searching();
     let mut save_search = false;
+    let mut scope_pick: Option<bool> = None;
     let mut remember: Option<String> = None;
     let mut recent_pick: Option<Option<String>> = None;
     let mut suggestion_pick: Option<String> = None;
@@ -1051,10 +1053,12 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                             egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
                                 if ui.selectable_label(!session.search_all, scope_folder()).clicked() {
                                     session.search_all = false;
+                                    scope_pick = Some(false);
                                     ui.close();
                                 }
                                 if ui.selectable_label(session.search_all, scope_all()).on_hover_text(tr("search-all-hint")).clicked() {
                                     session.search_all = true;
+                                    scope_pick = Some(true);
                                     ui.close();
                                 }
                                 // The index ranks what it finds; the person may want the newest on top.
@@ -1093,6 +1097,11 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
     }
     if save_search {
         app.ask_search_folder();
+    }
+    if let Some(all) = scope_pick {
+        app.view.search_all = all;
+        let ctx = ui.ctx().clone();
+        app.save_view(&ctx);
     }
     if let Some(q) = remember {
         app.view.remember_search(&q);

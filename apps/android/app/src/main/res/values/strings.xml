@@ -100,4 +100,19 @@
         <item quantity="one">%1$d minute before</item>
         <item quantity="other">%1$d minutes before</item>
     </plurals>
+    <string name="all_accounts">All accounts</string>
+    <string name="scope_all">All folders</string>
+    <string name="scope_folder">This folder</string>
+    <string name="search_settings">Search</string>
+    <string name="search_on_meaning">Search on meaning</string>
+    <string name="search_on_meaning_hint">Merel then also finds mail about the same thing in other words, such as a quote when you search for a proposal. A small language model does this on your phone itself; your mail goes nowhere. Switching it on downloads the model once (%1$d MB), preferably over Wi-Fi.</string>
+    <string name="related">About the same</string>
+    <string name="meaning_downloading">Downloading the language model…</string>
+    <string name="meaning_of">%1$s of %2$s</string>
+    <string name="meaning_preparing">Preparing the language model…</string>
+    <string name="meaning_reading">Reading messages…</string>
+    <string name="meaning_ready">Ready</string>
+    <string name="meaning_read">%1$d messages read · model %2$s</string>
+    <string name="meaning_failed">The download failed</string>
+    <string name="try_again">Try again</string>
 </resources>

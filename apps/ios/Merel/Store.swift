@@ -9,12 +9,18 @@ final class Store: ObservableObject {
     let core: MerelCore
     @Published private(set) var accounts: [AccountRow] = []
     @Published private(set) var folders: [FolderRow] = []
+    /// "Alle accounts": Postvak IN and the other special folders of every account together.
+    @Published private(set) var allAccountsFolders: [FolderRow] = []
     @Published private(set) var messages: [MessageRow] = []
     @Published private(set) var openMessage: MessageView?
     @Published private(set) var isSample = true
     @Published private(set) var calendars: [CalendarRow] = []
     /// One up whenever the engine took in news, so the calendar asks for its appointments again.
     @Published private(set) var revision = 0
+    /// What the search field looks for; empty when it is not searching.
+    @Published private(set) var searchWords = ""
+    @Published private(set) var searchOnMeaning = false
+    @Published private(set) var meaningStatus: MeaningStatus?
     /// The last thing that went wrong, for an alert; cleared when shown.
     @Published var problem: String?
     private var timer: Timer?
@@ -46,12 +52,25 @@ final class Store: ObservableObject {
     }
 
     private func tick() {
-        if core.poll() { refresh() }
+        if core.poll() {
+            refresh()
+        } else if !searchWords.isEmpty {
+            // The index and the language model answer a search a moment later.
+            let found = core.messages()
+            if found != messages { messages = found }
+        }
+        if searchOnMeaning {
+            let status = core.meaningStatus()
+            if status != meaningStatus { meaningStatus = status }
+        }
     }
 
     func refresh() {
         accounts = core.accounts()
         folders = core.folders()
+        allAccountsFolders = core.allAccountsFolders()
+        searchOnMeaning = core.searchOnMeaning()
+        meaningStatus = core.meaningStatus()
         messages = core.messages()
         openMessage = core.openMessage()
         isSample = core.isSample()
@@ -64,7 +83,33 @@ final class Store: ObservableObject {
         core.flush()
     }
 
-    var selectedFolder: FolderRow? { folders.first(where: \.selected) }
+    var selectedFolder: FolderRow? { allAccountsFolders.first(where: \.selected) ?? folders.first(where: \.selected) }
+
+    // MARK: Search
+
+    /// Searches every folder of every account, or the open folder only; empty words end the
+    /// search.
+    func search(_ words: String, allFolders: Bool) {
+        let words = words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : words
+        searchWords = words
+        core.search(words: words, allFolders: allFolders)
+        messages = core.messages()
+    }
+
+    /// Switches search on meaning on (the language model is downloaded once) or off.
+    func setSearchOnMeaning(_ on: Bool) {
+        do {
+            try core.setSearchOnMeaning(on: on)
+        } catch {
+            problem = error.localizedDescription
+        }
+        refresh()
+    }
+
+    func retryMeaning() {
+        core.retryMeaning()
+        refresh()
+    }
 
     func run(_ command: String, _ params: [String: Any] = [:]) {
         let data = (try? JSONSerialization.data(withJSONObject: params)) ?? Data("{}".utf8)
