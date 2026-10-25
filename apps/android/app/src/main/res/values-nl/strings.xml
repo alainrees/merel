@@ -219,4 +219,17 @@
     <string name="accept_hint">Plak de uitnodigingslink die je kreeg.</string>
     <string name="done">Klaar</string>
     <string name="accept">Aannemen</string>
+    <string name="more">Meer</string>
+    <string name="new_message">Nieuw bericht</string>
+    <string name="reply">Beantwoorden</string>
+    <string name="reply_all">Allen beantwoorden</string>
+    <string name="forward">Doorsturen</string>
+    <string name="not_sent">Het bericht is niet verstuurd: %1$s</string>
+    <string name="choose_send_account">Kies het account waarmee je verstuurt.</string>
+    <string name="to">Aan</string>
+    <string name="cc">CC</string>
+    <string name="bcc">BCC</string>
+    <string name="add_cc_bcc">CC en BCC toevoegen</string>
+    <string name="discard_message">Dit bericht weggooien?</string>
+    <string name="discard">Weggooien</string>
 </resources>

@@ -91,6 +91,16 @@
         }
       }
     },
+    "Aan": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To"
+          }
+        }
+      }
+    },
     "Aannemen": {
       "localizations": {
         "en": {
@@ -191,6 +201,16 @@
         }
       }
     },
+    "Allen beantwoorden": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reply all"
+          }
+        }
+      }
+    },
     "Andere": {
       "localizations": {
         "en": {
@@ -227,6 +247,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Archive"
+          }
+        }
+      }
+    },
+    "BCC": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BCC"
+          }
+        }
+      }
+    },
+    "Beantwoorden": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reply"
           }
         }
       }
@@ -347,6 +387,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Attachment %@"
+          }
+        }
+      }
+    },
+    "CC": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CC"
+          }
+        }
+      }
+    },
+    "CC en BCC toevoegen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add CC and BCC"
           }
         }
       }
@@ -541,6 +601,16 @@
         }
       }
     },
+    "Dit bericht weggooien?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discard this message?"
+          }
+        }
+      }
+    },
     "Dit contact is er niet meer": {
       "localizations": {
         "en": {
@@ -557,6 +627,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Delete this contact?"
+          }
+        }
+      }
+    },
+    "Doorsturen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forward"
           }
         }
       }
@@ -881,6 +961,16 @@
         }
       }
     },
+    "Het bericht is niet verstuurd: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The message was not sent: %@"
+          }
+        }
+      }
+    },
     "Het eerste bericht gaat versleuteld weg zodra %@ de uitnodiging heeft aangenomen.": {
       "localizations": {
         "en": {
@@ -977,6 +1067,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Choose a calendar."
+          }
+        }
+      }
+    },
+    "Kies het account waarmee je verstuurt.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose the account to send from."
           }
         }
       }
@@ -1167,6 +1267,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nothing found"
+          }
+        }
+      }
+    },
+    "Nieuw bericht": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New message"
           }
         }
       }
@@ -1917,6 +2027,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "View"
+          }
+        }
+      }
+    },
+    "Weggooien": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discard"
           }
         }
       }

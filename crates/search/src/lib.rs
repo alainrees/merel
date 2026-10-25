@@ -840,10 +840,11 @@ fn snippet(fold: &mut TextAnalyzer, nl: &mut TextAnalyzer, en: &mut TextAnalyzer
     while start > 0 && !scan.is_char_boundary(start) {
         start -= 1;
     }
+    // Past the space, which may be more than one byte (a non-breaking space, say).
     if start > 0
-        && let Some(space) = scan[start..first.start].find(char::is_whitespace)
+        && let Some((space, c)) = scan[start..first.start].char_indices().find(|(_, c)| c.is_whitespace())
     {
-        start += space + 1;
+        start += space + c.len_utf8();
     }
     let mut end = (start + SNIPPET_CHARS).min(scan.len());
     while end < scan.len() && !scan.is_char_boundary(end) {
@@ -1075,6 +1076,24 @@ mod tests {
         assert_eq!(marked, ["facturen", "café"], "stems and accents are marked too");
         let by_sender = i.search(Terms { words: &words(&["sanne"]), ..Default::default() }, &scope(), false);
         assert_eq!(by_sender[0].snippet, None, "nothing in the text to show");
+    }
+
+    #[test]
+    fn a_snippet_starts_after_a_space_of_more_than_one_byte() {
+        let mut i = Index::in_memory().unwrap();
+        // Non-breaking spaces before the word, as in many newsletters, with every offset tried.
+        for n in 0..8u32 {
+            let text = format!("{}{}\u{a0}woord\u{a0}{}offerte en meer", "x".repeat(n as usize), "lang\u{a0}".repeat(12), "y ".repeat(3));
+            i.add_text("a", &header(n, "Lies", "Nieuws", 999_000_000 + i64::from(n)), &text, &[]).unwrap();
+        }
+        i.commit_if_due(true).unwrap();
+        let hits = i.search(Terms { words: &words(&["offerte"]), ..Default::default() }, &scope(), false);
+        assert_eq!(hits.len(), 8);
+        for hit in hits {
+            let snip = hit.snippet.expect("a snippet");
+            let marked: Vec<&str> = snip.marks.iter().map(|r| &snip.text[r.clone()]).collect();
+            assert_eq!(marked, ["offerte"], "{snip:?}");
+        }
     }
 
     #[test]

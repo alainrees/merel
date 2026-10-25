@@ -19,6 +19,9 @@ final class Store: ObservableObject {
     @Published private(set) var taskPlaces: [TaskPlace] = []
     @Published private(set) var allContacts: [ContactRow] = []
     @Published private(set) var contactPlaces: [TaskPlace] = []
+    @Published private(set) var sendPlaces: [TaskPlace] = []
+    /// Messages handed to the engine that have not gone out yet, to say so when one fails.
+    private var sending: Set<UInt64> = []
     @Published private(set) var chats: [ChatRow] = []
     @Published private(set) var chatPlaces: [TaskPlace] = []
     /// Contact pictures already fetched, by contact id.
@@ -77,6 +80,7 @@ final class Store: ObservableObject {
         if signIn == .waiting {
             followSignIn()
         }
+        if !sending.isEmpty { followSending() }
         if searchOnMeaning {
             let status = core.meaningStatus()
             if status != meaningStatus { meaningStatus = status }
@@ -101,6 +105,7 @@ final class Store: ObservableObject {
             photos = [:]
         }
         contactPlaces = core.contactPlaces()
+        sendPlaces = core.sendPlaces()
         chats = core.chats()
         chatPlaces = core.chatPlaces()
         revision &+= 1
@@ -172,6 +177,39 @@ final class Store: ObservableObject {
             return String(localized: "Controleer \(fieldName(field)).")
         } catch {
             return error.localizedDescription
+        }
+    }
+
+    // MARK: Writing mail
+
+    func startCompose(_ kind: ComposeKind) -> ComposeForm { core.startCompose(kind: kind) }
+
+    /// Sends the message; on a form that is not right, what to tell the person. A failure on
+    /// the way out comes later as `problem`.
+    func sendMail(_ form: ComposeForm) -> String? {
+        do {
+            sending.insert(try core.sendMail(form: form))
+            return nil
+        } catch CoreError.Invalid(_) {
+            return String(localized: "Kies het account waarmee je verstuurt.")
+        } catch CoreError.Command(let reason) {
+            return reason
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private func followSending() {
+        for id in sending {
+            switch core.sendState(id: id) {
+            case .sent:
+                sending.remove(id)
+            case .failed(let reason):
+                sending.remove(id)
+                problem = String(localized: "Het bericht is niet verstuurd: \(reason)")
+            case .sending:
+                break
+            }
         }
     }
 

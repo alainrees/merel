@@ -2,6 +2,18 @@
 
 package nl.merel.app
 
+import androidx.compose.material.icons.automirrored.outlined.Forward
+import androidx.compose.material.icons.automirrored.outlined.Reply
+import androidx.compose.material.icons.automirrored.outlined.ReplyAll
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -77,6 +89,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import uniffi.merel_mobile.AccountRow
+import uniffi.merel_mobile.ComposeKind
 import uniffi.merel_mobile.ConnectionState
 import uniffi.merel_mobile.SignInState
 import uniffi.merel_mobile.FolderRole
@@ -85,6 +98,10 @@ import uniffi.merel_mobile.MessageRow
 
 @Composable
 fun MailTab(store: Store) {
+    store.composing?.let {
+        ComposeScreen(store, it)
+        return
+    }
     when (store.screen) {
         MailScreen.Folders -> FolderScreen(store)
         MailScreen.Messages -> MessagesScreen(store)
@@ -314,6 +331,13 @@ fun MessagesScreen(store: Store) {
                     }
                 }
             }
+            if (store.sendPlaces.isNotEmpty()) {
+                FloatingActionButton(
+                    onClick = { store.compose(ComposeKind.NEW) },
+                    containerColor = h.accent,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+                ) { Icon(Icons.Outlined.Edit, stringResource(R.string.new_message), tint = h.onAccent) }
+            }
         }
     }
 }
@@ -429,6 +453,25 @@ fun MessageScreen(store: Store) {
             },
             actions = {
                 if (m != null) {
+                    if (store.sendPlaces.isNotEmpty()) {
+                        IconButton(onClick = { store.compose(ComposeKind.REPLY) }) {
+                            Icon(Icons.AutoMirrored.Outlined.Reply, stringResource(R.string.reply))
+                        }
+                        Box {
+                            var more by remember { mutableStateOf(false) }
+                            IconButton(onClick = { more = true }) { Icon(Icons.Outlined.MoreVert, stringResource(R.string.more)) }
+                            DropdownMenu(more, { more = false }) {
+                                DropdownMenuItem(
+                                    { Text(stringResource(R.string.reply_all)) }, { more = false; store.compose(ComposeKind.REPLY_ALL) },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Outlined.ReplyAll, null) },
+                                )
+                                DropdownMenuItem(
+                                    { Text(stringResource(R.string.forward)) }, { more = false; store.compose(ComposeKind.FORWARD) },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Forward, null) },
+                                )
+                            }
+                        }
+                    }
                     IconButton(onClick = { store.run("message.archive"); store.screen = MailScreen.Messages }) {
                         Icon(Icons.Outlined.Archive, stringResource(R.string.archive))
                     }

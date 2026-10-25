@@ -510,6 +510,39 @@ pub struct ChatMessageRow {
     pub invite: Option<String>,
 }
 
+/// What a new message starts from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ComposeKind {
+    New,
+    /// To the open message's sender, quoting it.
+    Reply,
+    /// To the sender and everyone else on the open message but the account itself.
+    ReplyAll,
+    /// The open message's text under a "Doorgestuurd bericht" header, with no recipient yet.
+    Forward,
+}
+
+/// A message being written: addresses as typed, separated by commas or semicolons.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ComposeForm {
+    pub account_id: String,
+    pub to: String,
+    pub cc: String,
+    pub bcc: String,
+    pub subject: String,
+    pub body: String,
+    /// The Message-ID this answers, so the reply stays in its conversation.
+    pub in_reply_to: Option<String>,
+}
+
+/// Where a message handed to [`MerelCore::send_mail`] is.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum SendState {
+    Sending,
+    Sent,
+    Failed { reason: String },
+}
+
 /// The engine, shared by the app's screens.
 #[derive(uniffi::Object)]
 pub struct MerelCore {
@@ -1088,6 +1121,121 @@ impl MerelCore {
         engine.accept_invite(&account_id, link.trim()).map_err(|reason| CoreError::Command { reason })
     }
 
+    /// The accounts mail can go from, for the "Van" choice.
+    pub fn send_places(&self) -> Vec<TaskPlace> {
+        let engine = self.engine();
+        engine
+            .session
+            .accounts
+            .iter()
+            .filter(|a| a.id != "sample")
+            .map(|a| TaskPlace { account_id: a.id.clone(), address: a.address.email().to_string() })
+            .collect()
+    }
+
+    /// A new message: empty, or an answer to (or forward of) the open message, from the account
+    /// it is in, with that account's signature above the quoted text.
+    pub fn start_compose(&self, kind: ComposeKind) -> ComposeForm {
+        let engine = self.engine();
+        let s = &engine.session;
+        let original = if kind == ComposeKind::New { None } else { s.selected() };
+        let account = original
+            .and_then(|m| s.folder(&m.folder_id))
+            .and_then(|f| s.accounts.iter().find(|a| a.id == f.account_id))
+            .or_else(|| s.current_account())
+            .filter(|a| a.id != "sample")
+            .or_else(|| s.accounts.iter().find(|a| a.id != "sample"));
+        let mut form = ComposeForm {
+            account_id: account.map(|a| a.id.clone()).unwrap_or_default(),
+            to: String::new(),
+            cc: String::new(),
+            bcc: String::new(),
+            subject: String::new(),
+            body: String::new(),
+            in_reply_to: None,
+        };
+        if let Some(m) = original {
+            let text = s.selected_body().map(|b| b.text.replace("\r\n", "\n")).unwrap_or_default();
+            let me = account.map(|a| a.address.email().to_string()).unwrap_or_default();
+            let date = chrono::DateTime::from_timestamp(m.date, 0)
+                .map(|d| d.with_timezone(&chrono::Local).format("%d-%m-%Y %H:%M").to_string())
+                .unwrap_or_default();
+            match kind {
+                ComposeKind::New => {}
+                ComposeKind::Reply | ComposeKind::ReplyAll => {
+                    form.to = m.from.email().to_string();
+                    if kind == ComposeKind::ReplyAll {
+                        form.cc =
+                            m.to.iter()
+                                .filter(|a| !a.email().eq_ignore_ascii_case(&me) && !a.email().eq_ignore_ascii_case(m.from.email()))
+                                .map(|a| a.email().to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                    }
+                    form.subject = prefixed(&m.subject, "Re:");
+                    form.in_reply_to = m.message_id.clone();
+                    let header = merel_i18n::tr_args(
+                        "reply-header",
+                        &[("date", date.as_str().into()), ("name", m.from.display().into()), ("email", m.from.email().into())],
+                    );
+                    let quoted = text.lines().map(|l| format!("> {l}")).collect::<Vec<_>>().join("\n");
+                    form.body = format!("\n\n{header}\n{quoted}");
+                }
+                ComposeKind::Forward => {
+                    form.subject = prefixed(&m.subject, "Fw:");
+                    let to: Vec<&str> = m.to.iter().map(|a| a.email()).collect();
+                    let header = merel_i18n::tr_args(
+                        "forward-header",
+                        &[
+                            ("name", m.from.display().into()),
+                            ("email", m.from.email().into()),
+                            ("date", date.as_str().into()),
+                            ("subject", m.subject.as_str().into()),
+                            ("to", to.join("; ").into()),
+                        ],
+                    );
+                    form.body = format!("\n\n{header}\n\n{text}");
+                }
+            }
+        }
+        let signature = account.map(|a| a.signature.trim_matches(['\n', ' ', '\t']).to_string()).unwrap_or_default();
+        if !signature.is_empty() {
+            form.body = format!("\n\n-- \n{signature}{}", form.body);
+        }
+        form
+    }
+
+    /// Sends the message: the addresses are checked first, then it goes out (signed or
+    /// encrypted the way the account's settings say) and lands in Verzonden items. Gives an id
+    /// for [`send_state`](Self::send_state).
+    pub fn send_mail(&self, form: ComposeForm) -> Result<u64, CoreError> {
+        let stored = merel_model::StoredDraft {
+            account_id: form.account_id.clone(),
+            to: form.to,
+            cc: form.cc,
+            bcc: form.bcc,
+            subject: form.subject,
+            body: form.body,
+            in_reply_to: form.in_reply_to,
+            ..merel_model::StoredDraft::default()
+        }
+        .cleaned();
+        let draft = stored.to_draft().map_err(|reason| CoreError::Command { reason })?;
+        let mut engine = self.engine();
+        if !engine.session.accounts.iter().any(|a| a.id == form.account_id && a.id != "sample") {
+            return Err(CoreError::Invalid { field: "account_id".into() });
+        }
+        Ok(engine.send(&form.account_id, draft))
+    }
+
+    pub fn send_state(&self, id: u64) -> SendState {
+        match self.engine().session.outbox.get(&id) {
+            Some(merel_engine::SendState::Sent) => SendState::Sent,
+            Some(merel_engine::SendState::Failed(reason)) => SendState::Failed { reason: reason.clone() },
+            Some(merel_engine::SendState::Sending) | None => SendState::Sending,
+        }
+    }
+
     pub fn open_message(&self) -> Option<MessageView> {
         let engine = self.engine();
         let s = &engine.session;
@@ -1287,6 +1435,12 @@ fn row(s: &Session, m: &merel_model::MessageHeader) -> MessageRow {
     }
 }
 
+/// `subject` with `prefix` ("Re:", "Fw:") in front, unless it already starts with it.
+fn prefixed(subject: &str, prefix: &str) -> String {
+    let s = subject.trim();
+    if s.to_ascii_lowercase().starts_with(&prefix.to_ascii_lowercase()) { s.to_string() } else { format!("{prefix} {s}") }
+}
+
 /// How many megabytes switching search on meaning on downloads, for the switch's explanation.
 #[uniffi::export]
 pub fn meaning_download_megabytes() -> u64 {
@@ -1347,6 +1501,32 @@ mod tests {
         assert_eq!(core.messages().len(), 1, "the computer's search words work too");
         core.search(String::new(), true);
         assert!(core.messages().is_empty(), "no search: the open folder again");
+    }
+
+    #[test]
+    fn a_reply_quotes_the_message_and_sending_checks_the_addresses() {
+        let core = MerelCore::sample();
+        core.run("message.select".into(), r#"{"id":"m2"}"#.into()).unwrap();
+        let open = core.open_message().unwrap();
+        let reply = core.start_compose(ComposeKind::Reply);
+        assert_eq!(reply.subject, "Re: Offerte drukwerk", "Re: is not doubled");
+        assert_eq!(reply.to, "ravi@example.org");
+        if let Some(text) = open.text.as_deref().and_then(|t| t.lines().next()) {
+            assert!(reply.body.contains(&format!("> {text}")), "{}", reply.body);
+        }
+        let forward = core.start_compose(ComposeKind::Forward);
+        assert_eq!(forward.subject, "Fw: Re: Offerte drukwerk");
+        assert!(forward.to.is_empty());
+        let new = core.start_compose(ComposeKind::New);
+        assert!(new.subject.is_empty() && new.body.is_empty() && new.account_id.is_empty(), "the sample sends from nowhere");
+        assert!(core.send_places().is_empty());
+        let bad = ComposeForm { to: "geen adres".into(), ..new.clone() };
+        assert!(matches!(core.send_mail(bad), Err(CoreError::Command { .. })));
+        let none = ComposeForm { to: String::new(), ..new.clone() };
+        assert!(matches!(core.send_mail(none), Err(CoreError::Command { .. })));
+        let sample = ComposeForm { to: "a@b.nl".into(), ..new };
+        assert!(matches!(core.send_mail(sample), Err(CoreError::Invalid { field }) if field == "account_id"));
+        assert_eq!(core.send_state(99), SendState::Sending);
     }
 
     #[test]
