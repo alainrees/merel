@@ -8,7 +8,7 @@ final class SafariSignIn: SignInBrowser, @unchecked Sendable {
     static let shared = SafariSignIn()
     @MainActor private weak var shown: SFSafariViewController?
 
-    func open(url: String) -> Bool {
+    func show(url: String) -> Bool {
         guard let link = URL(string: url), link.scheme == "https" else { return false }
         Task { @MainActor in
             guard let top = Self.topController() else { return }

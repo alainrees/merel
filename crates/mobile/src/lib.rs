@@ -122,13 +122,13 @@ pub enum SignInState {
 #[uniffi::export(with_foreign)]
 pub trait SignInBrowser: Send + Sync {
     /// False when no browser could be opened.
-    fn open(&self, url: String) -> bool;
+    fn show(&self, url: String) -> bool;
 }
 
 /// Sets the browser sign-in links open in, once, when the app starts.
 #[uniffi::export]
 pub fn set_sign_in_browser(browser: Arc<dyn SignInBrowser>) {
-    merel_engine::signin::set_browser(Box::new(move |url| if browser.open(url.to_string()) { Ok(()) } else { Err("no browser".into()) }));
+    merel_engine::signin::set_browser(Box::new(move |url| if browser.show(url.to_string()) { Ok(()) } else { Err("no browser".into()) }));
 }
 
 /// What a folder is for, so the app can pick its icon and its place in the list.

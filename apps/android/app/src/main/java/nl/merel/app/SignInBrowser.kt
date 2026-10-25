@@ -17,7 +17,7 @@ object CustomTabSignIn : SignInBrowser {
     @Volatile
     var activity: WeakReference<Activity> = WeakReference(null)
 
-    override fun open(url: String): Boolean {
+    override fun show(url: String): Boolean {
         val uri = Uri.parse(url)
         val shown = activity.get() ?: return false
         if (uri.scheme != "https") return false
