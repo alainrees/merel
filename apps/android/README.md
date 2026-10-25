@@ -6,7 +6,7 @@ screens follow the approved designs in the project's `ontwerp/mobiel/` folder.
 What works now: sample mail, adding an IMAP/SMTP account (password sealed with a key in the
 Android Keystore), the folder tree, the message list with search, filters, pull to refresh and
 swipe to archive or delete, and reading a message. Server certificates are checked by Android's
-own trust store (rustls-platform-verifier). Calendar, chat, contacts and tasks follow.
+own trust store (rustls-platform-verifier). The calendar, tasks and contacts work as on the iPhone. Chat follows.
 
 ## Building
 

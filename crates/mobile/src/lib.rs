@@ -357,6 +357,68 @@ pub struct TaskForm {
     pub repeat_interval: u32,
 }
 
+/// What a phone number is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum PhoneKind {
+    Mobile,
+    Work,
+    Home,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct PhoneNumber {
+    pub kind: PhoneKind,
+    pub number: String,
+}
+
+/// A postal address as the lines to show, and whether it is for work or home.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct PostalAddress {
+    pub work: bool,
+    pub home: bool,
+    pub lines: Vec<String>,
+}
+
+/// One contact, as the list and the contact card show it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ContactRow {
+    pub id: String,
+    pub name: String,
+    /// The first one is where mail goes.
+    pub emails: Vec<String>,
+    pub phones: Vec<PhoneNumber>,
+    pub company: String,
+    pub job_title: String,
+    pub department: String,
+    pub website: String,
+    /// `YYYY-MM-DD`.
+    pub birthday: Option<String>,
+    pub addresses: Vec<PostalAddress>,
+    pub notes: String,
+    /// Whether [`MerelCore::contact_photo`] has a picture.
+    pub has_photo: bool,
+    /// The account it lives in and its address; `None` for a contact kept on this phone.
+    pub account_id: Option<String>,
+    pub account_address: Option<String>,
+}
+
+/// What the contact form gives back. What the form does not show (addresses, birthday,
+/// photo, …) stays as it was.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ContactForm {
+    /// `None` for a new contact.
+    pub id: Option<String>,
+    /// For a new contact: the account to keep it in, `None` for this phone.
+    pub account_id: Option<String>,
+    pub name: String,
+    pub company: String,
+    pub job_title: String,
+    pub emails: Vec<String>,
+    pub phones: Vec<PhoneNumber>,
+    pub notes: String,
+}
+
 /// What the appointment form gives back.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct AppointmentForm {
@@ -677,6 +739,73 @@ impl MerelCore {
         self.engine().run("task.delete", &serde_json::json!({ "id": id })).map_err(command_error)
     }
 
+    /// The contacts holding every word of `query` (all of them for an empty one), by name.
+    pub fn contacts(&self, query: String) -> Vec<ContactRow> {
+        let engine = self.engine();
+        let s = &engine.session;
+        s.contacts_matching(&query).into_iter().map(|c| contact_row(s, c)).collect()
+    }
+
+    /// The contact's picture as the image file came (JPEG, PNG, GIF or WebP).
+    pub fn contact_photo(&self, id: String) -> Option<Vec<u8>> {
+        self.engine().session.contact(&id)?.photo.as_ref().map(|p| p.0.clone())
+    }
+
+    /// The accounts a new contact can be kept in, besides this phone.
+    pub fn contact_places(&self) -> Vec<TaskPlace> {
+        self.task_places()
+    }
+
+    /// Saves a new contact, or changes the one with `form.id`.
+    pub fn save_contact(&self, form: ContactForm) -> Result<(), CoreError> {
+        let mut engine = self.engine();
+        let phones: Vec<merel_model::Phone> = form
+            .phones
+            .iter()
+            .filter(|p| !p.number.trim().is_empty())
+            .map(|p| {
+                let kind = match p.kind {
+                    PhoneKind::Mobile => merel_model::PhoneKind::Mobile,
+                    PhoneKind::Work => merel_model::PhoneKind::Work,
+                    PhoneKind::Home => merel_model::PhoneKind::Home,
+                    PhoneKind::Other => merel_model::PhoneKind::Other,
+                };
+                merel_model::Phone::new(kind, p.number.trim())
+            })
+            .collect();
+        let emails: Vec<String> = form.emails.iter().map(|e| e.trim().to_string()).filter(|e| !e.is_empty()).collect();
+        let mut params = serde_json::json!({
+            "name": form.name,
+            "company": form.company,
+            "job_title": form.job_title,
+            "emails": emails,
+            "phones": phones,
+            "notes": form.notes,
+        });
+        match &form.id {
+            Some(id) => {
+                let stored = engine.session.contact(id).ok_or(CoreError::Invalid { field: "id".into() })?;
+                // Formatting the phone does not show stays while the notes do.
+                if stored.notes == form.notes
+                    && let Some(rich) = &stored.notes_rich
+                {
+                    params["notes_rich"] = serde_json::to_value(rich).unwrap_or_default();
+                }
+                params["id"] = id.clone().into();
+            }
+            None => {
+                if let Some(account) = &form.account_id {
+                    params["account_id"] = account.clone().into();
+                }
+            }
+        }
+        engine.run("contact.save", &params).map_err(command_error)
+    }
+
+    pub fn delete_contact(&self, id: String) -> Result<(), CoreError> {
+        self.engine().run("contact.delete", &serde_json::json!({ "id": id })).map_err(command_error)
+    }
+
     /// The selected message, or `None` when nothing is open.
     pub fn open_message(&self) -> Option<MessageView> {
         let engine = self.engine();
@@ -771,6 +900,43 @@ fn task_row(s: &Session, t: &merel_model::Task) -> TaskRow {
         }),
         repeat_interval: t.repeat.map(|r| r.interval).unwrap_or(1),
         repeat_text: t.repeat.map(|r| merel_engine::calendar::repeat_text(Some(r.frequency), r.interval)),
+    }
+}
+
+fn contact_row(s: &Session, c: &merel_model::Contact) -> ContactRow {
+    use merel_model::PlaceKind;
+    ContactRow {
+        id: c.id.clone(),
+        name: c.name.clone(),
+        emails: c.emails.clone(),
+        phones: c
+            .phones
+            .iter()
+            .map(|p| PhoneNumber {
+                kind: match p.kind {
+                    merel_model::PhoneKind::Mobile => PhoneKind::Mobile,
+                    merel_model::PhoneKind::Work => PhoneKind::Work,
+                    merel_model::PhoneKind::Home => PhoneKind::Home,
+                    merel_model::PhoneKind::Other => PhoneKind::Other,
+                },
+                number: p.number.clone(),
+            })
+            .collect(),
+        company: c.company.clone(),
+        job_title: c.job_title.clone(),
+        department: c.department.clone(),
+        website: c.website.clone(),
+        birthday: c.birthday.clone(),
+        addresses: c
+            .places
+            .iter()
+            .map(|p| PostalAddress { work: p.kind == PlaceKind::Work, home: p.kind == PlaceKind::Home, lines: p.lines() })
+            .filter(|a| !a.lines.is_empty())
+            .collect(),
+        notes: c.notes.clone(),
+        has_photo: c.photo.is_some(),
+        account_id: c.account_id.clone(),
+        account_address: c.account_id.as_deref().and_then(|id| s.accounts.iter().find(|a| a.id == id)).map(|a| a.address.email().to_string()),
     }
 }
 
@@ -928,6 +1094,36 @@ mod tests {
         assert_eq!(core.tasks(true).len(), before + 2, "the next one of the repeat came");
         core.delete_task(t.id.clone()).unwrap();
         assert!(!core.tasks(true).iter().any(|x| x.id == t.id));
+    }
+
+    #[test]
+    fn contacts_are_added_changed_and_deleted() {
+        let core = MerelCore::sample();
+        let form = ContactForm {
+            id: None,
+            account_id: None,
+            name: "Eva Jansen".into(),
+            company: "Drukkerij Jansen".into(),
+            job_title: String::new(),
+            emails: vec!["eva@example.org".into(), " ".into()],
+            phones: vec![PhoneNumber { kind: PhoneKind::Mobile, number: "06 12345678".into() }],
+            notes: String::new(),
+        };
+        assert!(
+            matches!(core.save_contact(ContactForm { name: String::new(), emails: Vec::new(), ..form.clone() }), Err(CoreError::Invalid { field }) if field == "name")
+        );
+        assert!(
+            matches!(core.save_contact(ContactForm { emails: vec!["geen adres".into()], ..form.clone() }), Err(CoreError::Invalid { field }) if field == "emails")
+        );
+        core.save_contact(form.clone()).unwrap();
+        let c = core.contacts("drukkerij".into()).into_iter().next().unwrap();
+        assert_eq!((c.name.as_str(), c.emails.clone(), c.phones[0].kind), ("Eva Jansen", vec!["eva@example.org".to_string()], PhoneKind::Mobile));
+        assert!(!c.has_photo && core.contact_photo(c.id.clone()).is_none());
+        core.save_contact(ContactForm { id: Some(c.id.clone()), job_title: "Eigenaar".into(), ..form }).unwrap();
+        assert_eq!(core.contacts("eva".into()).len(), 1, "changed, not added");
+        assert_eq!(core.contacts("eva".into())[0].job_title, "Eigenaar");
+        core.delete_contact(c.id).unwrap();
+        assert!(core.contacts("eva".into()).is_empty());
     }
 
     #[test]

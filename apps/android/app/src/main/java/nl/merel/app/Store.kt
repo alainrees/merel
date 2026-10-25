@@ -17,6 +17,8 @@ import uniffi.merel_mobile.AccountRow
 import uniffi.merel_mobile.AppointmentForm
 import uniffi.merel_mobile.AppointmentRow
 import uniffi.merel_mobile.CalendarRow
+import uniffi.merel_mobile.ContactForm
+import uniffi.merel_mobile.ContactRow
 import uniffi.merel_mobile.CoreException
 import uniffi.merel_mobile.FolderRole
 import uniffi.merel_mobile.FolderRow
@@ -81,6 +83,15 @@ class Store(app: Application) : AndroidViewModel(app) {
     var showDoneTasks by mutableStateOf(false)
         private set
     var editingTask by mutableStateOf<TaskForm?>(null)
+    var contacts by mutableStateOf(emptyList<ContactRow>())
+        private set
+    var contactPlaces by mutableStateOf(emptyList<TaskPlace>())
+        private set
+    /** What the contact search holds, the contact open on its card, and the form being edited. */
+    var contactQuery by mutableStateOf("")
+        private set
+    var openContact by mutableStateOf<String?>(null)
+    var editingContact by mutableStateOf<ContactForm?>(null)
     /** The last thing that went wrong, for a dialog; cleared when shown. */
     var problem by mutableStateOf<String?>(null)
 
@@ -120,6 +131,8 @@ class Store(app: Application) : AndroidViewModel(app) {
         calendars = core.calendars()
         tasks = core.tasks(showDoneTasks)
         taskPlaces = core.taskPlaces()
+        contacts = core.contacts(contactQuery)
+        contactPlaces = core.contactPlaces()
         revision++
     }
 
@@ -245,6 +258,36 @@ class Store(app: Application) : AndroidViewModel(app) {
         } catch (e: CoreException) {
             problem = e.message
         }
+        refresh()
+    }
+
+    fun searchContacts(query: String) {
+        contactQuery = query
+        contacts = core.contacts(query)
+    }
+
+    fun contact(id: String): ContactRow? = core.contacts("").firstOrNull { it.id == id }
+
+    fun contactPhoto(id: String): ByteArray? = core.contactPhoto(id)
+
+    /** Saves the contact; on failure, which field was wrong (or the reason). */
+    fun saveContact(form: ContactForm): Result<Unit> =
+        try {
+            core.saveContact(form)
+            Result.success(Unit)
+        } catch (e: CoreException) {
+            Result.failure(e)
+        } finally {
+            refresh()
+        }
+
+    fun deleteContact(id: String) {
+        try {
+            core.deleteContact(id)
+        } catch (e: CoreException) {
+            problem = e.message
+        }
+        openContact = null
         refresh()
     }
 
