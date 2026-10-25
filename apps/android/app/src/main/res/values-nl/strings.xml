@@ -100,4 +100,19 @@
         <item quantity="one">%1$d minuut van tevoren</item>
         <item quantity="other">%1$d minuten van tevoren</item>
     </plurals>
+    <string name="all_accounts">Alle accounts</string>
+    <string name="scope_all">Alle mappen</string>
+    <string name="scope_folder">Deze map</string>
+    <string name="search_settings">Zoeken</string>
+    <string name="search_on_meaning">Zoeken op betekenis</string>
+    <string name="search_on_meaning_hint">Merel vindt dan ook mail over hetzelfde als er andere woorden in staan, zoals een offerte als je naar een voorstel zoekt. Een klein taalmodel doet dat op je telefoon zelf; je mail gaat nergens heen. Aanzetten haalt het model eenmalig op (%1$d MB), gebruik daarvoor bij voorkeur wifi.</string>
+    <string name="related">Over hetzelfde</string>
+    <string name="meaning_downloading">Taalmodel ophalen…</string>
+    <string name="meaning_of">%1$s van %2$s</string>
+    <string name="meaning_preparing">Taalmodel klaarmaken…</string>
+    <string name="meaning_reading">Berichten lezen…</string>
+    <string name="meaning_ready">Klaar</string>
+    <string name="meaning_read">%1$d berichten gelezen · model %2$s</string>
+    <string name="meaning_failed">Ophalen is niet gelukt</string>
+    <string name="try_again">Opnieuw proberen</string>
 </resources>

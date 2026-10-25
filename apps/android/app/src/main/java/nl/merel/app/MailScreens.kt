@@ -62,10 +62,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -93,9 +89,10 @@ fun MailTab(store: Store) {
         MailScreen.Messages -> MessagesScreen(store)
         MailScreen.Message -> MessageScreen(store)
         MailScreen.AddAccount -> AddAccountScreen(store)
+        MailScreen.SearchSettings -> SearchSettingsScreen(store)
     }
     BackHandler(enabled = store.screen != MailScreen.Messages) {
-        store.screen = MailScreen.Messages
+        store.screen = if (store.screen == MailScreen.SearchSettings) MailScreen.Folders else MailScreen.Messages
     }
 }
 
@@ -134,20 +131,38 @@ fun FolderScreen(store: Store) {
                     Text(stringResource(R.string.sample_hint), color = h.dim, modifier = Modifier.padding(4.dp, 8.dp))
                 }
             }
+            val open = { folder: FolderRow ->
+                store.search("")
+                store.selectFolder(folder.id)
+                store.screen = MailScreen.Messages
+            }
+            if (store.allAccountsFolders.isNotEmpty()) {
+                item(key = "head-all") {
+                    Text(
+                        stringResource(R.string.all_accounts), color = h.dim, style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(4.dp, 16.dp, 4.dp, 6.dp).semantics { heading() },
+                    )
+                }
+                items(store.allAccountsFolders, key = { it.id }) { folder -> FolderLine(folder, 0) { open(folder) } }
+            }
             for (account in store.accounts) {
                 item(key = "head-" + account.id) { AccountHeader(account) }
                 items(tree(store.folders, account.id), key = { it.first.id }) { (folder, depth) ->
-                    FolderLine(folder, depth) {
-                        store.selectFolder(folder.id)
-                        store.screen = MailScreen.Messages
-                    }
+                    FolderLine(folder, depth) { open(folder) }
                 }
             }
             item {
-                TextButton(onClick = { store.screen = MailScreen.AddAccount }, modifier = Modifier.padding(vertical = 8.dp)) {
+                TextButton(onClick = { store.screen = MailScreen.AddAccount }, modifier = Modifier.padding(top = 8.dp)) {
                     Icon(Icons.Outlined.PersonAdd, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.add_account))
+                }
+            }
+            item {
+                TextButton(onClick = { store.screen = MailScreen.SearchSettings }, modifier = Modifier.padding(bottom = 8.dp)) {
+                    Icon(Icons.Outlined.Search, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.search_settings))
                 }
             }
         }
@@ -224,12 +239,11 @@ private fun tree(all: List<FolderRow>, account: String): List<Pair<FolderRow, In
 @Composable
 fun MessagesScreen(store: Store) {
     val h = LocalHelder.current
-    var query by rememberSaveable { mutableStateOf("") }
-    val shown = store.messages.filter {
-        val q = query.trim().lowercase()
-        q.isEmpty() || listOf(it.sender, it.senderAddress, it.subject, it.preview).any { f -> f.lowercase().contains(q) }
-    }
+    val query = store.searchWords
+    val shown = store.messages
     val folder = store.selectedFolder
+    // The folder of each row is worth showing when the list holds more than one folder.
+    val showPlace = (query.isNotBlank() && store.allFolders) || folder?.accountId?.isEmpty() == true
     Column(Modifier.fillMaxSize()) {
         // The search bar of the design: the menu opens the folders, the avatar the accounts.
         Row(
@@ -241,7 +255,7 @@ fun MessagesScreen(store: Store) {
                 Icon(Icons.Outlined.Menu, stringResource(R.string.open_folders))
             }
             TextField(
-                value = query, onValueChange = { query = it }, singleLine = true,
+                value = query, onValueChange = { store.search(it) }, singleLine = true,
                 placeholder = { Text(stringResource(R.string.search_mail)) },
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                 colors = TextFieldDefaults.colors(
@@ -264,6 +278,15 @@ fun MessagesScreen(store: Store) {
         }
         LazyRow(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             item { Spacer(Modifier.width(8.dp)) }
+            // Where a search looks: every folder of every account (the start), or this folder.
+            if (query.isNotBlank()) {
+                items(listOf(true to R.string.scope_all, false to R.string.scope_folder)) { (all, label) ->
+                    FilterChip(
+                        selected = store.allFolders == all, onClick = { store.search(query, all) }, label = { Text(stringResource(label)) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = h.selected, selectedLabelColor = h.ink, containerColor = h.card),
+                    )
+                }
+            }
             items(listOf("all" to R.string.filter_all, "unread" to R.string.filter_unread, "flagged" to R.string.filter_flagged, "attachments" to R.string.filter_attachments)) { (value, label) ->
                 FilterChip(
                     selected = store.filter == value, onClick = { store.showOnly(value) }, label = { Text(stringResource(label)) },
@@ -279,7 +302,7 @@ fun MessagesScreen(store: Store) {
             } else {
                 LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                     items(shown, key = { it.id }) { m ->
-                        SwipeRow(store, m)
+                        SwipeRow(store, m, showPlace)
                         HorizontalDivider(color = h.border)
                     }
                 }
@@ -290,7 +313,7 @@ fun MessagesScreen(store: Store) {
 
 /** Swipe left to delete, right to archive, as the design shows. */
 @Composable
-private fun SwipeRow(store: Store, m: MessageRow) {
+private fun SwipeRow(store: Store, m: MessageRow, showPlace: Boolean) {
     val h = LocalHelder.current
     val state = rememberSwipeToDismissBoxState(confirmValueChange = { value ->
         when (value) {
@@ -315,7 +338,7 @@ private fun SwipeRow(store: Store, m: MessageRow) {
             }
         },
     ) {
-        MessageLine(m, Modifier.background(h.card).clickable {
+        MessageLine(m, showPlace, Modifier.background(h.card).clickable {
             store.open(m.id)
             store.screen = MailScreen.Message
         })
@@ -323,15 +346,22 @@ private fun SwipeRow(store: Store, m: MessageRow) {
 }
 
 @Composable
-private fun MessageLine(m: MessageRow, modifier: Modifier) {
+private fun MessageLine(m: MessageRow, showPlace: Boolean, modifier: Modifier) {
     val h = LocalHelder.current
     val unread = stringResource(R.string.unread)
     val flagged = stringResource(R.string.flagged)
     val attachment = stringResource(R.string.with_attachment)
     val subject = m.subject.ifEmpty { stringResource(R.string.no_subject) }
     val date = shortDate(m.date)
+    // "Postvak IN · jij@example.org", with "Over hetzelfde" in front of a message found on meaning alone.
+    val place = listOfNotNull(
+        stringResource(R.string.related).takeIf { m.related },
+        m.folderName.takeIf { showPlace },
+        m.accountAddress.takeIf { showPlace && it.isNotEmpty() },
+    ).joinToString(" · ")
     val summary = listOfNotNull(
         unread.takeIf { m.unread }, flagged.takeIf { m.flagged }, m.sender, subject, date, attachment.takeIf { m.hasAttachments }, m.preview,
+        place.takeIf { it.isNotEmpty() },
     ).joinToString(", ")
     Row(modifier.fillMaxWidth().padding(12.dp, 11.dp).semantics(mergeDescendants = true) { contentDescription = summary }) {
         Box(Modifier.width(10.dp).padding(top = 16.dp)) {
@@ -355,6 +385,9 @@ private fun MessageLine(m: MessageRow, modifier: Modifier) {
                 maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium,
             )
             Text(m.preview, color = h.dim, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+            if (place.isNotEmpty()) {
+                Text(place, color = h.dim, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }

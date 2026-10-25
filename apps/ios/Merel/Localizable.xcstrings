@@ -12,12 +12,32 @@
         }
       }
     },
+    "%@ van %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ of %2$@"
+          }
+        }
+      }
+    },
     "%@, hele dag": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "%@, all day"
+          }
+        }
+      }
+    },
+    "%lld berichten gelezen · model %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld messages read · model %2$@"
           }
         }
       }
@@ -112,6 +132,26 @@
         }
       }
     },
+    "Alle accounts": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All accounts"
+          }
+        }
+      }
+    },
+    "Alle mappen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All folders"
+          }
+        }
+      }
+    },
     "Alleen deze keer": {
       "localizations": {
         "en": {
@@ -168,6 +208,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Fetching message…"
+          }
+        }
+      }
+    },
+    "Berichten lezen…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading messages…"
           }
         }
       }
@@ -298,6 +348,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "This appointment is gone"
+          }
+        }
+      }
+    },
+    "Deze map": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This folder"
           }
         }
       }
@@ -492,6 +552,16 @@
         }
       }
     },
+    "Klaar": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready"
+          }
+        }
+      }
+    },
     "Locatie": {
       "localizations": {
         "en": {
@@ -538,6 +608,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Clear flag"
+          }
+        }
+      }
+    },
+    "Merel vindt dan ook mail over hetzelfde als er andere woorden in staan, zoals een offerte als je naar een voorstel zoekt. Een klein taalmodel doet dat op je telefoon zelf; je mail gaat nergens heen. Aanzetten haalt het model eenmalig op (%lld MB), gebruik daarvoor bij voorkeur wifi.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merel then also finds mail about the same thing in other words, such as a quote when you search for a proposal. A small language model does this on your phone itself; your mail goes nowhere. Switching it on downloads the model once (%lld MB), preferably over Wi-Fi."
           }
         }
       }
@@ -642,12 +722,42 @@
         }
       }
     },
+    "Ophalen is niet gelukt": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The download failed"
+          }
+        }
+      }
+    },
+    "Opnieuw proberen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try again"
+          }
+        }
+      }
+    },
     "Organisator": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Organiser"
+          }
+        }
+      }
+    },
+    "Over hetzelfde": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "About the same"
           }
         }
       }
@@ -698,6 +808,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "TLS"
+          }
+        }
+      }
+    },
+    "Taalmodel klaarmaken…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing the language model…"
+          }
+        }
+      }
+    },
+    "Taalmodel ophalen…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Downloading the language model…"
           }
         }
       }
@@ -792,12 +922,32 @@
         }
       }
     },
+    "Zoeken": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search"
+          }
+        }
+      }
+    },
     "Zoeken in mail": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Search mail"
+          }
+        }
+      }
+    },
+    "Zoeken op betekenis": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search on meaning"
           }
         }
       }
