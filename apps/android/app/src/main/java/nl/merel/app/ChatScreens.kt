@@ -74,7 +74,6 @@ import androidx.compose.ui.unit.dp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -152,16 +151,6 @@ private fun ChatList(store: Store, go: (ChatPage) -> Unit) {
                 modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
             ) { Icon(Icons.Outlined.Edit, stringResource(R.string.new_chat), tint = h.onAccent) }
         }
-    }
-}
-
-/** Today the time, else the day. */
-private fun shortDate(epoch: Long): String {
-    val at = Instant.ofEpochSecond(epoch).atZone(ZoneId.systemDefault())
-    return if (at.toLocalDate() == LocalDate.now()) {
-        at.format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
-    } else {
-        at.format(DateTimeFormatter.ofPattern("d MMM"))
     }
 }
 
