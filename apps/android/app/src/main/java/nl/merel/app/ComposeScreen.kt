@@ -35,10 +35,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import uniffi.merel_mobile.ComposeForm
+import uniffi.merel_mobile.CoreException
 
 /** The address list `field` with its last, half-typed address replaced by `address`. */
 private fun withPicked(field: String, address: String): String =
     (field.split(',', ';').map { it.trim() }.dropLast(1).filter { it.isNotEmpty() } + address).joinToString(", ") + ", "
+
+/** Contacts matching the address being typed at the end of `value`; a tap puts one in its place. */
+@Composable
+private fun Suggestions(store: Store, value: String, pick: (String) -> Unit) {
+    val h = LocalHelder.current
+    val typed = value.split(',', ';').last().trim()
+    if (typed.length < 2) return
+    store.contacts.filter { c -> c.name.contains(typed, true) || c.emails.any { it.contains(typed, true) } }.take(4).forEach { c ->
+        val address = c.emails.firstOrNull() ?: return@forEach
+        Column(Modifier.fillMaxWidth().clickable { pick(withPicked(value, address)) }.padding(vertical = 6.dp)) {
+            Text(c.name)
+            Text(address, color = h.dim, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
 
 /** Nieuw bericht, Beantwoorden, Allen beantwoorden or Doorsturen: Van, Aan, CC/BCC, Onderwerp and the text. */
 @Composable
@@ -57,7 +74,13 @@ fun ComposeScreen(store: Store, original: ComposeForm) {
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     val chooseAccount = stringResource(R.string.choose_send_account)
     val changed = to != original.to || cc != original.cc || bcc != original.bcc || subject != original.subject || text != original.body
-    val close = { if (changed) confirmDiscard = true else store.composing = null }
+    val close: () -> Unit = {
+        if (changed) {
+            confirmDiscard = true
+        } else {
+            store.composing = null
+        }
+    }
     BackHandler(onBack = close)
 
     val title = when {
@@ -86,32 +109,19 @@ fun ComposeScreen(store: Store, original: ComposeForm) {
                 Choice(stringResource(R.string.from), store.sendPlaces.map { it.accountId to it.address }, account) { account = it }
             }
             val email = KeyboardOptions(keyboardType = KeyboardType.Email, autoCorrectEnabled = false)
-            @Composable
-            fun Suggestions(field: String, value: String, pick: (String) -> Unit) {
-                if (typing != field) return
-                val typed = value.split(',', ';').last().trim()
-                if (typed.length < 2) return
-                store.contacts.filter { c -> c.name.contains(typed, true) || c.emails.any { it.contains(typed, true) } }.take(4).forEach { c ->
-                    val address = c.emails.firstOrNull() ?: return@forEach
-                    Column(Modifier.fillMaxWidth().clickable { pick(withPicked(value, address)) }.padding(vertical = 6.dp)) {
-                        Text(c.name)
-                        Text(address, color = h.dim, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
             OutlinedTextField(
-                to, { to = it; typing = "to" }, label = { Text(stringResource(R.string.to)) }, keyboardOptions = email, modifier = Modifier.fillMaxWidth(),
+                to, { v -> to = v; typing = "to" }, label = { Text(stringResource(R.string.to)) }, keyboardOptions = email, modifier = Modifier.fillMaxWidth(),
             )
-            Suggestions("to", to) { to = it }
+            if (typing == "to") Suggestions(store, to) { v -> to = v }
             if (copies) {
                 OutlinedTextField(
-                    cc, { cc = it; typing = "cc" }, label = { Text(stringResource(R.string.cc)) }, keyboardOptions = email, modifier = Modifier.fillMaxWidth(),
+                    cc, { v -> cc = v; typing = "cc" }, label = { Text(stringResource(R.string.cc)) }, keyboardOptions = email, modifier = Modifier.fillMaxWidth(),
                 )
-                Suggestions("cc", cc) { cc = it }
+                if (typing == "cc") Suggestions(store, cc) { v -> cc = v }
                 OutlinedTextField(
-                    bcc, { bcc = it; typing = "bcc" }, label = { Text(stringResource(R.string.bcc)) }, keyboardOptions = email, modifier = Modifier.fillMaxWidth(),
+                    bcc, { v -> bcc = v; typing = "bcc" }, label = { Text(stringResource(R.string.bcc)) }, keyboardOptions = email, modifier = Modifier.fillMaxWidth(),
                 )
-                Suggestions("bcc", bcc) { bcc = it }
+                if (typing == "bcc") Suggestions(store, bcc) { v -> bcc = v }
             } else {
                 TextButton(onClick = { copies = true }) { Text(stringResource(R.string.add_cc_bcc), color = h.ink) }
             }

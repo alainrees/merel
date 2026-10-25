@@ -89,6 +89,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import uniffi.merel_mobile.AccountRow
+import uniffi.merel_mobile.ComposeKind
 import uniffi.merel_mobile.ConnectionState
 import uniffi.merel_mobile.SignInState
 import uniffi.merel_mobile.FolderRole

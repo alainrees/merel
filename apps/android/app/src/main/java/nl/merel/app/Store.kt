@@ -19,6 +19,8 @@ import uniffi.merel_mobile.AppointmentRow
 import uniffi.merel_mobile.CalendarRow
 import uniffi.merel_mobile.ChatMessageRow
 import uniffi.merel_mobile.ChatRow
+import uniffi.merel_mobile.ComposeForm
+import uniffi.merel_mobile.ComposeKind
 import uniffi.merel_mobile.ContactForm
 import uniffi.merel_mobile.ContactRow
 import uniffi.merel_mobile.CoreException
@@ -29,6 +31,7 @@ import uniffi.merel_mobile.MeaningStatus
 import uniffi.merel_mobile.MerelCore
 import uniffi.merel_mobile.MessageRow
 import uniffi.merel_mobile.MessageView
+import uniffi.merel_mobile.SendState
 import uniffi.merel_mobile.SignInProvider
 import uniffi.merel_mobile.SignInState
 import uniffi.merel_mobile.TaskForm
