@@ -15,6 +15,12 @@ final class Store: ObservableObject {
     @Published private(set) var openMessage: MessageView?
     @Published private(set) var isSample = true
     @Published private(set) var calendars: [CalendarRow] = []
+    @Published private(set) var tasks: [TaskRow] = []
+    @Published private(set) var taskPlaces: [TaskPlace] = []
+    /// Whether the task list shows the finished tasks too.
+    @Published var showDoneTasks = false {
+        didSet { tasks = core.tasks(includeDone: showDoneTasks) }
+    }
     /// One up whenever the engine took in news, so the calendar asks for its appointments again.
     @Published private(set) var revision = 0
     /// What the search field looks for; empty when it is not searching.
@@ -75,6 +81,8 @@ final class Store: ObservableObject {
         openMessage = core.openMessage()
         isSample = core.isSample()
         calendars = core.calendars()
+        tasks = core.tasks(includeDone: showDoneTasks)
+        taskPlaces = core.taskPlaces()
         revision &+= 1
     }
 
@@ -178,6 +186,43 @@ final class Store: ObservableObject {
     func deleteAppointment(_ a: AppointmentRow, onlyThis: Bool) {
         do {
             try core.deleteAppointment(id: a.id, occurrence: onlyThis ? a.start : nil)
+        } catch {
+            problem = error.localizedDescription
+        }
+        refresh()
+    }
+
+    // MARK: Tasks
+
+    /// Saves the task; on failure, what to tell the person.
+    func saveTask(_ form: TaskForm) -> String? {
+        defer { refresh() }
+        do {
+            try core.saveTask(form: form)
+            return nil
+        } catch CoreError.Invalid(let field) {
+            switch field {
+            case "title": return String(localized: "Geef de taak een naam.")
+            case "repeat": return String(localized: "Een taak die terugkomt heeft een einddatum nodig.")
+            default: return String(localized: "Dat lukte niet.")
+            }
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    func completeTask(_ id: String, done: Bool) {
+        do {
+            try core.completeTask(id: id, done: done)
+        } catch {
+            problem = error.localizedDescription
+        }
+        refresh()
+    }
+
+    func deleteTask(_ id: String) {
+        do {
+            try core.deleteTask(id: id)
         } catch {
             problem = error.localizedDescription
         }

@@ -636,7 +636,7 @@ private fun AppointmentEditor(store: Store, original: AppointmentForm) {
 }
 
 @Composable
-private fun <T> Choice(label: String, options: List<Pair<T, String>>, value: T, onChange: (T) -> Unit) {
+fun <T> Choice(label: String, options: List<Pair<T, String>>, value: T, onChange: (T) -> Unit) {
     var open by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(expanded = open, onExpandedChange = { open = it }) {
         OutlinedTextField(
@@ -654,7 +654,7 @@ private fun <T> Choice(label: String, options: List<Pair<T, String>>, value: T, 
 
 /** A date (and, unless all day, a time) the person picks in Material's dialogs. */
 @Composable
-private fun DateTimeRow(label: String, value: LocalDateTime, allDay: Boolean, onChange: (LocalDateTime) -> Unit) {
+fun DateTimeRow(label: String, value: LocalDateTime, allDay: Boolean, onChange: (LocalDateTime) -> Unit) {
     val h = LocalHelder.current
     var pickingDate by remember { mutableStateOf(false) }
     var pickingTime by remember { mutableStateOf(false) }

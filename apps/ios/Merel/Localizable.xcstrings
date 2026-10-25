@@ -242,6 +242,16 @@
         }
       }
     },
+    "Bewaren in": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep in"
+          }
+        }
+      }
+    },
     "Bij het begin": {
       "localizations": {
         "en": {
@@ -298,6 +308,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "That did not work"
+          }
+        }
+      }
+    },
+    "Dat lukte niet.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That did not work."
+          }
+        }
+      }
+    },
+    "Datum": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Date"
           }
         }
       }
@@ -362,6 +392,16 @@
         }
       }
     },
+    "Deze taak verwijderen?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete this task?"
+          }
+        }
+      }
+    },
     "Dit onderdeel komt binnenkort naar de telefoon.": {
       "localizations": {
         "en": {
@@ -382,6 +422,16 @@
         }
       }
     },
+    "Een taak die terugkomt heeft een einddatum nodig.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A repeating task needs a due date."
+          }
+        }
+      }
+    },
     "Een terugkerende afspraak wijzig je voorlopig op de computer.": {
       "localizations": {
         "en": {
@@ -392,12 +442,62 @@
         }
       }
     },
+    "Einddatum": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Due date"
+          }
+        }
+      }
+    },
     "Einde": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "End"
+          }
+        }
+      }
+    },
+    "Elk jaar": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every year"
+          }
+        }
+      }
+    },
+    "Elke dag": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every day"
+          }
+        }
+      }
+    },
+    "Elke maand": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every month"
+          }
+        }
+      }
+    },
+    "Elke week": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every week"
           }
         }
       }
@@ -432,6 +532,16 @@
         }
       }
     },
+    "Geef de taak een naam.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Give the task a name."
+          }
+        }
+      }
+    },
     "Geen bericht geopend": {
       "localizations": {
         "en": {
@@ -458,6 +568,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "No reminder"
+          }
+        }
+      }
+    },
+    "Geen taken": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No tasks"
           }
         }
       }
@@ -502,12 +622,42 @@
         }
       }
     },
+    "Herhalen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Repeat"
+          }
+        }
+      }
+    },
     "Herinnering": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Reminder"
+          }
+        }
+      }
+    },
+    "Hoge prioriteit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "High priority"
+          }
+        }
+      }
+    },
+    "Hoog": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "High"
           }
         }
       }
@@ -558,6 +708,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ready"
+          }
+        }
+      }
+    },
+    "Laag": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Low"
+          }
+        }
+      }
+    },
+    "Lage prioriteit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Low priority"
+          }
+        }
+      }
+    },
+    "Later": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Later"
           }
         }
       }
@@ -622,6 +802,16 @@
         }
       }
     },
+    "Morgen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tomorrow"
+          }
+        }
+      }
+    },
     "Naam": {
       "localizations": {
         "en": {
@@ -652,12 +842,42 @@
         }
       }
     },
+    "Nieuwe taak": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New task"
+          }
+        }
+      }
+    },
     "Nog geen antwoord": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "No answer yet"
+          }
+        }
+      }
+    },
+    "Nooit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Never"
+          }
+        }
+      }
+    },
+    "Normaal": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Normal"
           }
         }
       }
@@ -692,6 +912,16 @@
         }
       }
     },
+    "Om de %lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every %lld"
+          }
+        }
+      }
+    },
     "Onderwerp": {
       "localizations": {
         "en": {
@@ -718,6 +948,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Online meeting"
+          }
+        }
+      }
+    },
+    "Op deze telefoon": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On this phone"
           }
         }
       }
@@ -772,6 +1012,16 @@
         }
       }
     },
+    "Prioriteit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Priority"
+          }
+        }
+      }
+    },
     "Probleem met dit account": {
       "localizations": {
         "en": {
@@ -812,6 +1062,36 @@
         }
       }
     },
+    "Taak": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Task"
+          }
+        }
+      }
+    },
+    "Taak verwijderen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete task"
+          }
+        }
+      }
+    },
+    "Taak wijzigen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit task"
+          }
+        }
+      }
+    },
     "Taalmodel klaarmaken…": {
       "localizations": {
         "en": {
@@ -838,6 +1118,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tasks"
+          }
+        }
+      }
+    },
+    "Te laat": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Overdue"
+          }
+        }
+      }
+    },
+    "Tik op + om een taak toe te voegen.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tap + to add a task."
           }
         }
       }
@@ -892,6 +1192,36 @@
         }
       }
     },
+    "Voltooid": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Completed"
+          }
+        }
+      }
+    },
+    "Voltooide taken tonen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show completed tasks"
+          }
+        }
+      }
+    },
+    "Voltooien": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Complete"
+          }
+        }
+      }
+    },
     "Voorlopig": {
       "localizations": {
         "en": {
@@ -908,6 +1238,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Password"
+          }
+        }
+      }
+    },
+    "Weer openen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reopen"
+          }
+        }
+      }
+    },
+    "Weergave": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View"
           }
         }
       }
@@ -948,6 +1298,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Search on meaning"
+          }
+        }
+      }
+    },
+    "Zonder datum": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No date"
           }
         }
       }

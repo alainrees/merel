@@ -297,6 +297,66 @@ pub struct AppointmentRow {
     pub attendees: Vec<AttendeeRow>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum TaskPriority {
+    Low,
+    Normal,
+    High,
+}
+
+/// How a finished task comes back, every `interval` of these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum TaskRepeat {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+}
+
+/// One task in the list.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct TaskRow {
+    pub id: String,
+    pub title: String,
+    pub notes: String,
+    /// Local midnight of the due day, Unix seconds; `None` for no deadline.
+    pub due: Option<i64>,
+    pub priority: TaskPriority,
+    pub done: bool,
+    /// When it was finished, Unix seconds.
+    pub completed: Option<i64>,
+    /// The account it lives in and its address; `None` for a task kept on this phone.
+    pub account_id: Option<String>,
+    pub account_address: Option<String>,
+    pub repeat: Option<TaskRepeat>,
+    pub repeat_interval: u32,
+    /// "Elke week", "Om de 2 weken", …: the repeat in words.
+    pub repeat_text: Option<String>,
+}
+
+/// Where a new task can be kept: an account that stores tasks.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct TaskPlace {
+    pub account_id: String,
+    pub address: String,
+}
+
+/// What the task form gives back.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct TaskForm {
+    /// `None` for a new task.
+    pub id: Option<String>,
+    /// For a new task: the account to keep it in, `None` for this phone.
+    pub account_id: Option<String>,
+    pub title: String,
+    pub notes: String,
+    pub due: Option<i64>,
+    pub priority: TaskPriority,
+    /// Only for a task on this phone, and it needs a due day.
+    pub repeat: Option<TaskRepeat>,
+    pub repeat_interval: u32,
+}
+
 /// What the appointment form gives back.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct AppointmentForm {
@@ -548,6 +608,75 @@ impl MerelCore {
         .map_err(command_error)
     }
 
+    /// The tasks: open ones first by due day and priority, then (with `include_done`) the
+    /// finished ones, newest first.
+    pub fn tasks(&self, include_done: bool) -> Vec<TaskRow> {
+        use merel_engine::tasks::TaskFilter;
+        let engine = self.engine();
+        let s = &engine.session;
+        s.tasks_filtered(if include_done { TaskFilter::All } else { TaskFilter::Open }).into_iter().map(|t| task_row(s, t)).collect()
+    }
+
+    /// The accounts a new task can be kept in, besides this phone.
+    pub fn task_places(&self) -> Vec<TaskPlace> {
+        let engine = self.engine();
+        engine.session.item_accounts().into_iter().map(|a| TaskPlace { account_id: a.id.clone(), address: a.address.email().to_string() }).collect()
+    }
+
+    /// Saves a new task, or changes the one with `form.id`.
+    pub fn save_task(&self, form: TaskForm) -> Result<(), CoreError> {
+        use merel_model::Frequency;
+        let mut engine = self.engine();
+        let priority = match form.priority {
+            TaskPriority::Low => "low",
+            TaskPriority::Normal => "normal",
+            TaskPriority::High => "high",
+        };
+        let repeat = form.repeat.map(|r| {
+            let frequency = match r {
+                TaskRepeat::Daily => Frequency::Daily,
+                TaskRepeat::Weekly => Frequency::Weekly,
+                TaskRepeat::Monthly => Frequency::Monthly,
+                TaskRepeat::Yearly => Frequency::Yearly,
+            };
+            serde_json::json!({ "frequency": frequency, "interval": form.repeat_interval.max(1) })
+        });
+        let mut params = serde_json::json!({
+            "title": form.title,
+            "notes": form.notes,
+            "due": form.due,
+            "priority": priority,
+            "repeat": repeat,
+        });
+        match &form.id {
+            Some(id) => {
+                let stored = engine.session.task(id).ok_or(CoreError::Invalid { field: "id".into() })?;
+                // Formatting the phone does not show stays while the notes do.
+                if stored.notes == form.notes
+                    && let Some(rich) = &stored.notes_rich
+                {
+                    params["notes_rich"] = serde_json::to_value(rich).unwrap_or_default();
+                }
+                params["id"] = id.clone().into();
+            }
+            None => {
+                if let Some(account) = &form.account_id {
+                    params["account_id"] = account.clone().into();
+                }
+            }
+        }
+        engine.run("task.save", &params).map_err(command_error)
+    }
+
+    /// Marks the task done, or open again.
+    pub fn complete_task(&self, id: String, done: bool) -> Result<(), CoreError> {
+        self.engine().run("task.complete", &serde_json::json!({ "id": id, "done": done })).map_err(command_error)
+    }
+
+    pub fn delete_task(&self, id: String) -> Result<(), CoreError> {
+        self.engine().run("task.delete", &serde_json::json!({ "id": id })).map_err(command_error)
+    }
+
     /// The selected message, or `None` when nothing is open.
     pub fn open_message(&self) -> Option<MessageView> {
         let engine = self.engine();
@@ -618,6 +747,33 @@ fn rgb([r, g, b]: [u8; 3]) -> u32 {
 }
 
 /// A field the engine named, for the form; anything else as it is.
+fn task_row(s: &Session, t: &merel_model::Task) -> TaskRow {
+    use merel_model::{Frequency, Priority};
+    TaskRow {
+        id: t.id.clone(),
+        title: t.title.clone(),
+        notes: t.notes.clone(),
+        due: t.due,
+        priority: match t.priority {
+            Priority::Low => TaskPriority::Low,
+            Priority::Normal => TaskPriority::Normal,
+            Priority::High => TaskPriority::High,
+        },
+        done: t.done,
+        completed: t.completed,
+        account_id: t.account_id.clone(),
+        account_address: t.account_id.as_deref().and_then(|id| s.accounts.iter().find(|a| a.id == id)).map(|a| a.address.email().to_string()),
+        repeat: t.repeat.map(|r| match r.frequency {
+            Frequency::Daily => TaskRepeat::Daily,
+            Frequency::Weekly => TaskRepeat::Weekly,
+            Frequency::Monthly => TaskRepeat::Monthly,
+            Frequency::Yearly => TaskRepeat::Yearly,
+        }),
+        repeat_interval: t.repeat.map(|r| r.interval).unwrap_or(1),
+        repeat_text: t.repeat.map(|r| merel_engine::calendar::repeat_text(Some(r.frequency), r.interval)),
+    }
+}
+
 fn command_error(e: CommandError) -> CoreError {
     match e {
         CommandError::Param(field) => CoreError::Invalid { field: field.into() },
@@ -744,6 +900,34 @@ mod tests {
         assert_eq!(core.messages().len(), 1, "the computer's search words work too");
         core.search(String::new(), true);
         assert!(core.messages().is_empty(), "no search: the open folder again");
+    }
+
+    #[test]
+    fn tasks_are_added_finished_and_deleted() {
+        let core = MerelCore::sample();
+        let form = |title: &str| TaskForm {
+            id: None,
+            account_id: None,
+            title: title.into(),
+            notes: String::new(),
+            due: Some(1_792_000_000),
+            priority: TaskPriority::High,
+            repeat: Some(TaskRepeat::Weekly),
+            repeat_interval: 2,
+        };
+        let before = core.tasks(true).len();
+        assert!(matches!(core.save_task(form("")), Err(CoreError::Invalid { field }) if field == "title"));
+        core.save_task(form("Weekrapport")).unwrap();
+        let t = core.tasks(false).into_iter().find(|t| t.title == "Weekrapport").unwrap();
+        assert_eq!((t.priority, t.repeat, t.repeat_interval, t.account_id.clone()), (TaskPriority::High, Some(TaskRepeat::Weekly), 2, None));
+        assert!(t.repeat_text.is_some());
+        core.save_task(TaskForm { id: Some(t.id.clone()), title: "Weekrapport sturen".into(), ..form("") }).unwrap();
+        assert_eq!(core.tasks(true).len(), before + 1, "changed, not added");
+        core.complete_task(t.id.clone(), true).unwrap();
+        assert!(!core.tasks(false).iter().any(|x| x.id == t.id), "done is out of the open list");
+        assert_eq!(core.tasks(true).len(), before + 2, "the next one of the repeat came");
+        core.delete_task(t.id.clone()).unwrap();
+        assert!(!core.tasks(true).iter().any(|x| x.id == t.id));
     }
 
     #[test]

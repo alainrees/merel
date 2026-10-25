@@ -25,6 +25,9 @@ import uniffi.merel_mobile.MeaningStatus
 import uniffi.merel_mobile.MerelCore
 import uniffi.merel_mobile.MessageRow
 import uniffi.merel_mobile.MessageView
+import uniffi.merel_mobile.TaskForm
+import uniffi.merel_mobile.TaskPlace
+import uniffi.merel_mobile.TaskRow
 
 /** Where the mail tab is: the folder list, a folder's messages, one message, or the account form. */
 enum class MailScreen { Folders, Messages, Message, AddAccount, SearchSettings }
@@ -70,6 +73,14 @@ class Store(app: Application) : AndroidViewModel(app) {
     var day by mutableStateOf(LocalDate.now())
     var openAppointment by mutableStateOf<Pair<String, Long>?>(null)
     var editing by mutableStateOf<AppointmentForm?>(null)
+    var tasks by mutableStateOf(emptyList<TaskRow>())
+        private set
+    var taskPlaces by mutableStateOf(emptyList<TaskPlace>())
+        private set
+    /** Whether the task list shows the finished tasks too, and the task form being edited. */
+    var showDoneTasks by mutableStateOf(false)
+        private set
+    var editingTask by mutableStateOf<TaskForm?>(null)
     /** The last thing that went wrong, for a dialog; cleared when shown. */
     var problem by mutableStateOf<String?>(null)
 
@@ -107,6 +118,8 @@ class Store(app: Application) : AndroidViewModel(app) {
         openMessage = core.openMessage()
         isSample = core.isSample()
         calendars = core.calendars()
+        tasks = core.tasks(showDoneTasks)
+        taskPlaces = core.taskPlaces()
         revision++
     }
 
@@ -198,6 +211,40 @@ class Store(app: Application) : AndroidViewModel(app) {
             problem = e.message
         }
         openAppointment = null
+        refresh()
+    }
+
+    fun showDone(on: Boolean) {
+        showDoneTasks = on
+        tasks = core.tasks(on)
+    }
+
+    /** Saves the task; on failure, which field was wrong (or the reason). */
+    fun saveTask(form: TaskForm): Result<Unit> =
+        try {
+            core.saveTask(form)
+            Result.success(Unit)
+        } catch (e: CoreException) {
+            Result.failure(e)
+        } finally {
+            refresh()
+        }
+
+    fun completeTask(id: String, done: Boolean) {
+        try {
+            core.completeTask(id, done)
+        } catch (e: CoreException) {
+            problem = e.message
+        }
+        refresh()
+    }
+
+    fun deleteTask(id: String) {
+        try {
+            core.deleteTask(id)
+        } catch (e: CoreException) {
+            problem = e.message
+        }
         refresh()
     }
 

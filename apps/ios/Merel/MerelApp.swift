@@ -17,7 +17,7 @@ struct MerelApp: App {
     }
 }
 
-/// The five modules along the bottom, as in the design; mail and the calendar are built.
+/// The five modules along the bottom, as in the design; mail, the calendar and tasks are built.
 struct RootView: View {
     @EnvironmentObject private var store: Store
 
@@ -31,7 +31,7 @@ struct RootView: View {
                 .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
             Soon(title: "Contacten")
                 .tabItem { Label("Contacten", systemImage: "person.2") }
-            Soon(title: "Taken")
+            TasksTab()
                 .tabItem { Label("Taken", systemImage: "checkmark.square") }
         }
         .alert(

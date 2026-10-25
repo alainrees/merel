@@ -8,7 +8,9 @@ folder tree with "Alle accounts" on top, the message list with pull to refresh a
 (archive, delete, flag, read/unread), reading a message, and the calendar. Search works as on the
 computer (the search index, search words such as `van:`, the text of attachments), in all folders or
 this one; search on meaning, switched on under Mappen > Zoeken, downloads the small language model
-once. Chat, contacts and tasks follow.
+once. Tasks: the open ones under Te laat, Vandaag, Morgen and Later, a tap on the circle to finish one,
+and a form for the due date, priority, repeat (tasks on the phone) and where to keep a new one. Chat
+and contacts follow.
 
 ## Running it on your own iPhone (free Apple ID)
 
