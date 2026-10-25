@@ -19,6 +19,8 @@ final class Store: ObservableObject {
     @Published private(set) var taskPlaces: [TaskPlace] = []
     @Published private(set) var allContacts: [ContactRow] = []
     @Published private(set) var contactPlaces: [TaskPlace] = []
+    @Published private(set) var chats: [ChatRow] = []
+    @Published private(set) var chatPlaces: [TaskPlace] = []
     /// Contact pictures already fetched, by contact id.
     private var photos: [String: Data] = [:]
     /// Whether the task list shows the finished tasks too.
@@ -99,6 +101,8 @@ final class Store: ObservableObject {
             photos = [:]
         }
         contactPlaces = core.contactPlaces()
+        chats = core.chats()
+        chatPlaces = core.chatPlaces()
         revision &+= 1
     }
 
@@ -168,6 +172,57 @@ final class Store: ObservableObject {
             return String(localized: "Controleer \(fieldName(field)).")
         } catch {
             return error.localizedDescription
+        }
+    }
+
+    // MARK: Chat
+
+    func chatMessages(_ id: String) -> [ChatMessageRow] { core.chatMessages(id: id) }
+    func openChat(_ id: String) { core.openChat(id: id) }
+
+    /// Sends `text` in the chat; on failure, what to tell the person.
+    func send(_ text: String, in chat: String) -> String? {
+        do {
+            try core.sendInChat(id: chat, text: text)
+            refresh()
+            return nil
+        } catch {
+            return chatProblem(error)
+        }
+    }
+
+    /// Starts a chat and gives its id, or what to tell the person.
+    func startChat(from account: String, with people: [String], name: String, text: String) -> Result<String, ChatFailure> {
+        do {
+            let id = try core.startChat(accountId: account, people: people, name: name, text: text)
+            refresh()
+            return .success(id)
+        } catch {
+            return .failure(ChatFailure(message: chatProblem(error)))
+        }
+    }
+
+    func inviteLink(_ account: String) -> Result<String, ChatFailure> {
+        do { return .success(try core.inviteLink(accountId: account)) } catch { return .failure(ChatFailure(message: chatProblem(error))) }
+    }
+
+    /// Accepts an invitation link; on failure, what to tell the person.
+    func acceptInvite(_ link: String, on account: String) -> String? {
+        do {
+            _ = try core.acceptInvite(accountId: account, link: link)
+            refresh()
+            return nil
+        } catch {
+            return chatProblem(error)
+        }
+    }
+
+    private func chatProblem(_ error: Error) -> String {
+        switch error {
+        case CoreError.Invalid(let field) where field == "people": String(localized: "Vul een geldig e-mailadres in.")
+        case CoreError.Invalid(let field) where field == "text": String(localized: "Typ eerst een bericht.")
+        case CoreError.Command(let reason): reason
+        default: error.localizedDescription
         }
     }
 
@@ -354,4 +409,9 @@ final class Store: ObservableObject {
         default: String(localized: "de server voor uitgaande mail")
         }
     }
+}
+
+/// What went wrong with a chat, for a `Result`.
+struct ChatFailure: Error {
+    let message: String
 }

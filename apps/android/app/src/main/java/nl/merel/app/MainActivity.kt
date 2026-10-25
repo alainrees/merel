@@ -27,10 +27,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 
 class MainActivity : ComponentActivity() {
     private val store: Store by viewModels()
@@ -48,7 +46,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** The five modules along the bottom, as in the design; all but chat are built. */
+/** The five modules along the bottom, as in the design. */
 @Composable
 fun Root(store: Store) {
     val h = LocalHelder.current
@@ -83,9 +81,9 @@ fun Root(store: Store) {
             when (tab) {
                 0 -> MailTab(store)
                 1 -> CalendarTab(store)
+                2 -> ChatsTab(store)
                 3 -> ContactsTab(store)
-                4 -> TasksTab(store)
-                else -> Soon()
+                else -> TasksTab(store)
             }
         }
     }
@@ -96,13 +94,5 @@ fun Root(store: Store) {
             title = { Text(stringResource(R.string.failed)) },
             text = { Text(message) },
         )
-    }
-}
-
-/** A module that is not on the phone yet. */
-@Composable
-fun Soon() {
-    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-        Text(stringResource(R.string.soon), color = LocalHelder.current.dim)
     }
 }

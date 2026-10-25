@@ -50,6 +50,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.browser:browser:1.8.0")
+    implementation("com.google.zxing:core:3.5.3")
     // UniFFI's Kotlin bindings call the Rust core through JNA.
     implementation("net.java.dev.jna:jna:5.17.0@aar")
     implementation("org.rustls:rustls-platform-verifier:$rustlsVerifierVersion")

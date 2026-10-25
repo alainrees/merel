@@ -6,7 +6,7 @@ screens follow the approved designs in the project's `ontwerp/mobiel/` folder.
 What works now: sample mail, adding an IMAP/SMTP account (password sealed with a key in the
 Android Keystore), the folder tree, the message list with search, filters, pull to refresh and
 swipe to archive or delete, and reading a message. Server certificates are checked by Android's
-own trust store (rustls-platform-verifier). The calendar, tasks and contacts work as on the iPhone. Microsoft 365 and Gmail sign in in a Custom Tab, back to a listener on `127.0.0.1` as on the computer. Chat follows.
+own trust store (rustls-platform-verifier). The calendar, tasks and contacts work as on the iPhone. Microsoft 365 and Gmail sign in in a Custom Tab, back to a listener on `127.0.0.1` as on the computer. Chat works as on the iPhone, always end-to-end encrypted.
 
 ## Building
 

@@ -91,6 +91,26 @@
         }
       }
     },
+    "Aannemen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accept"
+          }
+        }
+      }
+    },
+    "Account": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account"
+          }
+        }
+      }
+    },
     "Account toevoegen": {
       "localizations": {
         "en": {
@@ -241,6 +261,16 @@
         }
       }
     },
+    "Bericht": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Message"
+          }
+        }
+      }
+    },
     "Bericht ophalen…": {
       "localizations": {
         "en": {
@@ -327,6 +357,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Chat"
+          }
+        }
+      }
+    },
+    "Chatberichten gaan altijd versleuteld. Heeft iemand nog geen sleutel, dan stuurt Merel eerst een uitnodiging en gaat je bericht weg zodra die is aangenomen.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chat messages are always encrypted. When someone has no key yet, Merel first sends an invitation and your message goes out once it is accepted."
+          }
+        }
+      }
+    },
+    "Chatten kan met een IMAP- of Microsoft 365-account. Voeg er een toe onder Mail.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chat works with an IMAP or Microsoft 365 account. Add one under Mail."
           }
         }
       }
@@ -511,16 +561,6 @@
         }
       }
     },
-    "Dit onderdeel komt binnenkort naar de telefoon.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This part is coming to the phone soon."
-          }
-        }
-      }
-    },
     "E-mail": {
       "localizations": {
         "en": {
@@ -551,6 +591,16 @@
         }
       }
     },
+    "E-mailadressen, gescheiden door komma's": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Email addresses, separated by commas"
+          }
+        }
+      }
+    },
     "Een taak die terugkomt heeft een einddatum nodig.": {
       "localizations": {
         "en": {
@@ -577,6 +627,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "One of the email addresses is not right."
+          }
+        }
+      }
+    },
+    "Eerste bericht": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First message"
           }
         }
       }
@@ -781,6 +841,16 @@
         }
       }
     },
+    "Groepschat": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Group chat"
+          }
+        }
+      }
+    },
     "Hele dag": {
       "localizations": {
         "en": {
@@ -807,6 +877,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Reminder"
+          }
+        }
+      }
+    },
+    "Het eerste bericht gaat versleuteld weg zodra %@ de uitnodiging heeft aangenomen.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The first message goes out encrypted as soon as %@ has accepted the invitation."
           }
         }
       }
@@ -881,6 +961,16 @@
         }
       }
     },
+    "Jij: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You: %@"
+          }
+        }
+      }
+    },
     "Kies een agenda.": {
       "localizations": {
         "en": {
@@ -907,6 +997,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Low"
+          }
+        }
+      }
+    },
+    "Laat de ander deze code scannen met Merel of Delta Chat, of deel de link. Daarna kunnen jullie versleuteld chatten.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Let the other person scan this code with Merel or Delta Chat, or share the link. Then you can chat encrypted."
           }
         }
       }
@@ -1001,6 +1101,26 @@
         }
       }
     },
+    "Met": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "With"
+          }
+        }
+      }
+    },
+    "Mijn uitnodiging": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "My invitation"
+          }
+        }
+      }
+    },
     "Mobiel": {
       "localizations": {
         "en": {
@@ -1027,6 +1147,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Name"
+          }
+        }
+      }
+    },
+    "Naam van de groep": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Group name"
           }
         }
       }
@@ -1061,6 +1191,16 @@
         }
       }
     },
+    "Nieuwe chat": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New chat"
+          }
+        }
+      }
+    },
     "Nieuwe taak": {
       "localizations": {
         "en": {
@@ -1077,6 +1217,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "No answer yet"
+          }
+        }
+      }
+    },
+    "Nog geen chats": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No chats yet"
           }
         }
       }
@@ -1261,6 +1411,16 @@
         }
       }
     },
+    "Plak de uitnodigingslink die je kreeg. Een QR-code scan je met de Camera-app en kopieer je daarna.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste the invitation link you received. Scan a QR code with the Camera app and copy it."
+          }
+        }
+      }
+    },
     "Poort": {
       "localizations": {
         "en": {
@@ -1287,6 +1447,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Problem with this account"
+          }
+        }
+      }
+    },
+    "QR-code van je uitnodiging": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "QR code of your invitation"
           }
         }
       }
@@ -1327,6 +1497,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Kind of account"
+          }
+        }
+      }
+    },
+    "Start": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start"
           }
         }
       }
@@ -1461,6 +1641,16 @@
         }
       }
     },
+    "Tik op het potlood om een chat te beginnen. Berichten zijn altijd versleuteld.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tap the pencil to start a chat. Messages are always encrypted."
+          }
+        }
+      }
+    },
     "Toevoegen": {
       "localizations": {
         "en": {
@@ -1471,12 +1661,82 @@
         }
       }
     },
+    "Typ eerst een bericht.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type a message first."
+          }
+        }
+      }
+    },
     "Uitgaande mail (SMTP)": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Outgoing mail (SMTP)"
+          }
+        }
+      }
+    },
+    "Uitnodigen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invite"
+          }
+        }
+      }
+    },
+    "Uitnodiging aangenomen. De chat verschijnt zodra de ander heeft geantwoord.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invitation accepted. The chat shows up once the other person has answered."
+          }
+        }
+      }
+    },
+    "Uitnodiging aannemen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accept invitation"
+          }
+        }
+      }
+    },
+    "Uitnodiging delen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Share invitation"
+          }
+        }
+      }
+    },
+    "Uitnodiging openen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open an invitation"
+          }
+        }
+      }
+    },
+    "Van": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "From"
           }
         }
       }
@@ -1511,12 +1771,42 @@
         }
       }
     },
+    "Versleuteld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted"
+          }
+        }
+      }
+    },
+    "Versleuteld bericht wordt geopend…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening encrypted message…"
+          }
+        }
+      }
+    },
     "Verwijderen": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Delete"
+          }
+        }
+      }
+    },
+    "Verzenden": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send"
           }
         }
       }
@@ -1557,6 +1847,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tentative"
+          }
+        }
+      }
+    },
+    "Vul een geldig e-mailadres in.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fill in a valid email address."
+          }
+        }
+      }
+    },
+    "Wacht tot %@ de uitnodiging aanneemt": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for %@ to accept the invitation"
           }
         }
       }
@@ -1777,6 +2087,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "optional"
+          }
+        }
+      }
+    },
+    "🔒 Versleuteld bericht": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "🔒 Encrypted message"
           }
         }
       }
