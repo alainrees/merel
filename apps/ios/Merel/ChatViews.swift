@@ -77,7 +77,7 @@ struct ChatLine: View {
                 HStack {
                     Text(chat.title).fontWeight(chat.unread > 0 ? .bold : .regular).lineLimit(1)
                     Spacer()
-                    Text(Date(timeIntervalSince1970: TimeInterval(chat.last)), format: shortDate(chat.last))
+                    Text(shortDate(chat.last))
                         .font(.footnote).foregroundStyle(Helder.dim)
                 }
                 HStack {
@@ -105,12 +105,6 @@ struct ChatLine: View {
         guard let text = chat.preview else { return String(localized: "🔒 Versleuteld bericht") }
         return chat.lastMine ? String(localized: "Jij: \(text)") : text
     }
-}
-
-/// Today the time, else the day.
-func shortDate(_ epoch: Int64) -> Date.FormatStyle {
-    let date = Date(timeIntervalSince1970: TimeInterval(epoch))
-    return Calendar.current.isDateInToday(date) ? .dateTime.hour().minute() : .dateTime.day().month(.abbreviated)
 }
 
 /// One chat: the messages as bubbles, and a field to answer.
