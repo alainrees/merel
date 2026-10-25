@@ -975,7 +975,7 @@ impl MerelCore {
                 waiting: true,
             });
         }
-        out.sort_by(|a, b| b.last.cmp(&a.last));
+        out.sort_by_key(|c| std::cmp::Reverse(c.last));
         out
     }
 
