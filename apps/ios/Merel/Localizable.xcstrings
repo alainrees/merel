@@ -102,6 +102,16 @@
         }
       }
     },
+    "Adres": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Address"
+          }
+        }
+      }
+    },
     "Afspraak verwijderen?": {
       "localizations": {
         "en": {
@@ -192,12 +202,32 @@
         }
       }
     },
+    "Bedrijf": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Company"
+          }
+        }
+      }
+    },
     "Begin": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Start"
+          }
+        }
+      }
+    },
+    "Bellen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Call"
           }
         }
       }
@@ -242,6 +272,16 @@
         }
       }
     },
+    "Bewaard in": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kept in"
+          }
+        }
+      }
+    },
     "Bewaren in": {
       "localizations": {
         "en": {
@@ -278,6 +318,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Chat"
+          }
+        }
+      }
+    },
+    "Contact verwijderen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete contact"
+          }
+        }
+      }
+    },
+    "Contact wijzigen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit contact"
           }
         }
       }
@@ -402,6 +462,26 @@
         }
       }
     },
+    "Dit contact is er niet meer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This contact is gone"
+          }
+        }
+      }
+    },
+    "Dit contact verwijderen?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete this contact?"
+          }
+        }
+      }
+    },
     "Dit onderdeel komt binnenkort naar de telefoon.": {
       "localizations": {
         "en": {
@@ -412,12 +492,32 @@
         }
       }
     },
+    "E-mail": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Email"
+          }
+        }
+      }
+    },
     "E-mailadres": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Email address"
+          }
+        }
+      }
+    },
+    "E-mailadres toevoegen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add email address"
           }
         }
       }
@@ -438,6 +538,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "For now, change a recurring appointment on your computer."
+          }
+        }
+      }
+    },
+    "Een van de e-mailadressen klopt niet.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One of the email addresses is not right."
           }
         }
       }
@@ -502,6 +612,16 @@
         }
       }
     },
+    "Functie": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Job title"
+          }
+        }
+      }
+    },
     "Geaccepteerd": {
       "localizations": {
         "en": {
@@ -542,6 +662,16 @@
         }
       }
     },
+    "Geef het contact een naam of e-mailadres.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Give the contact a name or email address."
+          }
+        }
+      }
+    },
     "Geen bericht geopend": {
       "localizations": {
         "en": {
@@ -558,6 +688,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "No messages"
+          }
+        }
+      }
+    },
+    "Geen contacten": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No contacts"
           }
         }
       }
@@ -802,6 +942,16 @@
         }
       }
     },
+    "Mobiel": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mobile"
+          }
+        }
+      }
+    },
     "Morgen": {
       "localizations": {
         "en": {
@@ -828,6 +978,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nothing found"
+          }
+        }
+      }
+    },
+    "Nieuw contact": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New contact"
           }
         }
       }
@@ -888,6 +1048,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Notes"
+          }
+        }
+      }
+    },
+    "Nummer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Number"
+          }
+        }
+      }
+    },
+    "Nummer toevoegen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add number"
           }
         }
       }
@@ -1002,6 +1182,16 @@
         }
       }
     },
+    "Overig": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Other"
+          }
+        }
+      }
+    },
     "Poort": {
       "localizations": {
         "en": {
@@ -1048,6 +1238,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Server"
+          }
+        }
+      }
+    },
+    "Soort": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kind"
           }
         }
       }
@@ -1132,6 +1332,36 @@
         }
       }
     },
+    "Telefoon": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Phone"
+          }
+        }
+      }
+    },
+    "Thuis": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Home"
+          }
+        }
+      }
+    },
+    "Tik op + om een contact toe te voegen.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tap + to add a contact."
+          }
+        }
+      }
+    },
     "Tik op + om een taak toe te voegen.": {
       "localizations": {
         "en": {
@@ -1178,6 +1408,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Connecting…"
+          }
+        }
+      }
+    },
+    "Verjaardag": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Birthday"
           }
         }
       }
@@ -1242,6 +1482,16 @@
         }
       }
     },
+    "Website": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Website"
+          }
+        }
+      }
+    },
     "Weer openen": {
       "localizations": {
         "en": {
@@ -1262,6 +1512,16 @@
         }
       }
     },
+    "Werk": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Work"
+          }
+        }
+      }
+    },
     "Wijzig": {
       "localizations": {
         "en": {
@@ -1278,6 +1538,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Search"
+          }
+        }
+      }
+    },
+    "Zoeken in contacten": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search contacts"
           }
         }
       }

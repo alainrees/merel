@@ -17,6 +17,10 @@ final class Store: ObservableObject {
     @Published private(set) var calendars: [CalendarRow] = []
     @Published private(set) var tasks: [TaskRow] = []
     @Published private(set) var taskPlaces: [TaskPlace] = []
+    @Published private(set) var allContacts: [ContactRow] = []
+    @Published private(set) var contactPlaces: [TaskPlace] = []
+    /// Contact pictures already fetched, by contact id.
+    private var photos: [String: Data] = [:]
     /// Whether the task list shows the finished tasks too.
     @Published var showDoneTasks = false {
         didSet { tasks = core.tasks(includeDone: showDoneTasks) }
@@ -83,6 +87,12 @@ final class Store: ObservableObject {
         calendars = core.calendars()
         tasks = core.tasks(includeDone: showDoneTasks)
         taskPlaces = core.taskPlaces()
+        let contacts = core.contacts(query: "")
+        if contacts != allContacts {
+            allContacts = contacts
+            photos = [:]
+        }
+        contactPlaces = core.contactPlaces()
         revision &+= 1
     }
 
@@ -186,6 +196,48 @@ final class Store: ObservableObject {
     func deleteAppointment(_ a: AppointmentRow, onlyThis: Bool) {
         do {
             try core.deleteAppointment(id: a.id, occurrence: onlyThis ? a.start : nil)
+        } catch {
+            problem = error.localizedDescription
+        }
+        refresh()
+    }
+
+    // MARK: Contacts
+
+    /// The contacts holding every word of `query`, by name.
+    func contacts(matching query: String) -> [ContactRow] {
+        query.trimmingCharacters(in: .whitespaces).isEmpty ? allContacts : core.contacts(query: query)
+    }
+
+    func contact(_ id: String) -> ContactRow? { allContacts.first { $0.id == id } }
+
+    func contactPhoto(_ id: String) -> Data? {
+        if let data = photos[id] { return data }
+        let data = core.contactPhoto(id: id)
+        photos[id] = data
+        return data
+    }
+
+    /// Saves the contact; on failure, what to tell the person.
+    func saveContact(_ form: ContactForm) -> String? {
+        defer { refresh() }
+        do {
+            try core.saveContact(form: form)
+            return nil
+        } catch CoreError.Invalid(let field) {
+            switch field {
+            case "name": return String(localized: "Geef het contact een naam of e-mailadres.")
+            case "emails": return String(localized: "Een van de e-mailadressen klopt niet.")
+            default: return String(localized: "Dat lukte niet.")
+            }
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    func deleteContact(_ id: String) {
+        do {
+            try core.deleteContact(id: id)
         } catch {
             problem = error.localizedDescription
         }

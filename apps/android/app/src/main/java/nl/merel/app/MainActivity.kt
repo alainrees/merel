@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** The five modules along the bottom, as in the design; mail, the calendar and tasks are built. */
+/** The five modules along the bottom, as in the design; all but chat are built. */
 @Composable
 fun Root(store: Store) {
     val h = LocalHelder.current
@@ -82,6 +82,7 @@ fun Root(store: Store) {
             when (tab) {
                 0 -> MailTab(store)
                 1 -> CalendarTab(store)
+                3 -> ContactsTab(store)
                 4 -> TasksTab(store)
                 else -> Soon()
             }
