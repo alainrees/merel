@@ -27,7 +27,7 @@ use merel_store::Store;
 use serde::{Deserialize, Serialize};
 
 use crate::meaning::{Meaning, MeaningStatus};
-use crate::{AccountStatus, Event, Job, SAMPLE_ACCOUNT, Session, config, message_of, search};
+use crate::{AccountStatus, Event, Job, SAMPLE_ACCOUNT, Session, config, message_of};
 
 /// How many headers one job lists.
 pub const PAGE: u32 = 200;
@@ -140,7 +140,7 @@ pub struct Indexer {
     /// server no longer has can leave the index at the end.
     seen: HashMap<String, HashSet<String>>,
     /// What the last search was for, with the index generation it saw.
-    searched: Option<(String, bool, Option<String>, u64)>,
+    searched: Option<(String, bool, bool, Option<String>, u64)>,
     /// When the next jobs were last looked for, and whether a job just ended.
     last_plan: Option<Instant>,
     kick: bool,
@@ -595,14 +595,15 @@ impl Indexer {
             s.index_hits = None;
             return;
         };
-        let key = (s.search.clone(), s.search_all, s.selected_folder.clone(), index.generation());
+        let key = (s.search.clone(), s.search_all, s.search_exact, s.selected_folder.clone(), index.generation());
         if self.searched.as_ref() == Some(&key) {
             return;
         }
         self.searched = Some(key);
-        let query = search::Query::parse(&s.search);
+        let query = s.search_query();
         let terms = Terms {
             words: &query.words,
+            alike: &query.alike,
             either: &query.either,
             phrases: &query.phrases,
             not: &query.not,

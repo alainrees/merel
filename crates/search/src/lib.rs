@@ -12,6 +12,7 @@
 //!
 //! The index is sealed on disk and lives decrypted in memory only; see [`sealed`].
 
+pub mod lexicon;
 pub mod sealed;
 
 use std::collections::HashSet;
@@ -145,6 +146,9 @@ fn tokens(analyzer: &mut TextAnalyzer, text: &str) -> Vec<(String, Range<usize>)
 pub struct Terms<'a> {
     /// Words that may occur anywhere; every one must.
     pub words: &'a [String],
+    /// For each of `words` (by position), the words that mean the same in another language
+    /// ([`lexicon`]); one of the word or these must occur, and these rank a little lower.
+    pub alike: &'a [Vec<String>],
     /// Groups of words of which one must occur.
     pub either: &'a [Vec<String>],
     /// Phrases that must occur as they stand.
@@ -568,7 +572,7 @@ impl Index {
             .map(|(t, _)| {
                 let nl = tokens(&mut self.stem_nl, &t).into_iter().next().map(|x| x.0).unwrap_or_else(|| t.clone());
                 let en = tokens(&mut self.stem_en, &t).into_iter().next().map(|x| x.0).unwrap_or_else(|| t.clone());
-                Form { folded: t, nl, en }
+                Form { folded: t, nl, en, exact: false }
             })
             .collect()
     }
@@ -588,12 +592,28 @@ impl Index {
         for (i, word) in terms.words.iter().enumerate() {
             let forms = self.forms(word);
             let n = forms.len();
+            let mut parts: Vec<(Occur, Box<dyn Query>)> = Vec::new();
             for (j, form) in forms.into_iter().enumerate() {
                 let prefix = typing && i == last && j + 1 == n && terms.either.is_empty();
-                must.push((Occur::Must, Box::new(word_query(f, &form, prefix))));
+                parts.push((Occur::Must, Box::new(word_query(f, &form, prefix))));
                 all_forms.push((form, prefix));
                 scored = true;
             }
+            let alike = terms.alike.get(i).map(Vec::as_slice).unwrap_or_default();
+            if alike.is_empty() || parts.is_empty() {
+                must.extend(parts);
+                continue;
+            }
+            // The word itself, or one that means the same in another language.
+            let mut any: Vec<(Occur, Box<dyn Query>)> = vec![(Occur::Should, Box::new(BooleanQuery::new(parts)))];
+            for other in alike {
+                for form in self.forms(other) {
+                    let form = Form { exact: true, ..form };
+                    any.push((Occur::Should, Box::new(BoostQuery::new(Box::new(alike_query(f, &form)), 0.6))));
+                    all_forms.push((form, false));
+                }
+            }
+            must.push((Occur::Must, Box::new(BooleanQuery::new(any))));
         }
         for group in terms.either {
             let mut any: Vec<(Occur, Box<dyn Query>)> = Vec::new();
@@ -628,7 +648,7 @@ impl Index {
                 for (folded, _) in tokens(&mut self.fold, phrase) {
                     let nl = tokens(&mut self.stem_nl, &folded).into_iter().next().map(|x| x.0).unwrap_or_else(|| folded.clone());
                     let en = tokens(&mut self.stem_en, &folded).into_iter().next().map(|x| x.0).unwrap_or_else(|| folded.clone());
-                    all_forms.push((Form { folded, nl, en }, false));
+                    all_forms.push((Form { folded, nl, en, exact: false }, false));
                 }
                 scored = true;
             }
@@ -760,10 +780,26 @@ impl Marker {
                 }
                 let nl = tokens(&mut stem_nl, &folded).into_iter().next().map(|x| x.0).unwrap_or_else(|| folded.clone());
                 let en = tokens(&mut stem_en, &folded).into_iter().next().map(|x| x.0).unwrap_or_else(|| folded.clone());
-                forms.push(Form { folded, nl, en });
+                forms.push(Form { folded, nl, en, exact: false });
             }
         }
         Marker { fold, stem_nl, stem_en, forms }
+    }
+
+    /// Also marks `words` that mean the same in another language ([`lexicon`]): as they are,
+    /// by their stem or as the start of a longer word, never with a typing error.
+    pub fn also<'a>(mut self, words: impl IntoIterator<Item = &'a str>) -> Marker {
+        for word in words {
+            for (folded, _) in tokens(&mut self.fold, word) {
+                if self.forms.iter().any(|f| f.folded == folded) {
+                    continue;
+                }
+                let nl = tokens(&mut self.stem_nl, &folded).into_iter().next().map(|x| x.0).unwrap_or_else(|| folded.clone());
+                let en = tokens(&mut self.stem_en, &folded).into_iter().next().map(|x| x.0).unwrap_or_else(|| folded.clone());
+                self.forms.push(Form { folded, nl, en, exact: true });
+            }
+        }
+        self
     }
 
     pub fn is_empty(&self) -> bool {
@@ -787,7 +823,7 @@ impl Marker {
         let strict = |form: &Form, (word, nl, en, _): &Word| distance_ok(word, nl, en, form);
         let loose = |form: &Form, (word, nl, en, _): &Word| matches(word, nl, en, form, true);
         // Per word of the search: strict where it occurs strictly anywhere, loose elsewhere.
-        let lenient: Vec<bool> = self.forms.iter().map(|form| !words.iter().flatten().any(|w| strict(form, w))).collect();
+        let lenient: Vec<bool> = self.forms.iter().map(|form| !form.exact && !words.iter().flatten().any(|w| strict(form, w))).collect();
         words
             .iter()
             .map(|list| {
@@ -815,6 +851,9 @@ struct Form {
     folded: String,
     nl: String,
     en: String,
+    /// A word in another language ([`lexicon`]): found as it is or by its stem, never with a
+    /// typing error.
+    exact: bool,
 }
 
 /// How many typing errors a word of this length may have and still match.
@@ -854,6 +893,23 @@ fn word_query(f: Fields, form: &Form, prefix: bool) -> BooleanQuery {
         if distance > 0 {
             any.push((Occur::Should, Box::new(BoostQuery::new(Box::new(FuzzyTermQuery::new(term(field, &form.folded), distance, true)), 0.3))));
         }
+    }
+    BooleanQuery::new(any)
+}
+
+/// A word in another language: as it is or by its stem, in the subject, the text and the
+/// attachments; no typing errors, no prefixes.
+fn alike_query(f: Fields, form: &Form) -> BooleanQuery {
+    let term = |field: Field, text: &str| Term::from_field_text(field, text);
+    let mut any: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+    for (field, boost) in [(f.subject, 3.0), (f.text, 1.0), (f.attachments, 1.5), (f.attached, 0.8)] {
+        any.push((
+            Occur::Should,
+            Box::new(BoostQuery::new(Box::new(TermQuery::new(term(field, &form.folded), IndexRecordOption::WithFreqs)), boost)),
+        ));
+    }
+    for (field, stem) in [(f.stem_nl, &form.nl), (f.stem_en, &form.en)] {
+        any.push((Occur::Should, Box::new(BoostQuery::new(Box::new(TermQuery::new(term(field, stem), IndexRecordOption::WithFreqs)), 0.8))));
     }
     BooleanQuery::new(any)
 }
@@ -900,7 +956,7 @@ fn matches(word: &str, nl: &str, en: &str, form: &Form, prefix: bool) -> bool {
         || nl == form.nl
         || en == form.en
         || (prefix && word.starts_with(&form.folded))
-        || (typos(&form.folded) > 0 && distance(word, &form.folded) <= usize::from(typos(&form.folded)))
+        || (!form.exact && typos(&form.folded) > 0 && distance(word, &form.folded) <= usize::from(typos(&form.folded)))
 }
 
 /// A piece of `text` around the first word the search asked for, with every such word in it
@@ -1178,6 +1234,27 @@ mod tests {
         let w = words(&["foto"]);
         let both = i.search(Terms { words: &w, size: Some((Some(10_000), Some(100_000))), ..Default::default() }, &scope(), false);
         assert_eq!(ids(&both), ["2"]);
+    }
+
+    #[test]
+    fn a_word_in_another_language_is_found_and_ranks_below_the_word_itself() {
+        let mut i = Index::in_memory().unwrap();
+        i.add_text("a", &header(1, "Ravi", "Your quote", 999_000_001), "Please find the quote for the print job.", &[]).unwrap();
+        i.add_text("a", &header(2, "Sanne", "Voorstel drukwerk", 999_000_000), "Hier is mijn voorstel.", &[]).unwrap();
+        i.add_text("a", &header(3, "Piet", "Koffie", 999_000_002), "Zullen we koffie drinken? Will you?", &[]).unwrap();
+        i.commit_if_due(true).unwrap();
+        let w = words(&["voorstel"]);
+        let alike = vec![lexicon::alike("voorstel")];
+        let hits = i.search(Terms { words: &w, alike: &alike, ..Default::default() }, &scope(), false);
+        assert_eq!(ids(&hits), ["2", "1"], "the typed word first, then the translation; no typo of a translation");
+        let snip = hits[1].snippet.clone().expect("a snippet");
+        let marked: Vec<&str> = snip.marks.iter().map(|r| &snip.text[r.clone()]).collect();
+        assert_eq!(marked, ["quote"]);
+        assert_eq!(ids(&i.search(Terms { words: &w, ..Default::default() }, &scope(), false)), ["2"], "without them, only the word");
+        let mut m = Marker::new(["voorstel"]).also(alike[0].iter().map(String::as_str));
+        let text = "Your quote, or a quota?";
+        let found: Vec<&str> = m.marks(&[text])[0].iter().map(|r| &text[r.clone()]).collect();
+        assert_eq!(found, ["quote"], "translations are marked, never their typos");
     }
 
     #[test]

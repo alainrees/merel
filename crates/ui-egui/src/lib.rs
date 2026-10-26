@@ -761,6 +761,36 @@ fn chip_menu(ui: &mut Ui, t: &Tokens, name: &str, chosen: Option<&str>, add: imp
 
 /// The chips under a search: Datum, Van and Map, each a menu that puts the search word in the
 /// box (or takes it out), so nobody has to know the words.
+/// What else the search looked for: the typed words in other languages, with the way to
+/// search only what was typed (and back).
+fn languages_strip(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let session = &mut app.engine.session;
+    let also = merel_engine::search::Query::parse(&session.search).also_searched();
+    if also.is_empty() {
+        return;
+    }
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        if session.search_exact {
+            ui.label(RichText::new(tr("search-exact")).size(12.0).color(t.text_dim));
+            if ui.link(RichText::new(tr("search-also-on")).size(12.0).color(t.accent_text)).clicked() {
+                session.search_exact = false;
+            }
+        } else {
+            // A few, so the strip stays one line or two.
+            const SHOWN: usize = 6;
+            let mut words = also.iter().take(SHOWN).cloned().collect::<Vec<_>>().join(", ");
+            if also.len() > SHOWN {
+                words.push_str(", …");
+            }
+            ui.label(RichText::new(format!("{} {words}", tr("search-also"))).size(12.0).color(t.text_dim)).on_hover_text(also.join(", "));
+            if ui.link(RichText::new(tr("search-also-off")).size(12.0).color(t.accent_text)).on_hover_text(tr("search-also-off-hint")).clicked() {
+                session.search_exact = true;
+            }
+        }
+    });
+}
+
 fn search_chips(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     use merel_engine::search::{operator_value, with_operator};
     let session = &app.engine.session;
@@ -2050,6 +2080,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 if searching {
                     ui.add_space(2.0);
                     search_chips(app, ui, t);
+                    languages_strip(app, ui, t);
                 }
                 // The server can look where Merel has not: older mail, and the text itself.
                 let session = &app.engine.session;
@@ -2849,7 +2880,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         && let Some(doc) = b.rich.as_ref()
     {
         let remote = app.remote.snapshot(&message_id);
-        let marks = found::marks(ui, &message_id, &app.engine.session.search, &found::texts_of(doc));
+        let marks = found::marks(ui, &message_id, &app.engine.session, &found::texts_of(doc));
         let clicked = egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| html::show(ui, t, doc, &b.images, &message_id, remote.as_ref(), !in_junk, marks.as_deref()))
@@ -2876,7 +2907,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         (None, false, false) => String::new(),
     };
     let color = if body.is_some() || sample { t.text } else { t.text_dim };
-    let marks = if body.is_some() || sample { found::marks(ui, &message_id, &app.engine.session.search, &[&text]) } else { None };
+    let marks = if body.is_some() || sample { found::marks(ui, &message_id, &app.engine.session, &[&text]) } else { None };
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| match marks.as_ref().and_then(|m| m.get(&text)) {
         // The words a search found, on a yellow ground.
         Some(found) => {
@@ -3477,6 +3508,23 @@ mod tests {
         h.key_press(Key::Escape);
         h.run();
         assert!(h.state().engine.session.search.is_empty(), "Escape clears the search");
+    }
+
+    #[test]
+    fn a_dutch_word_also_finds_its_translation_until_that_is_switched_off() {
+        let mut h = harness();
+        h.state_mut().engine.session.search = "voorstel".into();
+        h.run();
+        assert!(h.query_by_label("Re: Offerte drukwerk").is_some(), "voorstel finds the offerte");
+        assert!(h.query_by_label_contains("Ook gezocht: offerte").is_some());
+        h.get_by_label("Alleen wat ik typte").click();
+        h.run();
+        assert!(h.state().engine.session.search_exact);
+        assert!(h.query_by_label("Re: Offerte drukwerk").is_none());
+        h.get_by_label("Ook in andere talen").click();
+        h.run();
+        assert!(!h.state().engine.session.search_exact);
+        assert!(h.query_by_label("Re: Offerte drukwerk").is_some());
     }
 
     #[test]
