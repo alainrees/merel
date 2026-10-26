@@ -45,7 +45,9 @@ that count also stands in red on the app icon (the Dock on macOS, the launcher o
 one), and while Merel is in the background the computer's own notification announces new mail and due
 reminders; a click on one opens the message, appointment or task. "Bestand" > "Meldingen" switches each of
 these on or off; the notification names no sender, subject or title unless that is switched on there too,
-so nothing is read off a locked screen. Junk: the
+so nothing is read off a locked screen. On macOS the red window button closes the window but not Merel, as in
+Outlook for Mac: mail, notifications and the count go on, a click on the Dock icon brings the window back, and
+"Merel" > "Stop Merel" (Cmd+Q) ends it. Junk: the
 server's own filter stays the first line, and its Junk folder shows as "Ongewenste e-mail". On top of that,
 "Afzender blokkeren" in a message's right-click menu (or "Bestand" > "Ongewenste e-mail", for an address or a
 whole domain) keeps a list of blocked senders in `junk.json`; new mail from one of them goes straight to that

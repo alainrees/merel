@@ -16,20 +16,54 @@ struct App {
     menu: Option<app_menu::AppMenu>,
 }
 
+/// Brings the main window back after the close button hid it, or from the Dock.
+fn show_window(ctx: &egui::Context) {
+    ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Visible(true));
+    ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Minimized(false));
+    ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+}
+
 impl eframe::App for App {
+    /// Runs before each `ui`, and on its own while the main window is hidden or minimised, so
+    /// that mail keeps coming in, with its notifications and the count on the Dock icon.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let hidden = ctx.input(|i| i.viewport().visible()) == Some(false);
+        // With the window in view, AppKit's own handling of the click is enough.
+        if merel_window_buttons::take_dock_click() && hidden {
+            show_window(ctx);
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(menu) = &self.menu {
+            let actions = menu.actions();
+            // A menu chosen while the window is closed opens it again, to show what it did.
+            if !actions.is_empty() && hidden {
+                show_window(ctx);
+            }
+            for action in actions {
+                match action {
+                    app_menu::Action::About => self.app.help = Some(merel_ui_egui::help::HelpWindow::About),
+                    app_menu::Action::Updates => self.app.check_for_updates(ctx, true),
+                    app_menu::Action::Menu(index, path) => self.app.click_menu(index, path),
+                }
+            }
+        }
+        // While the window shows, `ui` runs this itself.
+        if hidden {
+            self.app.logic(ctx);
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         if self.app.title_bar_inset > 0.0 {
             merel_window_buttons::place(frame, f64::from(merel_ui_egui::TITLE_BAR_HEIGHT));
         }
+        // As in Outlook for Mac, the red button closes the window but not Merel: it goes on
+        // fetching mail and notifying, and a click on the Dock icon shows the window again.
+        // "Stop Merel" (Cmd+Q) ends it, and so does starting a new version.
         #[cfg(target_os = "macos")]
-        if let Some(menu) = &self.menu {
-            for action in menu.actions() {
-                match action {
-                    app_menu::Action::About => self.app.help = Some(merel_ui_egui::help::HelpWindow::About),
-                    app_menu::Action::Updates => self.app.check_for_updates(ui.ctx(), true),
-                    app_menu::Action::Menu(index, path) => self.app.click_menu(index, path),
-                }
-            }
+        if ui.input(|i| i.viewport().close_requested()) && !merel_ui_egui::updates::quitting(ui.ctx()) {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
         self.app.ui(ui);
         #[cfg(target_os = "macos")]
@@ -113,6 +147,8 @@ fn main() -> eframe::Result {
             // wakes the window so it can open what the notification was about.
             let ctx = cc.egui_ctx.clone();
             merel_notify::set_waker(move || ctx.request_repaint());
+            let ctx = cc.egui_ctx.clone();
+            merel_window_buttons::watch_dock_clicks(move || ctx.request_repaint());
             let mut notifier = merel_notify::Notifier::new();
             if app.view.notifications.mail || app.view.notifications.reminders {
                 notifier.prepare();

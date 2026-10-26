@@ -404,7 +404,19 @@ const STEPS: usize = 4;
 /// window of its own, and a plain Close from inside it would shut only that one, leaving Merel
 /// running and the new version waiting for it.
 fn quit(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(quit_id(), true));
     ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
+}
+
+fn quit_id() -> egui::Id {
+    egui::Id::new("merel-quitting")
+}
+
+/// Whether Merel itself asked its main window to close so that it ends (to start a new
+/// version), rather than the person clicking the window's close button. On macOS the close
+/// button only hides the window, and this close must not be held back like that.
+pub fn quitting(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp(quit_id()).unwrap_or(false))
 }
 
 /// The update under way: a progress bar while it downloads, then the check, the install and
@@ -575,6 +587,10 @@ mod tests {
     #[test]
     fn starting_again_from_the_update_window_closes_merel_itself() {
         assert!(root_commands(quit).contains(&egui::ViewportCommand::Close));
+        let ctx = egui::Context::default();
+        assert!(!quitting(&ctx));
+        quit(&ctx);
+        assert!(quitting(&ctx), "the close button's hiding must let this close through");
         // What it did before: only the update window closed, and Merel kept running.
         assert!(!root_commands(|ctx| ctx.send_viewport_cmd(egui::ViewportCommand::Close)).contains(&egui::ViewportCommand::Close));
     }
