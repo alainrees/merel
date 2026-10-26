@@ -84,9 +84,14 @@ const ICON: &[u8] = include_bytes!("../../../packaging/icon-256.png");
 /// Writes warnings and errors to the terminal, so a window that fails to open says why.
 struct Stderr;
 
+/// Libraries that warn about what they meet in a message itself (a PDF attachment's text that
+/// cannot be decoded, say): normal for mail, so only their errors are written.
+const QUIET: [&str; 1] = ["lopdf"];
+
 impl log::Log for Stderr {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::Level::Warn
+        let quiet = QUIET.iter().any(|q| metadata.target() == *q || metadata.target().starts_with(&format!("{q}::")));
+        metadata.level() <= if quiet { log::Level::Error } else { log::Level::Warn }
     }
 
     fn log(&self, record: &log::Record) {
@@ -165,6 +170,18 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
+    use log::Log;
+
+    #[test]
+    fn a_pdf_that_cannot_be_read_does_not_fill_the_terminal() {
+        let meta = |level, target| log::Metadata::builder().level(level).target(target).build();
+        assert!(!super::Stderr.enabled(&meta(log::Level::Warn, "lopdf::parser_aux")));
+        assert!(super::Stderr.enabled(&meta(log::Level::Error, "lopdf::parser_aux")));
+        assert!(super::Stderr.enabled(&meta(log::Level::Warn, "merel_engine")));
+        assert!(super::Stderr.enabled(&meta(log::Level::Warn, "lopdfx")), "only lopdf itself");
+        assert!(!super::Stderr.enabled(&meta(log::Level::Info, "merel_engine")));
+    }
+
     #[test]
     fn the_app_icon_decodes() {
         let icon = eframe::icon_data::from_png_bytes(super::ICON).expect("icon");
