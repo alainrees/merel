@@ -65,6 +65,8 @@ struct Fields {
     header: Field,
     full: Field,
     date: Field,
+    /// The message's size in bytes; 0 while unknown.
+    size: Field,
     subject: Field,
     from: Field,
     to: Field,
@@ -98,6 +100,7 @@ fn schema() -> (Schema, Fields) {
         header: b.add_text_field("header", STORED),
         full: b.add_u64_field("full", INDEXED | STORED),
         date: b.add_i64_field("date", INDEXED | FAST | STORED),
+        size: b.add_u64_field("size", INDEXED | FAST),
         subject: b.add_text_field("subject", words(FOLD, false)),
         from: b.add_text_field("from", words(FOLD, false)),
         to: b.add_text_field("to", words(FOLD, false)),
@@ -161,6 +164,8 @@ pub struct Terms<'a> {
     pub amount: Option<(Option<i64>, Option<i64>)>,
     /// Kinds of data that must have been recognised ("amount", "iban", "tracking", "order", "invoice").
     pub has: &'a [String],
+    /// A size in bytes between these, inclusive; a message of unknown size never matches.
+    pub size: Option<(Option<u64>, Option<u64>)>,
 }
 
 impl Terms<'_> {
@@ -177,6 +182,7 @@ impl Terms<'_> {
             && self.before.is_none()
             && self.amount.is_none()
             && self.has.is_empty()
+            && self.size.is_none()
     }
 }
 
@@ -387,6 +393,7 @@ impl Index {
         doc.add_text(f.header, serde_json::to_string(&kept).unwrap_or_default());
         doc.add_u64(f.full, u64::from(text.is_some() && whole));
         doc.add_i64(f.date, header.date);
+        doc.add_u64(f.size, header.size);
         doc.add_text(f.subject, &header.subject);
         doc.add_text(f.from, format!("{} {}", header.from.display(), header.from.email()));
         let to: Vec<String> = header.to.iter().map(|a| format!("{} {}", a.display(), a.email())).collect();
@@ -653,6 +660,12 @@ impl Index {
         for kind in terms.has {
             must.push((Occur::Must, Box::new(TermQuery::new(Term::from_field_text(f.kinds, kind), IndexRecordOption::Basic))));
         }
+        if let Some((low, high)) = terms.size {
+            // An unknown size is 0, so the low end is at least 1.
+            let from = std::ops::Bound::Included(Term::from_field_u64(f.size, low.unwrap_or(0).max(1)));
+            let to = high.map_or(std::ops::Bound::Unbounded, |h| std::ops::Bound::Included(Term::from_field_u64(f.size, h)));
+            must.push((Occur::Must, Box::new(RangeQuery::new(from, to))));
+        }
         if terms.after.is_some() || terms.before.is_some() {
             let from = terms.after.map_or(std::ops::Bound::Unbounded, |a| std::ops::Bound::Included(Term::from_field_i64(f.date, a)));
             let to = terms.before.map_or(std::ops::Bound::Unbounded, |b| std::ops::Bound::Excluded(Term::from_field_i64(f.date, b)));
@@ -722,6 +735,78 @@ impl Index {
         }
         hits.into_iter().map(|(h, _)| h).collect()
     }
+}
+
+/// Finds the words a search asked for in a message being read, as the index found them: in
+/// any form (folded, either stem, or a longer word it starts, as a search box finds them), and
+/// only for a word that occurs in none of those forms, one with a typing error, so a typo in
+/// the box still shows where it hit.
+pub struct Marker {
+    fold: TextAnalyzer,
+    stem_nl: TextAnalyzer,
+    stem_en: TextAnalyzer,
+    forms: Vec<Form>,
+}
+
+impl Marker {
+    /// For the plain words, the words of `OF` groups and the words of phrases of a search.
+    pub fn new<'a>(words: impl IntoIterator<Item = &'a str>) -> Marker {
+        let (mut fold, mut stem_nl, mut stem_en) = (fold(), stemmed(Language::Dutch), stemmed(Language::English));
+        let mut forms: Vec<Form> = Vec::new();
+        for word in words {
+            for (folded, _) in tokens(&mut fold, word) {
+                if forms.iter().any(|f| f.folded == folded) {
+                    continue;
+                }
+                let nl = tokens(&mut stem_nl, &folded).into_iter().next().map(|x| x.0).unwrap_or_else(|| folded.clone());
+                let en = tokens(&mut stem_en, &folded).into_iter().next().map(|x| x.0).unwrap_or_else(|| folded.clone());
+                forms.push(Form { folded, nl, en });
+            }
+        }
+        Marker { fold, stem_nl, stem_en, forms }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.forms.is_empty()
+    }
+
+    /// For each of `texts` (the pieces of one message), the byte ranges of the words found, in
+    /// order. At most [`MAX_TEXT`] of each piece is looked at.
+    pub fn marks(&mut self, texts: &[&str]) -> Vec<Vec<Range<usize>>> {
+        // Each word of each text with its stems, once.
+        let mut words: Vec<Vec<Word>> = Vec::with_capacity(texts.len());
+        for text in texts {
+            let mut list = Vec::new();
+            for (word, range) in tokens(&mut self.fold, cut(text, MAX_TEXT)) {
+                let nl = tokens(&mut self.stem_nl, &word).into_iter().next().map(|x| x.0).unwrap_or_default();
+                let en = tokens(&mut self.stem_en, &word).into_iter().next().map(|x| x.0).unwrap_or_default();
+                list.push((word, nl, en, range));
+            }
+            words.push(list);
+        }
+        let strict = |form: &Form, (word, nl, en, _): &Word| distance_ok(word, nl, en, form);
+        let loose = |form: &Form, (word, nl, en, _): &Word| matches(word, nl, en, form, true);
+        // Per word of the search: strict where it occurs strictly anywhere, loose elsewhere.
+        let lenient: Vec<bool> = self.forms.iter().map(|form| !words.iter().flatten().any(|w| strict(form, w))).collect();
+        words
+            .iter()
+            .map(|list| {
+                list.iter()
+                    .filter(|w| self.forms.iter().zip(&lenient).any(|(form, &lenient)| if lenient { loose(form, w) } else { strict(form, w) }))
+                    .map(|w| w.3.clone())
+                    .collect()
+            })
+            .collect()
+    }
+}
+
+/// A word of a message: folded, its two stems, and where it stands.
+type Word = (String, String, String, Range<usize>);
+
+/// Whether a word matched without a typing error: the same word, the same stem, or a word that
+/// starts with it (from three letters on, so "de" marks no "deze").
+fn distance_ok(word: &str, nl: &str, en: &str, form: &Form) -> bool {
+    word == form.folded || nl == form.nl || en == form.en || (form.folded.chars().count() >= 3 && word.starts_with(&form.folded))
 }
 
 /// A search word as the index sees it.
@@ -884,6 +969,7 @@ mod tests {
             importance: Importance::Normal,
             chat: None,
             sealed: Sealed::No,
+            size: 0,
         }
     }
 
@@ -1076,6 +1162,42 @@ mod tests {
         assert_eq!(marked, ["facturen", "café"], "stems and accents are marked too");
         let by_sender = i.search(Terms { words: &words(&["sanne"]), ..Default::default() }, &scope(), false);
         assert_eq!(by_sender[0].snippet, None, "nothing in the text to show");
+    }
+
+    #[test]
+    fn a_size_narrows_the_hits_and_an_unknown_size_never_matches() {
+        let mut i = Index::in_memory().unwrap();
+        for (n, size) in [(1u32, 0u64), (2, 20_000), (3, 6_000_000)] {
+            let h = MessageHeader { size, ..header(n, "Sanne", "Bijlage", 999_000_000 + i64::from(n)) };
+            i.add_text("a", &h, "de foto's", &[]).unwrap();
+        }
+        i.commit_if_due(true).unwrap();
+        let find = |i: &mut Index, size| ids(&i.search(Terms { size: Some(size), ..Default::default() }, &scope(), false));
+        assert_eq!(find(&mut i, (Some(5_242_881), None)), ["3"], "groot:>5MB on its own");
+        assert_eq!(find(&mut i, (None, Some(102_399))), ["2"], "groot:<100KB leaves the unknown out");
+        let w = words(&["foto"]);
+        let both = i.search(Terms { words: &w, size: Some((Some(10_000), Some(100_000))), ..Default::default() }, &scope(), false);
+        assert_eq!(ids(&both), ["2"]);
+    }
+
+    #[test]
+    fn the_marker_finds_the_words_in_any_form_and_a_typo_only_where_nothing_else_is() {
+        let text = "De facturen van het café, en de Factuur van de aannemer. Een factuurtje.";
+        let at = |marks: &[Range<usize>]| marks.iter().map(|r| &text[r.clone()]).collect::<Vec<_>>();
+        let mut m = Marker::new(["factuur", "cafe"]);
+        assert_eq!(at(&m.marks(&[text])[0]), ["facturen", "café", "Factuur", "factuurtje"], "stems and accents, as the index finds them");
+        let mut start = Marker::new(["schets"]);
+        let sketches = "De schetsen, een schets en Schetsboek; de schetz.";
+        let found: Vec<&str> = start.marks(&[sketches])[0].iter().map(|r| &sketches[r.clone()]).collect();
+        assert_eq!(found, ["schetsen", "schets", "Schetsboek"], "a word it starts, but no typo once it was found");
+        let mut typo = Marker::new(["aanemer"]);
+        assert_eq!(at(&typo.marks(&[text])[0]), ["aannemer"], "the typo of the search box still shows where it hit");
+        let mut phrase = Marker::new(["\"van het\""]);
+        assert_eq!(at(&phrase.marks(&[text])[0]), ["van", "het", "van"]);
+        let mut both = Marker::new(["aannemer"]);
+        let pieces = both.marks(&[text, "geen", "De aannemer"]);
+        assert_eq!((pieces[0].len(), pieces[1].len(), pieces[2].len()), (1, 0, 1), "each piece its own marks");
+        assert!(Marker::new(["!!"]).is_empty());
     }
 
     #[test]

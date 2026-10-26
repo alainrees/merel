@@ -53,6 +53,7 @@ fn key_detail(key: &str) -> String {
         "categorie:" => "suggest-category",
         "heeft:" => "suggest-has",
         "bedrag:" => "suggest-amount",
+        "groot:" => "suggest-size",
         _ => "suggest-is",
     };
     merel_i18n::tr(id)
@@ -165,6 +166,13 @@ impl Session {
                             }
                         }
                     }
+                    "groot" | "grootte" | "size" => {
+                        for w in [">1MB", ">5MB", ">10MB", ">25MB", "<100KB"] {
+                            if w.to_lowercase().starts_with(typed) {
+                                push(format!("{key}:{w}"), key_detail("groot:"), format!("{lead}{key}:{w} "));
+                            }
+                        }
+                    }
                     "categorie" | "category" => {
                         for c in &self.categories {
                             if c.name.to_lowercase().contains(typed) {
@@ -232,6 +240,9 @@ mod tests {
         assert_eq!(texts(&s, "heeft:i"), ["heeft:iban "]);
         assert_eq!(texts(&s, "has:tr"), ["has:tracking "]);
         assert!(texts(&s, "bed").contains(&"bedrag:".to_string()));
+        assert!(texts(&s, "gro").contains(&"groot:".to_string()));
+        assert_eq!(texts(&s, "groot:>1"), ["groot:>1MB ", "groot:>10MB "]);
+        assert_eq!(texts(&s, "size:<"), ["size:<100KB "]);
         assert!(texts(&s, "keuken ").is_empty(), "a finished word asks nothing");
         assert!(texts(&s, "k").is_empty(), "one letter is too little");
         assert!(texts(&s, "").is_empty());

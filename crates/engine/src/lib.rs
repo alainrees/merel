@@ -372,6 +372,7 @@ fn message_of(folder_id: &str, h: RemoteHeader) -> Option<MessageHeader> {
         importance: h.header.importance,
         chat: h.header.chat,
         sealed: if h.header.encrypted { merel_model::Sealed::Closed } else { merel_model::Sealed::No },
+        size: u64::from(h.size),
     })
 }
 

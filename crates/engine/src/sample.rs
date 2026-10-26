@@ -91,6 +91,8 @@ fn build() -> Option<Session> {
                 importance: if i == 1 { merel_model::Importance::High } else { merel_model::Importance::Normal },
                 chat: None,
                 sealed: Default::default(),
+                // A message with an attachment weighs a few megabytes, as in real mail.
+                size: if att { 6_300_000 } else { 14_000 + (i as u64) * 3_100 },
             })
         })
         .collect();

@@ -614,6 +614,7 @@ impl Indexer {
             before: query.before,
             amount: query.amount,
             has: &query.has,
+            size: query.size,
         };
         if terms.is_empty() {
             s.index_hits = None;

@@ -373,6 +373,7 @@ mod tests {
             importance: merel_model::Importance::Normal,
             chat,
             sealed: Default::default(),
+            size: 0,
         }
     }
 

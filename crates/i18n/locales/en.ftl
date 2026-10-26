@@ -1930,6 +1930,7 @@ suggest-is = unread or flagged
 suggest-has-attachment = only messages with an attachment
 suggest-has = attachment, amount, iban, tracking, order or invoice
 suggest-amount = an amount: >100, <50, 100-500 or 1250
+suggest-size = size of the message: >5MB, <100KB or 1MB-10MB
 suggest-has-amount = with an amount in the text or an attachment
 suggest-has-iban = with an IBAN
 suggest-has-tracking = with a tracking code

@@ -68,6 +68,8 @@ pub struct GraphClient {
     chat_marks: HashMap<String, ChatMark>,
     /// Per folder, the newest message whose headers were looked at.
     chat_looked: HashMap<String, i64>,
+    /// Set once Graph refused the message size next to a listing; it is then left out.
+    no_sizes: bool,
 }
 
 /// What a message's own headers say that the listing does not: the chat tag and whether it is
@@ -241,6 +243,21 @@ fn address_of(v: &Value) -> Option<Address> {
     Address::new(name, address).ok()
 }
 
+/// The message's size, which Graph lists only as the MAPI property PidTagMessageSize; see
+/// [`SIZE`].
+fn size_of(m: &Value) -> u32 {
+    m.get("singleValueExtendedProperties")
+        .and_then(Value::as_array)
+        // Graph may write the tag back its own way ("Integer 0xe08").
+        .and_then(|l| {
+            l.iter().find(|p| {
+                str_of(p, "id").to_ascii_lowercase().strip_prefix("integer 0x").and_then(|tag| u32::from_str_radix(tag, 16).ok()) == Some(SIZE_TAG)
+            })
+        })
+        .and_then(|p| str_of(p, "value").parse().ok())
+        .unwrap_or(0)
+}
+
 fn header_of(m: &Value) -> Option<RemoteHeader> {
     let id = id_of(m)?;
     let date = m.get("receivedDateTime").and_then(Value::as_str).and_then(parse_utc).unwrap_or(0);
@@ -252,7 +269,7 @@ fn header_of(m: &Value) -> Option<RemoteHeader> {
         flagged: m.get("flag").map(|f| str_of(f, "flagStatus")) == Some("flagged"),
         // Graph does not say whether a message was answered.
         answered: false,
-        size: 0,
+        size: size_of(m),
         has_attachments: m.get("hasAttachments").and_then(Value::as_bool).unwrap_or(false),
         categories: m
             .get("categories")
@@ -655,6 +672,7 @@ impl GraphClient {
             photos: HashMap::new(),
             chat_marks: HashMap::new(),
             chat_looked: HashMap::new(),
+            no_sizes: false,
         };
         client.known = client.well_known()?;
         Ok(client)
@@ -674,6 +692,7 @@ impl GraphClient {
             photos: HashMap::new(),
             chat_marks: HashMap::new(),
             chat_looked: HashMap::new(),
+            no_sizes: false,
         }
     }
 
@@ -748,6 +767,22 @@ impl GraphClient {
                     Err(MailboxError::Protocol(text))
                 }
             }
+        }
+    }
+
+    /// A page of messages with the size of each, or without it once Graph refused that: the
+    /// size is worth a search word, not a mailbox that no longer lists.
+    fn listing(&mut self, path: &str) -> Result<Value> {
+        if self.no_sizes {
+            return self.call("GET", path, None);
+        }
+        match self.call("GET", &format!("{path}{SIZE}"), None) {
+            Err(MailboxError::Protocol(e)) => {
+                log::warn!("{}: no message sizes in a listing ({e}); listing without", self.host);
+                self.no_sizes = true;
+                self.call("GET", path, None)
+            }
+            other => other,
         }
     }
 
@@ -958,6 +993,11 @@ impl GraphClient {
 /// How many levels of subfolders the folder list goes down.
 const MAX_FOLDER_DEPTH: usize = 4;
 
+/// PidTagMessageSize, the whole message in bytes.
+const SIZE_TAG: u32 = 0x0E08;
+/// What a listing adds to have the size of each message.
+const SIZE: &str = "&$expand=singleValueExtendedProperties($filter=id%20eq%20'Integer%200x0E08')";
+
 /// The fields a listing asks for per message.
 const MESSAGE_FIELDS: &str = "id,subject,from,toRecipients,receivedDateTime,isRead,flag,hasAttachments,internetMessageId,categories,importance";
 
@@ -1011,7 +1051,7 @@ impl Mailbox for GraphClient {
             encode(folder),
             limit.clamp(1, PAGE)
         );
-        let page = self.call("GET", &path, None)?;
+        let page = self.listing(&path)?;
         let mut out: Vec<RemoteHeader> =
             page.get("value").and_then(Value::as_array).map(|l| l.iter().filter_map(header_of).collect()).unwrap_or_default();
         out.reverse();
@@ -1025,7 +1065,7 @@ impl Mailbox for GraphClient {
 
     fn search(&mut self, folder: &str, query: &str, limit: u32) -> Result<Vec<RemoteHeader>> {
         let Some(path) = search_path(folder, query, limit) else { return Ok(Vec::new()) };
-        let page = self.call("GET", &path, None)?;
+        let page = self.listing(&path)?;
         let mut out: Vec<RemoteHeader> =
             page.get("value").and_then(Value::as_array).map(|l| l.iter().filter_map(header_of).collect()).unwrap_or_default();
         // Search results come by relevance; the listing wants them by date, newest last.
@@ -1254,6 +1294,13 @@ mod tests {
         assert_eq!(h.header.message_id.as_deref(), Some("<abc@example.org>"));
         assert_eq!(h.header.importance, Importance::Low);
         assert!(header_of(&json!({ "subject": "no id" })).is_none());
+        assert_eq!(h.size, 0, "no size listed: unknown");
+        let sized = json!({ "id": "AAMk2", "singleValueExtendedProperties": [{ "id": "Integer 0xe08", "value": "1024" }] });
+        assert_eq!(header_of(&sized).unwrap().size, 1024, "as Graph writes the tag back");
+        let other = json!({ "id": "AAMk2", "singleValueExtendedProperties": [{ "id": "Integer 0x0E07", "value": "1" }] });
+        assert_eq!(header_of(&other).unwrap().size, 0, "only the size property");
+        let sized = json!({ "id": "AAMk2", "singleValueExtendedProperties": [{ "id": "Integer 0x0E08", "value": "6291456" }] });
+        assert_eq!(header_of(&sized).unwrap().size, 6_291_456);
     }
 
     #[test]

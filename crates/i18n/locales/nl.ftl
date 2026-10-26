@@ -1915,6 +1915,7 @@ suggest-is = ongelezen of gemarkeerd
 suggest-has-attachment = alleen berichten met een bijlage
 suggest-has = bijlage, bedrag, iban, zending, ordernummer of factuurnummer
 suggest-amount = een bedrag: >100, <50, 100-500 of 1250
+suggest-size = grootte van het bericht: >5MB, <100KB of 1MB-10MB
 suggest-has-amount = met een bedrag in de tekst of een bijlage
 suggest-has-iban = met een IBAN
 suggest-has-tracking = met een track-and-tracecode
