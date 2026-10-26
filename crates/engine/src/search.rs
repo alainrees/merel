@@ -23,6 +23,10 @@ pub const HINT: &str = "Zoekwoorden zoals in Outlook: van:sanne, aan:jan, onderw
 pub struct Query {
     /// Words that may occur anywhere: subject, sender, recipients or preview; every one must.
     pub words: Vec<String>,
+    /// For each of `words`, by position, what it means in Dutch, English, German and French
+    /// ([`merel_search::lexicon`]): the word or one of these must occur. Empty for a word in
+    /// quotes, and all empty once [`Query::exact`] took them out.
+    pub alike: Vec<Vec<String>>,
     /// Groups of words joined by `OF`: one word of each group must occur.
     pub either: Vec<Vec<String>>,
     /// Phrases that must occur as they stand.
@@ -232,6 +236,8 @@ impl Query {
     /// As [`Query::parse`], with `today` for the date words.
     pub fn parse_on(text: &str, today: NaiveDate) -> Query {
         let mut q = Query::default();
+        // Words in quotes are searched as they stand, in no other language.
+        let mut quoted: Vec<String> = Vec::new();
         // A plain word waiting to see whether `OF` follows it.
         let mut last_plain: Option<String> = None;
         let mut join_next = false;
@@ -257,6 +263,7 @@ impl Query {
                 if word.contains(char::is_whitespace) {
                     q.phrases.push(word);
                 } else {
+                    quoted.push(word.clone());
                     q.words.push(word);
                 }
                 continue;
@@ -283,7 +290,28 @@ impl Query {
             last_plain = Some(word);
         }
         flush(&mut q, last_plain);
+        q.alike = q.words.iter().map(|w| if quoted.contains(w) { Vec::new() } else { merel_search::lexicon::alike(w) }).collect();
+        if q.alike.iter().all(Vec::is_empty) {
+            q.alike.clear();
+        }
         q
+    }
+
+    /// The query with every word as it stands, in no other language.
+    pub fn exact(mut self) -> Query {
+        self.alike.clear();
+        self
+    }
+
+    /// The words searched for besides the ones typed, each once, for "Ook gezocht: …".
+    pub fn also_searched(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for w in self.alike.iter().flatten() {
+            if !out.contains(w) {
+                out.push(w.clone());
+            }
+        }
+        out
     }
 
     /// Takes in `key:value`; false when it is no operator.
@@ -450,7 +478,9 @@ impl Query {
             }
             h.to_lowercase()
         };
-        self.words.iter().chain(&self.phrases).all(|w| haystack.contains(w.as_str()))
+        let alike = |i: usize| self.alike.get(i).map(Vec::as_slice).unwrap_or_default();
+        self.words.iter().enumerate().all(|(i, w)| haystack.contains(w.as_str()) || alike(i).iter().any(|a| haystack.contains(a.as_str())))
+            && self.phrases.iter().all(|w| haystack.contains(w.as_str()))
             && self.either.iter().all(|group| group.iter().any(|w| haystack.contains(w.as_str())))
             && !self.not.iter().any(|w| haystack.contains(w.as_str()))
     }
@@ -658,6 +688,22 @@ mod tests {
         s.search = "groot:>5MB".into();
         let found: Vec<&str> = s.visible_messages().iter().map(|m| m.subject.as_str()).collect();
         assert_eq!(found, ["Planning voor donderdag"], "the sample's one message with an attachment");
+    }
+
+    #[test]
+    fn a_word_is_also_searched_in_other_languages_unless_quoted() {
+        let q = Query::parse("voorstel van:sanne \"offerte\"");
+        assert_eq!(q.words, ["voorstel", "offerte"]);
+        assert!(q.alike[0].contains(&"quote".to_string()) && q.alike[0].contains(&"angebot".to_string()));
+        assert!(q.alike[1].is_empty(), "a word in quotes stands as it is");
+        assert!(q.also_searched().contains(&"proposal".to_string()));
+        assert!(Query::parse("keukenkastje").alike.is_empty(), "nothing known, nothing kept");
+        let mut m = crate::Session::sample().messages.first().cloned().expect("sample mail");
+        m.subject = "Your quote for the print job".into();
+        assert!(Query::parse("voorstel").matches(&m), "the English mail for the Dutch word");
+        assert!(!Query::parse("\"voorstel\"").matches(&m));
+        assert!(!Query::parse("voorstel").exact().matches(&m), "switched off");
+        assert!(Query::parse("voorstel print").matches(&m) && !Query::parse("voorstel keuken").matches(&m), "every word still counts");
     }
 
     #[test]

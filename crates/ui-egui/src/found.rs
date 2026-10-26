@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 use egui::Ui;
 use egui::text::{LayoutJob, TextFormat};
+use merel_engine::Session;
+use merel_engine::search::Query;
 use merel_html::{Block, Document, Inline};
 
 use crate::Tokens;
@@ -17,19 +19,22 @@ pub type Marks = HashMap<String, Vec<Range<usize>>>;
 
 /// The words of the search box to mark: the plain words, those of `OF` groups and of phrases.
 /// Names, subjects and amounts were searched in their own field and are left alone.
-pub fn words(search: &str) -> Vec<String> {
-    let q = merel_engine::search::Query::parse(search);
+pub fn words(q: &Query) -> Vec<String> {
     q.words.iter().chain(q.either.iter().flatten()).chain(&q.phrases).cloned().collect()
 }
 
 /// The marks for `texts`, the pieces of the message `key`, for the search as it stands; worked
 /// out once per message and search and kept in egui's memory. `None` when nothing is searched
 /// or nothing was found.
-pub fn marks(ui: &Ui, key: &str, search: &str, texts: &[&str]) -> Option<Arc<Marks>> {
-    let words = words(search);
+pub fn marks(ui: &Ui, key: &str, session: &Session, texts: &[&str]) -> Option<Arc<Marks>> {
+    let q = session.search_query();
+    let words = words(&q);
     if words.is_empty() {
         return None;
     }
+    // Switched to only what was typed: another answer.
+    let search = format!("{}\u{1}{}", session.search, session.search_exact);
+    let search = search.as_str();
     // One answer kept per message, for the search it was for.
     let id = egui::Id::new(("found", key));
     if let Some((for_search, cached)) = ui.data(|d| d.get_temp::<(String, Option<Arc<Marks>>)>(id))
@@ -37,7 +42,7 @@ pub fn marks(ui: &Ui, key: &str, search: &str, texts: &[&str]) -> Option<Arc<Mar
     {
         return cached;
     }
-    let mut marker = merel_search::Marker::new(words.iter().map(String::as_str));
+    let mut marker = merel_search::Marker::new(words.iter().map(String::as_str)).also(q.alike.iter().flatten().map(String::as_str));
     let found: Marks = texts.iter().zip(marker.marks(texts)).filter(|(_, m)| !m.is_empty()).map(|(t, m)| (t.to_string(), m)).collect();
     let found = (!found.is_empty()).then(|| Arc::new(found));
     ui.data_mut(|d| d.insert_temp(id, (search.to_string(), found.clone())));
@@ -109,8 +114,9 @@ mod tests {
 
     #[test]
     fn the_words_to_mark_are_the_plain_ones_either_and_phrases() {
-        assert_eq!(words("van:sanne factuur \"nieuwe keuken\" a OF b bedrag:>100 -oud"), ["factuur", "a", "b", "nieuwe keuken"]);
-        assert!(words("van:sanne is:ongelezen groot:>5MB").is_empty(), "nothing to mark in the text");
+        let w = |s: &str| words(&Query::parse(s));
+        assert_eq!(w("van:sanne factuur \"nieuwe keuken\" a OF b bedrag:>100 -oud"), ["factuur", "a", "b", "nieuwe keuken"]);
+        assert!(w("van:sanne is:ongelezen groot:>5MB").is_empty(), "nothing to mark in the text");
     }
 
     #[test]

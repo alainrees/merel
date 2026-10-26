@@ -418,6 +418,8 @@ pub struct Session {
     pub search: String,
     /// Whether a search covers every folder of every account, or the selected folder only.
     pub search_all: bool,
+    /// Searches words only as typed, not also in other languages ("Ook gezocht: …" switched off).
+    pub search_exact: bool,
     /// Which messages of the folder the list shows, and in what order ("Beeld" tab).
     pub filter: view::Filter,
     pub sort: view::Sort,
@@ -702,6 +704,12 @@ impl Session {
         }
     }
 
+    /// The search box as a query, with the words in other languages unless switched off.
+    pub fn search_query(&self) -> search::Query {
+        let q = search::Query::parse(&self.search);
+        if self.search_exact { q.exact() } else { q }
+    }
+
     pub fn folder(&self, id: &str) -> Option<&Folder> {
         self.folders.iter().find(|f| f.id == id)
     }
@@ -715,7 +723,7 @@ impl Session {
     /// A search looks at what has been fetched: the newest headers of each opened folder and
     /// what the offline cache holds, not the whole server.
     pub fn visible_messages(&self) -> Vec<&MessageHeader> {
-        let query = search::Query::parse(&self.search);
+        let query = self.search_query();
         let now = snooze::now();
         let hits = self.current_hits().map(|h| &h.ids);
         let found = self.current_index_hits();
