@@ -8,8 +8,10 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.io.File
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.LocalDate
 import java.time.ZoneId
@@ -133,7 +135,8 @@ class Store(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             while (true) {
                 delay(500)
-                if (core.poll()) {
+                // Off the main thread: a poll can write the search index, which takes a moment.
+                if (withContext(Dispatchers.Default) { core.poll() }) {
                     refresh()
                 } else if (searchWords.isNotBlank()) {
                     // The index and the language model answer a search a moment later.

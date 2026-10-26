@@ -41,6 +41,8 @@ final class Store: ObservableObject {
     /// The last thing that went wrong, for an alert; cleared when shown.
     @Published var problem: String?
     private var timer: Timer?
+    /// Whether the engine is busy with a poll off the main thread; the next tick waits for it.
+    private var polling = false
 
     init(core: MerelCore) {
         self.core = core
@@ -69,8 +71,23 @@ final class Store: ObservableObject {
         return Store(core: MerelCore(dataDir: dir.path, vault: KeychainVault()))
     }
 
+    /// Polls the engine off the main thread: a poll can write the search index, which takes a
+    /// moment the screen should not wait for.
     private func tick() {
-        if core.poll() {
+        guard !polling else { return }
+        polling = true
+        let core = self.core
+        Task.detached(priority: .userInitiated) {
+            let changed = core.poll()
+            await MainActor.run {
+                self.polling = false
+                self.afterPoll(changed)
+            }
+        }
+    }
+
+    private func afterPoll(_ changed: Bool) {
+        if changed {
             refresh()
         } else if !searchWords.isEmpty {
             // The index and the language model answer a search a moment later.
