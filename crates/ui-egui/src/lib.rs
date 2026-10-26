@@ -1028,6 +1028,11 @@ fn search_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens, search: bool) {
                         if box_r.lost_focus() && !session.search.trim().is_empty() {
                             remember = Some(session.search.clone());
                         }
+                        // That Enter was the search box's: the mail keys, which run later this
+                        // frame, must not take it as "open the selected message".
+                        if box_r.lost_focus() {
+                            ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                        }
                         let shown = egui::Popup::from_response(&box_r)
                             .open(focused && !options.is_empty() && suggestion_pick.is_none())
                             .align(egui::RectAlign::BOTTOM_START)
@@ -3534,6 +3539,25 @@ mod tests {
         h.run();
         assert!(!h.state().engine.session.search_exact);
         assert!(h.query_by_label("Re: Offerte drukwerk").is_some());
+    }
+
+    #[test]
+    fn enter_in_the_search_box_searches_and_does_not_open_the_selected_message() {
+        let mut h = harness();
+        h.get_by_label("Welkom bij Merel").click();
+        h.run();
+        assert!(h.state().engine.session.selected_message.is_some());
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new(SEARCH_BOX)));
+        h.run();
+        h.state_mut().engine.session.search = "groot:>5MB".into();
+        h.run();
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert!(!h.state().message_window, "Enter belongs to the search box");
+        assert!(h.query_by_label("Planning voor donderdag").is_some(), "the search stands");
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert!(h.state().message_window, "outside the box Enter still opens the message");
     }
 
     #[test]
