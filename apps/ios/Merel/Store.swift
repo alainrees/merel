@@ -72,12 +72,13 @@ final class Store: ObservableObject {
     }
 
     /// Polls the engine off the main thread: a poll can write the search index, which takes a
-    /// moment the screen should not wait for.
+    /// moment the screen should not wait for. At utility priority, below the index's own
+    /// threads, so the poll does not wait on lower-priority work.
     private func tick() {
         guard !polling else { return }
         polling = true
         let core = self.core
-        Task.detached(priority: .userInitiated) {
+        Task.detached(priority: .utility) {
             let changed = core.poll()
             await MainActor.run {
                 self.polling = false
