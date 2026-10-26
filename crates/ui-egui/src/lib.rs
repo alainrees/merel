@@ -376,25 +376,14 @@ impl MailApp {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui) {
-        if !self.theme_applied {
-            ui.ctx().set_fonts(fonts::definitions());
-            theme::install(ui.ctx());
-            ui.ctx().set_theme(self.view.theme.preference());
-            self.theme_applied = true;
-        }
-        let t = Tokens::for_dark(ui.visuals().dark_mode);
-        // Decoders for pictures embedded in mail; a no-op after the first frame.
-        egui_extras::install_image_loaders(ui.ctx());
+    /// What runs whether or not the window shows: the engine's news, notifications, the count
+    /// on the app icon, reminders and the update check. On macOS the main window can be hidden
+    /// with Merel still running, and then only this runs (see the app's `logic`).
+    pub fn logic(&mut self, ctx: &egui::Context) {
         self.engine.poll();
-        room::tick(self, &ui.ctx().clone());
+        room::tick(self, ctx);
         self.wake_snoozed();
-        self.tick_read_timer(ui.ctx());
-        self.tick_updates(ui.ctx());
-        if self.updates.required {
-            updates::required_screen(self, ui, &t);
-            return;
-        }
+        self.tick_updates(ctx);
         let arrivals = self.engine.session.take_arrivals();
         if !arrivals.is_empty() {
             self.notice = Some(Notice::info(if arrivals.len() == 1 {
@@ -402,10 +391,10 @@ impl MailApp {
             } else {
                 crate::i18n::tr_args("arrived", &[("count", arrivals.len().into())])
             }));
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
-            self.alert_new_mail(&ui.ctx().clone(), &arrivals);
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
+            self.alert_new_mail(ctx, &arrivals);
         }
-        self.tick_notifications(&ui.ctx().clone());
+        self.tick_notifications(ctx);
         let hits = self.engine.session.take_rule_hits();
         if hits > 0 {
             self.notice = Some(Notice::info(rules::rule_notice(hits)));
@@ -419,13 +408,33 @@ impl MailApp {
         }
         let title = window_title(self.engine.session.inbox_unread());
         if self.title.as_deref() != Some(title.as_str()) {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.title = Some(title);
         }
         // Wake up now and then so the engine's refresh timer runs while nothing happens; faster
         // while something is on its way.
         let wake = if self.engine.session.has_pending() { std::time::Duration::from_millis(250) } else { std::time::Duration::from_secs(5) };
-        ui.ctx().request_repaint_after(wake);
+        ctx.request_repaint_after(wake);
+        reminders::announce(self, ctx);
+    }
+
+    pub fn ui(&mut self, ui: &mut Ui) {
+        if !self.theme_applied {
+            ui.ctx().set_fonts(fonts::definitions());
+            theme::install(ui.ctx());
+            ui.ctx().set_theme(self.view.theme.preference());
+            self.theme_applied = true;
+        }
+        let t = Tokens::for_dark(ui.visuals().dark_mode);
+        // Decoders for pictures embedded in mail; a no-op after the first frame.
+        egui_extras::install_image_loaders(ui.ctx());
+        self.logic(&ui.ctx().clone());
+        // Only a message the person can see turns read.
+        self.tick_read_timer(ui.ctx());
+        if self.updates.required {
+            updates::required_screen(self, ui, &t);
+            return;
+        }
         ribbon(self, ui, &t);
         if self.native_menu {
             menu_bar(self, ui, &t);

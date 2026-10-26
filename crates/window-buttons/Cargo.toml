@@ -8,13 +8,15 @@ license.workspace = true
 
 [dependencies]
 raw-window-handle = "0.6"
+log = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSView", "NSWindow", "NSButton", "NSControl"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSView", "NSWindow", "NSButton", "NSControl", "NSApplication"] }
 
-# Reaching AppKit's views from winit's window handle needs `unsafe`; every other crate but
+# Reaching AppKit's views from winit's window handle, and teaching winit's application
+# delegate to answer clicks on the Dock icon, need `unsafe`; every other crate but
 # merel-touch-bar keeps the workspace's `unsafe_code = "forbid"`.
 [lints.rust]
 unsafe_code = "allow"

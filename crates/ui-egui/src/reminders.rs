@@ -147,7 +147,9 @@ fn snooze(ui: &mut egui::Ui, t: &Tokens) -> Option<u32> {
 }
 
 /// Draws the window when a reminder is due.
-pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+/// Notes reminders that came due: asks for attention and, if the person wants them, sends the
+/// computer's notifications. Runs every frame, also while the main window is hidden.
+pub fn announce(app: &mut MailApp, ctx: &egui::Context) {
     let now = now();
     let today = chrono::Local::now().date_naive();
     let due = app.engine.session.due_reminders(now);
@@ -192,6 +194,17 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     app.announced_reminders = keys;
     // The soonest reminder decides when to look again, so the window shows up on time.
     ctx.request_repaint_after(std::time::Duration::from_secs(5));
+}
+
+pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    let now = now();
+    let today = chrono::Local::now().date_naive();
+    let due = app.engine.session.due_reminders(now);
+    let follow = app.engine.session.due_follow_ups(today, now);
+    let tasks = app.engine.session.due_task_reminders(today, now);
+    if due.is_empty() && follow.is_empty() && tasks.is_empty() {
+        return;
+    }
     let mut action: Option<Action> = None;
     let count = due.len() + follow.len() + tasks.len();
     let title = crate::i18n::tr_args("reminder-title", &[("count", count.into())]);
