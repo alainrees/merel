@@ -48,6 +48,10 @@ pub struct Tokens {
     pub card: Color32,
     /// The seam around a card; a control's edge stays `control_border`.
     pub card_border: Color32,
+    /// The ground behind a word a search found, in the message being read; `on_found` is the
+    /// text on it.
+    pub found: Color32,
+    pub on_found: Color32,
 }
 
 impl Tokens {
@@ -78,6 +82,8 @@ impl Tokens {
             window: Color32::from_rgb(0xF3, 0xF4, 0xF6),
             card: Color32::WHITE,
             card_border: Color32::from_rgb(0xE3, 0xE5, 0xE8),
+            found: Color32::from_rgb(0xFF, 0xE5, 0x6B),
+            on_found: Color32::from_rgb(0x24, 0x24, 0x24),
         }
     }
 
@@ -109,6 +115,9 @@ impl Tokens {
             window: Color32::from_rgb(0x1B, 0x1C, 0x1E),
             card: Color32::from_rgb(0x26, 0x28, 0x2B),
             card_border: Color32::from_rgb(0x3A, 0x3D, 0x42),
+            // A softer yellow than by day, with dark text, as Outlook marks a find in the dark.
+            found: Color32::from_rgb(0xE8, 0xC5, 0x4A),
+            on_found: Color32::from_rgb(0x1A, 0x1A, 0x1A),
         }
     }
 
@@ -237,6 +246,7 @@ mod tests {
                 }
             }
             need("on_accent", t.on_accent, t.accent, 4.5);
+            need("on_found", t.on_found, t.found, 4.5);
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }

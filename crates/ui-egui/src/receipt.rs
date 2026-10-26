@@ -102,6 +102,7 @@ mod tests {
             importance: Default::default(),
             chat: None,
             sealed: Default::default(),
+            size: 0,
         };
         let to = Address::new(None, "receipts@example.org").unwrap();
         let d = draft(&m, &to, 1_760_100_000);

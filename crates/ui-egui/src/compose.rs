@@ -1125,6 +1125,7 @@ mod tests {
             importance: Default::default(),
             chat: None,
             sealed: Default::default(),
+            size: 0,
         }
     }
 

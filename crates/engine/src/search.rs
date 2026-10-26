@@ -4,7 +4,9 @@
 //! (`datum:vandaag`, `datum:vorige-week`, `datum:2026-10`, `voor:2026-10-01`, `na:2026`), where
 //! (`map:facturen`, `account:werk`), an attachment's name (`bijlage:pdf`) or a category
 //! (`categorie:rood`). A phrase in quotes must occur as it stands, a word with a minus in front
-//! must not occur at all, and `OF` between two words lets either do. The English forms
+//! must not occur at all, and `OF` between two words lets either do. `groot:>5MB` (also
+//! `grootte:` and `size:`, with `<`, `>=`, `<=` or a range `1MB-5MB`; KB, MB or GB, MB when no
+//! unit is given) holds the message to a size. The English forms
 //! (`from:`, `to:`, `subject:`, `has:attachment`, `is:unread`, `is:flagged`, `date:`, `before:`,
 //! `after:`, `folder:`, `attachment:`, `category:`, `OR`, and `today`, `this-week` and so on)
 //! work too. The server gets only the plain words; what it finds is then held to the same
@@ -14,7 +16,7 @@ use chrono::{Datelike, Duration, Local, NaiveDate, TimeZone};
 use merel_model::{Address, MessageHeader};
 
 /// What the search box says the words mean, for a tooltip.
-pub const HINT: &str = "Zoekwoorden zoals in Outlook: van:sanne, aan:jan, onderwerp:offerte, heeft:bijlage, bijlage:pdf, is:ongelezen, is:gemarkeerd, datum:vorige-week, voor:2026-10-01, na:2026, map:facturen, account:werk, categorie:rood. \"Een zin\" tussen aanhalingstekens, -woord sluit uit, OF laat een van beide toe. Losse woorden zoeken overal.";
+pub const HINT: &str = "Zoekwoorden zoals in Outlook: van:sanne, aan:jan, onderwerp:offerte, heeft:bijlage, bijlage:pdf, is:ongelezen, is:gemarkeerd, datum:vorige-week, voor:2026-10-01, na:2026, map:facturen, account:werk, categorie:rood, groot:>5MB. \"Een zin\" tussen aanhalingstekens, -woord sluit uit, OF laat een van beide toe. Losse woorden zoeken overal.";
 
 /// A parsed search: lower-case words plus the operators.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -48,6 +50,8 @@ pub struct Query {
     pub amount: Option<(Option<i64>, Option<i64>)>,
     /// `heeft:iban` and the like: kinds of data the index must have recognised.
     pub has: Vec<String>,
+    /// `groot:`: the message's size in bytes between these, inclusive.
+    pub size: Option<(Option<u64>, Option<u64>)>,
 }
 
 /// One piece of the search box: what it says, whether it was in quotes, whether a minus led it.
@@ -181,6 +185,45 @@ fn amount_range(value: &str) -> Option<(Option<i64>, Option<i64>)> {
     Some((Some(cents), Some(if whole { cents + 99 } else { cents })))
 }
 
+/// The bytes a size word names: `5MB`, `2,5 mb`, `500KB`, `1GB`, `300B`; megabytes when no
+/// unit is given, counted in 1024s as Outlook does.
+fn bytes(value: &str) -> Option<u64> {
+    let v = value.trim().to_lowercase();
+    let digits = v.find(|c: char| !(c.is_ascii_digit() || c == ',' || c == '.')).unwrap_or(v.len());
+    let (number, unit) = v.split_at(digits);
+    let number: f64 = number.replace(',', ".").parse().ok()?;
+    let unit = match unit.trim() {
+        "b" | "bytes" => 1.0,
+        "k" | "kb" => 1024.0,
+        "" | "m" | "mb" => 1024.0 * 1024.0,
+        "g" | "gb" => 1024.0 * 1024.0 * 1024.0,
+        _ => return None,
+    };
+    (number.is_finite() && number >= 0.0).then(|| (number * unit).round() as u64)
+}
+
+/// The bytes a size word asks for: `>5MB`, `>=1MB`, `<100KB`, `1MB-5MB` or `1MB..5MB`; a lone
+/// size means at least that much.
+fn size_range(value: &str) -> Option<(Option<u64>, Option<u64>)> {
+    if let Some(v) = value.strip_prefix(">=") {
+        return Some((Some(bytes(v)?), None));
+    }
+    if let Some(v) = value.strip_prefix("<=") {
+        return Some((None, Some(bytes(v)?)));
+    }
+    if let Some(v) = value.strip_prefix('>') {
+        return Some((Some(bytes(v)? + 1), None));
+    }
+    if let Some(v) = value.strip_prefix('<') {
+        return Some((None, Some(bytes(v)?.checked_sub(1)?)));
+    }
+    if let Some((a, b)) = value.split_once("..").or_else(|| value.split_once('-').filter(|(a, b)| !a.is_empty() && !b.is_empty())) {
+        let (a, b) = (bytes(a)?, bytes(b)?);
+        return Some((Some(a.min(b)), Some(a.max(b))));
+    }
+    Some((Some(bytes(value)?), None))
+}
+
 impl Query {
     pub fn parse(text: &str) -> Query {
         Query::parse_on(text, Local::now().date_naive())
@@ -286,6 +329,19 @@ impl Query {
                 };
                 self.amount = Some((low, high));
             }
+            "groot" | "grootte" | "size" => {
+                let Some((low, high)) = size_range(value) else { return false };
+                let (old_low, old_high) = self.size.unwrap_or((None, None));
+                let low = match (old_low, low) {
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                    (a, b) => a.or(b),
+                };
+                let high = match (old_high, high) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                };
+                self.size = Some((low, high));
+            }
             "is" => match value {
                 "ongelezen" | "unread" => self.unread = true,
                 "gemarkeerd" | "gevlagd" | "flagged" => self.flagged = true,
@@ -358,6 +414,12 @@ impl Query {
         if self.after.is_some_and(|a| m.date < a) || self.before.is_some_and(|b| m.date >= b) {
             return false;
         }
+        // A size not known yet (the server did not say) never matches.
+        if let Some((low, high)) = self.size
+            && (m.size == 0 || low.is_some_and(|l| m.size < l) || high.is_some_and(|h| m.size > h))
+        {
+            return false;
+        }
         // The names of attachments are the index's to check; here only that there are some.
         let attachment = self.attachment || !self.attachment_names.is_empty();
         (!attachment || m.has_attachments) && (!self.unread || !m.flags.seen) && (!self.flagged || m.flags.flagged)
@@ -423,7 +485,7 @@ pub fn toggle_word(text: &str, word: &str, aliases: &[&str]) -> String {
 }
 
 /// The keys of the search words in Dutch with their English forms, as the suggestions offer them.
-pub const KEYS: [(&str, &str); 14] = [
+pub const KEYS: [(&str, &str); 15] = [
     ("van:", "from:"),
     ("aan:", "to:"),
     ("cc:", "cc:"),
@@ -438,6 +500,7 @@ pub const KEYS: [(&str, &str); 14] = [
     ("is:", "is:"),
     ("heeft:", "has:"),
     ("bedrag:", "amount:"),
+    ("groot:", "size:"),
 ];
 
 /// `text` with `key:value` in the place of any word with that key (in either language), or
@@ -566,6 +629,35 @@ mod tests {
         assert!(q.has_words(), "only the index can answer");
         let m = crate::Session::sample().messages.first().cloned().expect("sample mail");
         assert!(!q.matches(&m) && q.keeps(&m), "a listed message waits for the index");
+    }
+
+    #[test]
+    fn sizes_are_read_in_any_unit_and_hold_a_message_to_them() {
+        const MB: u64 = 1024 * 1024;
+        assert_eq!(Query::parse("groot:>5MB").size, Some((Some(5 * MB + 1), None)));
+        assert_eq!(Query::parse("size:>=5mb").size, Some((Some(5 * MB), None)));
+        assert_eq!(Query::parse("grootte:<100KB").size, Some((None, Some(100 * 1024 - 1))));
+        assert_eq!(Query::parse("groot:2,5MB").size, Some((Some(5 * MB / 2), None)), "a lone size is at least that");
+        assert_eq!(Query::parse("groot:>5").size, Some((Some(5 * MB + 1), None)), "megabytes without a unit");
+        assert_eq!(Query::parse("groot:1MB-10MB").size, Some((Some(MB), Some(10 * MB))));
+        assert_eq!(Query::parse("groot:1gb..500mb").size, Some((Some(500 * MB), Some(1024 * MB))));
+        assert_eq!(Query::parse("groot:>1MB groot:<5MB").size, Some((Some(MB + 1), Some(5 * MB - 1))), "two narrow together");
+        assert_eq!(Query::parse("groot:huis").words, ["groot:huis"], "no size: a plain word");
+        assert_eq!(Query::parse("groot:<0").words, ["groot:<0"]);
+        let mut m = crate::Session::sample().messages.first().cloned().expect("sample mail");
+        let q = Query::parse("groot:>5MB");
+        assert!(!q.has_words(), "the session answers it alone");
+        m.size = 6 * MB;
+        assert!(q.matches(&m) && q.keeps(&m));
+        m.size = 4 * MB;
+        assert!(!q.matches(&m));
+        m.size = 0;
+        assert!(!q.matches(&m) && !Query::parse("groot:<5MB").matches(&m), "an unknown size matches nothing");
+        assert_eq!(with_operator("offerte size:>1MB", "groot", ">5MB"), "offerte groot:>5MB ");
+        let mut s = crate::Session::sample();
+        s.search = "groot:>5MB".into();
+        let found: Vec<&str> = s.visible_messages().iter().map(|m| m.subject.as_str()).collect();
+        assert_eq!(found, ["Planning voor donderdag"], "the sample's one message with an attachment");
     }
 
     #[test]

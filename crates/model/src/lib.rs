@@ -317,6 +317,13 @@ pub struct MessageHeader {
     /// encryption has been read yet.
     #[serde(default, skip_serializing_if = "Sealed::is_no")]
     pub sealed: Sealed,
+    /// The whole message in bytes, as the server counts it; 0 while unknown.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub size: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// An OpenPGP-encrypted message keeps its real header inside the encryption (protected

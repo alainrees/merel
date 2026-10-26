@@ -13,6 +13,7 @@ use merel_html::{Block, Cell, Document, Image, ImageSource, Inline, Style};
 use merel_mime::InlineImage;
 
 use crate::Tokens;
+use crate::found::{self, Marks};
 use crate::remote::{Load, Loads};
 
 /// Body text size, in points.
@@ -38,6 +39,8 @@ struct Painter<'a> {
     remote: Option<&'a Loads>,
     /// Whether a click on a link opens it; off for a message in the Junk folder.
     links: bool,
+    /// The words a search found, to mark; see [`crate::found`].
+    found: Option<&'a Marks>,
     data_images: usize,
     remote_images: usize,
     clicked: Option<Clicked>,
@@ -49,9 +52,19 @@ pub fn links_off() -> String {
 }
 
 /// Draws `doc`. `key` names the message, so its pictures are cached under their own names;
-/// `links` false draws the links but lets no click through.
-pub fn show(ui: &mut Ui, t: &Tokens, doc: &Document, images: &[InlineImage], key: &str, remote: Option<&Loads>, links: bool) -> Option<Clicked> {
-    let mut p = Painter { t, images, key, remote, links, data_images: 0, remote_images: 0, clicked: None };
+/// `links` false draws the links but lets no click through; `found` marks what a search found.
+#[allow(clippy::too_many_arguments)]
+pub fn show(
+    ui: &mut Ui,
+    t: &Tokens,
+    doc: &Document,
+    images: &[InlineImage],
+    key: &str,
+    remote: Option<&Loads>,
+    links: bool,
+    found: Option<&Marks>,
+) -> Option<Clicked> {
+    let mut p = Painter { t, images, key, remote, links, found, data_images: 0, remote_images: 0, clicked: None };
     p.blocks(ui, &doc.blocks);
     if doc.truncated {
         ui.label(RichText::new(tr("message-truncated")).color(t.text_dim).size(12.0));
@@ -132,15 +145,28 @@ impl Painter<'_> {
             ui.spacing_mut().item_spacing.x = 0.0;
             for inline in inlines {
                 match inline {
-                    Inline::Text { text, style } => {
-                        ui.add(egui::Label::new(self.rich(text, *style, size).color(self.t.text)).wrap());
-                    }
+                    Inline::Text { text, style } => match self.found.and_then(|f| f.get(text)) {
+                        Some(marks) => {
+                            for (piece, hit) in found::pieces(text, marks) {
+                                let rich = self.rich(piece, *style, size);
+                                let rich = if hit { rich.color(self.t.on_found).background_color(self.t.found) } else { rich.color(self.t.text) };
+                                ui.add(egui::Label::new(rich).wrap());
+                            }
+                        }
+                        None => {
+                            ui.add(egui::Label::new(self.rich(text, *style, size).color(self.t.text)).wrap());
+                        }
+                    },
                     Inline::Link { href, text, style } if !self.links => {
                         let rich = self.rich(text, *style, size).color(self.t.text_dim).underline();
                         ui.add(egui::Label::new(rich).wrap()).on_hover_text(format!("{}: {href}", links_off()));
                     }
                     Inline::Link { href, text, style } => {
-                        let rich = self.rich(text, *style, size).color(self.t.accent_text).underline();
+                        let mut rich = self.rich(text, *style, size).color(self.t.accent_text).underline();
+                        // A link with a word found in it is marked whole, so it stays one link.
+                        if self.found.is_some_and(|f| f.contains_key(text)) {
+                            rich = rich.color(self.t.on_found).background_color(self.t.found);
+                        }
                         let r = ui
                             .add(egui::Label::new(rich).sense(Sense::click()).wrap())
                             .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -250,7 +276,7 @@ mod tests {
         let seen = clicked.clone();
         let t = Tokens::light();
         let mut h = egui_kittest::Harness::builder().with_size(vec2(900.0, 700.0)).build_ui(move |ui| {
-            if let Some(c) = show(ui, &t, &doc, &[], "m1", None, true) {
+            if let Some(c) = show(ui, &t, &doc, &[], "m1", None, true, None) {
                 *seen.borrow_mut() = Some(c);
             }
         });
@@ -272,12 +298,26 @@ mod tests {
         loads.insert("https://t.example/b.png".into(), Load::Failed);
         let t = Tokens::light();
         let mut h = egui_kittest::Harness::builder().with_size(vec2(600.0, 300.0)).build_ui(move |ui| {
-            show(ui, &t, &doc, &[], "m2", Some(&loads), true);
+            show(ui, &t, &doc, &[], "m2", Some(&loads), true, None);
         });
         h.run();
         assert!(h.query_by_label_contains("laden…: eerste").is_some());
         assert!(h.query_by_label_contains("kon niet worden geladen: tweede").is_some());
         assert!(h.query_by_label_contains("geblokkeerd").is_none());
+    }
+
+    #[test]
+    fn the_words_a_search_found_are_drawn_apart_on_their_ground() {
+        let doc = merel_html::parse("<p>Hierbij de <b>facturen</b> van oktober.</p>");
+        let mut found = Marks::new();
+        found.insert("facturen".into(), std::iter::once(0..8).collect());
+        let t = Tokens::light();
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(600.0, 200.0)).build_ui(move |ui| {
+            show(ui, &t, &doc, &[], "m4", None, true, Some(&found));
+        });
+        h.run();
+        assert!(h.query_by_label("facturen").is_some());
+        assert!(h.query_by_label("Hierbij de ").is_some(), "the rest stays as it was");
     }
 
     #[test]
@@ -287,7 +327,7 @@ mod tests {
         let seen = clicked.clone();
         let t = Tokens::light();
         let mut h = egui_kittest::Harness::builder().with_size(vec2(600.0, 300.0)).build_ui(move |ui| {
-            if let Some(c) = show(ui, &t, &doc, &[], "m3", None, false) {
+            if let Some(c) = show(ui, &t, &doc, &[], "m3", None, false, None) {
                 *seen.borrow_mut() = Some(c);
             }
         });

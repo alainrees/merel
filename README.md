@@ -100,6 +100,9 @@ categories, `map:facturen` and `account:werk` search those folders whatever the 
 computer, amounts of money, IBANs (checked by their check digits), track-and-trace codes and order and invoice numbers in
 the text and the attachments: `bedrag:>100`, `bedrag:<50`, `bedrag:100-500` or `bedrag:1250` find mail by an amount, and
 `heeft:bedrag`, `heeft:iban`, `heeft:zending`, `heeft:ordernummer` and `heeft:factuurnummer` keep mail that holds one.
+`groot:>5MB` (also `grootte:` or `size:`, with `<`, `>=`, `<=` or a range such as `1MB-10MB`, in KB, MB or GB) finds mail
+by its size, as the server counts it. In the message being read, the words a search found stand on a yellow ground, in
+whatever form they were found (another ending, without accents, or near the typo in the search box).
 An opened message shows what was recognised in a "Herkend:" strip: a click on an order or invoice number searches all mail
 for it, a parcel code with a known carrier (PostNL, DHL, DPD, UPS, GLS) opens that carrier's page, an amount or IBAN is
 copied (not in the Junk folder). Search on meaning, which "Bestand > Zoeken" switches on (it is off until then), also

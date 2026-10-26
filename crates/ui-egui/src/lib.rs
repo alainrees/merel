@@ -20,6 +20,7 @@ mod dates;
 pub mod eml;
 pub mod folders;
 mod fonts;
+mod found;
 pub mod groups;
 pub mod helder;
 pub mod help;
@@ -2848,9 +2849,10 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         && let Some(doc) = b.rich.as_ref()
     {
         let remote = app.remote.snapshot(&message_id);
+        let marks = found::marks(ui, &message_id, &app.engine.session.search, &found::texts_of(doc));
         let clicked = egui::ScrollArea::vertical()
             .auto_shrink(false)
-            .show(ui, |ui| html::show(ui, t, doc, &b.images, &message_id, remote.as_ref(), !in_junk))
+            .show(ui, |ui| html::show(ui, t, doc, &b.images, &message_id, remote.as_ref(), !in_junk, marks.as_deref()))
             .inner;
         match clicked {
             Some(html::Clicked::Mailto(address)) => {
@@ -2873,8 +2875,17 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         (None, false, true) => m.preview.clone(),
         (None, false, false) => String::new(),
     };
-    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-        ui.add(egui::Label::new(RichText::new(text).color(if body.is_some() || sample { t.text } else { t.text_dim }).size(14.0)).wrap());
+    let color = if body.is_some() || sample { t.text } else { t.text_dim };
+    let marks = if body.is_some() || sample { found::marks(ui, &message_id, &app.engine.session.search, &[&text]) } else { None };
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| match marks.as_ref().and_then(|m| m.get(&text)) {
+        // The words a search found, on a yellow ground.
+        Some(found) => {
+            let base = egui::TextFormat { font_id: egui::FontId::proportional(14.0), color, ..Default::default() };
+            ui.add(egui::Label::new(found::job(&text, found, base, t)).wrap());
+        }
+        None => {
+            ui.add(egui::Label::new(RichText::new(text).color(color).size(14.0)).wrap());
+        }
     });
 }
 
@@ -3597,6 +3608,7 @@ mod tests {
             importance: merel_model::Importance::Normal,
             chat: Some(ChatTag::default()),
             sealed: Default::default(),
+            size: 0,
         });
         s.bodies.insert("a1/INBOX#1".into(), merel_engine::Body { text: "Zie ik je om tien uur?".into(), ..Default::default() });
     }
@@ -4458,6 +4470,7 @@ mod tests {
             importance: Default::default(),
             chat: None,
             sealed: Default::default(),
+            size: 0,
         };
         let body = merel_engine::Body {
             rich: Some(merel_html::parse(r#"<p><a href="https://evil.example/login">https://www.bank.nl/inloggen</a></p>"#)),
