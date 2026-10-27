@@ -700,11 +700,17 @@ junk-safe = Veilige afzenders
 junk-safe-none = Je contacten zijn altijd veilig.
 junk-level = Niveau
 junk-level-standard = Standaard
-junk-level-standard-hint = Alleen mail van geblokkeerde afzenders gaat naar Ongewenste e-mail; je mailprovider filtert de rest.
+junk-level-standard-hint = Mail van geblokkeerde afzenders, en wat het lerende filter herkent, gaat naar Ongewenste e-mail; je mailprovider filtert de rest.
 junk-level-high = Hoog
 junk-level-high-hint = Ook mail van een afzender met kenmerken van phishing: de naam van een contact met een ander adres, of een domein dat op een bekend domein lijkt.
 junk-level-safe-only = Alleen veilige lijsten
 junk-level-safe-only-hint = Alles wat niet van een contact, een veilige afzender of jezelf komt, gaat naar Ongewenste e-mail. Kijk daar dan regelmatig.
+junk-learning = Lerend filter
+junk-learning-on = Leren van wat ik als ongewenst aanmerk
+junk-learning-hint = Merel leert van wat je naar Ongewenste e-mail verplaatst of eruit terughaalt, en van mail van je contacten en veilige afzenders. Nieuwe mail die lijkt op wat je als ongewenst aanmerkte, gaat dan vanzelf naar Ongewenste e-mail. Dit blijft op deze computer: er gaat niets uit je mail naar buiten, en het bestand bevat geen leesbare woorden.
+junk-learning-status = Geleerd van { $junk } ongewenste en { $good } goede berichten.
+junk-learning-waiting = Geleerd van { $junk } ongewenste en { $good } goede berichten. Het filter begint zodra het er van allebei { $min } kent.
+junk-learning-forget = Vergeten wat het filter leerde
 
 ## Opruimen
 

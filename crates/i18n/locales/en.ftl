@@ -693,11 +693,17 @@ junk-safe = Safe senders
 junk-safe-none = Your contacts are always safe.
 junk-level = Level
 junk-level-standard = Standard
-junk-level-standard-hint = Only mail from blocked senders goes to Junk Email; your mail provider filters the rest.
+junk-level-standard-hint = Mail from blocked senders, and what the learning filter recognises, goes to Junk Email; your mail provider filters the rest.
 junk-level-high = High
 junk-level-high-hint = Also mail from a sender with the marks of phishing: the name of a contact with another address, or a domain that looks like a well-known one.
 junk-level-safe-only = Safe lists only
 junk-level-safe-only-hint = Everything not from a contact, a safe sender or yourself goes to Junk Email. Look there regularly then.
+junk-learning = Learning filter
+junk-learning-on = Learn from what I mark as junk
+junk-learning-hint = Merel learns from what you move to Junk Email or take back out of it, and from mail from your contacts and safe senders. New mail that looks like what you marked as junk then goes to Junk Email by itself. This stays on this computer: nothing from your mail goes out, and the file holds no readable words.
+junk-learning-status = Learned from { $junk } junk and { $good } good messages.
+junk-learning-waiting = Learned from { $junk } junk and { $good } good messages. The filter starts once it knows { $min } of each.
+junk-learning-forget = Forget what the filter learned
 
 ## Opruimen
 

@@ -1,7 +1,8 @@
 //! Blocked and safe senders, as Outlook's junk e-mail options have them. An entry is an
 //! address ("news@example.org") or a domain ("example.org", which covers every address there
 //! and at its subdomains). Nothing here looks at the message text: the lists are the person's
-//! own choices, and the mail server's filter does the rest. The [`JunkLevel`] says how far the
+//! own choices, and the mail server's filter does the rest (with the learning filter of
+//! [`crate::Learned`], which learns from those choices). The [`JunkLevel`] says how far the
 //! filing goes beyond the blocked list, like Outlook's protection level.
 
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,8 @@ pub const MAX_JUNK_ENTRY: usize = 254;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JunkLevel {
-    /// Only the blocked senders; the server's filter does the rest.
+    /// Only the blocked senders (and what the learning filter recognises); the server's filter
+    /// does the rest.
     #[default]
     Standard,
     /// Also a sender who shows signs of phishing in the header: a contact's name with another
@@ -51,6 +53,13 @@ pub struct JunkLists {
     pub safe: Vec<String>,
     #[serde(default)]
     pub level: JunkLevel,
+    /// Whether the learning filter (see [`crate::Learned`]) is off; it is on unless turned off.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub learning_off: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl JunkLists {
@@ -110,7 +119,12 @@ mod tests {
         assert!(!entry_covers("example.org", "x@notexample.org"));
         assert!(!entry_covers("example.org", "nonsense"));
 
-        let lists = JunkLists { blocked: vec!["spam.example".into()], safe: vec!["boss@spam.example".into()], level: JunkLevel::Standard };
+        let lists = JunkLists {
+            blocked: vec!["spam.example".into()],
+            safe: vec!["boss@spam.example".into()],
+            level: JunkLevel::Standard,
+            learning_off: false,
+        };
         assert!(lists.is_blocked("a@spam.example") && lists.is_blocked("boss@spam.example"), "the lists do not know about each other");
         assert!(lists.is_safe("BOSS@spam.example") && !lists.is_safe("a@spam.example"));
     }

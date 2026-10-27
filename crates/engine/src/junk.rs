@@ -3,6 +3,10 @@
 //! mail goes to the account's Junk folder the way "Ongewenst" does it by hand: the header
 //! moves in the session at once and the server gets the job. A safe sender, or a contact, is
 //! never filed, whatever the blocked list says. The server's own filter stays the first line.
+//!
+//! Beside the lists, the learning filter ([`merel_model::Learned`]) learns from what the
+//! person files as junk and takes back out of the Junk folder, and from mail of safe senders,
+//! and files new mail that looks like the junk; it stays on this computer.
 
 use serde_json::Value;
 
@@ -18,6 +22,25 @@ impl Session {
 
     pub fn junk_data(&self) -> JunkLists {
         self.junk.clone()
+    }
+
+    pub fn set_learned(&mut self, learned: merel_model::Learned) {
+        self.learned = learned;
+    }
+
+    /// Whether the learning filter learned something since the last call.
+    pub fn take_learned_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.learned_dirty)
+    }
+
+    /// Teaches the learning filter that `message_id` is junk (or good mail), unless it is off.
+    pub(crate) fn learn_junk(&mut self, message_id: &str, junk: bool) {
+        if self.junk.learning_off {
+            return;
+        }
+        let Some(m) = self.message(message_id).cloned() else { return };
+        self.learned.learn(&m, junk, rand::random());
+        self.learned_dirty = true;
     }
 
     /// Whether a command changed the lists since the last call.
@@ -56,14 +79,26 @@ impl Session {
 
     /// A message new in an inbox that [`Self::files_as_junk`] goes to the account's Junk folder;
     /// true when it did (the rules then do not see it).
+    /// Mail from a safe sender teaches the learning filter what good mail looks like, and
+    /// beyond the lists the learning filter files what looks like the junk it learned.
     pub(crate) fn apply_junk(&mut self, message_id: &str) -> bool {
         let Some(m) = self.message(message_id) else { return false };
-        if !self.files_as_junk(&m.from) {
-            return false;
-        }
         let Some(folder) = self.folder(&m.folder_id) else { return false };
         if folder.kind != FolderKind::Inbox {
             return false;
+        }
+        if !self.files_as_junk(&m.from) {
+            let email = m.from.email();
+            let trusted = self.sender_safe(email) || self.accounts.iter().any(|a| a.address.email().eq_ignore_ascii_case(email));
+            if trusted {
+                if m.chat.is_none() {
+                    self.learn_junk(message_id, false);
+                }
+                return false;
+            }
+            if self.junk.learning_off || m.chat.is_some() || !self.learned.is_junk(m) {
+                return false;
+            }
         }
         let Some(junk) = self.folder_of_kind(&folder.account_id, FolderKind::Junk).map(|f| f.id.clone()) else { return false };
         move_message(self, message_id, &junk).is_ok()
@@ -74,6 +109,7 @@ impl Session {
 /// it (IMAP keywords, Exchange's `MarkAsJunk`); before any move, while the message is where
 /// the session says. Sample mail has no server.
 pub(crate) fn report(s: &mut Session, message_id: &str, junk: bool) {
+    s.learn_junk(message_id, junk);
     let Some(m) = s.message(message_id) else { return };
     let Some(folder) = s.folder(&m.folder_id) else { return };
     if folder.account_id == SAMPLE_ACCOUNT {
@@ -150,6 +186,24 @@ pub fn level(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         s.junk.level = level;
         s.junk_dirty = true;
     }
+    Ok(())
+}
+
+/// `junk.learning { on }`: turns the learning filter on or off. Off, it neither learns nor
+/// files; what it learned stays until `junk.unlearn`.
+pub fn learning(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let on = params.get("on").and_then(Value::as_bool).ok_or(CommandError::Param("on"))?;
+    if s.junk.learning_off == on {
+        s.junk.learning_off = !on;
+        s.junk_dirty = true;
+    }
+    Ok(())
+}
+
+/// `junk.unlearn`: forgets everything the learning filter learned.
+pub fn unlearn(s: &mut Session, _: &Value) -> Result<(), CommandError> {
+    s.learned = merel_model::Learned::default();
+    s.learned_dirty = true;
     Ok(())
 }
 
@@ -268,6 +322,58 @@ mod tests {
             "{jobs:?}"
         );
         assert!(jobs.iter().any(|j| matches!(j, Job::Move { .. })));
+    }
+
+    fn mail(n: u32, from: &str, subject: &str) -> RemoteHeader {
+        RemoteHeader { header: merel_mime::parse_header(format!("From: {from}\r\nSubject: {subject}\r\n\r\n").as_bytes()), ..header(n, from) }
+    }
+
+    #[test]
+    fn the_learning_filter_learns_from_the_person_and_files_look_alikes() {
+        let mut s = Session::with_accounts(vec![crate::tests::account("a")]);
+        s.apply(Event::Connected {
+            account_id: "a".into(),
+            folders: vec![
+                RemoteFolder { path: "INBOX".into(), name: "Inbox".into(), kind: FolderKind::Inbox, selectable: true, parent: None },
+                RemoteFolder { path: "Junk".into(), name: "Junk".into(), kind: FolderKind::Junk, selectable: true, parent: None },
+            ],
+            syncs_items: false,
+        });
+        s.run("junk.trust", &json!({ "entry": "werk.nl" })).unwrap();
+        let mut shown = vec![mail(1, "first@werk.nl", "Hallo")];
+        let list =
+            |headers: &Vec<RemoteHeader>| Event::Headers { folder_id: "a/INBOX".into(), headers: headers.clone(), offset: 0, limit: HEADER_LIMIT };
+        s.apply(list(&shown));
+        for n in 2..12 {
+            shown.push(mail(n, &format!("collega{n}@werk.nl"), "Planning overleg ontwerp donderdag"));
+            shown.push(mail(100 + n, &format!("promo{n}@lucky-prize.biz"), "You won a FREE cash prize, claim now"));
+            s.apply(list(&shown));
+            s.run("message.select", &json!({ "id": format!("a/INBOX#{}", 100 + n) })).unwrap();
+            s.run("message.junk", &Value::Null).unwrap();
+        }
+        assert!(s.take_learned_dirty());
+        assert_eq!((s.learned.junk, s.learned.good), (10, 10), "junk from the person, good mail from the safe senders");
+        assert!(s.message("a/INBOX#5").is_some_and(|m| m.folder_id == "a/INBOX"), "a safe sender stays");
+
+        shown.push(mail(200, "deals@lucky-prize.biz", "Claim your FREE prize"));
+        shown.push(mail(201, "iemand@elders.de", "Vraag over de offerte"));
+        s.apply(list(&shown));
+        assert_eq!(s.message("a/INBOX#200").map(|m| m.folder_id.as_str()), Some("a/Junk"), "it looks like the junk");
+        assert_eq!(s.message("a/INBOX#201").map(|m| m.folder_id.as_str()), Some("a/INBOX"), "a stranger with other words stays");
+
+        // Dragged back out of Junk: a change of mind it learns from.
+        s.run("message.move", &json!({ "id": "a/INBOX#200", "folder_id": "a/INBOX" })).unwrap();
+        assert_eq!((s.learned.junk, s.learned.good), (10, 11));
+
+        // Off, it neither files nor learns; forgetting empties it.
+        s.run("junk.learning", &json!({ "on": false })).unwrap();
+        assert!(s.junk_data().learning_off && s.take_junk_dirty());
+        shown.push(mail(202, "more@lucky-prize.biz", "You won a FREE cash prize"));
+        s.apply(list(&shown));
+        assert_eq!(s.message("a/INBOX#202").map(|m| m.folder_id.as_str()), Some("a/INBOX"));
+        s.run("junk.unlearn", &Value::Null).unwrap();
+        assert_eq!(s.learned, merel_model::Learned::default());
+        assert!(s.take_learned_dirty());
     }
 
     #[test]

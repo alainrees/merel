@@ -82,6 +82,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "junk.trust", label: "Trust sender", run: crate::junk::trust },
     CommandSpec { id: "junk.forget", label: "Forget sender", run: crate::junk::forget },
     CommandSpec { id: "junk.level", label: "Junk filter level", run: crate::junk::level },
+    CommandSpec { id: "junk.learning", label: "Learning junk filter", run: crate::junk::learning },
+    CommandSpec { id: "junk.unlearn", label: "Forget what the junk filter learned", run: crate::junk::unlearn },
     CommandSpec { id: "conversation.ignore", label: "Ignore conversation", run: crate::ignore::ignore },
     CommandSpec { id: "conversation.unignore", label: "Stop ignoring conversation", run: crate::ignore::unignore },
     CommandSpec { id: "conversation.cleanup", label: "Clean up conversation", run: crate::cleanup::conversation },
@@ -377,7 +379,14 @@ fn message_move(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         Some(id) => vec![id.to_string()],
         None => selection(s)?,
     };
+    let into = s.folder(&target).map(|f| f.kind);
     for id in ids {
+        let from = s.message(&id).and_then(|m| s.folder(&m.folder_id)).map(|f| f.kind);
+        match (from, into) {
+            (Some(f), Some(FolderKind::Junk)) if f != FolderKind::Junk => s.learn_junk(&id, true),
+            (Some(FolderKind::Junk), Some(t)) if !matches!(t, FolderKind::Junk | FolderKind::Deleted) => s.learn_junk(&id, false),
+            _ => {}
+        }
         move_message(s, &id, &target)?;
     }
     Ok(())

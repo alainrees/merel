@@ -5309,6 +5309,13 @@ mod tests {
         h.get_by_label("Hoog").click();
         h.run();
         assert_eq!(h.state().engine.session.junk.level, merel_model::JunkLevel::High);
+        assert!(h.query_by_label("Vergeten wat het filter leerde").is_some(), "the blocked message taught the learning filter");
+        h.get_by_label("Leren van wat ik als ongewenst aanmerk").click();
+        h.run();
+        assert!(h.state().engine.session.junk.learning_off);
+        h.get_by_label("Vergeten wat het filter leerde").click();
+        h.run();
+        assert_eq!(h.state().engine.session.learned, merel_model::Learned::default());
         h.get_by_label("Sluiten").click();
         h.run();
         assert!(h.state().junk.is_none());
