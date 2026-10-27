@@ -1302,6 +1302,7 @@ calendar-add-optional = Add optional attendees
 calendar-add-attendees = Add attendees
 calendar-optional-hint = Invites someone who does not have to be there
 calendar-nothing-planned = You have nothing planned then.
+calendar-free-then = You have nothing else planned at that time.
 calendar-overlaps = Overlaps with { $titles }.
 calendar-recurring = Recurring appointment
 calendar-send-hint = Saves the appointment and emails the attendees an invitation for their calendar.

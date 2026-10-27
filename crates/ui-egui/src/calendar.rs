@@ -1940,23 +1940,32 @@ fn day_of(app: &MailApp, editor: &Editor, t: &Tokens) -> Option<(NaiveDate, Vec<
     Some((day, busy))
 }
 
-/// The day of the appointment, beside the form: the hours around it with what is already
-/// planned, and the appointment itself in the app colour, so a clash shows before saving.
-fn day_preview(ui: &mut Ui, t: &Tokens, editor: &Editor, day: NaiveDate, busy: &[Busy]) {
-    ui.label(RichText::new(format!("{} {} {}", weekday_name(day), day.day(), month_name(day.month()))).size(15.0).strong().color(t.text));
-    let span = editor.start().zip(editor.end());
+/// The line above the day preview, and whether it warns of a clash: what overlaps the
+/// appointment, that the time is free while other things are planned that day, or that
+/// the day is still empty.
+fn preview_status(span: Option<(NaiveDateTime, NaiveDateTime)>, busy: &[Busy]) -> (String, bool) {
     let clash: Vec<&str> = match span {
         Some((s, e)) => {
             busy.iter().filter(|b| !b.all_day && b.show_as != ShowAs::Free && b.start < e && s < b.end).map(|b| b.title.as_str()).collect()
         }
         None => Vec::new(),
     };
-    let status = if clash.is_empty() {
-        tr("calendar-nothing-planned")
+    if !clash.is_empty() {
+        (crate::i18n::tr_args("calendar-overlaps", &[("titles", clash.join(", ").into())]), true)
+    } else if busy.is_empty() {
+        (tr("calendar-nothing-planned"), false)
     } else {
-        crate::i18n::tr_args("calendar-overlaps", &[("titles", clash.join(", ").into())])
-    };
-    ui.label(RichText::new(status).size(12.0).color(if clash.is_empty() { t.text_dim } else { t.flag }));
+        (tr("calendar-free-then"), false)
+    }
+}
+
+/// The day of the appointment, beside the form: the hours around it with what is already
+/// planned, and the appointment itself in the app colour, so a clash shows before saving.
+fn day_preview(ui: &mut Ui, t: &Tokens, editor: &Editor, day: NaiveDate, busy: &[Busy]) {
+    ui.label(RichText::new(format!("{} {} {}", weekday_name(day), day.day(), month_name(day.month()))).size(15.0).strong().color(t.text));
+    let span = editor.start().zip(editor.end());
+    let (status, clash) = preview_status(span, busy);
+    ui.label(RichText::new(status).size(12.0).color(if clash { t.flag } else { t.text_dim }));
     for b in busy.iter().filter(|b| b.all_day) {
         ui.label(helder::dotted(&b.title, b.color, t));
     }
@@ -1984,7 +1993,7 @@ fn day_preview(ui: &mut Ui, t: &Tokens, editor: &Editor, day: NaiveDate, busy: &
     // On a clash the planned blocks take the left half and the new one the right half, so
     // both stay readable.
     let middle = rect.left() + gutter + (rect.width() - gutter) / 2.0;
-    let (planned_right, new_left) = if clash.is_empty() { (rect.right() - 2.0, rect.left() + gutter + 4.0) } else { (middle - 2.0, middle + 2.0) };
+    let (planned_right, new_left) = if !clash { (rect.right() - 2.0, rect.left() + gutter + 4.0) } else { (middle - 2.0, middle + 2.0) };
     let block = |top: f32, bottom: f32, left: f32, right: f32| {
         let top = top.max(rect.top());
         let bottom = bottom.min(rect.bottom());
@@ -2640,6 +2649,28 @@ mod tests {
         assert!(e.all_day && e.start_date == "23-10-2026" && e.id.is_none(), "a day drop plans the whole day");
         assert_eq!(resized_end(&a, d(2026, 10, 21), at(14, 0)), Some(base + 1_800), "shortened to the first half hour");
         assert_eq!(resized_end(&a, d(2026, 10, 21), at(9, 0)), Some(base + 1_800), "never before half an hour after the start");
+    }
+
+    #[test]
+    fn the_day_preview_only_says_nothing_is_planned_on_an_empty_day() {
+        let at = |h| d(2026, 10, 21).and_hms_opt(h, 0, 0).unwrap();
+        let busy = |title: &str, from, to, all_day| Busy {
+            title: title.into(),
+            start: at(from),
+            end: at(to),
+            all_day,
+            color: Color32::RED,
+            show_as: ShowAs::Busy,
+        };
+        let span = Some((at(14), at(15)));
+        assert_eq!(preview_status(span, &[]), ("Je hebt dan nog niets gepland.".to_string(), false));
+        let morning = [busy("Tandarts", 9, 10, false)];
+        assert_eq!(preview_status(span, &morning), ("Op dat tijdstip heb je niets anders gepland.".to_string(), false), "the day is not empty");
+        let all_day = [busy("Koningsdag", 0, 0, true)];
+        assert!(!preview_status(span, &all_day).1);
+        assert_ne!(preview_status(span, &all_day).0, "Je hebt dan nog niets gepland.", "an all-day appointment is planned too");
+        let clash = [busy("Tandarts", 9, 10, false), busy("Overleg", 14, 16, false)];
+        assert_eq!(preview_status(span, &clash), ("Overlapt met Overleg.".to_string(), true));
     }
 
     #[test]
