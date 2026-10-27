@@ -186,6 +186,9 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
             .or_else(|| s.calendars.first().map(|c| c.id.clone()))
             .ok_or(CommandError::Param("calendar_id"))?,
     };
+    if s.calendar(&calendar_id).is_some_and(|c| c.read_only) {
+        return Err(CommandError::Store(merel_i18n::tr("calendar-read-only")));
+    }
     let account = s.appointment_account(&calendar_id);
     let recurrence = match params.get("recurrence") {
         None | Some(Value::Null) => None,
@@ -416,7 +419,7 @@ pub fn calendar_add(s: &mut Session, params: &Value) -> Result<(), CommandError>
         None => CALENDAR_COLORS.iter().map(|(_, c)| *c).find(|c| !s.calendars.iter().any(|k| k.color == *c)).unwrap_or(CALENDAR_COLORS[0].1),
     };
     let id = (1..).map(|n| format!("local-{n}")).find(|id| s.calendar(id).is_none()).unwrap_or_default();
-    s.calendars.push(Calendar { id: id.clone(), name, account_id: None, color });
+    s.calendars.push(Calendar { id: id.clone(), name, account_id: None, color, read_only: false });
     s.last_calendar = Some(id);
     s.calendar_dirty = true;
     Ok(())
@@ -606,7 +609,13 @@ mod tests {
         s.run("calendar.delete", &json!({ "id": gezin })).unwrap();
         assert_eq!(s.run("calendar.delete", &json!({ "id": "local" })), Err(CommandError::Param("id")), "one local calendar always stays");
 
-        s.calendars.push(Calendar { id: "acc/calendar".into(), name: "Werk".into(), account_id: Some("acc".into()), color: [0; 3] });
+        s.calendars.push(Calendar {
+            id: "acc/calendar".into(),
+            name: "Werk".into(),
+            account_id: Some("acc".into()),
+            color: [0; 3],
+            read_only: false,
+        });
         assert_eq!(s.run("calendar.rename", &json!({ "id": "acc/calendar", "name": "x" })), Err(CommandError::Param("id")));
         assert_eq!(s.run("calendar.delete", &json!({ "id": "acc/calendar" })), Err(CommandError::Param("id")));
         assert_eq!(s.run("calendar.color", &json!({ "id": "nope", "color": [1, 1, 1] })), Err(CommandError::NotFound));
@@ -699,7 +708,7 @@ mod tests {
             s.run("appointment.save", &json!({ "title": "Raar", "start": start, "end": start + 1, "recurrence": { "frequency": "fortnightly" } })),
             Err(CommandError::Param("recurrence"))
         );
-        s.calendars.push(Calendar { id: "acc/cal".into(), name: "Werk".into(), account_id: Some("acc".into()), color: [0; 3] });
+        s.calendars.push(Calendar { id: "acc/cal".into(), name: "Werk".into(), account_id: Some("acc".into()), color: [0; 3], read_only: false });
         s.take_jobs();
         s.run(
             "appointment.save",

@@ -2045,11 +2045,14 @@ pub fn delete_series() -> String {
 /// The appointment window, when one is open: a command bar on top, the form in a card, and
 /// the day it falls on beside it.
 pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    // A calendar the account may only read is no place for a new appointment.
+    let open_in = app.calendar.editor.as_ref().and_then(|e| e.calendar_id.clone());
     let calendars: Vec<(String, String, Color32)> = app
         .engine
         .session
         .calendars
         .iter()
+        .filter(|c| !c.read_only || open_in.as_ref() == Some(&c.id))
         .map(|c| (c.id.clone(), app.engine.session.calendar_label(c), Color32::from_rgb(c.color[0], c.color[1], c.color[2])))
         .collect();
     let local_calendars: Vec<String> = app.engine.session.calendars.iter().filter(|c| c.account_id.is_none()).map(|c| c.id.clone()).collect();

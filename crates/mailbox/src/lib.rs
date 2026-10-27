@@ -161,15 +161,33 @@ impl Item {
     }
 }
 
+/// A calendar of a store besides its main one: another calendar of the account, a shared one
+/// or one it subscribed to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteCalendar {
+    /// The store's own id for it, as appointments carry it in `calendar_id`.
+    pub id: String,
+    pub name: String,
+    /// Whether the account may only read it (birthdays, holidays, someone else's).
+    pub read_only: bool,
+}
+
 /// The calendar, address book and to-do list of a store. Times are Unix seconds in UTC; a
 /// store that keeps all-day appointments and due days as dates reports them as midnight in
 /// its own time zone, and the engine snaps them to the computer's.
 pub trait ItemStore {
-    /// The appointments touching `[from, to)`, occurrences of a repeating one included.
+    /// The appointments touching `[from, to)`, occurrences of a repeating one included. Those
+    /// of the main calendar carry an empty `calendar_id`; those of one of [`Self::calendars`]
+    /// that calendar's id.
     fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>>;
+    /// The calendars besides the main one; none for a store that keeps one calendar.
+    fn calendars(&mut self) -> Result<Vec<RemoteCalendar>> {
+        Ok(Vec::new())
+    }
     fn contacts(&mut self) -> Result<Vec<Contact>>;
     fn tasks(&mut self) -> Result<Vec<Task>>;
-    /// Creates the item when its id is empty, replaces it otherwise; returns the store's id.
+    /// Creates the item when its id is empty, replaces it otherwise; returns the store's id. A
+    /// new appointment goes to the calendar its `calendar_id` names, the main one when empty.
     fn save(&mut self, item: &Item) -> Result<String>;
     fn delete(&mut self, id: &str) -> Result<()>;
     /// Whether `email` is free at `now` and when they work, for a store that can tell;

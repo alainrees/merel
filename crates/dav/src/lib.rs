@@ -24,7 +24,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use merel_imap::ImapClient;
-use merel_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result};
+use merel_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteCalendar, RemoteFolder, RemoteHeader, Result};
 use merel_model::{Appointment, Contact, Dav, Server, Task, clean_text};
 use merel_secrets::Secret;
 use roxmltree::{Document, Node};
@@ -550,12 +550,23 @@ impl DavClient {
             .ok_or_else(|| MailboxError::Protocol(if todos { merel_i18n::tr("dav-no-tasks") } else { merel_i18n::tr("dav-no-calendar") }))
     }
 
-    /// Creates or replaces one calendar object (`VEVENT` or `VTODO`).
-    /// `uid` is the UID a new object gets (a meeting's, which its invitations carry), else a
-    /// fresh one.
-    fn save_calendar_object(&mut self, id: &str, kind: &str, prefix: char, uid: Option<&str>, write: &dyn Fn(&mut Component)) -> Result<String> {
+    /// Creates or replaces one calendar object (`VEVENT` or `VTODO`). A new one goes to
+    /// `collection`, else to the first calendar that takes its kind. `uid` is the UID a new
+    /// object gets (a meeting's, which its invitations carry), else a fresh one.
+    fn save_calendar_object(
+        &mut self,
+        id: &str,
+        kind: &str,
+        prefix: char,
+        collection: Option<String>,
+        uid: Option<&str>,
+        write: &dyn Fn(&mut Component),
+    ) -> Result<String> {
         if id.is_empty() {
-            let collection = self.first_calendar(kind == "VTODO")?;
+            let collection = match collection {
+                Some(c) => c,
+                None => self.first_calendar(kind == "VTODO")?,
+            };
             let fresh = self.uid();
             let uid = uid.filter(|u| !u.trim().is_empty()).unwrap_or(&fresh).to_string();
             let mut root = ical::new_calendar(kind, &uid);
@@ -625,8 +636,11 @@ fn parse_collections(doc: &Document, home: &str, ns: &str, kind: &str) -> Vec<Co
 impl ItemStore for DavClient {
     fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>> {
         let calendars: Vec<String> = self.calendars.iter().filter(|c| c.events).map(|c| c.url.clone()).collect();
+        let main = self.first_calendar(false).ok();
         let mut out = Vec::new();
         for calendar in calendars {
+            // The first calendar is the main one; the others go by their URL.
+            let calendar_id = if main.as_ref() == Some(&calendar) { String::new() } else { calendar.clone() };
             // Servers that cannot expand recurrences answer the plain query; those show the
             // first occurrence only.
             let resources = match self.report(&calendar, &Self::events_query(from, to, true), CALDAV, "calendar-data") {
@@ -642,7 +656,8 @@ impl ItemStore for DavClient {
                             None if root.all("VEVENT").len() > 1 => format!("e:{url}#{}", event.prop("DTSTART").map(|p| p.raw.trim()).unwrap_or("")),
                             None => format!("e:{url}"),
                         };
-                        if let Some(a) = ical::appointment_of(event, id) {
+                        if let Some(mut a) = ical::appointment_of(event, id) {
+                            a.calendar_id = calendar_id.clone();
                             out.push(a);
                         }
                     }
@@ -650,6 +665,16 @@ impl ItemStore for DavClient {
             }
         }
         Ok(out)
+    }
+
+    fn calendars(&mut self) -> Result<Vec<RemoteCalendar>> {
+        let main = self.first_calendar(false).ok();
+        Ok(self
+            .calendars
+            .iter()
+            .filter(|c| c.events && main.as_ref() != Some(&c.url))
+            .map(|c| RemoteCalendar { id: c.url.clone(), name: c.name.clone(), read_only: false })
+            .collect())
     }
 
     fn contacts(&mut self) -> Result<Vec<Contact>> {
@@ -693,9 +718,11 @@ impl ItemStore for DavClient {
         let id = item.id();
         match item {
             Item::Appointment(a) => {
-                self.save_calendar_object(id, "VEVENT", 'e', a.meeting.as_ref().map(|m| m.uid.as_str()), &|c| ical::write_appointment(c, a))
+                let collection = self.calendars.iter().find(|c| c.events && c.url == a.calendar_id).map(|c| c.url.clone());
+                let uid = a.meeting.as_ref().map(|m| m.uid.as_str());
+                self.save_calendar_object(id, "VEVENT", 'e', collection, uid, &|c| ical::write_appointment(c, a))
             }
-            Item::Task(t) => self.save_calendar_object(id, "VTODO", 't', None, &|c| ical::write_task(c, t)),
+            Item::Task(t) => self.save_calendar_object(id, "VTODO", 't', None, None, &|c| ical::write_task(c, t)),
             Item::Contact(c) => {
                 if id.is_empty() {
                     let book = self

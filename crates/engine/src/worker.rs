@@ -380,9 +380,19 @@ fn sync(store: &mut dyn merel_mailbox::ItemStore, account_id: &str, from: i64, t
         e => e,
     })?;
     let mut refused = Vec::new();
+    // Without the list of calendars, every appointment shows in the main one.
+    let calendars = match store.calendars() {
+        Ok(c) => Some(c),
+        Err(MailboxError::Login) => return Err(MailboxError::Login),
+        Err(e) => {
+            log::warn!("the other calendars of {account_id} did not come: {e}");
+            None
+        }
+    };
     let contacts = part(store.contacts(), "Contactpersonen", &mut refused)?;
     let tasks = part(store.tasks(), "Taken", &mut refused)?;
-    let mut events = vec![Event::Synced { account_id: account_id.to_string(), appointments, contacts, tasks }];
+    let mut events: Vec<Event> = calendars.map(|calendars| Event::Calendars { account_id: account_id.to_string(), calendars }).into_iter().collect();
+    events.push(Event::Synced { account_id: account_id.to_string(), appointments, contacts, tasks });
     if !refused.is_empty() {
         events.push(Event::ItemsFailed { account_id: account_id.to_string(), what: refused.join(" ") });
     }
@@ -600,8 +610,9 @@ mod tests {
     #[test]
     fn refused_tasks_leave_the_calendar_standing() {
         let events = sync(&mut NoTasks, "a", 0, 1).unwrap();
-        assert!(matches!(&events[0], Event::Synced { account_id, .. } if account_id == "a"));
-        assert!(matches!(&events[1], Event::ItemsFailed { what, .. } if what == "Taken: De server gaf een fout: Invalid request"));
+        assert!(matches!(&events[0], Event::Calendars { account_id, calendars } if account_id == "a" && calendars.is_empty()));
+        assert!(matches!(&events[1], Event::Synced { account_id, .. } if account_id == "a"));
+        assert!(matches!(&events[2], Event::ItemsFailed { what, .. } if what == "Taken: De server gaf een fout: Invalid request"));
     }
 
     /// A mailbox where everything asked for was moved or deleted elsewhere; only its inbox is left.

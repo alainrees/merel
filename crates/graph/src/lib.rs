@@ -17,7 +17,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime, Datelike, Local, NaiveDateTime, Offset, TimeZone, Timelike, Utc};
-use merel_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result, kind_from_name};
+use merel_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteCalendar, RemoteFolder, RemoteHeader, Result, kind_from_name};
 use merel_mime::ParsedHeader;
 use merel_model::{
     Address, Appointment, Attendee, Availability, ChatTag, Contact, FolderKind, Frequency, Importance, MAX_PHOTO, Meeting, Phone, PhoneKind, Photo,
@@ -1149,14 +1149,60 @@ impl Mailbox for GraphClient {
     fn logout(self: Box<Self>) {}
 }
 
+impl GraphClient {
+    /// The mailbox's calendars, the default one among them.
+    fn calendar_list(&self) -> Result<Vec<Value>> {
+        self.list(&format!("/me/calendars?$top={PAGE}&$select=id,name,canEdit,isDefaultCalendar"))
+    }
+}
+
+/// The other calendars in a listing of `/me/calendars`: all but the default one.
+fn other_calendars(listed: &[Value]) -> Vec<RemoteCalendar> {
+    listed
+        .iter()
+        .filter(|c| c.get("isDefaultCalendar").and_then(Value::as_bool) != Some(true))
+        .filter_map(|c| {
+            Some(RemoteCalendar {
+                id: id_of(c)?,
+                name: clean_text(str_of(c, "name")),
+                read_only: c.get("canEdit").and_then(Value::as_bool) == Some(false),
+            })
+        })
+        .collect()
+}
+
 impl ItemStore for GraphClient {
     fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>> {
-        let path = format!(
-            "/me/calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity,showAs,categories,attendees,organizer,iCalUId,onlineMeeting,onlineMeetingUrl",
+        let query = format!(
+            "calendarView?startDateTime={}Z&endDateTime={}Z&$top={PAGE}&$select=id,subject,body,start,end,isAllDay,location,isCancelled,isReminderOn,reminderMinutesBeforeStart,sensitivity,showAs,categories,attendees,organizer,iCalUId,onlineMeeting,onlineMeetingUrl",
             encode(&utc(from)),
             encode(&utc(to.max(from)))
         );
-        Ok(self.list(&path)?.iter().filter_map(appointment_of).collect())
+        let mut out: Vec<Appointment> = self.list(&format!("/me/{query}"))?.iter().filter_map(appointment_of).collect();
+        // The other calendars each on their own; one that cannot be read leaves the rest.
+        let others = match self.calendar_list() {
+            Ok(listed) => other_calendars(&listed),
+            Err(MailboxError::Login) => return Err(MailboxError::Login),
+            Err(e) => {
+                log::warn!("Graph: calendars not listed: {e}");
+                Vec::new()
+            }
+        };
+        for c in others {
+            match self.list(&format!("/me/calendars/{}/{query}", encode(&c.id))) {
+                Ok(listed) => out.extend(listed.iter().filter_map(appointment_of).map(|mut a| {
+                    a.calendar_id = c.id.clone();
+                    a
+                })),
+                Err(MailboxError::Login) => return Err(MailboxError::Login),
+                Err(e) => log::warn!("Graph: a calendar could not be read: {e}"),
+            }
+        }
+        Ok(out)
+    }
+
+    fn calendars(&mut self) -> Result<Vec<RemoteCalendar>> {
+        Ok(other_calendars(&self.calendar_list()?))
     }
 
     fn contacts(&mut self) -> Result<Vec<Contact>> {
@@ -1182,6 +1228,9 @@ impl ItemStore for GraphClient {
     fn save(&mut self, item: &Item) -> Result<String> {
         let zone = self.time_zone.clone();
         let (body, create_path, prefix) = match item {
+            Item::Appointment(a) if !a.calendar_id.is_empty() => {
+                (Self::event_json(a, &zone), format!("/me/calendars/{}/events", encode(&a.calendar_id)), "event:")
+            }
             Item::Appointment(a) => (Self::event_json(a, &zone), "/me/events".to_string(), "event:"),
             Item::Contact(c) => (Self::contact_json(c), "/me/contacts".to_string(), "contact:"),
             Item::Task(t) => (Self::task_json(t, &zone), format!("/me/todo/lists/{}/tasks", encode(&self.task_list()?)), "task:"),
@@ -1229,6 +1278,20 @@ fn tls() -> ureq::tls::TlsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn other_calendars_are_all_but_the_default_one() {
+        let listed = json!([
+            { "id": "AAMkA=", "name": "Agenda", "canEdit": true, "isDefaultCalendar": true },
+            { "id": "AAMkB=", "name": "Team", "canEdit": true, "isDefaultCalendar": false },
+            { "id": "AAMkC=", "name": "Verjaardagen", "canEdit": false, "isDefaultCalendar": false }
+        ]);
+        let others = other_calendars(listed.as_array().unwrap());
+        assert_eq!(
+            others.iter().map(|c| (c.id.as_str(), c.name.as_str(), c.read_only)).collect::<Vec<_>>(),
+            [("AAMkB=", "Team", false), ("AAMkC=", "Verjaardagen", true)]
+        );
+    }
 
     #[test]
     fn a_search_quotes_the_words_and_drops_the_ordering() {

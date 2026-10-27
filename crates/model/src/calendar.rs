@@ -50,12 +50,16 @@ pub struct Calendar {
     pub account_id: Option<String>,
     /// RGB, the colour of its appointments.
     pub color: [u8; 3],
+    /// An account's calendar it may only read (birthdays, holidays, someone else's): it is
+    /// not offered for a new appointment.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
 }
 
 impl Calendar {
     /// The calendar every installation starts with.
     pub fn local() -> Self {
-        Calendar { id: "local".into(), name: merel_i18n::tr("calendar-mine"), account_id: None, color: CALENDAR_COLORS[0].1 }
+        Calendar { id: "local".into(), name: merel_i18n::tr("calendar-mine"), account_id: None, color: CALENDAR_COLORS[0].1, read_only: false }
     }
 }
 
