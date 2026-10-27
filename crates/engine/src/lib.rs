@@ -481,6 +481,9 @@ pub struct Session {
     /// Blocked and safe senders, for every account; `junk.json`.
     pub junk: merel_model::JunkLists,
     junk_dirty: bool,
+    /// What the learning junk filter learned; `junk-learned.json`.
+    pub learned: merel_model::Learned,
+    learned_dirty: bool,
     /// Conversations whose mail goes to Deleted Items on arrival; see [`ignore`].
     pub ignored: Vec<merel_model::IgnoredConversation>,
     ignored_dirty: bool,
@@ -664,6 +667,8 @@ impl Session {
             // The lists that are not an account's stay, and what the removal changed still
             // reaches its file.
             fresh.junk = std::mem::take(&mut self.junk);
+            fresh.learned = std::mem::take(&mut self.learned);
+            fresh.learned_dirty = self.learned_dirty;
             fresh.categories = std::mem::take(&mut self.categories);
             fresh.follow_ups = std::mem::take(&mut self.follow_ups);
             fresh.snoozes = std::mem::take(&mut self.snoozes);
@@ -1354,6 +1359,8 @@ impl Engine {
         engine.session.set_rules(rules.rules);
         let junk = engine.config_path.as_deref().map(|p| config::load_json::<merel_model::JunkLists>(&config::junk_path(p))).unwrap_or_default();
         engine.session.set_junk(junk);
+        let learned = engine.config_path.as_deref().map(|p| config::load_json::<merel_model::Learned>(&config::learned_path(p))).unwrap_or_default();
+        engine.session.set_learned(learned);
         let ignored = engine.config_path.as_deref().map(|p| config::load_json::<ignore::IgnoredFile>(&config::ignored_path(p))).unwrap_or_default();
         engine.session.set_ignored(ignored.ignored);
         let follow_ups =
@@ -1384,6 +1391,7 @@ impl Engine {
             self.session.take_tasks_dirty();
             self.session.take_rules_dirty();
             self.session.take_junk_dirty();
+            self.session.take_learned_dirty();
             self.session.take_ignored_dirty();
             self.session.take_follow_ups_dirty();
             self.session.take_snoozes_dirty();
@@ -1408,6 +1416,7 @@ impl Engine {
         if self.session.take_junk_dirty() {
             config::save_json(&config::junk_path(&path), &self.session.junk_data()).map_err(|e| CommandError::Store(e.to_string()))?;
         }
+        self.save_learned()?;
         if self.session.take_ignored_dirty() {
             config::save_json(&config::ignored_path(&path), &self.session.ignored_data()).map_err(|e| CommandError::Store(e.to_string()))?;
         }
@@ -1580,6 +1589,18 @@ impl Engine {
         r
     }
 
+    /// Writes what the learning junk filter learned, when it learned something.
+    fn save_learned(&mut self) -> Result<(), CommandError> {
+        let Some(path) = self.config_path.clone() else {
+            self.session.take_learned_dirty();
+            return Ok(());
+        };
+        if self.session.take_learned_dirty() {
+            config::save_json(&config::learned_path(&path), &self.session.learned).map_err(|e| CommandError::Store(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Writes the offline cache now; for when the window closes.
     pub fn flush(&mut self) {
         self.cache.save(&self.session, true);
@@ -1719,6 +1740,9 @@ impl Engine {
         self.index(false);
         self.dispatch();
         self.cache.save(&self.session, false);
+        // Mail from safe senders teaches the junk filter what good mail looks like. A failed
+        // write is tried again with the next change.
+        let _ = self.save_learned();
         changed
     }
 

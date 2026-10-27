@@ -12,6 +12,7 @@ mod chat;
 mod contact;
 mod groups;
 mod junk;
+mod learn;
 mod online;
 mod quicksteps;
 pub mod rich;
@@ -34,6 +35,7 @@ pub use chat::{
 pub use contact::{Contact, ContactError, MAX_PHOTO, Phone, PhoneKind, Photo, Place, PlaceKind};
 pub use groups::{ContactGroup, ContactGroupError, MAX_GROUP_MEMBERS, MAX_GROUP_NAME, mailbox};
 pub use junk::{JunkLevel, JunkLists, MAX_JUNK_ENTRY, entry_covers, junk_entry};
+pub use learn::{JUNK_SCORE, Learned, MIN_TRAINED};
 pub use online::{MAX_LINK as MAX_MEETING_LINK, MeetingLink, Service as MeetingService, find_meeting_link, meeting_link};
 pub use quicksteps::{MAX_QUICK_STEP_NAME, QuickStep, QuickStepError};
 pub use rules::{MAX_RULE_TEXT, Rule, RuleError, RuleField};

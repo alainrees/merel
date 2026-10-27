@@ -70,6 +70,11 @@ pub fn junk_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("junk.json")
 }
 
+/// What the learning junk filter learned, next to the accounts file.
+pub fn learned_path(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("junk-learned.json")
+}
+
 /// The correspondents' S/MIME certificates, next to the accounts file.
 pub fn certificates_path(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("certificates.json")

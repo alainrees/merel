@@ -59,7 +59,12 @@ mailbox's blocked list); Gmail learns from the move to Spam itself and Microsoft
 Junk Email. The window also sets the level, as Outlook's junk options do: "Standaard" files only the blocked
 senders, "Hoog" also a sender whose header shows signs of phishing (a contact's name with another address, a
 look-alike of a known domain), and "Alleen veilige lijsten" everything that is not from a contact, a safe sender or
-one of your own addresses. The lists live on your computer; nothing about your mail is sent anywhere to be checked.
+one of your own addresses. Besides the lists, a learning filter ("Lerend filter" in the same window, on unless
+turned off) learns from what you file as junk or take back out of the Junk folder, and from mail of your contacts
+and safe senders, and once it knows ten of each files new mail that looks like your junk (Robinson's chi-squared
+method, as SpamBayes does it). What it learned stays in `junk-learned.json` as salted hashes, without a readable
+word, and "Vergeten wat het filter leerde" empties it. The lists live on your computer; nothing about your mail is
+sent anywhere to be checked.
 When something gets past all that, "Melden" over the message (or "Melden als phishing of spam" in its right-click
 menu) sends its source to the Merel team so the check can learn from it: only on that click, from your own account,
 as an attached `.eml` with your names and addresses replaced by "Ontvanger" (in encoded text parts too), after
