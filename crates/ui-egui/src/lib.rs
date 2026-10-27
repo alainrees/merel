@@ -5764,6 +5764,7 @@ mod tests {
                 name: merel_engine::sync::ACCOUNT_CALENDAR.into(),
                 account_id: Some(a.into()),
                 color: [0x2E, 0x8B, 0x57],
+                read_only: false,
             });
         }
         h.run();

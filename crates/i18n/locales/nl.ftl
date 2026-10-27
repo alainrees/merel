@@ -1811,6 +1811,8 @@ folder-kind-archive = Archief
 folder-kind-junk = Ongewenste e-mail
 folder-kind-deleted = Verwijderde items
 calendar-mine = Mijn agenda
+calendar-unnamed = Naamloze agenda
+calendar-read-only = Deze agenda kun je alleen bekijken; kies een andere agenda.
 junk-intro = Mail van een geblokkeerde afzender of een geblokkeerd domein gaat bij aankomst meteen naar Ongewenste e-mail. Veilige afzenders en je contacten komen daar nooit in. Je mailprovider filtert daarnaast zelf; wat die als ongewenst ziet, staat ook in die map.
 
 ## Chat invitations

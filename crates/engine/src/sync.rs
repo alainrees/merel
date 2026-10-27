@@ -69,6 +69,18 @@ impl Session {
         format!("{account_id}/calendar")
     }
 
+    /// The session id of the calendar the store of `account_id` calls `remote_id`, one of its
+    /// calendars besides the main one.
+    pub fn other_calendar_id(account_id: &str, remote_id: &str) -> String {
+        format!("{account_id}/calendars/{remote_id}")
+    }
+
+    /// The store's id of the calendar behind session id `calendar_id` of `account_id`: empty
+    /// for the main calendar.
+    pub fn remote_calendar_id(account_id: &str, calendar_id: &str) -> String {
+        calendar_id.strip_prefix(&format!("{account_id}/calendars/")).unwrap_or_default().to_string()
+    }
+
     /// The session id of the item the store of `account_id` calls `remote_id`.
     pub fn local_item_id(account_id: &str, remote_id: &str) -> String {
         format!("{account_id}/{remote_id}")
@@ -135,6 +147,9 @@ impl Session {
             return Err(CommandError::Store(merel_i18n::tr("sync-still-saving")));
         }
         item.set_id(remote.unwrap_or_default());
+        if let Item::Appointment(a) = &mut item {
+            a.calendar_id = Self::remote_calendar_id(account_id, &a.calendar_id);
+        }
         self.pending.push(Job::SaveItem { account_id: account_id.to_string(), local_id, item: Box::new(item) });
         Ok(())
     }
@@ -175,10 +190,46 @@ impl Session {
             None => {
                 let index = self.accounts.iter().position(|a| a.id == account_id).unwrap_or(0);
                 let color = self.calendar_colors.get(&id).copied().unwrap_or(PALETTE[index % PALETTE.len()]);
-                self.calendars.push(Calendar { id: id.clone(), name: ACCOUNT_CALENDAR.into(), account_id: Some(account_id.to_string()), color });
+                self.calendars.push(Calendar {
+                    id: id.clone(),
+                    name: ACCOUNT_CALENDAR.into(),
+                    account_id: Some(account_id.to_string()),
+                    color,
+                    read_only: false,
+                });
             }
         }
         id
+    }
+
+    /// Takes the calendars the store of `account_id` keeps besides its main one: new ones come
+    /// in with a colour of their own, gone ones leave with their appointments, and the rest
+    /// take the store's name and whether they may be written.
+    pub(crate) fn apply_calendars(&mut self, account_id: &str, calendars: &[merel_mailbox::RemoteCalendar]) {
+        if !self.accounts.iter().any(|a| a.id == account_id) {
+            return;
+        }
+        let main = self.ensure_calendar(account_id);
+        let prefix = Self::other_calendar_id(account_id, "");
+        let listed: Vec<String> = calendars.iter().map(|c| Self::other_calendar_id(account_id, &c.id)).collect();
+        let gone: Vec<String> =
+            self.calendars.iter().filter(|c| c.id.starts_with(&prefix) && !listed.contains(&c.id)).map(|c| c.id.clone()).collect();
+        self.calendars.retain(|c| !gone.contains(&c.id));
+        self.appointments.retain(|a| !gone.contains(&a.calendar_id));
+        let index = self.accounts.iter().position(|a| a.id == account_id).unwrap_or(0);
+        for (n, (remote, id)) in calendars.iter().zip(listed).enumerate() {
+            let name = merel_model::clean_text(&remote.name);
+            let name = if name.trim().is_empty() { merel_i18n::tr("calendar-unnamed") } else { name };
+            match self.calendars.iter_mut().find(|c| c.id == id) {
+                Some(c) => (c.name, c.read_only) = (name, remote.read_only),
+                None => {
+                    let color = self.calendar_colors.get(&id).copied().unwrap_or(PALETTE[(index + n + 1) % PALETTE.len()]);
+                    // Next to the account's main calendar, in the store's order.
+                    let at = self.calendars.iter().rposition(|c| c.id == main || c.id.starts_with(&prefix)).map_or(self.calendars.len(), |i| i + 1);
+                    self.calendars.insert(at, Calendar { id, name, account_id: Some(account_id.to_string()), color, read_only: remote.read_only });
+                }
+            }
+        }
     }
 
     /// Replaces the items of `account_id` with what its store reported.
@@ -189,19 +240,20 @@ impl Session {
         }
         self.item_accounts.insert(account_id.to_string());
         let calendar_id = self.ensure_calendar(account_id);
+        let own: Vec<String> = self.calendars.iter().filter(|c| c.account_id.as_deref() == Some(account_id)).map(|c| c.id.clone()).collect();
         // Servers keep notes as text; the formatting stays on this computer for as long as the
         // text it lies over comes back unchanged.
         let formatted: Formatted = self
             .appointments
             .iter()
-            .filter(|a| a.calendar_id == calendar_id)
+            .filter(|a| own.contains(&a.calendar_id))
             .filter_map(|a| a.notes_rich.clone().map(|r| (a.id.clone(), (a.notes.clone(), r))))
             .collect();
         // Meetings Merel sent keep their attendees and answers here when the server does
         // not track them (Exchange, Microsoft 365, Google); what a server does track wins, with
         // the details of the answers filed here.
         let meetings: HashMap<String, Meeting> =
-            self.appointments.iter().filter(|a| a.calendar_id == calendar_id).filter_map(|a| a.meeting.clone().map(|m| (a.id.clone(), m))).collect();
+            self.appointments.iter().filter(|a| own.contains(&a.calendar_id)).filter_map(|a| a.meeting.clone().map(|m| (a.id.clone(), m))).collect();
         let formatted_contacts: Formatted = self
             .contacts
             .iter()
@@ -214,10 +266,12 @@ impl Session {
             .filter(|t| t.account_id.as_deref() == Some(account_id))
             .filter_map(|t| t.notes_rich.clone().map(|r| (t.id.clone(), (t.notes.clone(), r))))
             .collect();
-        self.appointments.retain(|a| a.calendar_id != calendar_id);
+        self.appointments.retain(|a| !own.contains(&a.calendar_id));
         self.appointments.extend(appointments.into_iter().map(|mut a| {
             a.id = Self::local_item_id(account_id, &a.id);
-            a.calendar_id = calendar_id.clone();
+            // One of the other calendars when the session knows it, else the main one.
+            let other = Self::other_calendar_id(account_id, &a.calendar_id);
+            a.calendar_id = if !a.calendar_id.is_empty() && own.contains(&other) { other } else { calendar_id.clone() };
             a.notes_rich = kept_formatting(&formatted, &a.id, &a.notes);
             if let Some(ours) = meetings.get(&a.id) {
                 match &mut a.meeting {
@@ -352,7 +406,13 @@ mod tests {
     #[test]
     fn an_account_calendar_named_after_the_account_is_renamed_agenda() {
         let mut s = Session::with_accounts(vec![account("acc", "Alain Rees")]);
-        s.calendars.push(Calendar { id: "acc/calendar".into(), name: "Alain Rees".into(), account_id: Some("acc".into()), color: [1, 2, 3] });
+        s.calendars.push(Calendar {
+            id: "acc/calendar".into(),
+            name: "Alain Rees".into(),
+            account_id: Some("acc".into()),
+            color: [1, 2, 3],
+            read_only: false,
+        });
         connected(&mut s);
         s.apply(Event::Synced { account_id: "acc".into(), appointments: Vec::new(), contacts: Vec::new(), tasks: Vec::new() });
         let cal = s.calendar("acc/calendar").unwrap();
@@ -380,6 +440,48 @@ mod tests {
         s.request_availability("sanne@example.org", None);
         assert_eq!(s.pending.len(), 2, "asked again after five minutes");
         assert_eq!(s.availability_of("sanne@example.org"), Some(&a), "the old answer shows meanwhile");
+    }
+
+    #[test]
+    fn other_calendars_of_a_store_stand_beside_the_main_one() {
+        let mut s = Session::with_accounts(vec![account("acc", "Werk")]);
+        connected(&mut s);
+        s.take_jobs();
+        let team = merel_mailbox::RemoteCalendar { id: "T1".into(), name: "Team".into(), read_only: false };
+        let birthdays = merel_mailbox::RemoteCalendar { id: "B1".into(), name: "Verjaardagen".into(), read_only: true };
+        s.apply(Event::Calendars { account_id: "acc".into(), calendars: vec![team.clone(), birthdays.clone()] });
+        let mine = |s: &Session| s.calendars.iter().filter(|c| c.account_id.as_deref() == Some("acc")).map(|c| c.id.clone()).collect::<Vec<_>>();
+        assert_eq!(mine(&s), ["acc/calendar", "acc/calendars/T1", "acc/calendars/B1"], "the main one first, then the store's order");
+        assert!(s.calendar("acc/calendars/B1").is_some_and(|c| c.read_only && c.name == "Verjaardagen"));
+
+        let in_team = Appointment { calendar_id: "T1".into(), ..appointment("E2", 3_600, 7_200, false) };
+        let unknown = Appointment { calendar_id: "X9".into(), ..appointment("E3", 3_600, 7_200, false) };
+        s.apply(Event::Synced {
+            account_id: "acc".into(),
+            appointments: vec![appointment("E1", 3_600, 7_200, false), in_team, unknown],
+            contacts: Vec::new(),
+            tasks: Vec::new(),
+        });
+        let calendar_of = |s: &Session, id: &str| s.appointment(id).map(|a| a.calendar_id.clone());
+        assert_eq!(calendar_of(&s, "acc/E1").as_deref(), Some("acc/calendar"));
+        assert_eq!(calendar_of(&s, "acc/E2").as_deref(), Some("acc/calendars/T1"));
+        assert_eq!(calendar_of(&s, "acc/E3").as_deref(), Some("acc/calendar"), "a calendar the session does not know: the main one");
+
+        // A new appointment goes to the store with the store's own calendar id.
+        s.run("appointment.save", &json!({ "title": "Retro", "start": 3_600, "end": 7_200, "calendar_id": "acc/calendars/T1" })).unwrap();
+        assert!(
+            matches!(&s.take_jobs()[..], [Job::SaveItem { item, .. }] if matches!(&**item, Item::Appointment(a) if a.calendar_id == "T1" && a.id.is_empty()))
+        );
+        assert!(
+            s.run("appointment.save", &json!({ "title": "Taart", "start": 3_600, "end": 7_200, "calendar_id": "acc/calendars/B1" })).is_err(),
+            "read only"
+        );
+
+        // A calendar the store no longer lists leaves with its appointments.
+        s.apply(Event::Calendars { account_id: "acc".into(), calendars: vec![birthdays] });
+        assert_eq!(mine(&s), ["acc/calendar", "acc/calendars/B1"]);
+        assert!(s.appointment("acc/E2").is_none());
+        assert!(s.appointment("acc/E1").is_some());
     }
 
     #[test]

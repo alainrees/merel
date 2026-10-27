@@ -273,6 +273,8 @@ pub enum Event {
     },
     /// The folders of an account, listed again after one was made, renamed or removed.
     Folders { account_id: String, folders: Vec<RemoteFolder> },
+    /// The calendars of an account's store besides its main one; comes before its `Synced`.
+    Calendars { account_id: String, calendars: Vec<merel_mailbox::RemoteCalendar> },
     /// The items of an account's store, replacing what the session had of it.
     Synced { account_id: String, appointments: Vec<Appointment>, contacts: Vec<Contact>, tasks: Vec<Task> },
     /// The store named the item the session knew as `local_id`.
@@ -629,7 +631,10 @@ impl Session {
         }
         self.leave_unified_if_alone();
         self.calendars.retain(|c| c.account_id.as_deref() != Some(account_id));
-        if self.calendar_colors.remove(&Self::account_calendar_id(account_id)).is_some() {
+        let others = Self::other_calendar_id(account_id, "");
+        let before = self.calendar_colors.len();
+        self.calendar_colors.retain(|id, _| *id != Self::account_calendar_id(account_id) && !id.starts_with(&others));
+        if self.calendar_colors.len() != before {
             self.calendar_dirty = true;
         }
         if self.rules.iter().any(|r| r.account_id == account_id) {
@@ -693,6 +698,7 @@ impl Session {
         match event {
             Event::Connected { account_id, .. }
             | Event::Folders { account_id, .. }
+            | Event::Calendars { account_id, .. }
             | Event::Synced { account_id, .. }
             | Event::ItemSaved { account_id, .. }
             | Event::Failed { account_id, .. }
@@ -1093,6 +1099,7 @@ impl Session {
                 *self.queued.entry(account_id.clone()).or_default() += 1;
                 self.status.insert(account_id, AccountStatus::Offline);
             }
+            Event::Calendars { account_id, calendars } => self.apply_calendars(&account_id, &calendars),
             Event::Synced { account_id, appointments, contacts, tasks } => self.apply_synced(&account_id, appointments, contacts, tasks),
             Event::ItemSaved { account_id, local_id, remote_id } => self.apply_saved(&account_id, &local_id, &remote_id),
             Event::Availability { email, availability } => {

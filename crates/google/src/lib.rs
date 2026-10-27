@@ -9,13 +9,14 @@
 //! token and retry once.
 //!
 //! Store ids carry their kind, since the APIs are three: `event:<id>`, `people/<id>` (the
-//! People API's own resource name) and `task:<id>`.
+//! People API's own resource name) and `task:<id>`. An event in another calendar than the
+//! primary one is `event:<id>|<calendar id>`; event ids never hold a `|`.
 
 use std::time::Duration;
 
 use chrono::{DateTime, Local, NaiveDate, NaiveTime, TimeZone, Utc};
 use merel_imap::ImapClient;
-use merel_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteFolder, RemoteHeader, Result};
+use merel_mailbox::{Credential, Flag, Item, ItemStore, Mailbox, MailboxError, RemoteCalendar, RemoteFolder, RemoteHeader, Result};
 use merel_model::{Address, Appointment, Contact, Phone, PhoneKind, Server, ShowAs, Task, clean_text};
 use merel_secrets::Secret;
 use serde_json::{Value, json};
@@ -25,6 +26,8 @@ pub const SCOPES: [&str; 3] =
     ["https://www.googleapis.com/auth/calendar", "https://www.googleapis.com/auth/contacts", "https://www.googleapis.com/auth/tasks"];
 
 const EVENTS: &str = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+const CALENDARS: &str = "https://www.googleapis.com/calendar/v3/calendars";
+const CALENDAR_LIST: &str = "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250";
 const PEOPLE: &str = "https://people.googleapis.com/v1";
 const TASKS: &str = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks";
 const TOKENINFO: &str = "https://oauth2.googleapis.com/tokeninfo";
@@ -415,7 +418,9 @@ fn without_nulls(mut v: Value) -> Value {
 
 /// Where an item's id leads: the URL that reads, changes or deletes it.
 fn url_of(id: &str) -> Result<String> {
-    if let Some(event) = id.strip_prefix("event:") {
+    if let Some((event, calendar)) = id.strip_prefix("event:").and_then(|e| e.split_once('|')) {
+        Ok(format!("{CALENDARS}/{}/events/{}", encode(calendar), encode(event)))
+    } else if let Some(event) = id.strip_prefix("event:") {
         Ok(format!("{EVENTS}/{}", encode(event)))
     } else if let Some(person) = id.strip_prefix("people/") {
         Ok(format!("{PEOPLE}/people/{}", encode(person)))
@@ -527,14 +532,54 @@ impl GoogleItems {
     }
 }
 
+/// The calendars in a listing of `calendarList` besides the primary one, without those that
+/// show only free and busy times.
+fn other_calendars(listed: &[Value]) -> Vec<RemoteCalendar> {
+    listed
+        .iter()
+        .filter(|c| c.get("primary").and_then(Value::as_bool) != Some(true))
+        .filter(|c| matches!(str_of(c, "accessRole"), "owner" | "writer" | "reader"))
+        .filter_map(|c| {
+            let id = c.get("id").and_then(Value::as_str).filter(|id| !id.is_empty())?;
+            let name = c.get("summaryOverride").and_then(Value::as_str).filter(|n| !n.trim().is_empty()).unwrap_or(str_of(c, "summary"));
+            Some(RemoteCalendar { id: id.to_string(), name: clean_text(name), read_only: str_of(c, "accessRole") == "reader" })
+        })
+        .collect()
+}
+
 impl ItemStore for GoogleItems {
     fn appointments(&mut self, from: i64, to: i64) -> Result<Vec<Appointment>> {
-        let url = format!(
-            "{EVENTS}?singleEvents=true&orderBy=startTime&maxResults=2500&timeMin={}&timeMax={}",
+        let query = format!(
+            "events?singleEvents=true&orderBy=startTime&maxResults=2500&timeMin={}&timeMax={}",
             encode(&rfc3339(from)),
             encode(&rfc3339(to.max(from)))
         );
-        Ok(self.list(&url, "items")?.iter().filter_map(appointment_of).collect())
+        let mut out: Vec<Appointment> = self.list(&format!("{CALENDARS}/primary/{query}"), "items")?.iter().filter_map(appointment_of).collect();
+        // The other calendars each on their own; one that cannot be read leaves the rest.
+        let others = match self.list(CALENDAR_LIST, "items") {
+            Ok(listed) => other_calendars(&listed),
+            Err(MailboxError::Login) => return Err(MailboxError::Login),
+            Err(e) => {
+                log::warn!("Google: calendars not listed: {e}");
+                Vec::new()
+            }
+        };
+        for c in others {
+            match self.list(&format!("{CALENDARS}/{}/{query}", encode(&c.id)), "items") {
+                Ok(listed) => out.extend(listed.iter().filter_map(appointment_of).map(|mut a| {
+                    a.id = format!("{}|{}", a.id, c.id);
+                    a.calendar_id = c.id.clone();
+                    a
+                })),
+                Err(MailboxError::Login) => return Err(MailboxError::Login),
+                Err(e) => log::warn!("Google: a calendar could not be read: {e}"),
+            }
+        }
+        Ok(out)
+    }
+
+    fn calendars(&mut self) -> Result<Vec<RemoteCalendar>> {
+        Ok(other_calendars(&self.list(CALENDAR_LIST, "items")?))
     }
 
     fn contacts(&mut self) -> Result<Vec<Contact>> {
@@ -554,7 +599,11 @@ impl ItemStore for GoogleItems {
                 let body = event_json(a, &local_zone());
                 // The Calendar API only reads `conferenceData` when asked to.
                 let conference = if a.make_online { "?conferenceDataVersion=1" } else { "" };
-                if id.is_empty() {
+                if id.is_empty() && !a.calendar_id.is_empty() {
+                    let url = format!("{CALENDARS}/{}/events{conference}", encode(&a.calendar_id));
+                    let created = Self::created_id(&self.call("POST", &url, Some(&without_nulls(body)))?, "id", "event:")?;
+                    Ok(format!("{created}|{}", a.calendar_id))
+                } else if id.is_empty() {
                     Self::created_id(&self.call("POST", &format!("{EVENTS}{conference}"), Some(&without_nulls(body)))?, "id", "event:")
                 } else {
                     self.call("PATCH", &format!("{}{conference}", url_of(id)?), Some(&body))?;
@@ -615,6 +664,23 @@ mod tests {
         assert!(!has_scopes("https://mail.google.com/ https://www.googleapis.com/auth/calendar"));
         assert_eq!(encode("a b/c:d_e"), "a%20b%2Fc%3Ad_e");
         assert_eq!(rfc3339(1_792_000_000), "2026-10-14T17:46:40Z");
+    }
+
+    #[test]
+    fn other_calendars_skip_the_primary_and_free_busy_ones() {
+        let listed = json!([
+            { "id": "alain@gmail.com", "summary": "Alain", "primary": true, "accessRole": "owner" },
+            { "id": "werk123@group.calendar.google.com", "summary": "Werk", "summaryOverride": "Werk (team)", "accessRole": "writer" },
+            { "id": "nl.dutch#holiday@group.v.calendar.google.com", "summary": "Feestdagen", "accessRole": "reader" },
+            { "id": "collega@example.org", "summary": "Collega", "accessRole": "freeBusyReader" }
+        ]);
+        let others = other_calendars(listed.as_array().unwrap());
+        assert_eq!(others.iter().map(|c| (c.name.as_str(), c.read_only)).collect::<Vec<_>>(), [("Werk (team)", false), ("Feestdagen", true)]);
+        assert_eq!(
+            url_of("event:e9|nl.dutch#holiday@group.v.calendar.google.com").unwrap(),
+            format!("{CALENDARS}/nl.dutch%23holiday%40group.v.calendar.google.com/events/e9"),
+            "an event of another calendar goes there"
+        );
     }
 
     #[test]

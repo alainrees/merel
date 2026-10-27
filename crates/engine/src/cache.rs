@@ -107,6 +107,7 @@ impl Cache {
         let account = match event {
             Event::Connected { account_id, .. }
             | Event::Folders { account_id, .. }
+            | Event::Calendars { account_id, .. }
             | Event::Synced { account_id, .. }
             | Event::ItemSaved { account_id, .. }
             | Event::Gone { account_id, .. } => Some(account_id.clone()),
