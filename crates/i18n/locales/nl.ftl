@@ -1287,6 +1287,7 @@ calendar-add-optional = Optionele genodigden toevoegen
 calendar-add-attendees = Genodigden toevoegen
 calendar-optional-hint = Nodigt iemand uit die er niet bij hoeft te zijn
 calendar-nothing-planned = Je hebt dan nog niets gepland.
+calendar-free-then = Op dat tijdstip heb je niets anders gepland.
 calendar-overlaps = Overlapt met { $titles }.
 calendar-recurring = Herhaalde afspraak
 calendar-send-hint = Slaat de afspraak op en mailt de genodigden een uitnodiging voor hun agenda.
