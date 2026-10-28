@@ -661,6 +661,8 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
             command = Some("message.select_all");
         } else if i.consume_key(Modifiers::NONE, Key::F5) {
             command = Some("folder.refresh");
+        } else if i.consume_key(Modifiers::NONE, Key::F9) {
+            command = Some("sync.now");
         } else if i.consume_key(Modifiers::NONE, Key::ArrowDown) {
             step = 1;
         } else if i.consume_key(Modifiers::NONE, Key::ArrowUp) {
@@ -686,6 +688,7 @@ fn shortcuts(app: &mut MailApp, ctx: &egui::Context) {
         Some("escape") => app.engine.session.search.clear(),
         Some("message.open_window") if has => app.message_window = true,
         Some("folder.refresh") => app.run("folder.refresh", Value::Null),
+        Some("sync.now") if !app.engine.session.is_syncing() => app.run("sync.now", Value::Null),
         Some("message.select_all") => {
             let ids: Vec<String> = app.engine.session.visible_messages().iter().map(|m| m.id.clone()).collect();
             if !ids.is_empty() {
@@ -932,6 +935,19 @@ const TITLE_SEARCH_HEIGHT: f32 = 32.0;
 /// The filter menu's name over the message list.
 pub(crate) fn list_filter() -> String {
     tr("list-filter")
+}
+
+/// The button over the message list that syncs every account; true when it was clicked.
+fn sync_button(ui: &mut Ui, t: &Tokens, can: bool, busy: bool) -> bool {
+    let color = if can && !busy { t.text } else { t.text_dim };
+    let button = egui::Button::image(helder::Icon::RefreshCw.image(helder::ICON, color))
+        .frame_when_inactive(false)
+        .corner_radius(helder::CONTROL_RADIUS)
+        .min_size(vec2(32.0, 32.0));
+    let r = ui.add_enabled(can && !busy, button);
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, can && !busy, tr("sync-all")));
+    let hint = if busy { tr("sync-busy") } else { format!("{} (F9)", tr("sync-all-hint")) };
+    r.on_hover_text(hint.clone()).on_disabled_hover_text(hint).clicked()
 }
 
 /// The search bar at the top of the window, as the new Outlook has it: one field for the
@@ -1402,9 +1418,12 @@ fn mail_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     quicksteps::ribbon(app, ui, t);
 }
 
-/// The Verzenden/ontvangen tab.
+/// The Verzenden/ontvangen tab: every account up to date, or only the open folder.
 fn send_receive_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
-    let can = !app.engine.session.is_sample() && app.engine.session.selected_folder.is_some();
+    let session = &app.engine.session;
+    let all = !session.is_sample() && !session.is_syncing();
+    let can = !session.is_sample() && session.selected_folder.is_some();
+    ribbon_button(app, ui, t, "⟳", &tr("sync-all"), ("sync.now", Some("F9")), all);
     ribbon_button(app, ui, t, "⟳", &tr("refresh"), ("folder.refresh", Some("F5")), can);
 }
 
@@ -1799,6 +1818,7 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     let mut fold_account = None;
     let mut fold_folder = None;
+    let mut sync_account: Option<String> = None;
     for account in &app.engine.session.accounts {
         // Each account under a heading that folds its folders shut: its name and address, as
         // the design has it, and a dot for the connection.
@@ -1811,9 +1831,17 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             _ => (t.border, tr("account-offline")),
         };
         let open = !app.view.closed_accounts.contains(&account.id);
-        if folding_heading(ui, t, &heading, open, Some((color, status.as_str()))).clicked() {
+        let r = folding_heading(ui, t, &heading, open, Some((color, status.as_str())));
+        if r.clicked() {
             fold_account = Some(account.id.clone());
         }
+        r.context_menu(|ui| {
+            let connecting = matches!(app.engine.session.status.get(&account.id), Some(AccountStatus::Connecting));
+            if ui.add_enabled(!connecting, egui::Button::new(tr("sync-account"))).clicked() {
+                sync_account = Some(account.id.clone());
+                ui.close();
+            }
+        });
         if !open {
             ui.add_space(4.0);
             continue;
@@ -1879,6 +1907,9 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     }
     if let Some(id) = unified_read {
         app.run("folder.mark_all_read", json!({ "id": id }));
+    }
+    if let Some(id) = sync_account {
+        app.run("sync.now", json!({ "account": id }));
     }
     if let Some(id) = fold_account {
         view::ViewPrefs::toggle(&mut app.view.closed_accounts, &id);
@@ -2051,6 +2082,8 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let count = if searching { Some(app.engine.session.visible_messages().len()) } else { None };
             let mut server_search = false;
             let mut filter_pick: Option<merel_engine::view::Filter> = None;
+            let (can_sync, syncing) = (!app.engine.session.is_sample(), app.engine.session.is_syncing());
+            let mut sync_all = false;
             egui::Frame::NONE.inner_margin(Margin { left: 12, right: 8, top: 12, bottom: 6 }).show(ui, |ui| {
                 let title = match count {
                     Some(n) => crate::i18n::tr_args("search-results", &[("count", n.into())]),
@@ -2076,6 +2109,9 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                             });
                             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, list_filter()));
                             r.on_hover_text(tr("list-filter-hint"));
+                            // Outlook's Send/Receive: every account up to date now. While that
+                            // runs the button rests, so a second click is not lost in the first.
+                            sync_all = sync_button(ui, t, can_sync, syncing);
                         });
                     });
                 });
@@ -2124,6 +2160,9 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     }
                 }
             });
+            if sync_all {
+                app.run("sync.now", Value::Null);
+            }
             if let Some(f) = filter_pick {
                 app.run("view.filter", json!({ "filter": f }));
             }
@@ -5092,6 +5131,38 @@ mod tests {
         engine.session.take_jobs();
         engine.session.loading.clear();
         egui_kittest::Harness::builder().with_size(vec2(1280.0, 800.0)).build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(engine))
+    }
+
+    #[test]
+    fn one_button_syncs_every_account_and_an_account_heading_syncs_only_its_own() {
+        let mut h = two_accounts();
+        h.run();
+        let ids: Vec<String> = h.state().engine.session.accounts.iter().map(|a| a.id.clone()).collect();
+        let listing = |h: &egui_kittest::Harness<'static, MailApp>| -> Vec<bool> {
+            ids.iter().map(|id| h.state().engine.session.loading.contains(&format!("folders/{id}"))).collect()
+        };
+        assert!(!h.state().engine.session.is_syncing());
+        h.get_by_label("Alles synchroniseren").click();
+        // Fetching repaints the window on a timer: a bounded number of steps.
+        h.run_steps(2);
+        assert_eq!(listing(&h), [true, true], "both accounts list their folders again");
+        assert!(h.state().engine.session.is_syncing(), "the button rests while it runs");
+
+        // Right on an account's heading: only that account.
+        h.state_mut().engine.session.loading.clear();
+        h.run_steps(2);
+        h.get_by_label_contains("rees@voorbeeld.org").click_secondary();
+        h.run_steps(2);
+        h.get_by_label("Account synchroniseren").click();
+        h.run_steps(2);
+        assert_eq!(listing(&h), [false, true]);
+
+        // F9, as in Outlook.
+        h.state_mut().engine.session.loading.clear();
+        h.run_steps(2);
+        h.key_press(egui::Key::F9);
+        h.run_steps(2);
+        assert_eq!(listing(&h), [true, true]);
     }
 
     #[test]

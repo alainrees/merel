@@ -344,6 +344,22 @@ impl Session {
     }
 }
 
+/// `sync.now { account? }`: brings every account, or only `account`, up to date now; see
+/// [`Session::sync_account`].
+pub fn sync_now(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    let only = params.get("account").and_then(Value::as_str);
+    if let Some(id) = only
+        && !s.accounts.iter().any(|a| a.id == id)
+    {
+        return Err(CommandError::NotFound);
+    }
+    let ids: Vec<String> = s.accounts.iter().map(|a| a.id.clone()).filter(|id| only.is_none_or(|o| o == id)).collect();
+    for id in ids {
+        s.sync_account(&id);
+    }
+    Ok(())
+}
+
 /// `sync.refresh`: fetches the items of every account that keeps them.
 pub fn refresh(s: &mut Session, _: &Value) -> Result<(), CommandError> {
     let ids: Vec<String> = s.item_accounts.iter().cloned().collect();
@@ -517,6 +533,64 @@ mod tests {
         assert_eq!(mine(&s), ["acc/calendar", "acc/calendars/B1"]);
         assert!(s.appointment("acc/E2").is_none());
         assert!(s.appointment("acc/E1").is_some());
+    }
+
+    #[test]
+    fn sync_now_lists_the_folders_again_and_fetches_what_is_listed_and_reconnects_an_account_that_is_down() {
+        use merel_mailbox::{RemoteFolder, RemoteHeader};
+        use merel_model::FolderKind;
+        let folder = |path: &str, kind| RemoteFolder { path: path.into(), name: path.into(), kind, selectable: true, parent: None };
+        let mut s = Session::with_accounts(vec![account("acc", "Werk"), account("b", "Thuis")]);
+        s.take_jobs();
+        s.apply(Event::Connected {
+            account_id: "acc".into(),
+            folders: vec![folder("INBOX", FolderKind::Inbox), folder("Archief", FolderKind::Archive), folder("Oud", FolderKind::Other)],
+            syncs_items: true,
+        });
+        let header = RemoteHeader {
+            id: "1".into(),
+            seen: true,
+            flagged: false,
+            answered: false,
+            size: 1,
+            has_attachments: false,
+            categories: Vec::new(),
+            header: merel_mime::parse_header(b"From: x@example.org\r\nSubject: Offerte\r\n\r\n"),
+            date: 1,
+        };
+        for path in ["INBOX", "Archief"] {
+            s.apply(Event::Headers { folder_id: format!("acc/{path}"), headers: vec![header.clone()], offset: 0, limit: crate::HEADER_LIMIT });
+        }
+        s.apply(Event::Synced { account_id: "acc".into(), appointments: Vec::new(), contacts: Vec::new(), tasks: Vec::new() });
+        s.apply(Event::Failed { account_id: "b".into(), what: "weg".into() });
+        s.take_jobs();
+        assert!(!s.is_syncing());
+
+        s.run("sync.now", &Value::Null).unwrap();
+        assert!(s.is_syncing());
+        let jobs = s.take_jobs();
+        let what: Vec<String> = jobs
+            .iter()
+            .map(|j| match j {
+                Job::Connect { account_id } => format!("connect {account_id}"),
+                Job::Headers { folder_id, .. } => format!("headers {folder_id}"),
+                Job::Sync { account_id, .. } => format!("sync {account_id}"),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        // The folder never opened is left for when it is; the account that was down tries now.
+        assert_eq!(what, ["connect acc", "headers acc/INBOX", "headers acc/Archief", "sync acc", "connect b"]);
+        assert_eq!(s.status.get("b"), Some(&crate::AccountStatus::Connecting));
+
+        // A second click while the first is under way asks for nothing more.
+        s.run("sync.now", &Value::Null).unwrap();
+        assert!(s.take_jobs().is_empty());
+
+        // Only one account, from its menu.
+        assert!(s.run("sync.now", &json!({ "account": "nobody" })).is_err());
+        s.apply(Event::Failed { account_id: "b".into(), what: "weg".into() });
+        s.run("sync.now", &json!({ "account": "b" })).unwrap();
+        assert_eq!(s.take_jobs(), vec![Job::Connect { account_id: "b".into() }]);
     }
 
     #[test]
