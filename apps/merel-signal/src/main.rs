@@ -6,6 +6,7 @@
 //! ```text
 //! merel-signal link <dir> <device name>   → {"type":"link","url":…} then {"type":"linked"}
 //! merel-signal run <dir>                   → {"type":"message",…}… and {"type":"synced"}
+//!                                            (first every stored message, then the new ones)
 //!                                          ← {"type":"send","thread":…,"text":…}
 //! ```
 //!
@@ -39,8 +40,10 @@ enum Event {
     Link {
         url: String,
     },
+    /// `id` is the account's own service id: the `sender` of what it sends.
     Linked {
         number: Option<String>,
+        id: String,
     },
     /// A message, sent or received; `thread` is the chat it belongs to.
     Message {
@@ -92,7 +95,11 @@ async fn start() -> Result<()> {
     let key = std::env::var("MEREL_SIGNAL_KEY").context("MEREL_SIGNAL_KEY is not set")?;
     match args.get(1..).unwrap_or_default() {
         [cmd, dir, name] if cmd == "link" => link(open(dir, &key).await?, name).await,
-        [cmd, dir] if cmd == "run" => run(Manager::load_registered(open(dir, &key).await?).await?).await,
+        [cmd, dir] if cmd == "run" => {
+            let manager = Manager::load_registered(open(dir, &key).await?).await?;
+            replay(&manager, &threads(dir, &key).await?).await?;
+            run(manager, dir, &key).await
+        }
         _ => bail!("usage: merel-signal link <dir> <device name> | merel-signal run <dir>"),
     }
 }
@@ -114,12 +121,35 @@ async fn link(store: SqliteStore, name: &str) -> Result<()> {
     })
     .await;
     let manager = linked.map_err(|e| anyhow!("{e}"))?;
-    let number = manager.registration_data().phone_number.to_string();
-    emit(&Event::Linked { number: Some(number) });
+    let data = manager.registration_data();
+    let id = ServiceId::from(data.service_ids.aci()).service_id_string();
+    emit(&Event::Linked { number: Some(data.phone_number.to_string()), id });
     Ok(())
 }
 
-async fn run<S: Store>(mut manager: Manager<S, Registered>) -> Result<()> {
+/// Most stored messages passed on at the start, the newest of each chat first.
+const MAX_REPLAY: usize = 20_000;
+
+/// Passes on every message the store keeps, so Merel has the whole conversation each time it
+/// starts the helper (and keeps nothing of its own).
+async fn replay<S: Store>(manager: &Manager<S, Registered>, threads: &[Thread]) -> Result<()> {
+    let mut sent = 0;
+    for thread in threads {
+        let Ok(messages) = manager.store().messages(thread, ..).await else { continue };
+        for content in messages.flatten() {
+            if sent >= MAX_REPLAY {
+                return Ok(());
+            }
+            if let Some(event) = describe(manager, &content).await {
+                emit(&event);
+                sent += 1;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str) -> Result<()> {
     let sender = manager.clone();
     let messages = manager.receive_messages().await.map_err(|e| anyhow!("{e}"))?;
     pin_mut!(messages);
@@ -139,10 +169,26 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>) -> Result<()> {
             },
             line = lines.next_line() => match line? {
                 Some(line) => match serde_json::from_str::<Command>(&line) {
-                    Ok(Command::Send { thread, text }) => emit(&match send(&mut sending, &thread, &text).await {
-                        Ok(timestamp) => Event::Sent { thread, timestamp },
-                        Err(e) => Event::Error { message: format!("{e:#}") },
-                    }),
+                    Ok(Command::Send { thread, text }) => match send(&mut sending, dir, key, &thread, &text).await {
+                        Ok((to, timestamp)) => {
+                            // As it came from another device of the account's, so Merel lists it.
+                            let me = ServiceId::from(manager.registration_data().service_ids.aci());
+                            let (thread_name, group) = name_of(&manager, &to).await;
+                            emit(&Event::Message {
+                                thread: thread.clone(),
+                                thread_name,
+                                group,
+                                sender: me.service_id_string(),
+                                sender_name: contact_name(&manager, &me).await,
+                                mine: true,
+                                timestamp,
+                                text,
+                                attachments: Vec::new(),
+                            });
+                            emit(&Event::Sent { thread, timestamp });
+                        }
+                        Err(e) => emit(&Event::Error { message: format!("{e:#}") }),
+                    },
                     Err(e) => emit(&Event::Error { message: format!("unknown command: {e}") }),
                 },
                 // Merel closed: done.
@@ -152,12 +198,39 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>) -> Result<()> {
     }
 }
 
-/// The thread's id as Merel keeps it: the person's service id, or `group:` and the group's key.
+/// The thread's id as Merel keeps it: the person's service id, or `g` and a hash of the group's
+/// key. The key itself lets anyone into the group, so it never leaves the helper.
 fn thread_id(thread: &Thread) -> String {
     match thread {
         Thread::Contact(id) => id.service_id_string(),
-        Thread::Group(key) => format!("group:{}", hex::encode(key)),
+        Thread::Group(key) => group_id(key),
     }
+}
+
+fn group_id(key: &[u8; 32]) -> String {
+    use sha2::Digest as _;
+    let hash = sha2::Sha256::digest([b"merel-signal-group:".as_slice(), key].concat());
+    format!("g{}", hex::encode(&hash[..16]))
+}
+
+/// Every chat in the store. The store has no list of them, so it comes from its table.
+async fn threads(dir: &str, key: &str) -> Result<Vec<Thread>> {
+    use sqlx::{ConnectOptions as _, Connection as _, Row as _};
+    let options: sqlx::sqlite::SqliteConnectOptions = format!("sqlite://{dir}/signal.db?mode=ro").parse()?;
+    let mut db = options.pragma("key", format!("'{}'", key.replace('\'', "''"))).connect().await?;
+    let rows = sqlx::query("SELECT group_master_key, recipient_id FROM threads").fetch_all(&mut db).await?;
+    db.close().await?;
+    let mut threads = Vec::new();
+    for row in rows {
+        let group: Option<Vec<u8>> = row.try_get(0)?;
+        let person: Option<uuid::Uuid> = row.try_get(1)?;
+        match (group.and_then(|g| <[u8; 32]>::try_from(g).ok()), person) {
+            (Some(key), _) => threads.push(Thread::Group(key)),
+            (None, Some(id)) => threads.push(Thread::Contact(ServiceId::Aci(id.into()))),
+            (None, None) => {}
+        }
+    }
+    Ok(threads)
 }
 
 async fn contact_name<S: Store>(manager: &Manager<S, Registered>, id: &ServiceId) -> String {
@@ -170,6 +243,14 @@ async fn contact_name<S: Store>(manager: &Manager<S, Registered>, id: &ServiceId
         .map(|c| if c.name.is_empty() { c.phone_number.map(|p| p.to_string()).unwrap_or_default() } else { c.name })
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| id.service_id_string())
+}
+
+/// The chat's name, and whether it is a group.
+async fn name_of<S: Store>(manager: &Manager<S, Registered>, thread: &Thread) -> (String, bool) {
+    match thread {
+        Thread::Contact(id) => (contact_name(manager, id).await, false),
+        Thread::Group(key) => (manager.store().group(*key).await.ok().flatten().map(|g| g.title).unwrap_or_default(), true),
+    }
 }
 
 /// A message worth showing and searching: text sent or received, here or on another device.
@@ -194,13 +275,7 @@ async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content)
         return None;
     }
     let thread = Thread::try_from(content).ok()?;
-    let (thread_name, group) = match &thread {
-        Thread::Contact(id) => (contact_name(manager, id).await, false),
-        Thread::Group(key) => {
-            let title = manager.store().group(*key).await.ok().flatten().map(|g| g.title).unwrap_or_default();
-            (title, true)
-        }
-    };
+    let (thread_name, group) = name_of(manager, &thread).await;
     let me = &content.metadata.sender;
     Some(Event::Message {
         thread: thread_id(&thread),
@@ -215,18 +290,22 @@ async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content)
     })
 }
 
-async fn send<S: Store>(manager: &mut Manager<S, Registered>, thread: &str, text: &str) -> Result<u64> {
+async fn send<S: Store>(manager: &mut Manager<S, Registered>, dir: &str, key: &str, thread: &str, text: &str) -> Result<(Thread, u64)> {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
     let message = DataMessage { body: Some(text.to_string()), timestamp: Some(timestamp), ..Default::default() };
-    match thread.strip_prefix("group:") {
-        Some(key) => {
-            let key = hex::decode(key)?;
-            manager.send_message_to_group(&key, message, timestamp).await.map_err(|e| anyhow!("{e}"))?;
+    match thread.starts_with('g') {
+        true => {
+            let groups = threads(dir, key).await?;
+            let Some(Thread::Group(key)) = groups.iter().find(|t| matches!(t, Thread::Group(k) if group_id(k) == thread)) else {
+                bail!("unknown chat {thread}");
+            };
+            manager.send_message_to_group(key, message, timestamp).await.map_err(|e| anyhow!("{e}"))?;
+            Ok((Thread::Group(*key), timestamp))
         }
-        None => {
+        false => {
             let to = ServiceId::parse_from_service_id_string(thread).ok_or_else(|| anyhow!("unknown chat {thread}"))?;
             manager.send_message(to, message, timestamp).await.map_err(|e| anyhow!("{e}"))?;
+            Ok((Thread::Contact(to), timestamp))
         }
     }
-    Ok(timestamp)
 }

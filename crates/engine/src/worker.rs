@@ -34,13 +34,20 @@ pub struct Worker {
     events: Sender<Event>,
     accounts: HashMap<String, Sender<Job>>,
     keys: Keys,
+    /// Where the Signal accounts keep their stores, one directory per account.
+    signal_dir: Option<std::path::PathBuf>,
 }
 
 impl Worker {
     /// `keys` are the S/MIME certificates (the accounts' own and the correspondents'), read
     /// when a message goes out.
     pub fn new(events: Sender<Event>, keys: Keys) -> Self {
-        Worker { events, accounts: HashMap::new(), keys }
+        Worker { events, accounts: HashMap::new(), keys, signal_dir: None }
+    }
+
+    /// Sets where the Signal accounts keep their stores.
+    pub fn set_signal_dir(&mut self, dir: Option<std::path::PathBuf>) {
+        self.signal_dir = dir;
     }
 
     /// A sender for events from threads the engine starts itself.
@@ -55,11 +62,12 @@ impl Worker {
         let id = account.id.clone();
         let name = format!("mailbox-{id}");
         let keys = self.keys.clone();
+        let signal_dir = self.signal_dir.as_ref().map(|d| d.join(&id));
         let run = move || {
             let id = account.id.clone();
             let reporter = events.clone();
             // A bug in a protocol library must not leave the account on "Verbinden…" for good.
-            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| serve(account, credentials, keys, rx, events)));
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| serve(account, credentials, keys, signal_dir, rx, events)));
             if let Err(panic) = outcome {
                 let detail =
                     panic.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| panic.downcast_ref::<String>().cloned()).unwrap_or_default();
@@ -214,7 +222,14 @@ fn longer(wait: Option<Duration>) -> Option<Duration> {
     Some(wait.map_or(FIRST_RETRY, |w| (w * 2).min(MAX_RETRY)))
 }
 
-fn serve(account: Account, mut credentials: Credentials, keys: Keys, jobs: Receiver<Job>, events: Sender<Event>) {
+fn serve(
+    account: Account,
+    mut credentials: Credentials,
+    keys: Keys,
+    signal_dir: Option<std::path::PathBuf>,
+    jobs: Receiver<Job>,
+    events: Sender<Event>,
+) {
     let Some(server) = account.incoming.clone() else {
         let _ = events.send(Event::Failed { account_id: account.id, what: merel_i18n::tr("conn-no-incoming") });
         return;
@@ -234,7 +249,7 @@ fn serve(account: Account, mut credentials: Credentials, keys: Keys, jobs: Recei
                 Err(RecvTimeoutError::Timeout) => {
                     // Nobody asked for anything; see whether the server is back. Connecting
                     // reports the folders, and the engine replays the offline queue.
-                    match connect(&account, &server, &mut credentials) {
+                    match connect(&account, &server, &mut credentials, signal_dir.as_deref()) {
                         Ok(mut c) => match run(c.as_mut(), &account, &keys, &Job::Connect { account_id: account.id.clone() }) {
                             Ok(evs) => {
                                 for ev in evs {
@@ -279,7 +294,7 @@ fn serve(account: Account, mut credentials: Credentials, keys: Keys, jobs: Recei
         loop {
             attempts += 1;
             if client.is_none() {
-                match connect(&account, &server, &mut credentials) {
+                match connect(&account, &server, &mut credentials, signal_dir.as_deref()) {
                     Ok(c) => client = Some(c),
                     Err(what) => {
                         // A refused login may be a stale access token: fetch a new one next time.
@@ -342,9 +357,22 @@ fn send_smtp(account: &Account, credentials: &mut Credentials, keys: &Keys, draf
     Ok(raw)
 }
 
-fn connect(account: &Account, server: &Server, credentials: &mut Credentials) -> Result<Box<dyn Mailbox>, String> {
+fn connect(
+    account: &Account,
+    server: &Server,
+    credentials: &mut Credentials,
+    signal_dir: Option<&std::path::Path>,
+) -> Result<Box<dyn Mailbox>, String> {
     let credential = credentials.incoming()?;
     Ok(match account.protocol {
+        // The key of the store is the account's "password".
+        Protocol::Signal => {
+            let (Some(dir), merel_mailbox::Credential::Password(key)) = (signal_dir, &credential) else {
+                return Err(merel_i18n::tr("signal-stopped"));
+            };
+            let helper = merel_signal_link::helper().ok_or_else(|| merel_i18n::tr("signal-no-program"))?;
+            Box::new(merel_signal_link::SignalMailbox::connect(&helper, dir, key, account.address.email()).map_err(|e| describe(&e))?)
+        }
         Protocol::Exchange => Box::new(EwsClient::connect(server, &account.username, &credential).map_err(|e| describe(&e))?),
         Protocol::Gmail => Box::new(GoogleMailbox::connect(server, &account.username, &credential).map_err(|e| describe(&e))?),
         // A Microsoft 365 account signed in for Graph; one from before that still speaks IMAP.

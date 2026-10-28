@@ -35,6 +35,7 @@ pub mod rules;
 mod sample;
 pub mod search;
 pub mod securejoin;
+pub mod signal;
 pub mod signin;
 pub mod snooze;
 pub mod suggest;
@@ -731,6 +732,14 @@ impl Session {
         if self.search_exact { q.exact() } else { q }
     }
 
+    /// The channel a message came by, when that is not plain mail: "Signal", or "Chat" for a
+    /// chat message over mail.
+    pub fn channel(&self, m: &MessageHeader) -> Option<String> {
+        m.chat.as_ref()?;
+        let account = self.folder(&m.folder_id).and_then(|f| self.accounts.iter().find(|a| a.id == f.account_id));
+        Some(if account.is_some_and(signal::is_signal) { "Signal".to_string() } else { merel_i18n::tr("channel-chat") })
+    }
+
     pub fn folder(&self, id: &str) -> Option<&Folder> {
         self.folders.iter().find(|f| f.id == id)
     }
@@ -752,6 +761,14 @@ impl Session {
         let places = self.search_folders(&query);
         // The selected folder, or each account's folder behind an "Alle accounts" one.
         let members = self.selected_folder.as_deref().map(|id| self.members(id)).unwrap_or_default();
+        // Chat messages belong in the chat module, but a search finds them too, saying which
+        // channel they came by, and a Signal account's folder lists its own.
+        let chats_too = !query.is_empty()
+            || self
+                .selected_folder
+                .as_deref()
+                .and_then(|id| self.folder(id))
+                .is_some_and(|f| self.accounts.iter().any(|a| a.id == f.account_id && signal::is_signal(a)));
         let mut list: Vec<&MessageHeader> = self
             .messages
             .iter()
@@ -772,7 +789,7 @@ impl Session {
             .filter(|m| (self.filter == view::Filter::Snoozed) == self.snoozed_until(m, now).is_some())
             .filter(|m| self.category_filter.as_deref().is_none_or(|c| m.categories.iter().any(|x| x.eq_ignore_ascii_case(c))))
             // Chat messages are read in the chat module, as Gmail keeps its chat apart.
-            .filter(|m| m.chat.is_none())
+            .filter(|m| chats_too || m.chat.is_none())
             .collect();
         match found.filter(|_| !self.search_newest) {
             // Best match first, as the index ranked them; what only matched here comes after.
@@ -1134,8 +1151,11 @@ impl Session {
                     Ok(()) => SendState::Sent,
                     Err(e) => SendState::Failed(e),
                 };
+                // A Signal account lists what it sent among the rest.
+                let signal = self.accounts.iter().any(|a| a.id == account_id && signal::is_signal(a));
+                let kind = if signal { FolderKind::Inbox } else { FolderKind::Sent };
                 if state == SendState::Sent
-                    && let Some(sent) = self.folder_of_kind(&account_id, FolderKind::Sent).map(|f| f.id.clone())
+                    && let Some(sent) = self.folder_of_kind(&account_id, kind).map(|f| f.id.clone())
                     && self.messages.iter().any(|m| m.folder_id == sent)
                 {
                     self.request_headers(&sent);
@@ -1152,12 +1172,14 @@ impl Session {
         let folders: Vec<RemoteFolder> = folders.into_iter().filter(|f| f.selectable).collect();
         // A folder nests under its parent when that is listed too; else it stands at the top.
         let listed: HashSet<String> = folders.iter().map(|f| f.path.clone()).collect();
+        // A Signal account's one folder is called Signal, not Postvak IN.
+        let signal = self.accounts.iter().any(|a| a.id == account_id && signal::is_signal(a));
         let mut new: Vec<Folder> = folders
             .into_iter()
             .map(|f| Folder {
                 id: format!("{account_id}/{}", f.path),
                 account_id: account_id.to_string(),
-                name: f.kind.local_name().unwrap_or_else(|| clean_text(&f.name)),
+                name: f.kind.local_name().filter(|_| !signal).unwrap_or_else(|| clean_text(&f.name)),
                 parent: f.parent.filter(|p| listed.contains(p) && *p != f.path).map(|p| format!("{account_id}/{p}")),
                 path: f.path,
                 kind: f.kind,
@@ -1312,6 +1334,10 @@ pub struct Engine {
     last_refresh: Instant,
     last_item_refresh: Instant,
     last_chat_refresh: Instant,
+    last_signal_refresh: Instant,
+    /// Linking a Signal account, while that is under way, and how far it came.
+    signal_link: Option<signal::SignalLinking>,
+    signal_state: Option<signal::LinkState>,
     /// How often open folders and items refresh on their own; `None` only by hand.
     refresh_every: Option<Duration>,
     items_every: Option<Duration>,
@@ -1379,6 +1405,9 @@ impl Engine {
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
             last_chat_refresh: Instant::now(),
+            last_signal_refresh: Instant::now(),
+            signal_link: None,
+            signal_state: None,
             refresh_every: Some(REFRESH_EVERY),
             items_every: Some(ITEMS_EVERY),
             indexer: indexing::Indexer::none(),
@@ -1391,7 +1420,8 @@ impl Engine {
         let accounts = config_path.as_deref().map(config::load).unwrap_or_default();
         let (tx, rx) = channel();
         let keys = certificates::Keys::default();
-        let worker = worker::Worker::new(tx, keys.clone());
+        let mut worker = worker::Worker::new(tx, keys.clone());
+        worker.set_signal_dir(config_path.as_deref().map(config::signal_dir));
         let calendar = config_path.as_deref().map(|p| config::load_json::<calendar::CalendarFile>(&config::calendar_path(p))).unwrap_or_default();
         let mut engine = Engine {
             session: Session::default(),
@@ -1406,6 +1436,9 @@ impl Engine {
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
             last_chat_refresh: Instant::now(),
+            last_signal_refresh: Instant::now(),
+            signal_link: None,
+            signal_state: None,
             refresh_every: Some(REFRESH_EVERY),
             items_every: Some(ITEMS_EVERY),
             indexer: indexing::Indexer::none(),
@@ -1780,6 +1813,10 @@ impl Engine {
         if self.last_chat_refresh.elapsed() >= REFRESH_EVERY {
             self.last_chat_refresh = Instant::now();
             self.refresh_chat_folders();
+        }
+        if self.last_signal_refresh.elapsed() >= signal::SIGNAL_EVERY {
+            self.last_signal_refresh = Instant::now();
+            self.refresh_signal();
         }
         if self.items_every.is_some_and(|every| self.last_item_refresh.elapsed() >= every) {
             self.last_item_refresh = Instant::now();

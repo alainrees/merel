@@ -298,6 +298,11 @@ impl Engine {
     /// Sends the chat message `draft` from `account_id`. It only goes out encrypted: without
     /// the account's own key or a key for each person, it does not go out and says why.
     pub fn send_chat(&mut self, account_id: &str, draft: Draft) -> Result<u64, String> {
+        if self.is_signal_account(account_id) {
+            let id = self.send_signal(account_id, draft)?;
+            self.dispatch();
+            return Ok(id);
+        }
         if draft.chat.is_none() || !draft.encrypt {
             return Err(merel_i18n::tr("chat-encrypted-only"));
         }

@@ -4,6 +4,7 @@
 # repository root after both release builds:
 #   cargo build --release -p merel --target aarch64-apple-darwin
 #   cargo build --release -p merel --target x86_64-apple-darwin
+# and, for Signal, the same two builds of apps/merel-signal (its own workspace and target/).
 set -euo pipefail
 version="$(packaging/version.sh)"
 commit="$(git rev-parse --short=7 HEAD 2>/dev/null || true)"
@@ -15,6 +16,15 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$out"
 lipo -create -output "$app/Contents/MacOS/merel" \
   target/aarch64-apple-darwin/release/merel \
   target/x86_64-apple-darwin/release/merel
+
+# Merel starts the Signal program from next to itself; without it, Signal is just not offered.
+signal=apps/merel-signal/target
+if [ -f "$signal/aarch64-apple-darwin/release/merel-signal" ] && [ -f "$signal/x86_64-apple-darwin/release/merel-signal" ]; then
+  lipo -create -output "$app/Contents/MacOS/merel-signal" \
+    "$signal/aarch64-apple-darwin/release/merel-signal" \
+    "$signal/x86_64-apple-darwin/release/merel-signal"
+  cp apps/merel-signal/LICENSE "$app/Contents/Resources/merel-signal-LICENSE.txt"
+fi
 
 iconset="$work/Merel.iconset"
 mkdir -p "$iconset"

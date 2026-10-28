@@ -55,6 +55,9 @@ pub enum Protocol {
     Gmail,
     Microsoft365,
     Exchange,
+    /// A Signal account Merel is linked to as a device, through the separate `merel-signal`
+    /// program; its chats show as messages in one folder.
+    Signal,
 }
 
 /// Transport security for a connection. There is deliberately no plain-text variant.
@@ -107,7 +110,7 @@ impl Protocol {
     /// The ready-made settings for a hosted service; `None` for plain IMAP/SMTP.
     pub fn preset(self) -> Option<Preset> {
         match self {
-            Protocol::ImapSmtp | Protocol::Exchange => None,
+            Protocol::ImapSmtp | Protocol::Exchange | Protocol::Signal => None,
             Protocol::Gmail => Some(Preset {
                 incoming: Server { host: "imap.gmail.com".into(), port: 993, tls: Tls::Implicit },
                 outgoing: Some(Server { host: "smtp.gmail.com".into(), port: 465, tls: Tls::Implicit }),

@@ -55,6 +55,11 @@ pub fn index_dir(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("search-index")
 }
 
+/// Where the Signal accounts keep their encrypted stores, one directory per account.
+pub fn signal_dir(accounts_path: &Path) -> PathBuf {
+    accounts_path.with_file_name("signal")
+}
+
 /// Where the model for search on meaning is kept, once downloaded.
 pub fn model_dir(accounts_path: &Path) -> PathBuf {
     accounts_path.with_file_name("search-model")

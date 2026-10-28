@@ -1985,3 +1985,25 @@ search-date-this-week = This week
 search-date-last-week = Last week
 search-date-this-month = This month
 search-date-this-year = This year
+
+## Signal
+signal-stopped = The Signal program stopped.
+signal-cannot = Signal cannot do that.
+signal-one-person = A Signal message goes to one person or one group.
+signal-unknown = You have no Signal chat with this person yet. Start the chat in Signal on your phone.
+signal-no-answer = Signal did not answer in time. Try again in a moment.
+signal-no-program = The Signal program belongs next to Merel, but it is not there.
+signal-text-only = Over Signal, Merel can only send text for now, no attachments.
+signal-no-folder = Merel does not know where to keep Signal.
+signal-link-help = Merel becomes a linked device of your Signal account, like Signal on a computer. Your chats then come into Merel too, and search finds them next to your mail.
+signal-link = Link Signal
+signal-link-starting = Signal is making a linking code…
+signal-link-qr = QR code to link Merel to Signal
+signal-link-step-1 = Open Signal on your phone.
+signal-link-step-2 = Go to Settings > Linked devices and tap Link new device.
+signal-link-step-3 = Scan this code.
+signal-link-history = Signal does not fetch messages from before linking; new messages come in from now on.
+signal-link-failed = Linking did not work.
+channel-chat = Chat
+signal-via = via Signal
+signal-attachment = Attachment
