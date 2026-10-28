@@ -66,9 +66,14 @@ use serde::{Deserialize, Serialize};
 pub const HEADER_LIMIT: u32 = 200;
 /// The most a refresh of one folder fetches at once, however many pages were loaded.
 pub const MAX_REFETCH: u32 = 2_000;
-/// How often open folders are refreshed, and the calendar, contacts and tasks.
+/// How often open folders are refreshed unless the person chose otherwise, and chats always.
 pub const REFRESH_EVERY: Duration = Duration::from_secs(120);
+/// How often the calendar, contacts and tasks are refreshed at the most.
 pub const ITEMS_EVERY: Duration = Duration::from_secs(300);
+/// The minutes between automatic syncs the person may choose; 0 is only by hand.
+pub const SYNC_CHOICES: [u32; 8] = [1, 2, 5, 10, 15, 30, 60, 0];
+/// The minutes between automatic syncs until the person chooses.
+pub const SYNC_DEFAULT: u32 = 2;
 
 fn default_limit() -> u32 {
     HEADER_LIMIT
@@ -1306,6 +1311,10 @@ pub struct Engine {
     calls: calls::Calls,
     last_refresh: Instant,
     last_item_refresh: Instant,
+    last_chat_refresh: Instant,
+    /// How often open folders and items refresh on their own; `None` only by hand.
+    refresh_every: Option<Duration>,
+    items_every: Option<Duration>,
     /// The search index over all mail.
     indexer: indexing::Indexer,
 }
@@ -1341,6 +1350,19 @@ impl Engine {
         names
     }
 
+    /// Sets how many minutes pass between automatic syncs; 0 syncs only by hand (the button or
+    /// F9). The calendar, contacts and tasks follow, but no more often than every five minutes.
+    pub fn set_sync_every(&mut self, minutes: u32) {
+        let every = (minutes > 0).then(|| Duration::from_secs(u64::from(minutes) * 60));
+        self.refresh_every = every;
+        self.items_every = every.map(|e| e.max(ITEMS_EVERY));
+    }
+
+    /// The time between automatic syncs of mail and of items; `None` only by hand.
+    pub fn sync_every(&self) -> (Option<Duration>, Option<Duration>) {
+        (self.refresh_every, self.items_every)
+    }
+
     /// Sample mail only, no worker: for tests and previews.
     pub fn sample() -> Self {
         let (_tx, rx) = channel();
@@ -1356,6 +1378,9 @@ impl Engine {
             calls: calls::Calls::default(),
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
+            last_chat_refresh: Instant::now(),
+            refresh_every: Some(REFRESH_EVERY),
+            items_every: Some(ITEMS_EVERY),
             indexer: indexing::Indexer::none(),
         }
     }
@@ -1380,6 +1405,9 @@ impl Engine {
             calls: calls::Calls::default(),
             last_refresh: Instant::now(),
             last_item_refresh: Instant::now(),
+            last_chat_refresh: Instant::now(),
+            refresh_every: Some(REFRESH_EVERY),
+            items_every: Some(ITEMS_EVERY),
             indexer: indexing::Indexer::none(),
         };
         if accounts.is_empty() {
@@ -1742,13 +1770,18 @@ impl Engine {
             self.cache.note_commands(&self.session);
             changed = true;
         }
-        // New mail comes in on its own: open folders every two minutes, items every five.
-        if self.last_refresh.elapsed() >= REFRESH_EVERY {
+        // New mail comes in on its own: open folders as often as the person chose (every two
+        // minutes until then), items no more often than every five. Chats every two minutes,
+        // also when mail syncs only by hand, so a chat does not wait for a click.
+        if self.refresh_every.is_some_and(|every| self.last_refresh.elapsed() >= every) {
             self.last_refresh = Instant::now();
             self.session.refresh_open_folders();
+        }
+        if self.last_chat_refresh.elapsed() >= REFRESH_EVERY {
+            self.last_chat_refresh = Instant::now();
             self.refresh_chat_folders();
         }
-        if self.last_item_refresh.elapsed() >= ITEMS_EVERY {
+        if self.items_every.is_some_and(|every| self.last_item_refresh.elapsed() >= every) {
             self.last_item_refresh = Instant::now();
             self.session.refresh_items();
         }
