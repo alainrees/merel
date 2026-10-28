@@ -539,7 +539,10 @@ fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             if std::mem::take(&mut app.form.scroll_to_form) {
                 heading.scroll_to_me(Some(egui::Align::TOP));
             }
-            ui.label(RichText::new(help).size(12.0).color(t.text_dim));
+            // Linking Signal says in its own words what happens; this is about mail.
+            if app.form.kind != Protocol::Signal {
+                ui.label(RichText::new(help).size(12.0).color(t.text_dim));
+            }
             ui.add_space(8.0);
             form(app, ui, t);
         });
@@ -634,23 +637,83 @@ fn form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             // The kind of an account is fixed; its servers and sign-in are what change.
             ui.label(RichText::new(if app.form.kind == Protocol::Exchange { "Exchange" } else { "IMAP/SMTP" }).color(t.text));
         } else {
-            chips(
-                ui,
-                t,
-                &mut app.form.kind,
-                &[
-                    (Protocol::ImapSmtp, "IMAP/SMTP"),
-                    (Protocol::Gmail, "Gmail"),
-                    (Protocol::Microsoft365, "Microsoft 365"),
-                    (Protocol::Exchange, "Exchange"),
-                ],
-            );
+            let mut kinds = vec![
+                (Protocol::ImapSmtp, "IMAP/SMTP"),
+                (Protocol::Gmail, "Gmail"),
+                (Protocol::Microsoft365, "Microsoft 365"),
+                (Protocol::Exchange, "Exchange"),
+            ];
+            if merel_engine::signal::available() {
+                kinds.push((Protocol::Signal, "Signal"));
+            }
+            chips(ui, t, &mut app.form.kind, &kinds);
         }
     });
     ui.add_space(6.0);
     match app.form.kind {
         Protocol::ImapSmtp | Protocol::Exchange => password_form(app, ui, t),
         Protocol::Gmail | Protocol::Microsoft365 => oauth_form(app, ui, t),
+        Protocol::Signal => signal_form(app, ui, t),
+    }
+}
+
+/// Linking a Signal account: Merel becomes one of its devices, as Signal Desktop does, by a QR
+/// code the Signal app on the phone scans.
+fn signal_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    use merel_engine::signal::LinkState;
+    helder::paragraph(ui, t, &tr("signal-link-help"));
+    ui.add_space(10.0);
+    let state = app.engine.signal_link_state();
+    if matches!(state, Some(LinkState::Starting | LinkState::Scan(_))) {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+    }
+    match state {
+        None | Some(LinkState::Failed(_)) => {
+            if let Some(LinkState::Failed(e)) = &state {
+                ui.label(RichText::new(tr("signal-link-failed")).color(t.flag));
+                ui.label(RichText::new(e).size(12.0).color(t.text_dim));
+                ui.add_space(8.0);
+            }
+            if let Some(e) = &app.form.error {
+                ui.label(RichText::new(e).color(t.flag));
+                ui.add_space(8.0);
+            }
+            if helder::primary_button(ui, t, Icon::Link, &tr("signal-link")).clicked() {
+                app.form.error = app.engine.start_signal_link().err();
+            }
+        }
+        Some(LinkState::Starting) => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(RichText::new(tr("signal-link-starting")).color(t.text_dim));
+            });
+        }
+        Some(LinkState::Scan(url)) => {
+            ui.horizontal_top(|ui| {
+                crate::chat::qr_code(ui, &url, 200.0, &tr("signal-link-qr"));
+                ui.add_space(20.0);
+                ui.vertical(|ui| {
+                    for (n, step) in ["signal-link-step-1", "signal-link-step-2", "signal-link-step-3"].iter().enumerate() {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(format!("{}.", n + 1)).strong().color(t.text));
+                            ui.label(RichText::new(tr(step)).color(t.text));
+                        });
+                        ui.add_space(4.0);
+                    }
+                    ui.add_space(8.0);
+                    ui.label(RichText::new(tr("signal-link-history")).size(12.0).color(t.text_dim));
+                    ui.add_space(12.0);
+                    if helder::secondary(ui, t, |ui| helder::tool_button(ui, t, Icon::X, &tr("cancel"))).clicked() {
+                        app.engine.cancel_signal_link();
+                    }
+                });
+            });
+        }
+        Some(LinkState::Done(_)) => {
+            app.engine.cancel_signal_link();
+            app.form = AccountForm::default();
+            app.tab = Tab::Home;
+        }
     }
 }
 

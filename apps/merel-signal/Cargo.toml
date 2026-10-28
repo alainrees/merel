@@ -19,8 +19,12 @@ libsqlite3-sys = { version = "0.36.0", features = ["bundled-sqlcipher-vendored-o
 anyhow = "1.0"
 futures = "0.3"
 hex = "0.4"
+sha2 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# Only to list the chats in the store; presage keeps no list of them.
+sqlx = { version = "0.9.0", default-features = false, features = ["sqlite", "uuid", "runtime-tokio"] }
+uuid = "1.12"
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync"] }
 
 [patch.crates-io]

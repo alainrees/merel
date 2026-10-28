@@ -40,6 +40,7 @@ merel-mobile = { path = "crates/mobile" }
 merel-search = { path = "crates/search" }
 merel-extract = { path = "crates/extract" }
 merel-semantic = { path = "crates/semantic" }
+merel-signal-link = { path = "crates/signal" }
 
 # foundation
 thiserror = "2"

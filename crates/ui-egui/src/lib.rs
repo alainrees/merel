@@ -1274,6 +1274,15 @@ impl MailApp {
     pub fn click_menu(&mut self, menu: usize, path: menubar::Path) {
         self.menu_click = Some((menu, path));
     }
+
+    /// Opens Bestand > Accounts at linking a Signal account.
+    pub fn open_signal_link(&mut self) {
+        self.tab = Tab::File;
+        self.file_page = backstage::Page::Accounts;
+        self.form = AccountForm::default();
+        self.form.kind = merel_model::Protocol::Signal;
+        self.form.scroll_to_form = true;
+    }
 }
 
 /// Notes the menus of the menu bar from the ribbon's tabs, and runs a click made in it.
@@ -1351,6 +1360,9 @@ fn file_menu(app: &mut MailApp) {
     if menubar::item(&tr("menu-accounts"), true, None) {
         app.tab = Tab::File;
         app.file_page = backstage::Page::Accounts;
+    }
+    if merel_engine::signal::available() && menubar::item(&format!("{}…", tr("signal-link")), true, None) {
+        app.open_signal_link();
     }
     if menubar::item(&format!("{}…", notifications::page_label()), true, None) {
         app.tab = Tab::File;
@@ -1870,7 +1882,14 @@ fn folder_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         // Each account under a heading that folds its folders shut: its name and address, as
         // the design has it, and a dot for the connection.
         let (name, email) = (account.address.display(), account.address.email());
-        let heading = if name == email { email.to_string() } else { format!("{name} · {email}") };
+        let heading = if merel_engine::signal::is_signal(account) {
+            // Its address is made up; its phone number is what the person knows.
+            format!("Signal · {name}")
+        } else if name == email {
+            email.to_string()
+        } else {
+            format!("{name} · {email}")
+        };
         let (color, status) = match app.engine.session.status.get(&account.id) {
             Some(AccountStatus::Online) => (t.accent, tr("account-online")),
             Some(AccountStatus::Connecting) => (t.text_dim, tr("account-connecting")),
@@ -2371,8 +2390,10 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         if m.flags.seen { t.text } else { t.accent_text },
                     );
                     if !compact {
-                        let folder = match (show_folder, app.engine.session.folder(&m.folder_id)) {
-                            (true, Some(f)) => format!("{} · ", f.name),
+                        // Which channel a chat came by, always; the folder when searching everywhere.
+                        let folder = match (app.engine.session.channel(m), show_folder, app.engine.session.folder(&m.folder_id)) {
+                            (Some(channel), _, _) => format!("{channel} · "),
+                            (None, true, Some(f)) => format!("{} · ", f.name),
                             _ => String::new(),
                         };
                         // A search shows where the words stand in the text, marked, instead of its start.
@@ -2686,16 +2707,18 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 ui.label(RichText::new(m.from.display()).strong().color(t.text));
-                if m.from.display() != m.from.email() {
+                if m.from.display() != m.from.email() && !merel_engine::signal::is_signal_address(m.from.email()) {
                     ui.label(RichText::new(format!("<{}>", m.from.email())).color(t.text_dim));
                 }
             });
-            let to: Vec<&str> = m.to.iter().map(|a| a.display()).collect();
-            ui.label(
-                RichText::new(format!("{} · {}", crate::i18n::tr_args("to-line", &[("to", to.join("; ").into())]), dates::long(m.date)))
-                    .size(12.0)
-                    .color(t.text_dim),
-            );
+            // A Signal message says it came over Signal; its addresses are made up.
+            let to = if merel_engine::signal::is_signal_address(m.from.email()) {
+                tr("signal-via")
+            } else {
+                let to: Vec<&str> = m.to.iter().map(|a| a.display()).collect();
+                crate::i18n::tr_args("to-line", &[("to", to.join("; ").into())])
+            };
+            ui.label(RichText::new(format!("{to} · {}", dates::long(m.date))).size(12.0).color(t.text_dim));
         });
         // The answers at hand in the message's own header, and the sender's contact card.
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

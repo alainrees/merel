@@ -474,7 +474,11 @@ fn chat_row(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) -> egui::Respon
     p.with_clip_rect(clip).text(egui::pos2(x, rect.top() + 10.0), egui::Align2::LEFT_TOP, &chat.title, FontId::proportional(14.5), name_color);
     let preview = match chat.messages.last() {
         Some(last) => {
-            let text = app.engine.session.chat_text(last).map(|s| s.replace('\n', " ")).unwrap_or_else(|| format!("🔒 {}", tr("chat-encrypted")));
+            // Over Signal the subject is the text's start, there before the message is opened.
+            let signal =
+                app.engine.is_signal_account(&chat.account_id).then(|| app.engine.session.message(last).map(|m| m.subject.clone())).flatten();
+            let text =
+                app.engine.session.chat_text(last).map(|s| s.replace('\n', " ")).or(signal).unwrap_or_else(|| format!("🔒 {}", tr("chat-encrypted")));
             let text = if invite_in(&text).is_some() { tr("chat-invitation") } else { text };
             if app.engine.session.chat_is_mine(last) { tr_args("chat-mine", &[("text", text.as_str().into())]) } else { text }
         }
@@ -495,13 +499,16 @@ fn chat_row(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) -> egui::Respon
 /// The open chat: its name, the messages oldest first with a line per day, and the line to
 /// write.
 fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
+    let signal_chat = app.engine.is_signal_account(&chat.account_id);
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
         chat_avatar(ui.painter(), rect.center(), 20.0, chat);
         ui.vertical(|ui| {
             ui.label(RichText::new(&chat.title).size(17.0).color(t.text));
             let first = chat.people.first();
-            let people = chat.people.iter().map(Address::email).collect::<Vec<_>>().join(", ");
+            let signal = app.engine.is_signal_account(&chat.account_id);
+            // Signal's addresses mean nothing to anyone: the channel says enough.
+            let people = if signal { tr("signal-via") } else { chat.people.iter().map(Address::email).collect::<Vec<_>>().join(", ") };
             let verified = !chat.is_group() && first.is_some_and(|p| app.engine.is_verified(p.email()));
             ui.horizontal(|ui| {
                 ui.add(Icon::Lock.image(14.0, t.text_dim));
@@ -512,7 +519,10 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                 ui.label(RichText::new(line).size(12.5).color(t.text_dim));
             });
         });
-        helder::right(ui, |ui| call_button(app, ui, t, chat));
+        // Calls go over mail; a Signal chat has none in Merel.
+        if !signal_chat {
+            helder::right(ui, |ui| call_button(app, ui, t, chat));
+        }
     });
     ui.add_space(8.0);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
@@ -842,7 +852,7 @@ fn invite_card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         helder::paragraph(ui, t, &tr("chat-invite-intro"));
         ui.add_space(12.0);
         ui.horizontal_top(|ui| {
-            qr_code(ui, &link, 188.0);
+            qr_code(ui, &link, 188.0, &tr("chat-invite-qr"));
             ui.add_space(20.0);
             ui.vertical(|ui| {
                 egui::Frame::new().fill(t.window).corner_radius(helder::CONTROL_RADIUS).inner_margin(Margin::same(10)).show(ui, |ui| {
@@ -875,9 +885,9 @@ fn invite_card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 
 /// A QR code of `text`, `size` points wide: dark on white whatever the theme, with the quiet
 /// zone around it that scanners need.
-fn qr_code(ui: &mut Ui, text: &str, size: f32) {
+pub(crate) fn qr_code(ui: &mut Ui, text: &str, size: f32, label: &str) {
     let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, tr("chat-invite-qr")));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, label));
     let Ok(code) = qrcode::QrCode::new(text.as_bytes()) else { return };
     let width = code.width();
     let colors = code.to_colors();

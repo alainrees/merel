@@ -2035,7 +2035,10 @@ dependencies = [
  "presage-store-sqlite",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "sqlx",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

@@ -4422,6 +4422,7 @@ dependencies = [
  "merel-search",
  "merel-secrets",
  "merel-semantic",
+ "merel-signal-link",
  "merel-smime",
  "merel-smtp",
  "merel-store",
@@ -4682,6 +4683,23 @@ dependencies = [
  "base64 0.23.1",
  "thiserror 2.0.21",
  "zeroize",
+]
+
+[[package]]
+name = "merel-signal-link"
+version = "0.1.20"
+dependencies = [
+ "base64 0.23.1",
+ "chrono",
+ "log",
+ "merel-i18n",
+ "merel-mailbox",
+ "merel-mime",
+ "merel-model",
+ "merel-secrets",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
 ]
 
 [[package]]

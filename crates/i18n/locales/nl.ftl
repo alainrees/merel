@@ -1970,3 +1970,25 @@ search-date-this-week = Deze week
 search-date-last-week = Vorige week
 search-date-this-month = Deze maand
 search-date-this-year = Dit jaar
+
+## Signal
+signal-stopped = Het Signal-programma is gestopt.
+signal-cannot = Dat kan niet bij Signal.
+signal-one-person = Een Signal-bericht gaat naar één persoon of één groep.
+signal-unknown = Met deze persoon heb je nog geen Signal-chat. Begin de chat in Signal op je telefoon.
+signal-no-answer = Signal antwoordde niet op tijd. Probeer het zo nog eens.
+signal-no-program = Het Signal-programma hoort naast Merel te staan, maar is er niet.
+signal-text-only = Via Signal kan Merel nog alleen tekst sturen, geen bijlagen.
+signal-no-folder = Merel weet niet waar het Signal mag bewaren.
+signal-link-help = Merel wordt een gekoppeld apparaat van je Signal-account, net als Signal op de computer. Je chats komen dan ook in Merel, en zoeken vindt ze naast je mail.
+signal-link = Signal koppelen
+signal-link-starting = Signal maakt een koppelcode…
+signal-link-qr = QR-code om Merel aan Signal te koppelen
+signal-link-step-1 = Open Signal op je telefoon.
+signal-link-step-2 = Ga naar Instellingen > Gekoppelde apparaten en tik op Nieuw apparaat koppelen.
+signal-link-step-3 = Scan deze code.
+signal-link-history = Berichten van vóór het koppelen haalt Signal niet op; nieuwe berichten komen vanaf nu binnen.
+signal-link-failed = Koppelen is niet gelukt.
+channel-chat = Chat
+signal-via = via Signal
+signal-attachment = Bijlage

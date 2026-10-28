@@ -228,6 +228,9 @@ impl Engine {
 
     /// [`Engine::send_or_invite`] without handing the mail to the worker yet.
     pub(crate) fn hold_or_send(&mut self, account_id: &str, draft: Draft) -> Result<Option<u64>, String> {
+        if self.is_signal_account(account_id) {
+            return self.send_signal(account_id, draft).map(Some);
+        }
         if draft.chat.is_none() || !draft.encrypt {
             return Err(merel_i18n::tr("chat-encrypted-only"));
         }
