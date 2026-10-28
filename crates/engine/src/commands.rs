@@ -121,6 +121,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "task.delete", label: "Delete task", run: crate::tasks::delete },
     CommandSpec { id: "task.reminder_dismiss", label: "Close a task reminder", run: crate::tasks::reminder_dismiss },
     CommandSpec { id: "task.reminder_snooze", label: "Put a task reminder off", run: crate::tasks::reminder_snooze },
+    CommandSpec { id: "sync.now", label: "Sync all accounts now", run: crate::sync::sync_now },
     CommandSpec { id: "sync.refresh", label: "Refresh calendar, contacts and tasks", run: crate::sync::refresh },
     CommandSpec { id: "draft.save", label: "Save draft", run: crate::drafts::save },
     CommandSpec { id: "draft.delete", label: "Delete draft", run: crate::drafts::delete },

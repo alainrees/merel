@@ -430,7 +430,10 @@ walk the message list, Delete removes the selected message, Backspace archives i
 the delete key, Ctrl+E archives, as in Outlook for Mac), Ctrl+N starts a new message, Ctrl+R
 replies, Ctrl+Shift+R replies to all, Ctrl+F forwards, Ctrl+Shift+V moves to a folder, Ctrl+Q and Ctrl+U mark read or unread,
 Ctrl+A selects every message in the list, Ctrl+E puts the cursor in the search box, Ctrl+P prints, Ctrl+S saves the message as an .eml file, Ctrl+Shift+1 to 9 run the account's quick steps, Esc clears a
-search and F5 refreshes the folder. From every module, Ctrl+Shift+M, Ctrl+Shift+A, Ctrl+Shift+C and Ctrl+Shift+K start a
+search, F5 refreshes the folder and F9 syncs every account, as Outlook's Send/Receive. The same sync sits as a button over
+the message list and on the Send/Receive tab; a right click on an account's heading syncs only that account: it lists
+its folders again, fetches its inbox, every folder whose mail is listed, and its calendar, contacts and tasks, and an
+account that lost its connection tries the server at once. From every module, Ctrl+Shift+M, Ctrl+Shift+A, Ctrl+Shift+C and Ctrl+Shift+K start a
 new message, appointment, contact or task, as in Outlook (the contact and task forms open in their own module). None
 of them fires while you are typing in a text field or writing a message. A right click on a message opens a menu with
 the everyday actions (reply, forward, read or unread, flag, move, archive, junk, delete) and two Outlook favourites:

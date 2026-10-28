@@ -378,6 +378,11 @@ fn message_of(folder_id: &str, h: RemoteHeader) -> Option<MessageHeader> {
     })
 }
 
+/// The loading key of an account listing its folders again on `sync.now`.
+fn folders_key(account_id: &str) -> String {
+    format!("folders/{account_id}")
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AccountStatus {
     Offline,
@@ -934,6 +939,7 @@ impl Session {
         match event {
             Event::Connected { account_id, folders, syncs_items } => {
                 self.status.insert(account_id.clone(), AccountStatus::Online);
+                self.loading.remove(&folders_key(&account_id));
                 self.queued.remove(&account_id);
                 self.item_errors.remove(&account_id);
                 if syncs_items {
@@ -1187,6 +1193,46 @@ impl Session {
         for id in folders {
             self.request_headers(&id);
         }
+    }
+
+    /// Brings one account up to date now, as Outlook's Send/Receive: a connected account lists
+    /// its folders again and fetches its inbox, every folder whose mail is listed, and its
+    /// appointments, contacts and tasks; an account that is not connected tries the server at
+    /// once instead of waiting for its next retry. An account that is connecting is left be.
+    pub(crate) fn sync_account(&mut self, account_id: &str) {
+        if account_id == SAMPLE_ACCOUNT {
+            return;
+        }
+        match self.status.get(account_id) {
+            Some(AccountStatus::Connecting) => {}
+            Some(AccountStatus::Online) => {
+                if self.loading.insert(folders_key(account_id)) {
+                    self.pending.push(Job::Connect { account_id: account_id.to_string() });
+                }
+                let listed: HashSet<&str> = self.messages.iter().map(|m| m.folder_id.as_str()).collect();
+                let folders: Vec<String> = self
+                    .folders
+                    .iter()
+                    .filter(|f| f.account_id == account_id && (f.kind == FolderKind::Inbox || listed.contains(f.id.as_str())))
+                    .map(|f| f.id.clone())
+                    .collect();
+                for id in folders {
+                    self.request_headers(&id);
+                }
+                self.request_sync(account_id);
+            }
+            _ => {
+                self.status.insert(account_id.to_string(), AccountStatus::Connecting);
+                self.pending.push(Job::Connect { account_id: account_id.to_string() });
+            }
+        }
+    }
+
+    /// Whether a sync is under way: an account connecting or listing its folders, a folder's
+    /// mail or an account's items being fetched. Opening a message does not count.
+    pub fn is_syncing(&self) -> bool {
+        self.accounts.iter().any(|a| self.status.get(&a.id) == Some(&AccountStatus::Connecting))
+            || self.loading.iter().any(|k| k.starts_with("folders/") || k.starts_with("sync/") || self.folder(k).is_some())
     }
 
     /// Asks every connected account that keeps them for its appointments, contacts and tasks.

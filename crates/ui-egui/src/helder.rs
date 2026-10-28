@@ -698,7 +698,7 @@ pub fn ribbon_icon(label: &str, glyph: &str) -> Option<Icon> {
         "Werkweek" => Icon::Columns,
         "Week" => Icon::CalendarRange,
         "Maand" => Icon::CalendarDays,
-        "Vernieuwen" => Icon::RefreshCw,
+        "Vernieuwen" | "Alles synchroniseren" => Icon::RefreshCw,
         "Sneltoetsen" => Icon::Keyboard,
         "Over Merel" => Icon::Info,
         "Op GitHub" => Icon::Globe,
