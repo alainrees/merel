@@ -433,7 +433,10 @@ Ctrl+A selects every message in the list, Ctrl+E puts the cursor in the search b
 search, F5 refreshes the folder and F9 syncs every account, as Outlook's Send/Receive. The same sync sits as a button over
 the message list and on the Send/Receive tab; a right click on an account's heading syncs only that account: it lists
 its folders again, fetches its inbox, every folder whose mail is listed, and its calendar, contacts and tasks, and an
-account that lost its connection tries the server at once. From every module, Ctrl+Shift+M, Ctrl+Shift+A, Ctrl+Shift+C and Ctrl+Shift+K start a
+account that lost its connection tries the server at once. A right click on that button, or the menu next to it on the
+Send/Receive tab (on a Mac: Map > Automatisch synchroniseren), chooses how often Merel syncs by itself: every 1, 2 (the
+start), 5, 10, 15, 30 or 60 minutes, or only by hand; the calendar, contacts and tasks follow at most every five minutes,
+and chats keep coming every two. From every module, Ctrl+Shift+M, Ctrl+Shift+A, Ctrl+Shift+C and Ctrl+Shift+K start a
 new message, appointment, contact or task, as in Outlook (the contact and task forms open in their own module). None
 of them fires while you are typing in a text field or writing a message. A right click on a message opens a menu with
 the everyday actions (reply, forward, read or unread, flag, move, archive, junk, delete) and two Outlook favourites:

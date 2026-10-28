@@ -298,6 +298,7 @@ impl MailApp {
         engine.session.relabel();
         engine.session.sort = view.sort;
         engine.session.search_all = view.search_all;
+        engine.set_sync_every(view.sync_minutes);
         let mut app = MailApp {
             engine,
             module: Module::Mail,
@@ -938,7 +939,7 @@ pub(crate) fn list_filter() -> String {
 }
 
 /// The button over the message list that syncs every account; true when it was clicked.
-fn sync_button(ui: &mut Ui, t: &Tokens, can: bool, busy: bool) -> bool {
+fn sync_button(ui: &mut Ui, t: &Tokens, can: bool, busy: bool, minutes: &mut u32) -> bool {
     let color = if can && !busy { t.text } else { t.text_dim };
     let button = egui::Button::image(helder::Icon::RefreshCw.image(helder::ICON, color))
         .frame_when_inactive(false)
@@ -947,7 +948,12 @@ fn sync_button(ui: &mut Ui, t: &Tokens, can: bool, busy: bool) -> bool {
     let r = ui.add_enabled(can && !busy, button);
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, can && !busy, tr("sync-all")));
     let hint = if busy { tr("sync-busy") } else { format!("{} (F9)", tr("sync-all-hint")) };
-    r.on_hover_text(hint.clone()).on_disabled_hover_text(hint).clicked()
+    let every = crate::i18n::tr_args("sync-every-now", &[("every", sync_every_name(*minutes).into())]);
+    let hint = format!("{hint}\n{every}");
+    let r = r.on_hover_text(hint.clone()).on_disabled_hover_text(hint);
+    // A right click chooses how often it happens on its own.
+    r.context_menu(|ui| sync_every_choices(ui, minutes));
+    r.clicked()
 }
 
 /// The search bar at the top of the window, as the new Outlook has it: one field for the
@@ -1425,6 +1431,47 @@ fn send_receive_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let can = !session.is_sample() && session.selected_folder.is_some();
     ribbon_button(app, ui, t, "⟳", &tr("sync-all"), ("sync.now", Some("F9")), all);
     ribbon_button(app, ui, t, "⟳", &tr("refresh"), ("folder.refresh", Some("F5")), can);
+    ribbon_separator(ui);
+    let mut minutes = app.view.sync_minutes;
+    if menubar::capturing() {
+        let options: Vec<(String, bool)> = merel_engine::SYNC_CHOICES.iter().map(|m| (sync_every_name(*m), *m == minutes)).collect();
+        if let Some(i) = menubar::choice(&tr("sync-every"), &options) {
+            minutes = merel_engine::SYNC_CHOICES[i];
+        }
+    } else {
+        helder::menu_button(ui, t, Some(helder::Icon::Clock), sync_every_name(minutes), |ui| sync_every_choices(ui, &mut minutes))
+            .on_hover_text(tr("sync-every-hint"));
+    }
+    set_sync_every(app, ui.ctx(), minutes);
+}
+
+/// "Elke 5 minuten", or "Alleen met de hand" for 0.
+pub(crate) fn sync_every_name(minutes: u32) -> String {
+    match minutes {
+        0 => tr("sync-every-off"),
+        1 => tr("sync-every-minute"),
+        m => crate::i18n::tr_args("sync-every-minutes", &[("minutes", m.into())]),
+    }
+}
+
+/// The choices for how often to sync on their own, as a menu's rows.
+fn sync_every_choices(ui: &mut Ui, minutes: &mut u32) {
+    ui.set_min_width(180.0);
+    ui.label(RichText::new(tr("sync-every")).strong());
+    for m in merel_engine::SYNC_CHOICES {
+        if ui.selectable_value(minutes, m, sync_every_name(m)).clicked() {
+            ui.close();
+        }
+    }
+}
+
+/// Keeps a new choice of how often to sync, and hands it to the engine.
+fn set_sync_every(app: &mut MailApp, ctx: &egui::Context, minutes: u32) {
+    if minutes != app.view.sync_minutes {
+        app.view.sync_minutes = minutes;
+        app.engine.set_sync_every(minutes);
+        app.save_view(ctx);
+    }
 }
 
 fn calendar_ribbon(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
@@ -2084,6 +2131,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             let mut filter_pick: Option<merel_engine::view::Filter> = None;
             let (can_sync, syncing) = (!app.engine.session.is_sample(), app.engine.session.is_syncing());
             let mut sync_all = false;
+            let mut sync_minutes = app.view.sync_minutes;
             egui::Frame::NONE.inner_margin(Margin { left: 12, right: 8, top: 12, bottom: 6 }).show(ui, |ui| {
                 let title = match count {
                     Some(n) => crate::i18n::tr_args("search-results", &[("count", n.into())]),
@@ -2111,7 +2159,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                             r.on_hover_text(tr("list-filter-hint"));
                             // Outlook's Send/Receive: every account up to date now. While that
                             // runs the button rests, so a second click is not lost in the first.
-                            sync_all = sync_button(ui, t, can_sync, syncing);
+                            sync_all = sync_button(ui, t, can_sync, syncing, &mut sync_minutes);
                         });
                     });
                 });
@@ -2163,6 +2211,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             if sync_all {
                 app.run("sync.now", Value::Null);
             }
+            set_sync_every(app, ui.ctx(), sync_minutes);
             if let Some(f) = filter_pick {
                 app.run("view.filter", json!({ "filter": f }));
             }
@@ -5163,6 +5212,33 @@ mod tests {
         h.key_press(egui::Key::F9);
         h.run_steps(2);
         assert_eq!(listing(&h), [true, true]);
+    }
+
+    #[test]
+    fn how_often_mail_syncs_is_chosen_with_a_right_click_on_the_sync_button_or_on_the_send_receive_tab() {
+        use std::time::Duration;
+        let mut h = two_accounts();
+        h.run();
+        assert_eq!(h.state().engine.sync_every(), (Some(Duration::from_secs(120)), Some(Duration::from_secs(300))), "every two minutes at first");
+        h.get_by_label("Alles synchroniseren").click_secondary();
+        h.run();
+        h.get_by_label("Elke 10 minuten").click();
+        h.run();
+        assert_eq!(h.state().view.sync_minutes, 10);
+        assert_eq!(h.state().engine.sync_every(), (Some(Duration::from_secs(600)), Some(Duration::from_secs(600))));
+
+        h.state_mut().tab = Tab::SendReceive;
+        h.run();
+        h.get_by_label("Elke 10 minuten").click();
+        h.run();
+        h.get_by_label("Alleen met de hand").click();
+        h.run();
+        assert_eq!(h.state().view.sync_minutes, 0);
+        assert_eq!(h.state().engine.sync_every(), (None, None), "only the button and F9 sync now");
+
+        // A minute for mail; the calendar still waits five.
+        h.state_mut().engine.set_sync_every(1);
+        assert_eq!(h.state().engine.sync_every(), (Some(Duration::from_secs(60)), Some(Duration::from_secs(300))));
     }
 
     #[test]
