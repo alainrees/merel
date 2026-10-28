@@ -4932,6 +4932,29 @@ mod tests {
         assert!(h.state().unsubscribe.is_none());
         assert_eq!(h.state().engine.session.outbox.len(), 1, "the request was handed to the outbox");
         assert!(h.state().notice.is_some(), "the sample account cannot send, and the person hears so");
+        let s = &h.state().engine.session;
+        assert_eq!(s.message("m3").map(|m| m.folder_id.as_str()), Some("inbox"), "a request that failed leaves the message where it is");
+    }
+
+    #[test]
+    fn after_afmelden_the_newsletter_goes_to_junk() {
+        let mut h = harness();
+        {
+            let s = &mut h.state_mut().engine.session;
+            let body = merel_engine::Body { text: "Nieuws".into(), unsubscribe: vec!["https://example.org/u".into()], ..Default::default() };
+            s.bodies.insert("m3".into(), body);
+            s.selected_message = Some("m3".into());
+        }
+        h.run();
+        h.get_by_label("Afmelden…").click();
+        h.run();
+        h.get_by_label("Ja, afmelden").click();
+        h.run();
+        let s = &h.state().engine.session;
+        let folder = s.message("m3").and_then(|m| s.folder(&m.folder_id)).map(|f| f.kind);
+        assert_eq!(folder, Some(merel_model::FolderKind::Junk));
+        let notice = h.state().notice.as_ref().map(|n| n.text.clone()).unwrap_or_default();
+        assert!(notice.contains("Ongewenste e-mail"), "{notice}");
     }
 
     #[test]

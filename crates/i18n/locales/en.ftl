@@ -510,8 +510,9 @@ unsubscribe-page-opened = The unsubscribe page is open in the browser.
 unsubscribe-title = Unsubscribe
 unsubscribe-yes = Yes, unsubscribe
 unsubscribe-sent = Unsubscribe request sent to { $email }.
-unsubscribe-by-mail = Merel sends an email to { $email } asking to unsubscribe you from { $sender }.
-unsubscribe-by-web = Merel opens { $host } in your browser; there you unsubscribe from { $sender }. The sender can tell from that that you read the message.
+unsubscribe-moved = The message is now in Junk Email.
+unsubscribe-by-mail = Merel sends an email to { $email } asking to unsubscribe you from { $sender }. Then this message goes to Junk Email.
+unsubscribe-by-web = Merel opens { $host } in your browser; there you unsubscribe from { $sender }. The sender can tell from that that you read the message. This message goes to Junk Email.
 
 ## Bericht als bestand
 
