@@ -421,6 +421,41 @@ mod tests {
     }
 
     #[test]
+    fn a_new_appointment_goes_to_the_calendar_of_the_account_mail_goes_from() {
+        let mut s = Session::with_accounts(vec![account("acc", "Werk"), account("two", "Thuis")]);
+        s.calendars.push(Calendar::local());
+        assert_eq!(s.default_calendar().map(|c| c.id.as_str()), Some("local"), "without an account calendar, the local one");
+        s.calendars.push(Calendar {
+            id: "two/calendar".into(),
+            name: ACCOUNT_CALENDAR.into(),
+            account_id: Some("two".into()),
+            color: [1, 2, 3],
+            read_only: false,
+        });
+        assert_eq!(s.default_calendar().map(|c| c.id.as_str()), Some("two/calendar"), "an account calendar before the local one");
+        s.calendars.push(Calendar {
+            id: "acc/calendars/T1".into(),
+            name: "Team".into(),
+            account_id: Some("acc".into()),
+            color: [1, 2, 3],
+            read_only: false,
+        });
+        assert_eq!(s.default_calendar().map(|c| c.id.as_str()), Some("two/calendar"), "another calendar of an account is never the default");
+        s.calendars.push(Calendar {
+            id: "acc/calendar".into(),
+            name: ACCOUNT_CALENDAR.into(),
+            account_id: Some("acc".into()),
+            color: [1, 2, 3],
+            read_only: false,
+        });
+        assert_eq!(s.default_calendar().map(|c| c.id.as_str()), Some("acc/calendar"), "the current account's own");
+        s.run("appointment.save", &json!({ "title": "Tandarts", "start": 3_600, "end": 7_200 })).unwrap();
+        assert_eq!(s.appointments.iter().find(|a| a.title == "Tandarts").map(|a| a.calendar_id.as_str()), Some("acc/calendar"));
+        s.run("appointment.save", &json!({ "title": "Kapper", "start": 3_600, "end": 7_200, "calendar_id": "local" })).unwrap();
+        assert_eq!(s.appointments.iter().find(|a| a.title == "Kapper").map(|a| a.calendar_id.as_str()), Some("local"), "a chosen calendar wins");
+    }
+
+    #[test]
     fn availability_is_asked_of_microsoft_365_once_in_a_while() {
         let mut s = Session::default();
         s.accounts.push(account("acc", "Werk"));

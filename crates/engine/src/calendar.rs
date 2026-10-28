@@ -59,6 +59,17 @@ impl Session {
         self.calendars.iter().find(|c| c.id == id)
     }
 
+    /// Where a new appointment goes unless chosen otherwise, as in Outlook: the main calendar
+    /// of the account mail is sent from, else the first account's main calendar, else the local
+    /// one.
+    pub fn default_calendar(&self) -> Option<&Calendar> {
+        let main = |account: &str| self.calendar(&Self::account_calendar_id(account));
+        self.current_account()
+            .and_then(|a| main(&a.id))
+            .or_else(|| self.accounts.iter().find_map(|a| main(&a.id)))
+            .or_else(|| self.calendars.iter().find(|c| !c.read_only))
+    }
+
     pub fn appointment(&self, id: &str) -> Option<&Appointment> {
         self.appointments.iter().find(|a| a.id == id)
     }
@@ -183,7 +194,7 @@ pub fn save(s: &mut Session, params: &Value) -> Result<(), CommandError> {
         None => existing
             .as_ref()
             .map(|a| a.calendar_id.clone())
-            .or_else(|| s.calendars.first().map(|c| c.id.clone()))
+            .or_else(|| s.default_calendar().map(|c| c.id.clone()))
             .ok_or(CommandError::Param("calendar_id"))?,
     };
     if s.calendar(&calendar_id).is_some_and(|c| c.read_only) {

@@ -2055,6 +2055,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         .filter(|c| !c.read_only || open_in.as_ref() == Some(&c.id))
         .map(|c| (c.id.clone(), app.engine.session.calendar_label(c), Color32::from_rgb(c.color[0], c.color[1], c.color[2])))
         .collect();
+    let default_calendar = app.engine.session.default_calendar().map(|c| c.id.clone());
     let local_calendars: Vec<String> = app.engine.session.calendars.iter().filter(|c| c.account_id.is_none()).map(|c| c.id.clone()).collect();
     let preview = app.calendar.editor.as_ref().and_then(|e| day_of(app, e, t));
     let stored = app.calendar.editor.as_ref().and_then(|e| e.id.as_ref()).and_then(|id| app.engine.session.appointment(id)).cloned();
@@ -2188,7 +2189,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
         editor.chip_typed(true, true);
         match editor.params().and_then(|p| editor.all_attendees().map(|a| (p, a))) {
             Ok((params, people)) => {
-                let calendar = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _, _)| id.clone()));
+                let calendar = editor.calendar_id.clone().or_else(|| default_calendar.clone());
                 match save_meeting(app, params, people, action, organiser, stored.as_ref(), calendar.as_deref()) {
                     Ok(()) => close = true,
                     Err(e) => {
@@ -2338,7 +2339,7 @@ fn form(
     }
     // Which calendar: a choice for a new appointment when there is more than one, a fact
     // otherwise.
-    let current = editor.calendar_id.clone().or_else(|| calendars.first().map(|(id, _, _)| id.clone()));
+    let current = editor.calendar_id.clone().or_else(|| session.default_calendar().map(|c| c.id.clone()));
     if let Some((_, name, color)) = calendars.iter().find(|(id, _, _)| Some(id) == current.as_ref()) {
         helder::dot_row(ui, *color, |ui| {
             if editor.id.is_none() && calendars.len() > 1 {
