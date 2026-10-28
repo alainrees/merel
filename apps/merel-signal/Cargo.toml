@@ -1,0 +1,31 @@
+[package]
+name = "merel-signal"
+description = "Signal for Merel: links as a secondary device and passes messages to Merel as JSON lines."
+version = "0.1.0"
+edition = "2024"
+# The Signal libraries are AGPL, so this helper is too. Merel runs it as a separate program and
+# talks to it over stdin and stdout; Merel itself stays MIT OR Apache-2.0.
+license = "AGPL-3.0-only"
+publish = false
+
+# Its own workspace: the Signal libraries stay out of Merel's build and lockfile.
+[workspace]
+
+[dependencies]
+presage = { git = "https://github.com/whisperfish/presage", rev = "aeaedf99babebae2dbc6b86bca797807d4cd9fda" }
+presage-store-sqlite = { git = "https://github.com/whisperfish/presage", rev = "aeaedf99babebae2dbc6b86bca797807d4cd9fda", default-features = false }
+# SQLCipher with its own OpenSSL, so the app needs nothing installed on the computer.
+libsqlite3-sys = { version = "0.36.0", features = ["bundled-sqlcipher-vendored-openssl"] }
+anyhow = "1.0"
+futures = "0.3"
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync"] }
+
+[patch.crates-io]
+libsqlite3-sys = { version = "0.36.0", git = "https://github.com/whisperfish/rusqlite", rev = "2a42b3354c9194700d08aa070f70a131a470e7dc" }
+
+[profile.dev.package.libcrux-ml-kem]
+# Unoptimised ML-KEM can overflow the stack decrypting a PQXDH prekey message.
+opt-level = 3

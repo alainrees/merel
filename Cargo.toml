@@ -2,7 +2,8 @@
 resolver = "3"
 members = ["crates/*", "apps/*"]
 # The phone apps are Xcode and Gradle projects; their Rust core is crates/mobile.
-exclude = ["apps/ios", "apps/android"]
+# merel-signal is AGPL and has its own workspace; Merel runs it as a separate program.
+exclude = ["apps/ios", "apps/android", "apps/merel-signal"]
 
 [workspace.package]
 version = "0.1.20"
