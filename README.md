@@ -318,7 +318,8 @@ the hover text of a row in the list names the day too.
 A newsletter (mail with a `List-Unsubscribe` header) shows "Afmelden…" over the message, as Outlook does. Nothing
 happens by itself: a window first says what will be done, a mail to the list's address from the account the message
 came in on (preferred, since it tells the sender nothing new) or the list's web page in the browser (which does tell
-the sender the mail was read), and the person decides. Mail in the Junk folder gets no such offer.
+the sender the mail was read), and the person decides. Once the request is out, the message goes to the Junk folder
+(and the junk filter learns from it); a request that failed leaves it where it is. Mail in the Junk folder gets no such offer.
 
 Read receipts, Outlook's "Leesbevestiging": "Leesbevestiging vragen" in the compose window adds the
 `Disposition-Notification-To` header, and a message whose sender asked for one shows "De afzender vraagt een

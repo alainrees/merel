@@ -3,11 +3,12 @@
 //! line over such a message and, after asking, either sends the mail from the account the
 //! message came in on or opens the page in the browser. Nothing happens without the click:
 //! the header is the sender's word, and a visit to the page tells the sender the mail was read.
+//! Once the request has gone out, the message itself goes to the Junk folder.
 
 use crate::i18n::tr;
 use egui::RichText;
 use merel_engine::SendState;
-use merel_model::{Address, Draft};
+use merel_model::{Address, Draft, FolderKind};
 
 use crate::{MailApp, Tokens};
 
@@ -93,27 +94,37 @@ impl MailApp {
     }
 
     /// Does what the person agreed to: the mail goes out from the account the message came in
-    /// on, or the page opens in the browser.
+    /// on, or the page opens in the browser. Then the message goes to Junk; a request that
+    /// failed leaves it where it is.
     fn unsubscribe_now(&mut self, ctx: &egui::Context, c: &Confirm) {
-        match &c.way {
+        let account = self.engine.session.message(&c.message_id).and_then(|m| self.engine.session.folder(&m.folder_id)).map(|f| f.account_id.clone());
+        let Some(account) = account else {
+            self.notice = Some(crate::Notice::warning(tr("message-gone")));
+            return;
+        };
+        let done = match &c.way {
             Way::Mail { to, subject } => {
-                let account =
-                    self.engine.session.message(&c.message_id).and_then(|m| self.engine.session.folder(&m.folder_id)).map(|f| f.account_id.clone());
-                let Some(account) = account else {
-                    self.notice = Some(crate::Notice::warning(tr("message-gone")));
-                    return;
-                };
                 let draft = Draft { to: vec![to.clone()], subject: subject.clone(), body: "unsubscribe".to_string(), ..Draft::default() };
                 let id = self.engine.send(&account, draft);
-                self.notice = Some(match self.engine.session.outbox.get(&id) {
-                    Some(SendState::Failed(e)) => crate::Notice::error(e.clone()),
-                    _ => crate::Notice::success(crate::i18n::tr_args("unsubscribe-sent", &[("email", to.email().into())])),
-                });
+                if let Some(SendState::Failed(e)) = self.engine.session.outbox.get(&id) {
+                    self.notice = Some(crate::Notice::error(e.clone()));
+                    return;
+                }
+                crate::i18n::tr_args("unsubscribe-sent", &[("email", to.email().into())])
             }
             Way::Web(url) => {
                 ctx.open_url(egui::OpenUrl::new_tab(url));
-                self.notice = Some(crate::Notice::info(tr("unsubscribe-page-opened")));
+                tr("unsubscribe-page-opened")
             }
+        };
+        let junk = self.engine.session.folders.iter().find(|f| f.account_id == account && f.kind == FolderKind::Junk).map(|f| f.id.clone());
+        let Some(junk) = junk else {
+            self.notice = Some(crate::Notice::success(done));
+            return;
+        };
+        self.run("message.move", serde_json::json!({ "id": c.message_id, "folder_id": junk }));
+        if !self.notice.as_ref().is_some_and(|n| n.tone == crate::notice::Tone::Error) {
+            self.notice = Some(crate::Notice::success(format!("{done} {}", tr("unsubscribe-moved"))));
         }
     }
 }

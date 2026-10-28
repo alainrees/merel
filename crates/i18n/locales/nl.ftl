@@ -504,8 +504,9 @@ unsubscribe-page-opened = De afmeldpagina is geopend in de browser.
 unsubscribe-title = Afmelden
 unsubscribe-yes = Ja, afmelden
 unsubscribe-sent = Afmeldverzoek verstuurd aan { $email }.
-unsubscribe-by-mail = Merel stuurt een e-mail aan { $email } met het verzoek je af te melden bij { $sender }.
-unsubscribe-by-web = Merel opent { $host } in je browser; daar meld je je af bij { $sender }. De afzender kan zo zien dat je het bericht hebt gelezen.
+unsubscribe-moved = Het bericht staat nu in Ongewenste e-mail.
+unsubscribe-by-mail = Merel stuurt een e-mail aan { $email } met het verzoek je af te melden bij { $sender }. Daarna gaat dit bericht naar Ongewenste e-mail.
+unsubscribe-by-web = Merel opent { $host } in je browser; daar meld je je af bij { $sender }. De afzender kan zo zien dat je het bericht hebt gelezen. Dit bericht gaat naar Ongewenste e-mail.
 
 ## Bericht als bestand
 
