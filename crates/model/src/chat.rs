@@ -47,6 +47,28 @@ pub struct ChatTag {
     /// and shows it; the engine drops it from any other account.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quote: Option<Quoted>,
+    /// For one's own message: whether it arrived or was read (`Merel-Delivery`), as Signal's
+    /// receipts say. Only Signal says it; the engine drops it from any other account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<Delivery>,
+}
+
+/// How far a message one sent came.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Delivery {
+    Delivered,
+    Read,
+}
+
+impl Delivery {
+    /// From a `Merel-Delivery` header value.
+    pub fn from_header(value: Option<&str>) -> Option<Delivery> {
+        match value?.trim() {
+            "delivered" => Some(Delivery::Delivered),
+            "read" => Some(Delivery::Read),
+            _ => None,
+        }
+    }
 }
 
 /// A message quoted in the answer to it.

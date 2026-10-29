@@ -80,6 +80,28 @@ pub enum Said {
     },
     Message(Received),
     Reaction(Reaction),
+    Receipt {
+        sender: String,
+        kind: String,
+        #[serde(default)]
+        timestamps: Vec<u64>,
+    },
+    Typing {
+        sender: String,
+        #[serde(default)]
+        sender_name: String,
+        typing: bool,
+    },
+    ReadElsewhere {
+        #[serde(default)]
+        read: Vec<(String, u64)>,
+    },
+    Settings {
+        #[serde(default)]
+        read_receipts: Option<bool>,
+        #[serde(default)]
+        typing_indicators: Option<bool>,
+    },
     File {
         id: String,
         #[serde(default)]
@@ -118,6 +140,10 @@ pub struct Received {
     /// The message this one answers.
     #[serde(default)]
     pub quote: Option<QuoteOf>,
+    /// For one's own message: how far it came, as the receipts said. Merel's own, not the
+    /// program's.
+    #[serde(skip)]
+    pub delivery: Option<&'static str>,
 }
 
 /// A file sent with a message: its id to fetch it with, and what it is.
@@ -201,6 +227,10 @@ enum Asked<'a> {
     },
     Fetch {
         id: &'a str,
+    },
+    MarkRead {
+        author: &'a str,
+        timestamps: Vec<u64>,
     },
     React {
         thread: &'a str,
@@ -317,6 +347,9 @@ struct Messages {
     reactions: HashMap<String, Vec<Reaction>>,
     /// The account's own service id, once a message of its own came.
     me_id: Option<String>,
+    /// What the program said since the last listing about receipts, reading elsewhere and
+    /// settings, for the mailbox to keep.
+    news: Vec<Said>,
 }
 
 impl Messages {
@@ -406,6 +439,42 @@ impl Messages {
     }
 }
 
+/// Who is typing now, by service id: their name and when they said so.
+static TYPING: Mutex<Option<HashMap<String, (String, Instant)>>> = Mutex::new(None);
+/// How long "is typing" holds without news: Signal repeats it every few seconds.
+const TYPING_HOLDS: Duration = Duration::from_secs(15);
+
+/// The name of whoever with Signal address `address` is typing to the account now, if anyone.
+pub fn typing(address: &str) -> Option<String> {
+    let map = TYPING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    map.as_ref()?
+        .iter()
+        .find(|(id, (_, at))| address_of(id).eq_ignore_ascii_case(address) && at.elapsed() < TYPING_HOLDS)
+        .map(|(_, (name, _))| name.clone())
+}
+
+fn note_typing(sender: &str, name: &str, on: bool) {
+    let mut map = TYPING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let map = map.get_or_insert_with(HashMap::new);
+    if on {
+        map.insert(sender.to_string(), (name.to_string(), Instant::now()));
+    } else {
+        map.remove(sender);
+    }
+}
+
+/// Takes in what the program said that is not a message or a reply to a request.
+fn take_news(messages: &Mutex<Messages>, said: Said) -> Option<Said> {
+    match said {
+        Said::Message(m) => lock(messages).add(m),
+        Said::Reaction(r) => lock(messages).react(r),
+        Said::Typing { sender, sender_name, typing } => note_typing(&sender, &sender_name, typing),
+        news @ (Said::Receipt { .. } | Said::ReadElsewhere { .. } | Said::Settings { .. }) => lock(messages).news.push(news),
+        other => return Some(other),
+    }
+    None
+}
+
 /// Whether `name` is a name, not empty or the service id it stands for.
 fn is_name(name: &str, id: &str) -> bool {
     !name.trim().is_empty() && !name.eq_ignore_ascii_case(id)
@@ -440,11 +509,11 @@ impl SignalMailbox {
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             match program.said.recv_timeout(left) {
-                Ok(Said::Message(m)) => lock(&messages).add(m),
-                Ok(Said::Reaction(r)) => lock(&messages).react(r),
                 Ok(Said::Synced) => break,
                 Ok(Said::Error { message }) => return Err(unreachable(message)),
-                Ok(_) => {}
+                Ok(said) => {
+                    take_news(&messages, said);
+                }
                 // Slow, not broken: what came so far is shown, the rest follows.
                 Err(RecvTimeoutError::Timeout) => break,
                 Err(RecvTimeoutError::Disconnected) => return Err(unreachable(merel_i18n::tr("signal-stopped"))),
@@ -461,10 +530,9 @@ impl SignalMailbox {
             .spawn(move || {
                 let mut last_error = None;
                 for s in said {
-                    match s {
-                        Said::Message(m) => lock(&into).add(m),
-                        Said::Reaction(r) => lock(&into).react(r),
-                        other => {
+                    match take_news(&into, s) {
+                        None => {}
+                        Some(other) => {
                             if let Said::Error { message } = &other {
                                 log::warn!("signal: {}", clean(message));
                                 last_error = Some(message.clone());
@@ -492,8 +560,10 @@ impl SignalMailbox {
     }
 
     fn header(&self, messages: &Messages, m: &Received) -> RemoteHeader {
-        let raw = message(&messages.named(m, &self.me_name), &self.me, &messages.reactions_on(m, &self.me_name));
         let id = m.id();
+        let mut named = messages.named(m, &self.me_name);
+        named.delivery = self.delivery(&named);
+        let raw = message(&named, &self.me, &messages.reactions_on(m, &self.me_name));
         RemoteHeader {
             seen: m.mine || self.flags.has(Flag::Seen, &id),
             flagged: self.flags.has(Flag::Flagged, &id),
@@ -525,6 +595,49 @@ impl SignalMailbox {
                 Ok(Said::Error { message }) => return Err(MailboxError::Protocol(message)),
                 Ok(_) => {}
                 Err(_) => return Err(MailboxError::Protocol(merel_i18n::tr("signal-no-answer"))),
+            }
+        }
+    }
+
+    /// How far one's own message `m` came: `read`, `delivered` or nothing yet.
+    fn delivery(&self, m: &Received) -> Option<&'static str> {
+        if !m.mine {
+            None
+        } else if self.flags.has_tag("read", &m.id()) {
+            Some("read")
+        } else if self.flags.has_tag("delivered", &m.id()) {
+            Some("delivered")
+        } else {
+            None
+        }
+    }
+
+    /// Keeps what the program said about receipts, reading on the phone and settings, in the
+    /// file next to the store, so it holds after a restart.
+    fn keep_news(&mut self) {
+        let (news, me_id) = {
+            let mut messages = lock(&self.messages);
+            (std::mem::take(&mut messages.news), messages.me_id.clone())
+        };
+        for said in news {
+            match said {
+                Said::Receipt { kind, timestamps, .. } => {
+                    let Some(me) = me_id.as_deref() else { continue };
+                    for ts in timestamps {
+                        let id = message_id(ts, me);
+                        self.flags.set_tag("delivered", &id, true);
+                        if kind == "read" {
+                            self.flags.set_tag("read", &id, true);
+                        }
+                    }
+                }
+                Said::ReadElsewhere { read } => {
+                    for (author, ts) in read {
+                        self.flags.set(Flag::Seen, &message_id(ts, &author), true);
+                    }
+                }
+                Said::Settings { read_receipts: Some(on), .. } => self.flags.set_tag("on", "read-receipts", on),
+                _ => {}
             }
         }
     }
@@ -602,6 +715,7 @@ impl Mailbox for SignalMailbox {
         if let Some(why) = self.stopped.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
             return Err(MailboxError::Connect { host: "Signal".into(), reason: why });
         }
+        self.keep_news();
         Ok(self.listed(|_| true, offset, limit))
     }
 
@@ -622,6 +736,8 @@ impl Mailbox for SignalMailbox {
             let m = messages.by_id.get(id).ok_or_else(|| MailboxError::NotFound(id.to_string()))?;
             (messages.named(m, &self.me_name), messages.reactions_on(m, &self.me_name))
         };
+        let mut m = m;
+        m.delivery = self.delivery(&m);
         // The files come along, as Signal shows pictures in the chat; very big ones by name only.
         let files: Vec<(FileRef, Option<Arc<[u8]>>)> =
             m.attachments.iter().map(|f| (f.clone(), if f.size <= FETCH_UP_TO { self.fetch(&f.id) } else { None })).collect();
@@ -630,7 +746,18 @@ impl Mailbox for SignalMailbox {
 
     fn set_flag(&mut self, folder: &str, id: &str, flag: Flag, on: bool) -> Result<()> {
         only_folder(folder)?;
+        let newly_read = flag == Flag::Seen && on && !self.flags.has(Flag::Seen, id);
         self.flags.set(flag, id, on);
+        // As Signal does, the sender hears it was read, unless the account turned read
+        // receipts off on the phone (or Merel has not heard the setting yet).
+        if newly_read && self.flags.has_tag("on", "read-receipts") {
+            let theirs = lock(&self.messages).by_id.get(id).filter(|m| !m.mine).map(|m| (m.sender.clone(), m.timestamp));
+            if let Some((author, ts)) = theirs
+                && let Ok(line) = serde_json::to_string(&Asked::MarkRead { author: &author, timestamps: vec![ts] })
+            {
+                let _ = writeln!(self.stdin, "{line}").and_then(|()| self.stdin.flush());
+            }
+        }
         Ok(())
     }
 
@@ -746,6 +873,9 @@ fn message_with(m: &Received, me: &str, reactions: &[merel_model::Reacted], file
             out.push_str(&format!("Chat-Group-Name: {}\r\n", word(&m.thread_name)));
         }
     }
+    if let Some(d) = m.delivery {
+        out.push_str(&format!("Merel-Delivery: {d}\r\n"));
+    }
     if let Some(q) = &m.quote {
         let name = if q.author_name.is_empty() { q.author.clone() } else { q.author_name.clone() };
         let text: String = q.text.chars().take(merel_model::MAX_QUOTE).collect();
@@ -860,11 +990,17 @@ impl Flags {
     }
 
     fn key(flag: Flag, id: &str) -> String {
+        Flags::tag_key(
+            match flag {
+                Flag::Seen => "seen",
+                Flag::Flagged => "flagged",
+            },
+            id,
+        )
+    }
+
+    fn tag_key(tag: &str, id: &str) -> String {
         use sha2::Digest as _;
-        let tag = match flag {
-            Flag::Seen => "seen",
-            Flag::Flagged => "flagged",
-        };
         let hash = sha2::Sha256::digest(format!("{tag}:{id}").as_bytes());
         hash[..12].iter().map(|b| format!("{b:02x}")).collect()
     }
@@ -874,7 +1010,20 @@ impl Flags {
     }
 
     fn set(&mut self, flag: Flag, id: &str, on: bool) {
-        let key = Flags::key(flag, id);
+        self.set_key(Flags::key(flag, id), on);
+    }
+
+    /// Whether `id` carries `tag`: `delivered` and `read` for one's own messages, `on` for
+    /// a setting.
+    fn has_tag(&self, tag: &str, id: &str) -> bool {
+        self.on.contains(&Flags::tag_key(tag, id))
+    }
+
+    fn set_tag(&mut self, tag: &str, id: &str, on: bool) {
+        self.set_key(Flags::tag_key(tag, id), on);
+    }
+
+    fn set_key(&mut self, key: String, on: bool) {
         let changed = if on { self.on.insert(key) } else { self.on.remove(&key) };
         if changed
             && let Some(path) = &self.path
@@ -902,6 +1051,7 @@ mod tests {
             text: text.into(),
             attachments: Vec::new(),
             quote: None,
+            delivery: None,
         }
     }
 
@@ -1031,6 +1181,27 @@ mod tests {
         assert_eq!(body.attachments[0].name, "foto.png");
         assert_eq!(&body.attachments[0].bytes[..], [1, 2, 3, 4]);
         assert!(body.text.contains("Kijk!") && body.text.contains("film.mp4"), "{}", body.text);
+    }
+
+    #[test]
+    fn typing_holds_until_it_stops_and_receipts_wait_for_the_mailbox() {
+        let messages = Mutex::new(Messages::default());
+        assert!(take_news(&messages, Said::Typing { sender: "t1".into(), sender_name: "Sanne".into(), typing: true }).is_none());
+        assert_eq!(typing("t1@signal.invalid").as_deref(), Some("Sanne"));
+        take_news(&messages, Said::Typing { sender: "t1".into(), sender_name: "Sanne".into(), typing: false });
+        assert_eq!(typing("t1@signal.invalid"), None);
+        take_news(&messages, Said::Receipt { sender: "t1".into(), kind: "read".into(), timestamps: vec![5] });
+        assert_eq!(lock(&messages).news.len(), 1);
+        assert!(take_news(&messages, Said::Synced).is_some());
+    }
+
+    #[test]
+    fn a_message_of_ones_own_says_how_far_it_came() {
+        let mut m = received("Kom je?");
+        m.mine = true;
+        m.delivery = Some("read");
+        let header = merel_mime::parse_header(&message(&m, "me@signal.invalid", &[]));
+        assert_eq!(header.chat.and_then(|c| c.delivery), Some(merel_model::Delivery::Read));
     }
 
     #[test]

@@ -196,6 +196,14 @@ impl Engine {
         Ok(())
     }
 
+    /// Who is typing in `chat` now, by name, when it is a Signal chat between two people.
+    pub fn signal_typing(&self, chat: &crate::chat::Chat) -> Option<String> {
+        if !self.is_signal_account(&chat.account_id) || chat.is_group() {
+            return None;
+        }
+        chat.people.iter().find_map(|p| merel_signal_link::typing(p.email()))
+    }
+
     /// Whether `account_id` is a Signal account.
     pub fn is_signal_account(&self, account_id: &str) -> bool {
         self.session.accounts.iter().any(|a| a.id == account_id && is_signal(a))

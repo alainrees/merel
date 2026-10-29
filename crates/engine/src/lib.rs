@@ -1042,6 +1042,7 @@ impl Session {
                         if !reactions_shown && let Some(chat) = m.chat.as_mut() {
                             chat.reactions.clear();
                             chat.quote = None;
+                            chat.delivery = None;
                         }
                         if let Some(o) = opened.get(&m.id).filter(|_| m.sealed == merel_model::Sealed::Closed) {
                             (m.from, m.to, m.subject, m.date, m.chat, m.sealed) =

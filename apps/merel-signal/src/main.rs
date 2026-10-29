@@ -33,6 +33,7 @@ use presage::proto::AttachmentPointer;
 use presage::proto::data_message::{Quote, Reaction, quote};
 use presage::proto::sync_message::{Content as SyncContent, Sent};
 use presage::proto::{EditMessage, SyncMessage};
+use presage::proto::{ReceiptMessage, receipt_message, typing_message};
 use presage::store::{ContentExt, Store, Thread};
 use presage_store_sqlite::SqliteStore;
 use serde::{Deserialize, Serialize};
@@ -87,6 +88,28 @@ enum Event {
         data: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+    },
+    /// `sender` got (`delivered`) or read (`read`) the account's messages sent at `timestamps`.
+    Receipt {
+        sender: String,
+        kind: &'static str,
+        timestamps: Vec<u64>,
+    },
+    /// `sender` started or stopped typing in the chat between the two of them.
+    Typing {
+        sender: String,
+        sender_name: String,
+        typing: bool,
+    },
+    /// The account read these messages on another device: by author and timestamp.
+    ReadElsewhere {
+        read: Vec<(String, u64)>,
+    },
+    /// The account's Signal settings, from the phone: whether to send read receipts and show
+    /// typing.
+    Settings {
+        read_receipts: Option<bool>,
+        typing_indicators: Option<bool>,
     },
     /// Every message waiting on the server is in.
     Synced,
@@ -148,6 +171,9 @@ enum Command {
     },
     /// The contents of file `id`, as `{"type":"file"}`.
     Fetch { id: String },
+    /// Tells `author` their messages sent at `timestamps` were read. Merel only asks when the
+    /// account's Signal settings send read receipts.
+    MarkRead { author: String, timestamps: Vec<u64> },
     /// Reacts to the message `target_author` sent at `target_timestamp`; `remove` takes the
     /// reaction back. Signal keeps one reaction per person per message.
     React { thread: String, emoji: String, remove: bool, target_author: String, target_timestamp: u64 },
@@ -249,6 +275,10 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                     emit(&Event::Synced)
                 }
                 Some(Received::Content(content)) => {
+                    if let Some(event) = status(&manager, &content).await {
+                        emit(&event);
+                        continue;
+                    }
                     // What kind of message came, never who or what: for finding out why one
                     // does not show.
                     let shown = describe(&manager, &content, &mut files).await;
@@ -285,6 +315,18 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                         }
                         Err(e) => emit(&Event::Error { message: format!("{e:#}") }),
                     },
+                    Ok(Command::MarkRead { author, timestamps }) => {
+                        let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Read as i32), timestamp: timestamps };
+                        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+                        match ServiceId::parse_from_service_id_string(&author) {
+                            Some(to) => {
+                                if let Err(e) = sending.send_message(to, ContentBody::ReceiptMessage(receipt), now).await {
+                                    eprintln!("merel-signal: a read receipt did not go: {e}");
+                                }
+                            }
+                            None => eprintln!("merel-signal: a read receipt for no one"),
+                        }
+                    }
                     Ok(Command::Fetch { id }) => {
                         let event = match files.get(&id) {
                             Some(pointer) if pointer.size.unwrap_or(0) as usize <= MAX_FILE => match manager.get_attachment(pointer).await {
@@ -378,6 +420,35 @@ async fn contact_name<S: Store>(manager: &Manager<S, Registered>, id: &ServiceId
         .map(|c| if c.name.is_empty() { c.phone_number.map(|p| p.to_string()).unwrap_or_default() } else { c.name })
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| id.service_id_string())
+}
+
+/// What a receipt, typing or a sync of reading or settings says; `None` for anything else.
+async fn status<S: Store>(manager: &Manager<S, Registered>, content: &Content) -> Option<Event> {
+    let sender = &content.metadata.sender;
+    match &content.body {
+        ContentBody::ReceiptMessage(r) => {
+            let kind = match r.r#type.and_then(|t| receipt_message::Type::try_from(t).ok()) {
+                Some(receipt_message::Type::Delivery) => "delivered",
+                Some(receipt_message::Type::Read | receipt_message::Type::Viewed) => "read",
+                None => return None,
+            };
+            Some(Event::Receipt { sender: sender.service_id_string(), kind, timestamps: r.timestamp.clone() })
+        }
+        // Typing in a group names the group only by an id Merel does not keep; between two
+        // people the sender is the chat.
+        ContentBody::TypingMessage(t) if t.group_id.is_none() => Some(Event::Typing {
+            sender: sender.service_id_string(),
+            sender_name: contact_name(manager, sender).await,
+            typing: t.action.and_then(|a| typing_message::Action::try_from(a).ok()) == Some(typing_message::Action::Started),
+        }),
+        ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Configuration(c)), .. }) => {
+            Some(Event::Settings { read_receipts: c.read_receipts, typing_indicators: c.typing_indicators })
+        }
+        ContentBody::SynchronizeMessage(m) if !m.read.is_empty() => {
+            Some(Event::ReadElsewhere { read: m.read.iter().filter_map(|r| Some((r.sender_aci.clone()?, r.timestamp?))).collect() })
+        }
+        _ => None,
+    }
 }
 
 /// The kind of a message, for the log.

@@ -545,6 +545,9 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
         composer(app, ui, t, chat);
         picked_files(app, ui, t);
         replying_strip(app, ui, t);
+        if signal_chat {
+            typing_line(app, ui, t, chat);
+        }
         if let Some(e) = &app.chat.error {
             ui.label(RichText::new(e).color(t.flag));
         }
@@ -745,14 +748,24 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                     // A quote goes above the text and files under it; without either the text
                     // keeps the bubble narrow.
                     let has_files = session.bodies.get(id).is_some_and(|b| !b.attachments.is_empty());
+                    // In the bubble's corner, as Signal shows it.
+                    let ticks = mine && reacts;
+                    let delivery = m.chat.as_ref().and_then(|c| c.delivery);
                     if quote.is_some() || has_files {
                         ui.vertical(|ui| {
                             if let Some(q) = quote {
                                 quote_block(ui, t, session, q, mine);
                             }
                             content(ui);
+                            if ticks {
+                                ui.with_layout(Layout::right_to_left(Align::Min), |ui| delivery_ticks(ui, t, delivery));
+                            }
                         });
                     } else {
+                        // One's own row runs right to left: the ticks first end up after the text.
+                        if ticks {
+                            delivery_ticks(ui, t, delivery);
+                        }
                         content(ui);
                     }
                 },
@@ -870,6 +883,29 @@ fn add_chat_files(app: &mut MailApp, paths: Vec<std::path::PathBuf>) {
             Err(_) => app.chat.error = Some(tr_args("attach-unreadable", &[("name", name.as_str().into())])),
         }
     }
+}
+
+/// In one's own message, as Signal shows it: one tick once sent, two once it arrived,
+/// two in the accent once read; the words on hover.
+fn delivery_ticks(ui: &mut Ui, t: &Tokens, delivery: Option<merel_model::Delivery>) {
+    let (ticks, colour, words) = match delivery {
+        None => ("✓", t.text_dim, tr("chat-sent")),
+        Some(merel_model::Delivery::Delivered) => ("✓✓", t.text_dim, tr("chat-delivered")),
+        Some(merel_model::Delivery::Read) => ("✓✓", t.accent, tr("chat-read")),
+    };
+    let r = ui.label(RichText::new(ticks).size(12.0).color(colour));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, words.clone()));
+    r.on_hover_text(words);
+}
+
+/// "Sanne is aan het typen…" above the line to write in, as Signal shows it.
+fn typing_line(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
+    if let Some(name) = app.engine.signal_typing(chat) {
+        ui.add_space(2.0);
+        ui.label(RichText::new(tr_args("chat-typing", &[("name", name.as_str().into())])).size(12.5).italics().color(t.text_dim));
+    }
+    // It ends by itself after a while, so look again.
+    ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
 }
 
 /// The arrow beside a message that answers it, quoting it; shown like the smiley.
