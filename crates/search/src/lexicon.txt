@@ -1,7 +1,9 @@
 # Words of mail and business that mean the same in Dutch, English, German and French, one
 # meaning per line. A search for one word of a line also finds the others (see lexicon.rs).
 # Only single words; none that mean something else in another of the four languages
-# ("gift", "post", "rest", "brand", "kind" stay out).
+# ("gift", "post", "rest", "brand", "kind" stay out). A word that starts with "=" is only
+# found as written: its stem would tie it to a line that means something else ("=train",
+# so that "training" does not find the trains).
 
 # Money and buying
 offerte, voorstel, prijsopgave, quote, quotation, proposal, angebot, kostenvoranschlag, devis, offre, proposition
@@ -10,41 +12,41 @@ betaling, payment, zahlung, paiement
 betalen, pay, zahlen, bezahlen, payer
 aanmaning, betalingsherinnering, mahnung, zahlungserinnerung, relance
 bestelling, order, purchase, bestellung, auftrag, commande
-orderbevestiging, bestelbevestiging, confirmation, bestellbestatigung, auftragsbestatigung
+orderbevestiging, bestelbevestiging, confirmation, bestellbestätigung, auftragsbestätigung
 levering, bezorging, delivery, shipment, lieferung, zustellung, livraison
 zending, pakket, parcel, package, sendung, paket, colis
 verzending, shipping, versand, expedition, envoi
-retour, retourzending, return, refund, rucksendung, ruckerstattung, remboursement
+retour, retourzending, return, refund, rücksendung, rückerstattung, remboursement
 terugbetaling, restitutie, erstattung
 korting, discount, rabatt, remise, reduction
 prijs, price, preis, prix, tarif
-kosten, costs, cost, expenses, ausgaben, frais, couts
+kosten, costs, cost, expenses, ausgaben, frais, coûts
 budget, begroting, budgetplanung
 btw, vat, mwst, mehrwertsteuer, umsatzsteuer, tva
-belasting, tax, taxes, steuer, steuern, impot, impots, taxe
-bonnetje, kassabon, receipt, quittung, kassenbon, recu
+belasting, tax, taxes, steuer, steuern, impôt, impôts, taxe
+bonnetje, kassabon, receipt, quittung, kassenbon, reçu
 abonnement, subscription, abo
-lidmaatschap, membership, mitgliedschaft, adhesion
-contributie, fee, gebuhr, beitrag, cotisation
+lidmaatschap, membership, mitgliedschaft, adhésion
+contributie, fee, gebühr, beitrag, cotisation
 salaris, loon, salary, wages, payroll, gehalt, lohn, salaire, paie
 loonstrook, salarisstrook, payslip, gehaltsabrechnung, lohnabrechnung, bulletin
 declaratie, onkostendeclaratie, expense, claim, spesenabrechnung
 bank, banque
 rekeningnummer, iban
-overboeking, overschrijving, transfer, uberweisung, virement
+overboeking, overschrijving, überweisung, virement
 schuld, debt, schulden, dette
-lening, loan, kredit, darlehen, pret
+lening, loan, kredit, darlehen, prêt
 verzekering, insurance, versicherung, assurance
 polis, policy, versicherungsschein
 schade, damage, schaden, dommage, sinistre
-garantie, warranty, guarantee, gewahrleistung
-aanbieding, deal, sale, sonderangebot, promotion, solde, soldes
+garantie, warranty, guarantee, gewährleistung
+aanbieding, deal, sale, sonderangebot, solde, soldes
 winkelwagen, cart, basket, warenkorb, panier
 klant, customer, client, kunde, kundin
 leverancier, supplier, vendor, lieferant, fournisseur
 
 # Agreements and documents
-contract, overeenkomst, agreement, vertrag, vereinbarung, contrat, accord
+contract, overeenkomst, agreement, =vertrag, vereinbarung, contrat, accord
 handtekening, signature, unterschrift
 ondertekenen, tekenen, sign, unterschreiben, unterzeichnen, signer
 document, dokument, bestand, datei, fichier
@@ -52,105 +54,929 @@ bijlage, attachment, anhang, anlage
 formulier, formular, formulaire
 aanvraag, request, application, antrag, anfrage, demande
 aanmelding, inschrijving, registration, signup, anmeldung, registrierung, inscription
-opzegging, cancellation, kundigung, stornierung, resiliation, annulation
-annuleren, opzeggen, cancel, stornieren, kundigen, annuler, resilier
-bevestiging, confirmation, bestatigung
+opzegging, cancellation, kündigung, stornierung, résiliation, annulation
+annuleren, opzeggen, cancel, stornieren, kündigen, annuler, résilier
+bevestiging, confirmation, bestätigung
 goedkeuring, approval, genehmigung, freigabe, approbation, validation
 rapport, verslag, report
 notulen, minutes, protokoll
-presentatie, presentation, prasentation
+presentatie, presentation, präsentation
 planning, schedule, zeitplan, calendrier
 agenda, calendar, kalender
-verlenging, renewal, verlangerung, renouvellement
+verlenging, renewal, verlängerung, renouvellement
 voorwaarden, conditions, terms, bedingungen, agb
-privacyverklaring, privacy, datenschutz, confidentialite
+privacyverklaring, privacy, datenschutz
 wachtwoord, password, passwort, kennwort, motdepasse
 inloggen, login, signin, anmelden, connexion
 account, konto, compte
 certificaat, certificate, zertifikat, certificat
 diploma, degree, zeugnis
 cv, resume, lebenslauf
-sollicitatie, vacature, job, vacancy, bewerbung, stelle, candidature, emploi, poste
+sollicitatie, vacature, job, =vacancy, bewerbung, stelle, candidature, emploi, poste
 
 # Meeting and planning
-vergadering, overleg, bespreking, meeting, besprechung, sitzung, treffen, reunion
+vergadering, overleg, bespreking, meeting, besprechung, sitzung, treffen, réunion
 afspraak, appointment, termin, rendezvous
 uitnodiging, invitation, einladung
-deadline, frist, termijn, echeance, delai
+deadline, frist, termijn, échéance, délai
 herinnering, reminder, erinnerung, rappel
-vakantie, holiday, vacation, urlaub, ferien, vacances, conges
+vakantie, holiday, vacation, urlaub, ferien, =vacances, congés
 verlof, absence, abwesenheit
 afwezig, absent, outofoffice, abwesend
 ziek, sick, krank, malade
 reis, trip, travel, reise, voyage
 vlucht, flight, flug
-hotel, accommodatie, accommodation, unterkunft, hebergement
+hotel, accommodatie, accommodation, unterkunft, hébergement
 boeking, reservering, booking, reservation, buchung, reservierung
 ticket, kaartje, tickets, billet, eintrittskarte
-evenement, event, veranstaltung, evenement
-feest, party, fest, feier, fete
+evenement, event, veranstaltung
+feest, party, fest, feier, fête
 verjaardag, birthday, geburtstag, anniversaire
 bruiloft, huwelijk, wedding, hochzeit, mariage
-congres, conference, konferenz, kongress, conference
-cursus, training, opleiding, course, kurs, schulung, formation, cours
+congres, conference, konferenz, kongress
+cursus, training, opleiding, =course, kurs, schulung, formation, cours
 workshop, atelier
 webinar, webinaire
 
 # Work
 project, projekt, projet
-taak, task, aufgabe, tache
+taak, task, aufgabe, tâche
 opdracht, assignment, auftrag, mission
-team, equipe
-collega, colleague, kollege, kollegin, collegue
+team, équipe
+collega, colleague, kollege, kollegin, collègue
 manager, leidinggevende, chef, vorgesetzter, responsable
 directeur, director, direktor
-medewerker, employee, mitarbeiter, employe, salarie
-vacature, vacancy, stellenanzeige
+medewerker, employee, mitarbeiter, employé, salarié
+vacature, =vacancy, stellenanzeige
 sollicitant, candidate, applicant, bewerber, candidat
-bedrijf, company, firm, firma, unternehmen, entreprise, societe
-kantoor, office, buro, bureau
-afdeling, department, abteilung, departement
-klacht, complaint, beschwerde, reklamation, plainte, reclamation
+bedrijf, company, firm, firma, entreprise, société
+kantoor, office, büro, bureau
+afdeling, department, abteilung, département
+klacht, complaint, beschwerde, reklamation, plainte
 vraag, question, frage
-antwoord, answer, reply, antwort, reponse
-feedback, terugkoppeling, ruckmeldung
+antwoord, answer, reply, antwort, réponse
+feedback, terugkoppeling, rückmeldung
 update, bijwerking, aktualisierung
 probleem, problem, issue, probleme
-storing, outage, disruption, storung, ausfall, panne
+=storing, outage, disruption, störung, ausfall, panne
 fout, error, fehler, erreur
-oplossing, solution, losung
-ondersteuning, support, hulp, help, hilfe, unterstutzung, aide, assistance
+oplossing, solution, lösung
+ondersteuning, support, hulp, help, hilfe, unterstützung, aide, assistance
 handleiding, manual, guide, handbuch, anleitung, manuel
 nieuwsbrief, newsletter, rundbrief, infolettre
-aankondiging, announcement, ankundigung, annonce
+aankondiging, announcement, ankündigung, annonce
 waarschuwing, warning, warnung, avertissement
-beveiliging, security, sicherheit, securite
-verificatie, verification, verifizierung, uberprufung
+beveiliging, security, sicherheit, sécurité
+verificatie, verification, verifizierung, überprüfung
 code, verificatiecode, pin
 
 # People and places
 adres, address, adresse
-telefoon, phone, telephone, telefon
+telefoon, phone, téléphone, telefon
 huis, woning, house, haus, wohnung, maison, logement
 huur, rent, miete, loyer
 huurcontract, lease, mietvertrag, bail
-verhuizing, relocation, umzug, demenagement
+verhuizing, relocation, umzug, déménagement
 gemeente, municipality, council, gemeinde, stadt, mairie, commune
-school, schule, ecole
-universiteit, university, universitat, universite
-ziekenhuis, hospital, krankenhaus, hopital
-dokter, arts, huisarts, doctor, arzt, medecin
+school, schule, école
+universiteit, university, universität, université
+ziekenhuis, hospital, krankenhaus, hôpital
+dokter, arts, huisarts, doctor, arzt, médecin
 tandarts, dentist, zahnarzt, dentiste
-medicijn, medicine, medication, medikament, medicament
-gezondheid, health, gesundheit, sante
-familie, family, gezin, familie, famille
+medicijn, medicine, medication, medikament, médicament
+gezondheid, health, gesundheit, santé
+familie, family, gezin, famille
 kinderen, children, kids, kinder, enfants
 auto, car, wagen, voiture
-fiets, bike, bicycle, fahrrad, velo
-trein, train, zug
-parkeren, parking, parken, stationnement
-energie, energy, strom, energie, electricite
+fiets, bike, bicycle, fahrrad, vélo
+trein, =train, zug
+parkeren, parking, parken, =stationnement
+energie, energy, strom, électricité
 gas, gaz
 water, wasser, eau
 internet, wifi, wlan
 telefoonrekening, mobiel, mobile, handy, portable
+# Computers, internet and accounts
+computer, rechner, ordinateur
+toetsenbord, keyboard, tastatur, clavier
+muis, mouse, maus, souris
+beeldscherm, scherm, monitor, screen, bildschirm, écran
+printer, drucker, imprimante
+afdrukken, printen, print, drucken, ausdrucken, imprimer
+scanner, scannen, scan, numériser
+software, logiciel
+toepassing, applicatie, anwendung
+installatie, installeren, install, installieren, installer
+downloaden, download, herunterladen, télécharger
+uploaden, upload, hochladen, téléverser
+gebruikersnaam, username, benutzername, identifiant
+gebruiker, user, benutzer, nutzer, utilisateur
+beheerder, administrator, admin, verwalter, administrateur
+instellingen, settings, einstellungen, paramètres, réglages
+zurücksetzen, réinitialiser, réinitialisation
+inlogcode, toegangscode, zugangscode
+tweestapsverificatie, authenticatie, authentication, authentifizierung, authentification
+afmelden, uitloggen, logout, abmelden, déconnexion
+website, webseite
+webwinkel, onlinewinkel, webshop, onlineshop, boutique
+hyperlink, lien
+browser, navigateur
+zoekmachine, suchmaschine
+spam, junk, pourriel
+virus, malware, schadsoftware
+phishing, hameçonnage
+hacker, hacken
+datalek, inbreuk, breach, datenleck, datenpanne, fuite
+backup, reservekopie, sicherung, sauvegarde
+opslag, storage, speicher, stockage
+wolk, nuage
+server, serveur
+netwerk, network, netzwerk, réseau
+wifi, wlan
+storingsmelding, störungsmeldung
+foutmelding, fehlermeldung
+gegevens, data, daten, données
+database, gegevensbank, datenbank
+spreadsheet, rekenblad, tabellenkalkulation, tableur
+afbeelding, plaatje, bild, abbildung
+foto, photo, fotografie, photograph, photographie
+video, filmpje
+schermafbeelding, screenshot, bildschirmfoto, capture
+folder, ordner
+email, courriel
+bericht, message, nachricht
+mailbox, postvak, postfach, boite
+inbox, posteingang
+doorsturen, weiterleiten, transférer
+beantwoorden, antwoorden, respond, beantworten, répondre
+ontvanger, recipient, destinataire
+afzender, sender, absender, expéditeur
+onderwerp, betreff
+telefoonnummer, telefonnummer, numéro
+smartphone, mobiltelefon
+tablet, ipad
+abonnementskosten, abogebuhr
+licentie, license, lizenz
+sleutel, schlüssel
+versleuteling, encryptie, encryption, verschlüsselung
+digitaal, digital, numérique
+streaming, streamen
+podcast, podcasts
+# Money, banking and tax
+geld, money, geldbetrag, argent
+contant, cash, bargeld
+munt, münze
+bankbiljet, banknote, geldschein
+pinpas, bankpas, betaalpas, debitcard, bankkarte, girocard
+creditcard, kreditkarte
+zinsen, zins, intérêts
+hypotheek, mortgage, hypothek, hypothèque
+aflossing, repayment, tilgung
+spaarrekening, savings, sparkonto, épargne
+sparen, saving, ersparnis, économiser
+saldo, kontostand
+afschrift, bankafschrift
+incasso, lastschrift, prélèvement
+machtiging, mandate, mandat, vollmacht
+storting, einzahlung
+opname, withdrawal, abhebung
+wisselkoers, wechselkurs
+valuta, currency, wahrung
+euro, euros
+dollar, dollars
+beurs, aandelen, aktien, börse
+belegging, investering, investment, investition, geldanlage, investissement
+pensioen, pension, ruhestand, retraite
+aow, staatspensioen, grundrente
+uitkering, sozialleistung
+toeslag, allowance, zuschuss, zulage
+subsidie, subsidy, forderung, subvention
+lening, krediet, darlehen, kredit
+schuldeiser, crediteur, creditor, gläubiger, créancier
+débiteur, debtor, schuldner
+boete, penalty, strafe, bussgeld
+aangifte, belastingaangifte, steuererklärung
+belastingdienst, fiscus, finanzamt
+aanslag, steuerbescheid
+teruggave, terugbetaling, refund, rückzahlung
+toeslagen, allowances, zuschüsse
+boekhouding, administratie, accounting, bookkeeping, buchhaltung, comptabilité
+boekhouder, accountant, buchhalter, comptable
+jaarrekening, jaarverslag, jahresabschluss, jahresbericht
+begrotingen, budgets, budgetplanung
+omzet, revenue, turnover, umsatz
+winst, profit, gewinn, bénéfice
+verlies, loss, verlust, perte
+uitgaven, expenditure, ausgaben, dépenses
+inkomsten, inkomen, income, einkommen, einnahmen, revenu, revenus
+loonheffing, lohnsteuer
+btwnummer, umsatzsteuernummer
+kvk, handelsregister, kamervankoophandel
+ondernemer, unternehmer
+zzp, freelancer, freiberufler, indépendant
+bedrag, amount, betrag, montant
+totaal, gesamt, gesamtbetrag
+tarieven, tarife
+offertes, quotes, angebote
+creditnota, gutschrift
+voorschot, aanbetaling, anzahlung, vorschuss, acompte
+borg, waarborgsom, kaution
+nalatenschap, erfenis, inheritance, erbschaft
+schenking, donatie, donation, spende, schenkung
+charity, wohltätigkeit, charité
+sponsor, sponsoring, sponsorship
+crowdfunding, inzameling, fundraising, spendenaktion, collecte
+# Work and office
+werk, baan, arbeit, travail
+werkgever, employer, arbeitgeber, employeur
+werknemer, employee, arbeitnehmer
+directie, management, geschäftsführung
+bestuur, vorstand
+voorzitter, chairman, vorsitzender
+secretaris, secretary, sekretär, secrétaire
+penningmeester, treasurer, schatzmeister, trésorier
+vergaderverslag, sitzungsprotokoll
+agendapunt, agendapunten, tagesordnungspunkt
+besluit, decision, beschluss, entscheidung
+voorstel, proposal, vorschlag, proposition
+plannen, planen, planifier
+strategie, strategy
+doel, doelstelling, ziel
+resultaat, result, ergebnis, résultat
+prestatie, leistung
+beoordeling, evaluatie, evaluation, appraisal, beurteilung, bewertung
+functioneringsgesprek, jaargesprek, mitarbeitergespräch
+promotie, beförderung
+ontslag, dismissal, resignation, entlassung, licenciement, démission
+contractverlenging, extension, vertragsverlängerung, prolongation
+arbeidscontract, arbeidsovereenkomst, arbeitsvertrag
+proeftijd, probation, probezeit
+werktijden, werkuren, arbeitszeit, horaires
+overuren, overwerk, overtime, überstunden
+thuiswerken, remote, homeoffice, télétravail
+rooster, dienstrooster, rota, dienstplan
+shift, =schicht
+ziekmelding, krankmeldung
+herstelmelding, betermelding, gesundmeldung
+vakantiedagen, urlaubstage
+deadline, frist
+uiterste, spätestens
+spoed, urgent, dringend, eilig
+prioriteit, priority, priorität, priorité
+vergaderruimte, vergaderzaal, besprechungsraum
+overleggen, overlegt, discuss, besprechen, discuter
+bespreking, discussion, diskussion
+presenteren, präsentieren, présenter
+workshop, workshops
+teamuitje, uitje, teambuilding, betriebsausflug
+borrel, drinks, umtrunk, apéro
+lunch, lunchen, mittagessen, déjeuner
+ontbijt, breakfast, frühstück
+diner, dinner, abendessen
+kantine, canteen, cantine
+=receptie, reception, empfang, accueil
+bezoeker, visitor, besucher, visiteur
+leverancier, supplier, lieferant
+opdrachtgever, auftraggeber, commanditaire
+partners, partenaire
+samenwerking, cooperation, collaboration, zusammenarbeit
+onderhandeling, negotiation, verhandlung, négociation
+afspraken, agreements, absprachen
+handtekeningen, signatures, unterschriften
+stempel, stamp, tampon
+archief, archive, archiv, archives
+memo, notitie, notiz, vermerk
+rapporten, reports, =berichte, rapports
+analyse, analysis
+onderzoek, research, study, forschung, studie, recherche, étude
+enquête, vragenlijst, survey, questionnaire, umfrage, fragebogen
+statistiek, statistics, statistik, statistiques
+cijfers, chiffres
+grafiek, chart, graph, diagramm, graphique
+tabel, tabelle, tableau
+overzicht, overview, übersicht, aperçu
+samenvatting, summary, zusammenfassung
+conceptversie, draft, entwurf, brouillon
+versie, fassung
+wijziging, aanpassing, amendment, änderung, modification
+correctie, correction, korrektur
+akkoord, approval, zustimmung, einverstanden
+afwijzing, rejection, ablehnung, absage, refus, rejet
+followup, nachfassen, relance
+# Travel and transport
+reizen, travelling, verreisen, voyager
+vliegtuig, airplane, aircraft, plane, flugzeug, avion
+vliegveld, luchthaven, airport, flughafen, aéroport
+instapkaart, bordkarte, embarquement
+=vertraging, delay, verspätung, retard
+annulering, geannuleerd, cancelled, storniert, annule
+bagage, koffer, luggage, baggage, suitcase, gepäck, valise
+handbagage, handgepäck
+paspoort, passport, reisepass, passeport
+visum, visa
+identiteitskaart, personalausweis, ausweis
+rijbewijs, führerschein, permis
+douane, =customs, zoll
+grens, border, grenze, frontière
+station, bahnhof, gare
+perron, bahnsteig, gleis, quai
+treinkaartje, treinticket, fahrkarte, zugticket
+dienstregeling, fahrplan, horaire
+overstap, overstappen, umsteigen, correspondance
+bus, autobus
+tram, strassenbahn, tramway
+metro, subway, underground, ubahn
+taxi, taxis
+veerboot, pont, ferry, fahre, traversier
+cruise, kreuzfahrt, croisière
+haven, harbour, harbor, hafen
+fietsen, cycling, radfahren, vélo
+auto, car, automobil, voiture
+benzine, petrol, gasoline, benzin, essence
+diesel, dieselkraftstoff
+tankstation, benzinestation, tankstelle
+laadpaal, ladestation, ladesäule, borne
+parkeerplaats, parking, carpark, parkplatz, =stationnement
+parkeergarage, garage, parkhaus
+snelweg, highway, motorway, autobahn, autoroute
+traffic, stau, embouteillage, bouchon
+verkeer, traffic, verkehr, circulation
+ongeluk, ongeval, accident, unfall, crash
+bekeuring, strafzettel, bussgeldbescheid, contravention
+snelheid, speed, geschwindigkeit, vitesse
+navigatie, navigation, navi, gps
+routebeschrijving, =directions, wegbeschreibung, itinéraire
+kaart, plattegrond, karte
+bestemming, destination, reiseziel
+vertrek, departure, abfahrt, abflug, =départ
+aankomst, arrival, ankunft, arrivée
+retourtje, retourticket, rückfahrkarte
+oneway, einfache
+overnachting, overnight, übernachtung, nuitée
+inchecken, checkin, einchecken, enregistrement
+uitchecken, checkout, auschecken
+camping, campsite, campingplatz
+appartement, apartment, wohnung
+vakantiehuis, ferienhaus, ferienwohnung, gîte
+reisbureau, reisebüro, agence
+pakketreis, pauschalreise, forfait
+excursie, uitstapje, excursion, ausflug
+rondleiding, führung
+reisverzekering, reiseversicherung
+reisdocumenten, reisedokumente
+buitenland, abroad, ausland, étranger
+toerist, tourist, touriste
+zon, sonne, soleil
+strand, beach, plage
+zee, sea, mer
+bergen, mountains, berge, montagnes
+skiën, skiing, skifahren, ski
+wintersport, wintersports
+# House and living
+woning, huis, house, haus, wohnung, maison, logement
+koophuis, koopwoning, eigenheim
+huurhuis, huurwoning, mietwohnung
+verhuurder, landlord, vermieter
+huurder, tenant, mieter, locataire
+huurprijs, rent, miete, loyer
+servicekosten, nebenkosten
+makelaar, makler, immobilier
+bezichtiging, viewing, besichtigung
+koopcontract, koopakte, kaufvertrag
+notaris, notary, notar, notaire
+taxatie, valuation, appraisal, gutachten, wertgutachten, estimation
+verbouwing, renovatie, renovation, umbau, renovierung
+aannemer, contractor, bauunternehmer
+loodgieter, plumber, klempner, plombier
+elektricien, electrician, elektriker, électricien
+schilder, painter, maler, peintre
+timmerman, carpenter, schreiner, tischler, menuisier
+dakdekker, roofer, dachdecker, couvreur
+tuinman, hovenier, gardener, gärtner, jardinier
+schoonmaker, schoonmaakster, cleaner, putzkraft, reinigungskraft
+schoonmaak, cleaning, reinigung, nettoyage
+reparatie, repair, reparatur, réparation
+onderhoud, maintenance, wartung, instandhaltung
+lekkage, leak, leck, wasserschaden, fuite
+=storing, malfunction, störung
+verwarming, heating, heizung, chauffage
+ketel, boiler, heizkessel, chaudière
+warmtepomp, wärmepumpe
+zonnepanelen, solarpanels, solaranlage, photovoltaik, panneaux
+isolatie, insulation, dämmung, isolation
+keuken, kitchen, küche, cuisine
+badkamer, bathroom, badezimmer
+slaapkamer, bedroom, schlafzimmer
+woonkamer, livingroom, wohnzimmer, salon
+tuin, garden, garten, jardin
+balkon, balcony, balcon
+zolder, attic, dachboden, grenier
+kelder, basement, cellar, keller
+schuur, shed, schuppen
+dak, roof, dach, toit
+raam, ramen, window, fenster, fenêtre
+deur, tür, porte
+sleutels, keys, schlüssel, clés
+schloss, serrure
+alarmsysteem, alarm, alarmanlage, alarme
+meubels, furniture, möbel, meubles
+sofa, couch, canapé
+bed, bett
+matras, mattress, matratze, matelas
+kast, cupboard, wardrobe, schrank, armoire
+lamp, lampe
+koelkast, fridge, refrigerator, kühlschrank, frigo, réfrigérateur
+wasmachine, waschmaschine
+vaatwasser, dishwasher, geschirrspüler, spülmaschine
+oven, ofen
+magnetron, microwave, mikrowelle, microondes
+stofzuiger, vacuum, staubsauger, aspirateur
+afval, vuilnis, waste, garbage, rubbish, müll, abfall, déchets, ordures
+container, kliko, mülltonne, poubelle
+energierekening, stromrechnung, energiekosten
+stroom, elektriciteit, electricity, strom, elektrizität, électricité
+gasrekening, gasrechnung
+waterrekening, wasserrechnung
+meterstand, zählerstand
+energieleverancier, stromanbieter, energieversorger
+ozb, grundsteuer
+verhuisdoos, verhuisdozen, umzugskarton
+verhuisbedrijf, movers, removals, umzugsfirma, déménageur
+buren, neighbours, neighbors, nachbarn, voisins
+buurt, wijk, neighbourhood, neighborhood, nachbarschaft, viertel, quartier
+vve, homeowners, eigentümergemeinschaft, copropriété
+# Health and care
+huisartsenpraktijk, praktijk, arztpraxis, praxis, cabinet
+specialist, spécialiste, facharzt
+ziekenhuisopname, aufnahme, hospitalisation
+spoedeisende, eerstehulp, emergency, notaufnahme, notfall, urgences
+ambulance, krankenwagen, rettungswagen
+apotheek, pharmacy, chemist, apotheke, pharmacie
+=recept, prescription, rezept, ordonnance
+pillen, pills, comprimés
+vaccinatie, inenting, vaccination, impfung, vaccin
+prik, injectie, injection, spritze, piqûre
+afspraakbevestiging, terminbestatigung
+uitslag, testresultaat, befund, testergebnis
+bloedonderzoek, bloedtest, bluttest, blutuntersuchung
+röntgenfoto, röntgenbild, radiographie
+scan, mri, irm
+operatie, ingreep, surgery, operation, eingriff, chirurgie
+narcose, verdoving, anaesthesia, anesthesia, narkose, anesthésie
+fysiotherapeut, fysio, physiotherapist, physio, physiotherapeut, kinésithérapeute
+psycholoog, psychologist, psychologe, psychologue
+therapie, therapy
+behandeling, treatment, behandlung, traitement
+diagnose, diagnosis, diagnostic
+klachten, symptomen, symptoms, beschwerden, symptome, symptômes
+pijn, schmerz, schmerzen, douleur
+koorts, fever, fieber, fièvre
+griep, flu, influenza, grippe
+verkoudheid, cold, erkältung, rhume
+hoofdpijn, headache, kopfschmerzen, migraine
+allergie, allergy
+corona, covid, coronavirus
+zwanger, zwangerschap, pregnant, pregnancy, schwanger, schwangerschaft, enceinte, grossesse
+bevalling, geboorte, birth, geburt, naissance, accouchement
+verloskundige, midwife, hebamme, sagefemme
+kraamzorg, wochenbettbetreuung
+tandartsafspraak, zahnarzttermin
+bril, glasses, brille, lunettes
+opticien, optician, optiker
+lenzen, contactlenzen, kontaktlinsen, lentilles
+zorgverzekering, zorgverzekeraar, krankenversicherung, krankenkasse, mutuelle
+eigenrisico, deductible, excess, selbstbeteiligung, franchise
+vergoeding, reimbursement, erstattung, kostenerstattung
+mantelzorg, caregiving, pflege, soins
+verpleegkundige, verpleger, nurse, krankenschwester, pflegekraft, infirmière, infirmier
+verpleeghuis, verzorgingshuis, pflegeheim, ehpad
+thuiszorg, homecare, hauskrankenpflege
+revalidatie, rehabilitation, reha, rééducation
+gehandicapt, beperking, disability, behinderung, handicap
+rolstoel, wheelchair, rollstuhl, fauteuil
+dieet, diet, diät, régime
+sporten, workout, exercise
+fitness, gym, sportschool, fitnessstudio
+gewicht, weight, poids
+slaap, sleep, schlaf, sommeil
+stress, burnout
+overlijden, sterfgeval, death, tod, todesfall, décès
+begrafenis, funeral, beerdigung, obsèques, enterrement
+crematie, cremation, einäscherung, feuerbestattung
+condoleance, condolences, beileid, condoléances
+rouwkaart, overlijdensbericht, traueranzeige
+# School and study
+school, basisschool, grundschule, école
+middelbare, voortgezet, highschool, lycée
+universiteit, university, universität, université
+hogeschool, hochschule, fachhochschule
+student, studenten, students, étudiant, étudiants
+leerling, pupil, schüler, élève
+leraar, docent, teacher, lehrer, lehrerin, professeur, enseignant
+tutor, betreuer, tuteur
+directeur, headteacher, schulleiter
+lessen, lesson, lessons, unterricht
+rooster, lesrooster, stundenplan
+huiswerk, homework, hausaufgaben
+toets, proefwerk, klassenarbeit
+examen, tentamen, exam, examination, prüfung
+cijferlijst, schoolrapport, zeugnis
+diploma, getuigschrift, diplôme
+studiefinanciering, studiebeurs, bafög
+collegegeld, schoolgeld, tuition, studiengebühren
+inschrijving, enrolment, enrollment, einschreibung, immatriculation, inscription
+ouderavond, elternabend
+schoolreis, schoolreisje, klassenfahrt
+kamp, schoolkamp, ferienlager
+kinderopvang, opvang, childcare, kinderbetreuung, kita
+kinderdagverblijf, crèche, daycare, kindertagesstätte
+naschoolse, bso, afterschool, hort, périscolaire
+gastouder, childminder, tagesmutter
+oppas, babysitter, nounou
+internship, praktikum
+scriptie, thesis, dissertation, abschlussarbeit, mémoire
+afstuderen, graduation
+opleidingsinstituut, academie, academy, akademie
+bibliotheek, library, bibliothek, bücherei, bibliothèque
+boeken, books, bücher, livres
+studieboek, textbook, lehrbuch
+werkstuk, verslag, hausarbeit
+spreekbeurt, presentatie, referat
+vakken, subjects, fächer, matières
+wiskunde, mathematics, maths, math, mathematik, mathématiques
+=rekenen, arithmetic, =rechnen, calcul
+taal, language, sprache, langue
+nederlands, dutch, niederländisch, néerlandais
+engels, english, englisch, anglais
+duits, german, deutsch, allemand
+frans, french, französisch, français
+spaans, spanish, spanisch, espagnol
+geschiedenis, history, geschichte, histoire
+aardrijkskunde, geography, erdkunde, geographie
+biologie, biology
+scheikunde, chemistry, chemie, chimie
+natuurkunde, physics, physik, physique
+gymles, gym, sportunterricht, eps
+muziekles, musikunterricht
+# Government, law and official letters
+gemeentehuis, stadhuis, townhall, rathaus, mairie
+burgerzaken, bürgeramt, einwohnermeldeamt
+uittreksel, extract
+geboorteakte, geburtsurkunde
+huwelijk, marriage, ehe, heirat, mariage
+scheiding, echtscheiding, divorce, scheidung
+samenwonen, cohabitation, zusammenleben, concubinage
+partnerschap, partnership, partnerschaft, pacs
+vergunning, permit, licence, genehmigung, erlaubnis, autorisation, permis
+aanvraagformulier, antragsformular
+bezwaar, bezwaarschrift, objection, appeal, widerspruch, einspruch, recours
+hogerberoep, berufung
+rechtbank, court, gericht, tribunal
+rechter, judge, richter, juge
+advocaat, lawyer, attorney, solicitor, anwalt, rechtsanwalt, avocat
+juridisch, rechtlich, juridique
+wet, law, gesetz, loi
+wetgeving, legislation, gesetzgebung
+règlement, regulations, vorschriften
+privacywet, avg, gdpr, dsgvo, rgpd
+toestemming, consent, einwilligung, zustimmung, consentement
+klachtenprocedure, beschwerdeverfahren
+aansprakelijkheid, liability, haftung, responsabilité
+schadeclaim, schadensersatz, indemnisation
+dagvaarding, summons, ladung, vorladung
+deurwaarder, bailiff, gerichtsvollzieher, huissier
+incassobureau, inkassobuero, inkasso, recouvrement
+politie, polizei
+aangifte, strafanzeige
+diefstal, theft, diebstahl
+inbraak, burglary, einbruch, cambriolage
+fraude, fraud, betrug
+oplichting, scam, swindle, betrug, arnaque, escroquerie
+verkiezingen, election, elections
+voting, abstimmen
+stempas, wahlbenachrichtigung
+belastingaanslag, steuerbescheid
+uwv, jobcentre, arbeitsagentur, jobcenter
+werkloosheid, unemployment, arbeitslosigkeit, chômage
+bijstand, welfare, sozialhilfe, bürgergeld, rsa
+digid, eid
+verzekeringspolis, versicherungspolice, versicherungsschein
+inboedelverzekering, hausratversicherung
+opstalverzekering, gebäudeversicherung
+autoverzekering, kfzversicherung, autoversicherung
+aansprakelijkheidsverzekering, haftpflichtversicherung
+rechtsbijstand, rechtsschutz
+uitvaartverzekering, sterbegeldversicherung
+levensverzekering, lebensversicherung, assurancevie
+schademelding, schadeformulier, schadensmeldung
+# Shopping and orders
+winkel, shop, =store, laden, geschäft, magasin
+supermarkt, supermarket, supermarché
+boodschappen, groceries, lebensmittel, =courses
+kopen, buy, kaufen, acheter
+verkopen, sell, verkaufen, vendre
+aankoop, kauf, achat
+verkoop, sale, verkauf, vente
+uitverkoop, opruiming, clearance, schlussverkauf, ausverkauf, liquidation
+kortingscode, gutscheincode, rabattcode
+cadeaubon, voucher, gutschein
+waardebon, coupon
+cadeau, kado, geschenk
+pakketje, levering, delivery, lieferung, livraison
+bezorger, courier, kurier, bote, livreur
+afhaalpunt, abholstation, packstation
+tracking, sendungsverfolgung, suivi
+verzendkosten, versandkosten
+retourneren, terugsturen, returning, zurücksenden, retourner
+ruilen, umtauschen, échanger
+klantenservice, customerservice, kundendienst, kundenservice
+klantnummer, kundennummer
+ordernummer, bestelnummer, bestellnummer
+factuurnummer, rechnungsnummer
+bestelbevestigingen, bestellbestatigungen
+voorraad, inventory, vorrat
+uitverkocht, soldout, ausverkauft, épuisé
+product, produkt, produit
+prijzen, prices, preise
+kostenlos, gratuit
+abonnementen, subscriptions, abonnements
+lidmaatschapskaart, klantenkaart, kundenkarte
+spaarpunten, punten
+veiling, auction, auktion, versteigerung, enchères
+marktplaats, marketplace, marktplatz, kleinanzeigen, leboncoin
+tweedehands, secondhand, gebraucht
+kleding, kleren, clothes, clothing, kleidung
+schoenen, shoes, schuhe, chaussures
+jas, jacket, jacke
+broek, trousers, pantalon
+jurk, kleid
+overhemd, blouse, bluse, chemise
+trui, sweater, pullover
+sieraden, jewellery, jewelry, schmuck, bijoux
+meubelwinkel, möbelhaus
+bouwmarkt, diy, baumarkt, bricolage
+elektronica, electronics, elektronik, électronique
+televisie, fernseher
+koptelefoon, headphones, kopfhörer
+speelgoed, toys, spielzeug, jouets
+boekwinkel, bookshop, bookstore, buchhandlung, librairie
+bloemen, flowers, blumen, fleurs
+# Family and people
+familieleden, relatives, verwandte
+ouders, eltern
+vader, papa, father, dad, vater, père
+moeder, mama, mother, mum, mom, mutter, mère
+zoon, son, sohn, fils
+dochter, daughter, tochter, fille
+broer, brother, bruder, frère
+zus, zuster, sister, schwester, soeur
+opa, grootvader, grandfather, grandpa, grossvater, grandpère
+oma, grootmoeder, grandmother, grandma, grossmutter, grandmère
+kleinkind, kleinkinderen, grandchild, grandchildren, enkelkind, petitenfant
+oom, uncle, onkel, oncle
+tante, aunt
+neef, nicht, cousin, cousine, kusine
+echtgenoot, husband, ehemann, époux
+echtgenote, wife, ehefrau, épouse
+vriend, friend, freund, ami
+vriendin, girlfriend, freundin, amie
+acquaintance, bekannter
+baby, zuigeling, infant, säugling, bébé
+peuter, toddler, bambin
+tiener, teenager, jugendlicher, adolescent
+volwassene, adult, erwachsener, adulte
+gepensioneerde, retiree, rentner, retraite
+schoonouders, inlaws, schwiegereltern, beauxparents
+stiefvader, stepfather, stiefvater, beaupère
+stiefmoeder, stepmother, stiefmutter, bellemere
+peetoom, peettante, godparent, godfather, godmother, patin, parrain, marraine
+verjaardagsfeest, geburtstagsfeier
+jubileum, anniversary, jubiläum, anniversaire
+verloving, engagement, verlobung, fiançailles
+geboortekaartje, geburtsanzeige
+babyshower, babyparty
+kraamvisite, kraambezoek
+huisdier, pet, haustier
+hond, dog, hund
+kat, poes, cat, katze
+dierenarts, veterinarian, tierarzt, vétérinaire
+paard, horse, pferd, cheval
+# Leisure, culture and clubs
+vereniging, verein
+lid, member, mitglied, membre
+leden, members, mitglieder, membres
+contributienota, mitgliedsbeitrag, cotisation
+ledenvergadering, mitgliederversammlung
+vrijwilliger, volunteer, freiwilliger, ehrenamtlicher, bénévole
+vrijwilligerswerk, volunteering, ehrenamt, bénévolat
+concert, konzert
+theater, schouwburg, theatre
+=voorstelling, vorstellung, aufführung, spectacle
+bioscoop, cinéma, movies, kino
+museum, musée
+tentoonstelling, expositie, exhibition, ausstellung, exposition
+festival, festivals
+toegangskaart, toegangsbewijs, eintritt
+reservering, reservation, booking, reservierung
+restaurant, restaurants, gaststätte
+kroeg, kneipe, bistro
+muziek, music, musik, musique
+zingen, koor, choir, singing, chor, chorale
+dansen, dance, dancing, tanzen, danse
+sportclub, sportverein
+voetbal, football, soccer, fussball, foot
+zwemmen, swimming, schwimmen, natation
+hardlopen, running, jogging
+wandelen, hiking, walking, wandern, randonnée
+fietstocht, radtour, balade
+golf, golfen
+wedstrijd, wettkampf
+toernooi, tournament, turnier, tournoi
+übung, entraînement
+competitie, championnat
+sportschoolabonnement, fitnessabo
+hobby, hobbies, hobbys
+tuinieren, gardening, gartenarbeit, jardinage
+koken, cooking, kochen, cuisiner
+=recept, recipe, kochrezept, recette
+bakken, baking, backen, pâtisserie
+fotograferen, photography, fotografieren, photographier
+lezen, reading, lesen
+puzzel, rätsel
+spelletje, spel
+gamen, gaming, videogame, videospiel
+kerk, church, kirche, église
+moskee, mosque, moschee, mosquée
+kerstmis, kerst, christmas, weihnachten, noël
+pasen, easter, ostern, pâques
+oudjaar, nieuwjaar, newyear, silvester, neujahr
+sinterklaas, sintniklaas, nikolaus
+koningsdag, kingsday
+carnaval, carnival, karneval, fasching
+# Food and drink
+eten, food, essen, nourriture
+drinken, getränke, boisson
+maaltijd, meal, mahlzeit, repas
+boodschappenlijst, einkaufsliste
+brood, bread, brot
+kaas, cheese, käse, fromage
+vlees, meat, fleisch, viande
+vis, fish, fisch, poisson
+groente, groenten, vegetables, gemüse, légumes
+obst, fruits
+koffie, coffee, kaffee
+thee, tea, tee
+wijn, wine, wein
+bier, beer, bière
+taart, cake, kuchen, torte, gâteau
+vegetarisch, vegetarian, végétarien
+veganistisch, vegan, végétalien
+glutenvrij, glutenfree, glutenfrei
+bezorgmaaltijd, takeaway, takeout, lieferdienst
+catering, traiteur
+# Weather and nature
+weather, wetter, météo
+weerbericht, forecast, wettervorhersage, prévisions
+regen, rain, pluie
+sneeuw, snow, schnee, neige
+sturm, tempête
+onweer, thunderstorm, gewitter, orage
+hitte, hittegolf, heatwave, hitze, hitzewelle, canicule
+kou, vorst, kalte
+overstroming, flood, überschwemmung, hochwasser, inondation
+klimaat, climate, klima, climat
+milieu, environment, umwelt, environnement
+duurzaamheid, sustainability, nachhaltigkeit, durabilité
+recycling, recyclen, recyceln, recyclage
+bos, forest, woods, wald, forêt
+bomen, trees, bäume, arbres
+dieren, animals, tiere
+# Days, months and time
+maandag, monday, montag, lundi
+dinsdag, tuesday, dienstag, mardi
+woensdag, wednesday, mittwoch, mercredi
+donderdag, thursday, donnerstag, jeudi
+vrijdag, friday, freitag, vendredi
+zaterdag, saturday, samstag, samedi
+zondag, sunday, sonntag, dimanche
+weekend, wochenende
+januari, january, januar, janvier
+februari, february, februar, février
+maart, märz, mars
+april, avril
+juni, june, juin
+juli, july, juillet
+augustus, août
+september, septembre
+oktober, october, octobre
+november, novembre
+december, dezember, décembre
+voorjaar, lente, frühling, printemps
+zomer, summer, sommer
+najaar, herfst, autumn, herbst, automne
+winter, hiver
+tomorrow, demain
+gisteren, yesterday, gestern
+vandaag, today, heute, aujourdhui
+ochtend, morning, vormittag, matin
+middag, afternoon, nachmittag
+avond, evening, abend, soir
+nacht, night, nuit
+week, woche, semaine
+maand, month, monat, mois
+jaar, year, jahr, année
+kwartaal, quarter, quartal, trimestre
+jaarlijks, annual, yearly, jährlich
+maandelijks, monthly, monatlich, mensuel
+wekelijks, weekly, wöchentlich, hebdomadaire
+dagelijks, daily, täglich, quotidien
+# Countries and cities
+nederland, netherlands, holland, niederlande, paysbas
+belgië, belgium, belgien, belgique
+duitsland, germany, deutschland, allemagne
+frankrijk, france, frankreich
+engeland, england, angleterre
+unitedkingdom, grossbritannien, royaumeuni
+spanje, spain, spanien, espagne
+italie, italy, italien
+oostenrijk, austria, österreich, autriche
+zwitserland, switzerland, schweiz, suisse
+luxemburg, luxembourg
+denemarken, denmark, danemark
+zweden, sweden, schweden, suède
+noorwegen, norway, norwegen, norvège
+polen, poland, pologne
+griekenland, greece, griechenland, grèce
+turkije, turkey, türkei, turquie
+amerika, america, usa, etatsunis
+canada, kanada
+europa, europe
+brussel, brussels, bruxelles
+antwerpen, antwerp, anvers
+parijs, paris
+londen, london, londres
+keulen, cologne, köln
+münchen, munich
+wenen, vienna, wien, vienne
+rome, rom, roma
+lissabon, lisbon, lisbonne
+# Business and sales
+bedrijfsleven, business, wirtschaft, affaires
+onderneming, enterprise, unternehmen, entreprise
+eigenaar, owner, eigentümer, inhaber
+aandeelhouder, shareholder, aktionär, actionnaire
+investeerder, investor, investisseur
+fusie, merger, fusion
+overname, acquisition, übernahme, rachat
+faillissement, bankruptcy, insolvency, insolvenz, konkurs, faillite
+marketing, reclame, advertising, werbung, publicité
+campagne, campaign, kampagne
+nieuwsbrieven, newsletters, newsletter
+doelgroep, zielgruppe, cible
+concurrent, competitor, wettbewerber, konkurrent
+klantgegevens, kundendaten
+verkoper, salesman, salesperson, verkäufer, vendeur
+inkoper, buyer, purchaser, einkäufer, acheteur
+inkoop, purchasing, procurement, einkauf, achats
+logistiek, logistics, logistik, logistique
+magazijn, warehouse, lagerhaus, entrepôt
+transportbedrijf, vervoerder, carrier, spedition, transporteur
+pakbon, lieferschein, bordereau
+vrachtbrief, waybill, frachtbrief, lettre
+douanepapieren, zollpapiere
+productie, production, produktion, fabrication
+fabriek, factory, fabrik, usine
+kwaliteit, quality, qualität, qualité
+klacht, complaint, beschwerde, reklamation
+garantieaanvraag, garantieanspruch
+retourformulier, rucksendeformular
+handleidingen, manuals, handbücher, anleitungen
+specificaties, specifications, spezifikationen
+prijslijst, pricelist, preisliste, tarifs
+offerteaanvraag, angebotsanfrage
+opdrachtbevestiging, auftragsbestätigung
+leveringsvoorwaarden, lieferbedingungen
+betalingstermijn, zahlungsziel, zahlungsfrist
+herinneringsbrief, betalingsherinnering, zahlungserinnerung
+ingebrekestelling, inverzugsetzung
+projectplan, projectplanning, projektplan
+mijlpaal, milestone, meilenstein, jalon
+planningen, schedules, zeitpläne
+risico, risk, risiko, risque
+kansen, opportunities, chancen, opportunités
+innovatie, innovation
+ontwikkeling, development, entwicklung, développement
+onderzoeksrapport, forschungsbericht
+patent, octrooi, brevet
+handelsmerk, trademark, warenzeichen
+auteursrecht, copyright, urheberrecht
+geheimhouding, confidentiality, geheimhaltung, confidentialité
+geheimhoudingsverklaring, nda, vertraulichkeitsvereinbarung
+personeelszaken, personeel, personalabteilung
+werving, recruitment, recruiting, rekrutierung, recrutement
+sollicitatiegesprek, jobinterview, vorstellungsgespräch
+salarisstroken, payslips, gehaltsabrechnungen
+onkosten, expenses, auslagen
+reiskosten, reisekosten
+kilometervergoeding, kilometergeld, kilometerpauschale
+leaseauto, dienstwagen, firmenwagen

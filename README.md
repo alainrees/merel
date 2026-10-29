@@ -113,7 +113,8 @@ the text and the attachments: `bedrag:>100`, `bedrag:<50`, `bedrag:100-500` or `
 by its size, as the server counts it. In the message being read, the words a search found stand on a yellow ground, in
 whatever form they were found (another ending, without accents, or near the typo in the search box).
 A word is also searched in Dutch, English, German and French: `voorstel` finds mail about an `offerte`, a `quote`, an
-`Angebot` or a `devis`, from a built-in list of a few hundred words of mail and business (`crates/search/src/lexicon.txt`).
+`Angebot` or a `devis`, from a built-in list of some 950 meanings (about 3,700 words) of mail, work and daily life, from
+invoices and contracts to the doctor, the move and the days of the week (`crates/search/src/lexicon.txt`).
 The word as typed ranks first; "Ook gezocht: …" above the results names the others and switches them off, and a word in
 quotes is searched only as it stands.
 An opened message shows what was recognised in a "Herkend:" strip: a click on an order or invoice number searches all mail
