@@ -1,0 +1,145 @@
+name: Signal updates
+# Signal changes often, and an old Signal library can stop working with Signal's servers. Each
+# week this takes the newest presage (which brings the libsignal it needs) and the newest
+# compatible crates for the Signal helper, builds it on Linux and macOS, and puts the result in a
+# pull request. If the new versions do not build, it opens an issue instead.
+on:
+  schedule:
+    # Mondays 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  BRANCH: signal-updates
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.update.outputs.changed }}
+      old: ${{ steps.update.outputs.old }}
+      new: ${{ steps.update.outputs.new }}
+    defaults:
+      run:
+        working-directory: apps/merel-signal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - id: update
+        run: |
+          old=$(grep -oE 'presage", rev = "[0-9a-f]+' Cargo.toml | head -1 | grep -oE '[0-9a-f]{40}')
+          new=$(git ls-remote https://github.com/whisperfish/presage HEAD | cut -f1)
+          sed -i "s/$old/$new/g" Cargo.toml
+          cargo update
+          echo "old=$old" >> "$GITHUB_OUTPUT"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+          if git diff --quiet -- Cargo.toml Cargo.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat
+          fi
+      - if: steps.update.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-updates
+          path: |
+            apps/merel-signal/Cargo.toml
+            apps/merel-signal/Cargo.lock
+
+  check:
+    needs: update
+    if: needs.update.outputs.changed == 'true'
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: apps/merel-signal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: signal-updates
+          path: apps/merel-signal
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - if: runner.os == 'macOS'
+        run: brew install protobuf
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/merel-signal
+      - run: cargo clippy --locked -- -D warnings
+      - run: cargo build --locked
+      - run: cargo test --locked
+
+  # A pull request made with the workflow's own token starts no other workflows, so the checks
+  # above are what it was tested with.
+  pull-request:
+    needs: [update, check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OLD: ${{ needs.update.outputs.old }}
+      NEW: ${{ needs.update.outputs.new }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: signal-updates
+          path: apps/merel-signal
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add apps/merel-signal/Cargo.toml apps/merel-signal/Cargo.lock
+          git commit -m "Signal: update presage and the Signal libraries"
+          git push --force origin "$BRANCH"
+          if [ "$OLD" = "$NEW" ]; then
+            what="presage stays at \`${NEW:0:10}\`; only crates within the same versions moved."
+          else
+            what="presage: [\`${OLD:0:10}\` → \`${NEW:0:10}\`](https://github.com/whisperfish/presage/compare/$OLD...$NEW)"
+          fi
+          body=$(printf '%s\n\n%s\n\n%s\n' \
+            "Weekly update of the Signal helper (\`apps/merel-signal\`)." \
+            "$what" \
+            "Built, linted and tested on Linux and macOS by the Signal updates workflow. Once merged, the next release brings it to users.")
+          if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            # Without "Allow GitHub Actions to create pull requests" in the repository settings,
+            # the branch is still there: an issue links to it.
+            gh pr create --head "$BRANCH" --base main --title "Signal: update presage and the Signal libraries" --body "$body" \
+              || gh issue create --title "Signal update ready on branch $BRANCH" \
+                --body "$body"$'\n\n'"Open a pull request: ${{ github.server_url }}/${{ github.repository }}/compare/main...$BRANCH"
+          else
+            gh pr edit "$BRANCH" --body "$body"
+          fi
+
+  issue:
+    needs: [update, check]
+    if: failure() && needs.update.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NEW: ${{ needs.update.outputs.new }}
+    steps:
+      - run: |
+          title="Signal update needs changes to the helper"
+          body="The newest presage (\`${NEW:0:10}\`) or Signal libraries do not build with \`apps/merel-signal\` as it is: see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}."
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
