@@ -1499,6 +1499,11 @@ updates-progress = { $done } van { $total } MB
 updates-restart-failed = Opnieuw starten is niet gelukt. Start Merel zelf opnieuw.
 updates-required-text = Werk Merel eerst bij voordat je verdergaat. Zo heeft iedereen steeds de nieuwste versie, met alle beveiligingsherstel.
 updates-retry = Opnieuw proberen
+settings = Instellingen
+settings-update = Instellingen: Merel { $version } is beschikbaar
+updates-check-now = Nu controleren
+updates-checking-now = Bezig met controleren…
+updates-page-installed = Merel controleert bij elke start en daarna om de paar uur zelf. Een nieuwe versie zie je aan het rode uitroepteken op het tandwiel linksonder.
 
 ## Installing updates
 install-interrupted = Bijwerken is onderbroken.

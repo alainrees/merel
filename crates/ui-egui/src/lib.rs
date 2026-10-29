@@ -1677,7 +1677,38 @@ fn rail(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     ui.add_space(4.0);
                 }
             });
+            settings_button(app, ui, t);
         });
+}
+
+/// The gear at the bottom of the rail, which opens Bestand, Merel's settings. When a newer
+/// version is out it wears a red "!" and opens the Updates page, so an update is never missed.
+fn settings_button(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let newest = updates::badge(app).map(|r| r.version.clone());
+    let label = match &newest {
+        Some(version) => crate::i18n::tr_args("settings-update", &[("version", version.as_str().into())]),
+        None => tr("settings"),
+    };
+    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+        ui.add_space(8.0);
+        let b = egui::Button::image(helder::Icon::Settings.image(22.0, t.text_dim))
+            .fill(Color32::TRANSPARENT)
+            .frame_when_inactive(false)
+            .stroke(Stroke::NONE)
+            .corner_radius(10)
+            .min_size(vec2(48.0, 48.0));
+        let r = ui.add(b);
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        if newest.is_some() {
+            helder::alert_dot(ui, t, r.rect.center() + vec2(10.0, -10.0), 7.0);
+        }
+        if r.on_hover_text(&label).clicked() {
+            app.tab = Tab::File;
+            if newest.is_some() {
+                app.file_page = backstage::Page::Updates;
+            }
+        }
+    });
 }
 
 /// The line icon of a folder in the folder pane.
@@ -3379,6 +3410,9 @@ mod tests {
         assert!(!h.state().updates.required);
         h.get_by_label("Help");
 
+        let mut h = harness();
+        h.state_mut().updates.self_update = true;
+        h.run();
         h.state_mut().view.skipped_version = Some("9.0.0".into());
         h.state_mut().finish_update_check(Outcome::Newer(Release { version: "9.0.0".into(), notes: "Beveiliging.".into() }));
         h.run();
@@ -3402,6 +3436,58 @@ mod tests {
         h.run();
         h.get_by_label(&updates::restart_label());
         assert!(h.query_by_label(&updates::later()).is_none());
+    }
+
+    #[test]
+    fn a_release_found_while_merel_is_in_use_puts_a_red_mark_on_the_gear() {
+        use updates::{Outcome, Release};
+        let mut h = harness();
+        h.state_mut().updates.self_update = true;
+        h.run();
+        h.get_by_label(&tr("settings"));
+        // The check at start found nothing; one hours later does, while the person works.
+        h.state_mut().finish_update_check(Outcome::UpToDate);
+        h.state_mut().finish_update_check(Outcome::Newer(Release { version: "9.0.0".into(), notes: "Sneller.".into() }));
+        h.run();
+        assert!(!h.state().updates.required, "work is not taken away mid-way");
+        assert!(h.state().updates.offer.is_none(), "no window pops up by itself");
+        h.get_by_label("Help");
+        h.get_by_label("Instellingen: Merel 9.0.0 is beschikbaar").click();
+        h.run();
+        assert_eq!(h.state().tab, Tab::File);
+        assert_eq!(h.state().file_page, backstage::Page::Updates, "the gear leads straight to the update");
+        h.get_by_label("Merel 9.0.0 is beschikbaar.");
+        h.get_by_label("Sneller.");
+        h.get_by_label(&updates::update()).click();
+        h.run();
+        assert!(h.state().updates.offer.is_some(), "Bijwerken walks through the update window");
+        // Once this is the newest again, the gear is plain.
+        h.state_mut().updates.offer = None;
+        h.state_mut().finish_update_check(Outcome::UpToDate);
+        h.state_mut().tab = Tab::Home;
+        h.run();
+        h.get_by_label(&tr("settings"));
+    }
+
+    #[test]
+    fn the_gear_keeps_a_release_after_later_but_not_after_skipping_it() {
+        use updates::{Outcome, Release};
+        let mut h = harness();
+        h.run();
+        h.state_mut().finish_update_check(Outcome::Newer(Release { version: "9.0.0".into(), notes: String::new() }));
+        h.run();
+        h.get_by_label(&updates::later()).click();
+        h.run();
+        assert!(h.state().updates.offer.is_none());
+        h.get_by_label("Instellingen: Merel 9.0.0 is beschikbaar");
+        h.state_mut().updates.offer = h.state().updates.newest.clone();
+        h.run();
+        h.get_by_label(&updates::skip()).click();
+        h.run();
+        h.get_by_label(&tr("settings")).click();
+        h.run();
+        assert_eq!(h.state().tab, Tab::File);
+        assert_eq!(h.state().file_page, backstage::Page::Accounts, "without an update the gear opens the settings as they were");
     }
 
     #[test]
