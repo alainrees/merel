@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use base64::Engine;
 use chrono::{Datelike, Days, Local, NaiveDate, TimeZone};
-use merel_html::{Block, Document, Image, ImageSource, Inline, Style};
+use merel_html::{Align, Block, Document, Image, ImageSource, Inline, Length, Look, Style};
 use merel_mime::{Body, InlineImage};
 use merel_model::{Address, Appointment, MessageHeader};
 
@@ -65,7 +65,12 @@ fn image(out: &mut String, img: &Image, images: &[InlineImage]) {
     };
     match src {
         Some(src) => {
-            let _ = write!(out, "<img src=\"{src}\" alt=\"{}\">", esc(&img.alt));
+            let width = match img.width {
+                Some(merel_html::Length::Px(px)) => format!(" width=\"{px}\""),
+                Some(merel_html::Length::Percent(p)) => format!(" width=\"{p}%\""),
+                None => String::new(),
+            };
+            let _ = write!(out, "<img src=\"{src}\" alt=\"{}\"{width}>", esc(&img.alt));
         }
         None if img.alt.trim().is_empty() => {
             let _ = write!(out, "<span class=\"missing\">[{}]</span>", esc(&tr("print-image-left-out")));
@@ -158,6 +163,20 @@ fn blocks(out: &mut String, list: &[Block], images: &[InlineImage]) {
                 }
                 out.push_str("</table>\n");
             }
+            Block::Columns(cells) => {
+                out.push_str("<table class=\"cols\"><tr>");
+                for cell in cells {
+                    let _ = write!(out, "<td style=\"{}\">", look_css(&cell.look));
+                    blocks(out, &cell.blocks, images);
+                    out.push_str("</td>");
+                }
+                out.push_str("</tr></table>\n");
+            }
+            Block::Section { look, blocks: inner } => {
+                let _ = writeln!(out, "<div style=\"{}\">", look_css(look));
+                blocks(out, inner, images);
+                out.push_str("</div>\n");
+            }
             Block::Code(text) => {
                 let _ = writeln!(out, "<pre>{}</pre>", esc(text));
             }
@@ -166,11 +185,45 @@ fn blocks(out: &mut String, list: &[Block], images: &[InlineImage]) {
     }
 }
 
+/// The look of a block as CSS. Every part is a number or a fixed word, so nothing from the
+/// message reaches the page as text.
+fn look_css(look: &Look) -> String {
+    let mut css = String::new();
+    if let Some(c) = look.background {
+        let _ = write!(css, "background:#{:02x}{:02x}{:02x};", c.0, c.1, c.2);
+    }
+    if let Some(a) = look.align {
+        css.push_str(match a {
+            Align::Left => "text-align:left;",
+            Align::Center => "text-align:center;",
+            Align::Right => "text-align:right;",
+        });
+    }
+    match look.width {
+        Some(Length::Px(px)) => {
+            let _ = write!(css, "max-width:{px}px;");
+        }
+        Some(Length::Percent(p)) => {
+            let _ = write!(css, "width:{p}%;");
+        }
+        None => {}
+    }
+    if look.place == Some(Align::Center) {
+        css.push_str("margin:0 auto;");
+    }
+    let [t, r, b, l] = look.padding;
+    let _ = write!(css, "padding:{t}px {r}px {b}px {l}px;");
+    if let Some(h) = look.height {
+        let _ = write!(css, "min-height:{h}px;");
+    }
+    css
+}
+
 const STYLE: &str = "body{font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:11pt;color:#111;max-width:52em;margin:2em auto;padding:0 1em}\
 .hint{background:#eef;border:1px solid #ccd;padding:.5em .8em;border-radius:4px;font-size:10pt}\
 table.head{border-collapse:collapse;margin:1em 0}table.head th{text-align:left;padding:.15em 1em .15em 0;color:#555;font-weight:600;white-space:nowrap;vertical-align:top}\
 table.head td{padding:.15em 0}h1.subject{font-size:16pt;margin:.2em 0 .6em}hr.sep{border:0;border-top:1px solid #999;margin:1em 0}\
-.body table{border-collapse:collapse}.body td,.body th{border:1px solid #bbb;padding:.2em .5em;vertical-align:top}blockquote{border-left:3px solid #bbb;margin:.5em 0;padding-left:.8em;color:#444}\
+.body table{border-collapse:collapse}.body table.cols{width:100%}.body table.cols td{border:0;padding:0;vertical-align:middle}.body td,.body th{border:1px solid #bbb;padding:.2em .5em;vertical-align:top}blockquote{border-left:3px solid #bbb;margin:.5em 0;padding-left:.8em;color:#444}\
 pre{white-space:pre-wrap;font-family:Menlo,Consolas,monospace;font-size:10pt}img{max-width:100%}.missing{color:#888;font-style:italic}a{color:#1a4d8f}\
 h2.day{font-size:12pt;margin:1.2em 0 .3em;padding-bottom:.15em;border-bottom:1px solid #999}table.cal{border-collapse:collapse;width:100%}\
 table.cal td{padding:.25em .8em .25em 0;vertical-align:top}table.cal td.time{white-space:nowrap;color:#555;width:9em}table.cal td.where{color:#555}\
@@ -432,17 +485,19 @@ mod tests {
                         style: Style { bold: true, ..Style::default() },
                     },
                     Inline::Break,
-                    Inline::Image(Image { source: ImageSource::Inline("logo".into()), alt: "Logo".into() }),
-                    Inline::Image(Image { source: ImageSource::Remote("https://x/y.png".into()), alt: "Ver weg".into() }),
+                    Inline::Image(Image { source: ImageSource::Inline("logo".into()), alt: "Logo".into(), width: None, height: None }),
+                    Inline::Image(Image { source: ImageSource::Remote("https://x/y.png".into()), alt: "Ver weg".into(), width: None, height: None }),
                 ]),
                 Block::Table(vec![vec![Cell {
                     header: true,
                     blocks: vec![Block::Paragraph(vec![Inline::Text { text: "Kop".into(), style: Style::default() }])],
+                    look: Look::default(),
                 }]]),
                 Block::Code("a < b".into()),
             ],
             remote_images: 1,
             truncated: false,
+            designed: false,
         };
         let body = Body {
             text: "tekst".into(),

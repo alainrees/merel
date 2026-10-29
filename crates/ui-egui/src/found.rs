@@ -10,7 +10,7 @@ use egui::Ui;
 use egui::text::{LayoutJob, TextFormat};
 use merel_engine::Session;
 use merel_engine::search::Query;
-use merel_html::{Block, Document, Inline};
+use merel_html::{Document, Inline};
 
 use crate::Tokens;
 
@@ -51,25 +51,14 @@ pub fn marks(ui: &Ui, key: &str, session: &Session, texts: &[&str]) -> Option<Ar
 
 /// Every piece of text an HTML message draws, so [`marks`] can look at them all at once.
 pub fn texts_of(doc: &Document) -> Vec<&str> {
-    fn blocks<'a>(list: &'a [Block], out: &mut Vec<&'a str>) {
-        for b in list {
-            match b {
-                Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
-                    for i in inlines {
-                        if let Inline::Text { text, .. } | Inline::Link { text, .. } = i {
-                            out.push(text);
-                        }
-                    }
-                }
-                Block::Quote(inner) => blocks(inner, out),
-                Block::List { items, .. } => items.iter().for_each(|item| blocks(item, out)),
-                Block::Table(rows) => rows.iter().flatten().for_each(|cell| blocks(&cell.blocks, out)),
-                Block::Code(_) | Block::Rule => {}
+    let mut out = Vec::new();
+    merel_html::for_each_run(&doc.blocks, &mut |inlines| {
+        for i in inlines {
+            if let Inline::Text { text, .. } | Inline::Link { text, .. } = i {
+                out.push(text.as_str());
             }
         }
-    }
-    let mut out = Vec::new();
-    blocks(&doc.blocks, &mut out);
+    });
     out
 }
 
