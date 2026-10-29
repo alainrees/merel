@@ -2012,4 +2012,5 @@ signal-link-failed = Linking did not work.
 channel-chat = Chat
 signal-via = via Signal
 chat-emoji = Add emoji
+chat-react = React
 signal-attachment = Attachment
