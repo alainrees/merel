@@ -92,6 +92,20 @@ pub struct Received {
     pub text: String,
     #[serde(default)]
     pub attachments: Vec<String>,
+    /// The message this one answers.
+    #[serde(default)]
+    pub quote: Option<QuoteOf>,
+}
+
+/// The message a message answers, as the program passes it on and is asked to send it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuoteOf {
+    pub author: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub author_name: String,
+    pub timestamp: u64,
+    #[serde(default)]
+    pub text: String,
 }
 
 /// A reaction as the program passes it on: `sender` reacted with `emoji` to the message
@@ -134,8 +148,19 @@ impl Received {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Asked<'a> {
-    Send { thread: &'a str, text: &'a str },
-    React { thread: &'a str, emoji: &'a str, remove: bool, target_author: &'a str, target_timestamp: u64 },
+    Send {
+        thread: &'a str,
+        text: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        quote: Option<QuoteOf>,
+    },
+    React {
+        thread: &'a str,
+        emoji: &'a str,
+        remove: bool,
+        target_author: &'a str,
+        target_timestamp: u64,
+    },
 }
 
 /// The program running, and what it said so far.
@@ -242,6 +267,8 @@ struct Messages {
     names: HashMap<String, String>,
     /// The reactions on each message, by its id: one per person, the latest.
     reactions: HashMap<String, Vec<Reaction>>,
+    /// The account's own service id, once a message of its own came.
+    me_id: Option<String>,
 }
 
 impl Messages {
@@ -257,6 +284,9 @@ impl Messages {
         }
         if !m.mine && is_name(&m.sender_name, &m.sender) {
             self.names.insert(m.sender.clone(), m.sender_name.clone());
+        }
+        if m.mine {
+            self.me_id = Some(m.sender.clone());
         }
         let mut m = m;
         if m.text.len() > MAX_TEXT {
@@ -320,6 +350,9 @@ impl Messages {
         m.sender_name = if m.mine { me.to_string() } else { name(&m.sender, &m.sender_name) };
         if !m.group {
             m.thread_name = name(&m.thread, &m.thread_name);
+        }
+        if let Some(q) = m.quote.as_mut() {
+            q.author_name = if self.me_id.as_deref() == Some(q.author.as_str()) { me.to_string() } else { name(&q.author, &q.author_name) };
         }
         m
     }
@@ -540,7 +573,18 @@ impl Mailbox for SignalMailbox {
             }
         };
         let text = merel_mime::parse_body(raw).text.trim_end().to_string();
-        self.ask(&Asked::Send { thread: &thread, text: &text }, &thread)
+        let quote = header.chat.as_ref().and_then(|c| c.quote.as_ref()).and_then(|q| {
+            let id = q.message_id.trim().trim_matches(['<', '>']).strip_suffix(&format!("@{DOMAIN}"))?.to_string();
+            let messages = lock(&self.messages);
+            let m = messages.by_id.get(&id)?;
+            Some(QuoteOf {
+                author: m.sender.clone(),
+                author_name: String::new(),
+                timestamp: m.timestamp,
+                text: m.text.chars().take(merel_model::MAX_QUOTE).collect(),
+            })
+        });
+        self.ask(&Asked::Send { thread: &thread, text: &text, quote }, &thread)
     }
 
     fn create_folder(&mut self, _parent: Option<&str>, _name: &str) -> Result<()> {
@@ -600,10 +644,15 @@ fn message(m: &Received, me: &str, reactions: &[merel_model::Reacted]) -> Vec<u8
             out.push_str(&format!("Chat-Group-Name: {}\r\n", word(&m.thread_name)));
         }
     }
+    if let Some(q) = &m.quote {
+        let name = if q.author_name.is_empty() { q.author.clone() } else { q.author_name.clone() };
+        let text: String = q.text.chars().take(merel_model::MAX_QUOTE).collect();
+        let quoted = merel_model::Quoted { message_id: format!("<{}@{DOMAIN}>", message_id(q.timestamp, &q.author)), name, text };
+        out.push_str(&format!("Merel-Quote: {}\r\n", fold(&quoted.header())));
+    }
     if !reactions.is_empty() {
         let value = merel_model::Reacted::header(reactions);
-        let folded: Vec<String> = value.as_bytes().chunks(76).map(|c| String::from_utf8_lossy(c).into_owned()).collect();
-        out.push_str(&format!("Merel-Reactions: {}\r\n", folded.join("\r\n ")));
+        out.push_str(&format!("Merel-Reactions: {}\r\n", fold(&value)));
     }
     out.push_str("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n");
     let body = base64::engine::general_purpose::STANDARD.encode(text.replace('\n', "\r\n"));
@@ -612,6 +661,11 @@ fn message(m: &Received, me: &str, reactions: &[merel_model::Reacted]) -> Vec<u8
         out.push_str("\r\n");
     }
     out.into_bytes()
+}
+
+/// A long base64 header value over several lines.
+fn fold(value: &str) -> String {
+    value.as_bytes().chunks(76).map(|c| String::from_utf8_lossy(c).into_owned()).collect::<Vec<_>>().join("\r\n ")
 }
 
 /// Where a message sent in a chat between two people went: the other person.
@@ -685,6 +739,7 @@ mod tests {
             timestamp: 1_761_681_600_123,
             text: text.into(),
             attachments: Vec::new(),
+            quote: None,
         }
     }
 
@@ -780,6 +835,25 @@ mod tests {
         let line = r#"{"type":"reaction","thread":"1b2c","sender":"1b2c","sender_name":"Jan","mine":false,"timestamp":9,"emoji":"👍","remove":false,"target_author":"1b2c","target_timestamp":5}"#;
         let Ok(Said::Reaction(r)) = serde_json::from_str::<Said>(line) else { panic!("not read") };
         assert_eq!(r.target(), "5.1b2c");
+    }
+
+    #[test]
+    fn an_answer_carries_the_message_it_quotes_with_its_writer() {
+        let mut messages = Messages::default();
+        let mut mine = received("Kom je ook?");
+        mine.mine = true;
+        mine.sender = "me".into();
+        messages.add(mine.clone());
+        let mut answer = received("Ja, om acht uur.");
+        answer.timestamp += 5;
+        answer.quote = Some(QuoteOf { author: "me".into(), author_name: "me".into(), timestamp: mine.timestamp, text: "Kom je ook?".into() });
+        messages.add(answer.clone());
+        let named = messages.named(&answer, "Alain");
+        let header = merel_mime::parse_header(&message(&named, "me@signal.invalid", &[]));
+        let quote = header.chat.and_then(|c| c.quote).unwrap_or_default();
+        assert_eq!(quote.name, "Alain");
+        assert_eq!(quote.text, "Kom je ook?");
+        assert_eq!(quote.message_id, format!("<{}@signal.invalid>", mine.id()));
     }
 
     #[test]

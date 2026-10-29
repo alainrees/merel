@@ -43,6 +43,8 @@ pub struct State {
     pub query: String,
     /// What is typed in the open chat.
     pub input: String,
+    /// The message the next one answers, quoted above it (Signal).
+    pub replying: Option<String>,
     pub new: Option<NewChat>,
     /// Why the last message did not go out, or chat could not be turned on.
     pub error: Option<String>,
@@ -114,6 +116,7 @@ impl MailApp {
     }
 
     fn open_chat(&mut self, id: &str) {
+        self.chat.replying = None;
         self.chat.selected = Some(id.to_string());
         self.chat.new = None;
         self.chat.error = None;
@@ -132,11 +135,15 @@ impl MailApp {
         if text.is_empty() {
             return;
         }
-        let draft = self.engine.session.chat_reply(&chat, &text);
+        let mut draft = self.engine.session.chat_reply(&chat, &text);
+        if let (Some(id), Some(tag)) = (self.chat.replying.as_deref(), draft.chat.as_mut()) {
+            tag.quote = self.engine.session.chat_quote(id);
+        }
         match self.engine.send_or_invite(&chat.account_id, draft) {
             Ok(id) => {
                 self.chat.sending = id;
                 self.chat.input.clear();
+                self.chat.replying = None;
                 self.chat.error = None;
             }
             Err(e) => self.chat.error = Some(e),
@@ -531,6 +538,7 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
     // The line to write sits at the bottom; the messages fill what is above it.
     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
         composer(app, ui, t, chat);
+        replying_strip(app, ui, t);
         if let Some(e) = &app.chat.error {
             ui.label(RichText::new(e).color(t.flag));
         }
@@ -540,6 +548,7 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
         ui.with_layout(Layout::top_down(Align::Min), |ui| {
             let mut accept = None;
             let mut react = None;
+            let mut reply = None;
             egui::ScrollArea::vertical().auto_shrink(false).stick_to_bottom(true).show(ui, |ui| {
                 let mut day = None;
                 let mut previous: Option<String> = None;
@@ -557,6 +566,7 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                     match bubble(app, ui, t, chat, id, first_of_run) {
                         Some(Clicked::Accept(link)) => accept = Some(link),
                         Some(Clicked::React(emoji)) => react = Some((id.clone(), emoji)),
+                        Some(Clicked::Reply) => reply = Some(id.clone()),
                         None => {}
                     }
                 }
@@ -570,6 +580,10 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                     }
                 }
             });
+            if let Some(id) = reply {
+                app.chat.replying = Some(id);
+                ui.memory_mut(|m| m.request_focus(egui::Id::new(INPUT)));
+            }
             if let Some((id, emoji)) = react {
                 app.chat.error = app.engine.react(&id, &emoji).err();
             }
@@ -620,6 +634,8 @@ enum Clicked {
     Accept(String),
     /// React with this emoji, or take it back when it was the account's own.
     React(String),
+    /// Answer this message.
+    Reply,
 }
 
 /// The reactions Signal offers first, in its order.
@@ -659,6 +675,7 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
         let row = ui.horizontal_top(|ui| {
             if mine && reacts {
                 react_button(ui, t, id, hovered, &mut accept);
+                reply_button(ui, t, hovered, &mut accept);
             }
             if !mine {
                 let (rect, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
@@ -671,7 +688,8 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                 ui,
                 |ui| {
                     ui.set_max_width(max);
-                    match &invite {
+                    let quote = m.chat.as_ref().and_then(|c| c.quote.as_ref());
+                    let mut content = |ui: &mut Ui| match &invite {
                         Some(link) => {
                             ui.horizontal(|ui| {
                                 ui.add(Icon::Link.image(16.0, t.text));
@@ -695,10 +713,21 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                             });
                         }
                         None => crate::emoji::label(ui, &text, 14.0, t.text),
+                    };
+                    // A quote goes above the text; without one the text keeps the bubble narrow.
+                    match quote {
+                        Some(q) => {
+                            ui.vertical(|ui| {
+                                quote_block(ui, t, session, q, mine);
+                                content(ui);
+                            });
+                        }
+                        None => content(ui),
                     }
                 },
             );
             if !mine && reacts {
+                reply_button(ui, t, hovered, &mut accept);
                 react_button(ui, t, id, hovered, &mut accept);
             }
         });
@@ -706,6 +735,11 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
             let over = ui.rect_contains_pointer(row.response.rect);
             ui.data_mut(|d| d.insert_temp(hover_id, over));
             ui.interact(row.response.rect, egui::Id::new(("chat-bubble", id)), Sense::click()).context_menu(|ui| {
+                if ui.add(egui::Button::image_and_text(Icon::Reply.image(16.0, t.text), tr("chat-reply"))).clicked() {
+                    accept = Some(Clicked::Reply);
+                    ui.close();
+                }
+                ui.separator();
                 reaction_menu(ui, &mut accept);
             });
             if !reactions.is_empty() {
@@ -720,6 +754,69 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
     });
     ui.add_space(4.0);
     accept
+}
+
+/// The arrow beside a message that answers it, quoting it; shown like the smiley.
+fn reply_button(ui: &mut Ui, t: &Tokens, hovered: bool, clicked: &mut Option<Clicked>) {
+    let size = vec2(28.0, 28.0);
+    if !hovered {
+        ui.allocate_exact_size(size, Sense::hover());
+        return;
+    }
+    let r = ui.add(egui::Button::image(Icon::Reply.image(16.0, t.text_dim)).frame(false).min_size(size));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-reply")));
+    if r.on_hover_text(tr("chat-reply")).clicked() {
+        *clicked = Some(Clicked::Reply);
+    }
+}
+
+/// The message an answer quotes, inside the answer's bubble: a bar in the accent, the
+/// writer's name and the first lines of the text, as Signal shows it.
+fn quote_block(ui: &mut Ui, t: &Tokens, session: &merel_engine::Session, q: &merel_model::Quoted, mine: bool) {
+    // "Jij" for one's own message, as Signal says it.
+    let own = session.messages.iter().find(|m| m.message_id.as_deref() == Some(q.message_id.as_str())).is_some_and(|m| session.chat_is_mine(&m.id));
+    let name = if own { tr("chat-you") } else { q.name.clone() };
+    let fill = if mine { t.window.gamma_multiply(0.6) } else { t.checked.gamma_multiply(0.6) };
+    let frame = egui::Frame::new().fill(fill).corner_radius(6).inner_margin(Margin { left: 10, right: 8, top: 4, bottom: 4 }).show(ui, |ui| {
+        ui.set_min_width(120.0);
+        ui.label(RichText::new(name).size(12.5).strong().color(t.text));
+        let text: String = q.text.lines().take(2).collect::<Vec<_>>().join(" ");
+        ui.add(egui::Label::new(RichText::new(merel_mime::preview(&text, 140)).size(12.5).color(t.text_dim)).wrap());
+    });
+    let r = frame.response.rect;
+    ui.painter().rect_filled(egui::Rect::from_min_max(r.min, egui::pos2(r.min.x + 3.0, r.max.y)), 2.0, t.accent);
+    ui.add_space(4.0);
+}
+
+/// Above the line to write in while answering: whom and what, and a cross to stop.
+fn replying_strip(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let Some(id) = app.chat.replying.clone() else { return };
+    let Some(q) = app.engine.session.chat_quote(&id) else {
+        app.chat.replying = None;
+        return;
+    };
+    let mut stop = false;
+    ui.add_space(4.0);
+    egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.0, t.card_border)).corner_radius(8).inner_margin(Margin::symmetric(10, 6)).show(
+        ui,
+        |ui| {
+            ui.horizontal(|ui| {
+                ui.add(Icon::Reply.image(16.0, t.accent));
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(tr_args("chat-replying-to", &[("name", q.name.as_str().into())])).size(12.5).strong().color(t.text));
+                    ui.label(RichText::new(merel_mime::preview(&q.text, 120)).size(12.5).color(t.text_dim));
+                });
+                helder::right(ui, |ui| {
+                    let r = ui.add(egui::Button::image(Icon::X.image(14.0, t.text_dim)).frame(false));
+                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-reply-stop")));
+                    stop = r.on_hover_text(tr("chat-reply-stop")).clicked();
+                });
+            });
+        },
+    );
+    if stop || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        app.chat.replying = None;
+    }
 }
 
 /// The smiley beside a message that opens the reactions; it shows while the pointer is over

@@ -267,6 +267,17 @@ mod tests {
     }
 
     #[test]
+    fn an_answer_quotes_who_wrote_what() {
+        let mut e = Engine::sample();
+        let m = e.session.messages[0].clone();
+        e.session.bodies.insert(m.id.clone(), merel_mime::Body { text: "Kom je ook?".into(), ..Default::default() });
+        let q = e.session.chat_quote(&m.id).unwrap();
+        assert_eq!(q.text, "Kom je ook?");
+        assert_eq!(q.name, m.from.display());
+        assert_eq!(Some(q.message_id), m.message_id);
+    }
+
+    #[test]
     fn a_message_over_signal_goes_without_openpgp() {
         let mut e = Engine::sample();
         let a = signal_account("signal-1", None, "me").unwrap();

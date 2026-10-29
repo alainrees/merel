@@ -26,7 +26,7 @@ use presage::libsignal_service::protocol::ServiceId;
 use presage::manager::Registered;
 use presage::model::identity::OnNewIdentity;
 use presage::model::messages::Received;
-use presage::proto::data_message::Reaction;
+use presage::proto::data_message::{Quote, Reaction, quote};
 use presage::proto::sync_message::{Content as SyncContent, Sent};
 use presage::proto::{EditMessage, SyncMessage};
 use presage::store::{ContentExt, Store, Thread};
@@ -59,6 +59,9 @@ enum Event {
         timestamp: u64,
         text: String,
         attachments: Vec<String>,
+        /// The message this one answers, quoted.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        quote: Option<Quoted>,
     },
     /// Someone reacted with an emoji to a message, or took a reaction back (`remove`). The
     /// message is the one `target_author` sent at `target_timestamp`.
@@ -84,6 +87,17 @@ enum Event {
     },
 }
 
+/// The message a message answers: who sent it when, and (the start of) its text.
+#[derive(Serialize, Deserialize, Clone)]
+struct Quoted {
+    author: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    author_name: String,
+    timestamp: u64,
+    #[serde(default)]
+    text: String,
+}
+
 /// What Merel asks.
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -91,16 +105,13 @@ enum Command {
     Send {
         thread: String,
         text: String,
+        /// The message this one answers.
+        #[serde(default)]
+        quote: Option<Quoted>,
     },
     /// Reacts to the message `target_author` sent at `target_timestamp`; `remove` takes the
     /// reaction back. Signal keeps one reaction per person per message.
-    React {
-        thread: String,
-        emoji: String,
-        remove: bool,
-        target_author: String,
-        target_timestamp: u64,
-    },
+    React { thread: String, emoji: String, remove: bool, target_author: String, target_timestamp: u64 },
 }
 
 fn emit(event: &Event) {
@@ -212,7 +223,7 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
             },
             line = lines.next_line() => match line? {
                 Some(line) => match serde_json::from_str::<Command>(&line) {
-                    Ok(Command::Send { thread, text }) => match send(&mut sending, dir, key, &thread, &text).await {
+                    Ok(Command::Send { thread, text, quote }) => match send(&mut sending, dir, key, &thread, &text, quote.as_ref()).await {
                         Ok((to, timestamp)) => {
                             // As it came from another device of the account's, so Merel lists it.
                             let me = ServiceId::from(manager.registration_data().service_ids.aci());
@@ -227,6 +238,7 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                                 timestamp,
                                 text,
                                 attachments: Vec::new(),
+                                quote,
                             });
                             emit(&Event::Sent { thread, timestamp });
                         }
@@ -351,7 +363,7 @@ async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content)
         }) => (d, true),
         _ => return None,
     };
-    let DataMessage { body, attachments, reaction, .. } = data;
+    let DataMessage { body, attachments, reaction, quote, .. } = data;
     if let Some(r) = reaction {
         let thread = Thread::try_from(content).ok()?;
         let sender = &content.metadata.sender;
@@ -386,11 +398,43 @@ async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content)
         timestamp: content.timestamp(),
         text,
         attachments: names,
+        quote: match quote {
+            Some(q) => quoted(manager, q).await,
+            None => None,
+        },
     })
 }
 
-async fn send<S: Store>(manager: &mut Manager<S, Registered>, dir: &str, key: &str, thread: &str, text: &str) -> Result<(Thread, u64)> {
-    send_data(manager, dir, key, thread, DataMessage { body: Some(text.to_string()), ..Default::default() }).await
+async fn send<S: Store>(
+    manager: &mut Manager<S, Registered>,
+    dir: &str,
+    key: &str,
+    thread: &str,
+    text: &str,
+    quote: Option<&Quoted>,
+) -> Result<(Thread, u64)> {
+    let quote = quote.map(|q| Quote {
+        id: Some(q.timestamp),
+        author_aci: Some(q.author.clone()),
+        text: Some(q.text.clone()).filter(|t| !t.is_empty()),
+        r#type: Some(quote::Type::Normal as i32),
+        ..Default::default()
+    });
+    send_data(manager, dir, key, thread, DataMessage { body: Some(text.to_string()), quote, ..Default::default() }).await
+}
+
+/// The message `q` quotes, with its author's name.
+async fn quoted<S: Store>(manager: &Manager<S, Registered>, q: &Quote) -> Option<Quoted> {
+    let author = q.author_aci.clone()?;
+    let name = match ServiceId::parse_from_service_id_string(&author) {
+        Some(id) => contact_name(manager, &id).await,
+        None => String::new(),
+    };
+    let mut text = q.text.clone().unwrap_or_default();
+    if text.is_empty() {
+        text = q.attachments.iter().filter_map(|a| a.file_name.clone()).collect::<Vec<_>>().join(", ");
+    }
+    Some(Quoted { author, author_name: name, timestamp: q.id?, text })
 }
 
 /// Sends `message` to the chat `thread`, stamped with the time now.
