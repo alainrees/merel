@@ -14,9 +14,8 @@
 //! The store in `<dir>` is encrypted with the key in the environment variable `MEREL_SIGNAL_KEY`,
 //! which Merel keeps in the system keychain.
 
-#[cfg(feature = "calls")]
-mod calls;
 mod phone;
+mod wire;
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -40,7 +39,8 @@ use presage_store_sqlite::SqliteStore;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use crate::phone::{Phase, Phone};
+use crate::phone::Phone;
+use crate::wire::Phase;
 
 /// What Merel hears.
 #[derive(Serialize)]
@@ -88,8 +88,11 @@ enum Event {
     Synced {
         calls: bool,
     },
+    /// Whether calls can be made from here now (the calls program runs and has sound).
+    Calls {
+        available: bool,
+    },
     /// How a call in Merel goes: ringing, connected, ended….
-    #[cfg_attr(not(feature = "calls"), allow(dead_code))]
     Call {
         thread: String,
         name: String,
@@ -260,17 +263,26 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
     let mut sending = sender;
     let mut ringing = Ringing::default();
     let (mut phone, mut notes) = Phone::start();
+    let mut calls_open = true;
     loop {
         tokio::select! {
-            Some(note) = notes.recv() => {
-                for event in phone.handle(note, &mut sending, &mut ringing).await {
-                    emit(&event);
+            note = notes.recv(), if calls_open => match note {
+                Some(note) => {
+                    for event in phone.handle(note, &mut sending, &mut ringing).await {
+                        emit(&event);
+                    }
                 }
-            }
+                None => {
+                    calls_open = false;
+                    if let Some(event) = phone.stopped() {
+                        emit(&event);
+                    }
+                }
+            },
             received = messages.next() => match received {
                 Some(Received::QueueEmpty) => {
                     eprintln!("merel-signal: all waiting messages are in");
-                    emit(&Event::Synced { calls: cfg!(feature = "calls") })
+                    emit(&Event::Synced { calls: phone.ready() })
                 }
                 Some(Received::Content(content)) => {
                     // What kind of message came, never who or what: for finding out why one
@@ -347,9 +359,21 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                             emit(&Event::Error { message: format!("{e:#}") });
                         }
                     }
-                    Ok(Command::Accept { call_id }) => phone.accept(call_id),
-                    Ok(Command::HangUp) => phone.hang_up(),
-                    Ok(Command::Mute { on }) => phone.mute(on),
+                    Ok(Command::Accept { call_id }) => {
+                        if let Err(e) = phone.accept(call_id).await {
+                            emit(&Event::Error { message: format!("{e:#}") });
+                        }
+                    }
+                    Ok(Command::HangUp) => {
+                        if let Err(e) = phone.hang_up().await {
+                            emit(&Event::Error { message: format!("{e:#}") });
+                        }
+                    }
+                    Ok(Command::Mute { on }) => {
+                        if let Err(e) = phone.mute(on).await {
+                            emit(&Event::Error { message: format!("{e:#}") });
+                        }
+                    }
                     Err(e) => emit(&Event::Error { message: format!("unknown command: {e}") }),
                 },
                 // Merel closed: done.
@@ -542,7 +566,6 @@ struct Ringing(HashMap<u64, (ServiceId, CallKind, u64)>);
 
 impl Ringing {
     /// Merel itself took the call: how it ends is Merel's to log.
-    #[cfg_attr(not(feature = "calls"), allow(dead_code))]
     fn taken(&mut self, call_id: u64) {
         self.0.remove(&call_id);
     }

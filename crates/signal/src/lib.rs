@@ -87,6 +87,10 @@ pub enum Said {
     },
     /// How a call goes.
     Call(CallUpdate),
+    /// Whether calls can be made now: the calls program runs and has sound.
+    Calls {
+        available: bool,
+    },
     Error {
         message: String,
     },
@@ -592,7 +596,7 @@ impl SignalMailbox {
                         Said::Message(m) => lock(&into).add(m),
                         Said::Reaction(r) => lock(&into).react(r),
                         Said::Call(update) => UPDATES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((account.clone(), update)),
-                        Said::Synced { calls } => {
+                        Said::Synced { calls } | Said::Calls { available: calls } => {
                             if let Some(line) = lines().as_mut().and_then(|l| l.get_mut(&account)) {
                                 line.calls = calls;
                             }
