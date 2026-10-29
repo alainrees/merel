@@ -1,7 +1,9 @@
 //! The app's fonts. egui's own text font (Ubuntu Light) is thin and reads as grey, and its
 //! symbol fonts miss arrows and shapes the ribbon uses, so the app brings two of its own:
 //! Inter for text (OFL) and DejaVu Sans (Bitstream Vera licence) for the symbols. Both are
-//! embedded in the binary; their licences sit next to them under `assets/fonts`.
+//! embedded in the binary; their licences sit next to them under `assets/fonts`. Noto Emoji
+//! (OFL) comes after them for emoji: egui's own emoji font misses most of those made since
+//! 2016, which chat messages are full of.
 //!
 //! The message editor offers three typefaces in bold and italic too, so the app also carries
 //! Inter's bold and italic cuts, DejaVu Serif and DejaVu Sans Mono; each cut is a font family
@@ -14,6 +16,7 @@ use merel_model::rich::Face;
 
 const INTER: &[u8] = include_bytes!("../assets/fonts/Inter-Regular.otf");
 const DEJAVU_SANS: &[u8] = include_bytes!("../assets/fonts/DejaVuSans.ttf");
+const NOTO_EMOJI: &[u8] = include_bytes!("../assets/fonts/NotoEmoji-Regular.ttf");
 /// The cuts of the editor's typefaces: (name, bytes).
 const CUTS: [(&str, &[u8]); 7] = [
     ("Inter-Bold", include_bytes!("../assets/fonts/Inter-Bold.otf")),
@@ -53,10 +56,14 @@ pub fn definitions() -> FontDefinitions {
     let mut defs = FontDefinitions::default();
     defs.font_data.insert("Inter".to_owned(), Arc::new(FontData::from_static(INTER)));
     defs.font_data.insert("DejaVuSans".to_owned(), Arc::new(FontData::from_static(DEJAVU_SANS)));
+    defs.font_data.insert("NotoEmoji".to_owned(), Arc::new(FontData::from_static(NOTO_EMOJI)));
     let proportional = defs.families.entry(FontFamily::Proportional).or_default();
     proportional.insert(0, "Inter".to_owned());
     proportional.insert(1, "DejaVuSans".to_owned());
-    defs.families.entry(FontFamily::Monospace).or_default().insert(1, "DejaVuSans".to_owned());
+    proportional.insert(2, "NotoEmoji".to_owned());
+    let monospace = defs.families.entry(FontFamily::Monospace).or_default();
+    monospace.insert(1, "DejaVuSans".to_owned());
+    monospace.insert(2, "NotoEmoji".to_owned());
     for (name, bytes) in CUTS {
         defs.font_data.insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
     }

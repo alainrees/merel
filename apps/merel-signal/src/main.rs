@@ -97,7 +97,15 @@ async fn start() -> Result<()> {
         [cmd, dir, name] if cmd == "link" => link(open(dir, &key).await?, name).await,
         [cmd, dir] if cmd == "run" => {
             let manager = Manager::load_registered(open(dir, &key).await?).await?;
-            replay(&manager, &threads(dir, &key).await?).await?;
+            // Without the stored messages Merel still gets the new ones.
+            match threads(dir, &key).await {
+                Ok(threads) => {
+                    if let Err(e) = replay(&manager, &threads).await {
+                        eprintln!("merel-signal: the stored messages did not come: {e:#}");
+                    }
+                }
+                Err(e) => eprintln!("merel-signal: the stored chats could not be listed: {e:#}"),
+            }
             run(manager, dir, &key).await
         }
         _ => bail!("usage: merel-signal link <dir> <device name> | merel-signal run <dir>"),
@@ -158,13 +166,21 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
     loop {
         tokio::select! {
             received = messages.next() => match received {
-                Some(Received::QueueEmpty) => emit(&Event::Synced),
+                Some(Received::QueueEmpty) => {
+                    eprintln!("merel-signal: all waiting messages are in");
+                    emit(&Event::Synced)
+                }
                 Some(Received::Content(content)) => {
-                    if let Some(event) = describe(&manager, &content).await {
+                    // What kind of message came, never who or what: for finding out why one
+                    // does not show.
+                    let shown = describe(&manager, &content).await;
+                    eprintln!("merel-signal: received {}, {}", kind(&content.body), if shown.is_some() { "shown" } else { "not shown" });
+                    if let Some(event) = shown {
                         emit(&event);
                     }
                 }
-                Some(_) => {}
+                Some(Received::Contacts) => eprintln!("merel-signal: contacts synced"),
+                Some(Received::DecryptionError(_)) => eprintln!("merel-signal: a message could not be decrypted"),
                 None => bail!("the connection with Signal closed"),
             },
             line = lines.next_line() => match line? {
@@ -243,6 +259,20 @@ async fn contact_name<S: Store>(manager: &Manager<S, Registered>, id: &ServiceId
         .map(|c| if c.name.is_empty() { c.phone_number.map(|p| p.to_string()).unwrap_or_default() } else { c.name })
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| id.service_id_string())
+}
+
+/// The kind of a message, for the log.
+fn kind(body: &ContentBody) -> &'static str {
+    match body {
+        ContentBody::DataMessage(_) => "a message",
+        ContentBody::EditMessage(_) => "an edit",
+        ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Sent(_)), .. }) => "a message sent from another device",
+        ContentBody::SynchronizeMessage(_) => "a sync message",
+        ContentBody::CallMessage(_) => "a call",
+        ContentBody::ReceiptMessage(_) => "a receipt",
+        ContentBody::TypingMessage(_) => "typing",
+        _ => "something else",
+    }
 }
 
 /// The chat's name, and whether it is a group.

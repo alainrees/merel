@@ -371,7 +371,7 @@ fn connect(
                 return Err(merel_i18n::tr("signal-stopped"));
             };
             let helper = merel_signal_link::helper().ok_or_else(|| merel_i18n::tr("signal-no-program"))?;
-            Box::new(merel_signal_link::SignalMailbox::connect(&helper, dir, key, account.address.email()).map_err(|e| describe(&e))?)
+            Box::new(merel_signal_link::SignalMailbox::connect(&helper, dir, key, &account.address).map_err(|e| describe(&e))?)
         }
         Protocol::Exchange => Box::new(EwsClient::connect(server, &account.username, &credential).map_err(|e| describe(&e))?),
         Protocol::Gmail => Box::new(GoogleMailbox::connect(server, &account.username, &credential).map_err(|e| describe(&e))?),

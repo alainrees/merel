@@ -2388,7 +2388,6 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         );
                         from = format!("{} ({})", clip(m.from.display(), 28), fold.count);
                     }
-                    p.text(egui::pos2(x, rect.top() + 14.0), egui::Align2::LEFT_CENTER, from, egui::FontId::proportional(14.0), from_color);
                     let mut right = dates::short(m.date);
                     if m.has_attachments {
                         right = format!("📎 {right}");
@@ -2403,22 +2402,28 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         egui::FontId::proportional(12.0),
                         if m.flags.flagged { t.flag } else { t.text_dim },
                     );
+                    let mut from_end = right_rect.left() - 8.0;
                     if let Some((glyph, color)) = importance::mark(m.importance, t) {
-                        p.text(
+                        let mark = p.text(
                             egui::pos2(right_rect.left() - 6.0, rect.top() + 14.0),
                             egui::Align2::RIGHT_CENTER,
                             glyph,
                             egui::FontId::proportional(15.0),
                             color,
                         );
+                        from_end = mark.left() - 8.0;
                     }
+                    // Each line ends in "…" where the room ends, never over the date or the edge.
+                    one_line(ui, p, egui::pos2(x, rect.top() + 14.0), &from, egui::FontId::proportional(14.0), from_color, from_end - x);
                     let squares = categories::squares(app, p, egui::pos2(x + w, rect.top() + 34.0), &m.categories);
-                    p.text(
+                    one_line(
+                        ui,
+                        p,
                         egui::pos2(x, rect.top() + 34.0),
-                        egui::Align2::LEFT_CENTER,
-                        clip(&m.subject, if squares > 0.0 { 34 } else { 42 }),
+                        &m.subject,
                         egui::FontId::proportional(13.0),
                         if m.flags.seen { t.text } else { t.accent_text },
+                        w - squares - if squares > 0.0 { 8.0 } else { 0.0 },
                     );
                     if !compact {
                         // Which channel a chat came by, always; the folder when searching everywhere.
@@ -2437,7 +2442,8 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                                     }
                                     None => folder,
                                 };
-                                let job = snippet_job(&folder, snip, 48, t);
+                                let mut job = snippet_job(&folder, snip, 48, t);
+                                job.wrap = egui::text::TextWrapping::truncate_at_width(w);
                                 let galley = ui.fonts_mut(|f| f.layout_job(job));
                                 p.galley(egui::pos2(x, rect.top() + 52.0 - galley.size().y / 2.0), galley, t.text_dim);
                             }
@@ -2445,12 +2451,14 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                                 // Found on meaning alone: says why it is here without the words.
                                 let related = app.engine.session.current_index_hits().is_some_and(|h| h.related.contains(&m.id));
                                 let folder = if related { format!("{folder}{} ", crate::i18n::tr("search-related")) } else { folder };
-                                p.text(
+                                one_line(
+                                    ui,
+                                    p,
                                     egui::pos2(x, rect.top() + 52.0),
-                                    egui::Align2::LEFT_CENTER,
-                                    clip(&format!("{folder}{}", m.preview), 48),
+                                    &format!("{folder}{}", m.preview),
                                     egui::FontId::proportional(12.0),
                                     t.text_dim,
+                                    w,
                                 );
                             }
                         }
@@ -3224,6 +3232,14 @@ fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 }
 
 /// `s` cut to `n` characters with an ellipsis.
+/// `text` on one line from `pos` (its left middle), cut off with "…" where `width` ends.
+fn one_line(ui: &Ui, p: &egui::Painter, pos: egui::Pos2, text: &str, font: egui::FontId, color: Color32, width: f32) {
+    let mut job = egui::text::LayoutJob::simple_singleline(text.replace(['\n', '\r'], " "), font, color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(width.max(20.0));
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    p.galley(egui::pos2(pos.x, pos.y - galley.size().y / 2.0), galley, color);
+}
+
 fn clip(s: &str, n: usize) -> String {
     if s.chars().count() <= n { s.to_string() } else { format!("{}…", s.chars().take(n.saturating_sub(1)).collect::<String>()) }
 }
@@ -5749,6 +5765,23 @@ mod tests {
             }
         }
         assert!(missing.is_empty(), "these characters would draw as empty boxes: {missing:?}");
+    }
+
+    #[test]
+    fn emoji_from_a_phone_draw_without_empty_boxes() {
+        let mut h = harness();
+        h.run();
+        let boxes = |h: &mut egui_kittest::Harness<'static, MailApp>, text: &str| {
+            let replacement =
+                h.ctx.fonts_mut(|f| f.layout_no_wrap("\u{4E00}".into(), egui::FontId::proportional(14.0), Color32::WHITE)).rows[0].row.glyphs[0]
+                    .uv_rect;
+            let galley = h.ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), egui::FontId::proportional(14.0), Color32::WHITE));
+            galley.rows.iter().flat_map(|r| &r.row.glyphs).filter(|g| g.uv_rect == replacement).count()
+        };
+        // Newer emoji, and the variation selector phones put after a heart.
+        for text in ["🤔", "🥳", "🙂", "🥂", "🫠", "❤\u{FE0F}", "👍🏽", "👨\u{200D}👩\u{200D}👧"] {
+            assert_eq!(boxes(&mut h, text), 0, "{text:?} draws an empty box");
+        }
     }
 
     /// Every label on screen, for the checks that look for words left in the wrong language.

@@ -710,7 +710,7 @@ fn composer(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
         ui,
         |ui| {
             ui.allocate_ui_with_layout(vec2(ui.available_width(), 36.0), Layout::left_to_right(Align::Center), |ui| {
-                let width = (ui.available_width() - 44.0).max(120.0);
+                let width = (ui.available_width() - 82.0).max(120.0);
                 let hint = tr_args("chat-input-hint", &[("name", chat.title.as_str().into())]);
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut app.chat.input)
@@ -722,6 +722,7 @@ fn composer(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                 );
                 r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tr("chat-input")));
                 let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                emoji_button(ui, t, &mut app.chat.input);
                 let ready = !app.chat.input.trim().is_empty();
                 let clicked = ui.add_enabled_ui(ready, |ui| send_button(ui, t)).inner.clicked();
                 send = (enter || clicked) && ready;
@@ -732,6 +733,33 @@ fn composer(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
         app.send_in_chat();
         ui.memory_mut(|m| m.request_focus(egui::Id::new(INPUT)));
     }
+}
+
+/// The emoji most used in chats, for the button next to the line to write in.
+const EMOJI: [&str; 32] = [
+    "😀", "😂", "🙂", "😉", "😍", "🥰", "😘", "😎", "🤔", "😅", "😢", "😮", "😡", "🥳", "🙏", "👍", "👎", "👏", "🙌", "💪", "👋", "❤", "🔥", "🎉",
+    "✅", "❌", "⭐", "☕", "🍻", "🥂", "🎂", "🌹",
+];
+
+/// A smiley that opens the emoji to add to `input`; the computer's own picker works as well.
+fn emoji_button(ui: &mut Ui, t: &Tokens, input: &mut String) {
+    let r = ui.menu_button(RichText::new("🙂").size(19.0).color(t.text_dim), |ui| {
+        egui::Grid::new("chat-emoji").spacing(vec2(2.0, 2.0)).show(ui, |ui| {
+            for (i, e) in EMOJI.iter().enumerate() {
+                let b = ui.add(egui::Button::new(RichText::new(*e).size(20.0)).frame(false).min_size(vec2(32.0, 32.0)));
+                b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, *e));
+                if b.clicked() {
+                    input.push_str(e);
+                    ui.close();
+                }
+                if i % 8 == 7 {
+                    ui.end_row();
+                }
+            }
+        });
+    });
+    r.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-emoji")));
+    r.response.on_hover_text(tr("chat-emoji"));
 }
 
 /// The square blue send button with the paper plane.

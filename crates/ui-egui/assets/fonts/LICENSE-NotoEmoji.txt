@@ -1,0 +1,5 @@
+Noto Emoji (NotoEmoji-Regular.ttf), Copyright 2013-2026 Google LLC.
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+The full text is at https://openfontlicense.org/open-font-license-official-text/
+and in LICENSE-Inter.txt next to this file (the same licence).

@@ -1996,4 +1996,5 @@ signal-link-history = Berichten van vóór het koppelen haalt Signal niet op; ni
 signal-link-failed = Koppelen is niet gelukt.
 channel-chat = Chat
 signal-via = via Signal
+chat-emoji = Emoji toevoegen
 signal-attachment = Bijlage

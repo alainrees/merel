@@ -2011,4 +2011,5 @@ signal-link-history = Signal does not fetch messages from before linking; new me
 signal-link-failed = Linking did not work.
 channel-chat = Chat
 signal-via = via Signal
+chat-emoji = Add emoji
 signal-attachment = Attachment
