@@ -135,11 +135,12 @@ pub enum Icon {
     Mic,
     MicOff,
     PhoneOff,
+    Settings,
 }
 
 impl Icon {
     /// Every icon, for the test that each one loads.
-    pub const ALL: [Icon; 105] = [
+    pub const ALL: [Icon; 106] = [
         Icon::Archive,
         Icon::Bell,
         Icon::Calendar,
@@ -245,6 +246,7 @@ impl Icon {
         Icon::Mic,
         Icon::MicOff,
         Icon::PhoneOff,
+        Icon::Settings,
     ];
 
     /// The image's uri and its SVG source.
@@ -360,6 +362,7 @@ impl Icon {
             Icon::Mic => svg!("mic"),
             Icon::MicOff => svg!("mic-off"),
             Icon::PhoneOff => svg!("phone-off"),
+            Icon::Settings => svg!("settings"),
         }
     }
 
@@ -445,6 +448,15 @@ pub fn nav_item(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str, on: bool) -> R
     icon.image(ICON, color).paint_at(ui, Rect::from_min_size(pos2(left, rect.center().y - ICON / 2.0), vec2(ICON, ICON)));
     ui.painter().text(pos2(left + ICON + 10.0, rect.center().y), egui::Align2::LEFT_CENTER, label, FontId::proportional(14.0), color);
     r
+}
+
+/// A red round mark with a "!" at `center`, `radius` across, that says something waits for
+/// the person, such as a new version on the gear. A ring in the window's ground keeps it apart
+/// from the icon under it.
+pub fn alert_dot(ui: &Ui, t: &Tokens, center: egui::Pos2, radius: f32) {
+    let painter = ui.painter();
+    painter.circle(center, radius, t.flag, Stroke::new(2.0, t.window));
+    painter.text(center, egui::Align2::CENTER_CENTER, "!", FontId::proportional(radius * 1.5), t.on_flag);
 }
 
 /// A day of the week as a round button, lit in the app colour while `on`, as Outlook's

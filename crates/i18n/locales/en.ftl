@@ -1514,6 +1514,11 @@ updates-progress = { $done } of { $total } MB
 updates-restart-failed = Restarting did not work. Start Merel again yourself.
 updates-required-text = Update Merel before you continue. That way everyone always has the newest version, with every security fix.
 updates-retry = Try again
+settings = Settings
+settings-update = Settings: Merel { $version } is available
+updates-check-now = Check now
+updates-checking-now = Checking…
+updates-page-installed = Merel checks at every start and every few hours after that. You see a new version by the red exclamation mark on the gear at the bottom left.
 
 ## Installing updates
 install-interrupted = Updating was interrupted.

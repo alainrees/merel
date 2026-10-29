@@ -38,6 +38,8 @@ pub struct Tokens {
     pub on_accent: Color32,
     pub status_bar: Color32,
     pub flag: Color32,
+    /// Text and glyphs on a `flag` ground, such as the "!" of the update badge.
+    pub on_flag: Color32,
     /// The icon and edge of a notice that says an action worked; red stays for what failed.
     pub success: Color32,
     /// The icon and edge of a notice that asks for care.
@@ -77,6 +79,7 @@ impl Tokens {
             on_accent: Color32::WHITE,
             status_bar: Color32::from_rgb(0xF0, 0xF0, 0xF0),
             flag: Color32::from_rgb(0xC4, 0x31, 0x4B),
+            on_flag: Color32::WHITE,
             success: Color32::from_rgb(0x10, 0x7C, 0x10),
             warning: Color32::from_rgb(0xB2, 0x5E, 0x00),
             window: Color32::from_rgb(0xF3, 0xF4, 0xF6),
@@ -110,6 +113,7 @@ impl Tokens {
             on_accent: Color32::from_rgb(0x0B, 0x1A, 0x2E),
             status_bar: Color32::from_rgb(0x1F, 0x1F, 0x1F),
             flag: Color32::from_rgb(0xF0, 0x7A, 0x8C),
+            on_flag: Color32::from_rgb(0x1A, 0x1A, 0x1A),
             success: Color32::from_rgb(0x6C, 0xCB, 0x5F),
             warning: Color32::from_rgb(0xF2, 0xB1, 0x4B),
             window: Color32::from_rgb(0x1B, 0x1C, 0x1E),
@@ -247,6 +251,7 @@ mod tests {
             }
             need("on_accent", t.on_accent, t.accent, 4.5);
             need("on_found", t.on_found, t.found, 4.5);
+            need("on_flag", t.on_flag, t.flag, 4.5);
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }

@@ -523,6 +523,10 @@ Merel tells you when a newer release is out: "Updates" on the Help tab asks GitH
 away, and "Elke dag controleren op een nieuwe versie" in "Over Merel" asks once a day (off
 until you switch it on). A newer version opens a small window with its release notes,
 "Bijwerken", "Deze versie overslaan" and "Later"; the question carries no account or identifier.
+Until it is installed, the gear at the bottom of the left rail wears a red "!": it opens
+Bestand on the Updates page, with the release notes and "Bijwerken" (also after "Later"). An
+installed Merel asks at every start and every six hours after; a release found while you work
+only marks the gear, and is required at the next start.
 
 "Bijwerken" is a short wizard: it downloads the installer for this platform from the release,
 checks it, installs it and offers "Opnieuw starten". On macOS the `.dmg` is mounted read-only
