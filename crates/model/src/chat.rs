@@ -34,6 +34,67 @@ pub struct ChatTag {
     /// travels encrypted. Only a [`CallStep::Ring`] is a message to show.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call: Option<CallSignal>,
+    /// Set on a reaction going out (`Merel-Reaction`): the Message-ID of the message reacted
+    /// to. The text is the emoji; an empty text takes the reaction back. Only Signal sends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reaction_to: Option<String>,
+    /// The emoji people reacted with (`Merel-Reactions`), one per person. Only a Signal
+    /// account's messages carry them; the engine drops them from any other.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reactions: Vec<Reacted>,
+}
+
+/// One person's reaction to a message.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reacted {
+    pub emoji: String,
+    /// Who reacted, by name.
+    pub name: String,
+    /// Whether it was the account itself.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mine: bool,
+}
+
+/// Most reactions one message keeps.
+pub const MAX_REACTIONS: usize = 200;
+/// Most bytes one reaction's emoji may have: a family emoji with skin tones is about 40.
+pub const MAX_EMOJI: usize = 64;
+
+impl Reacted {
+    /// The `Merel-Reactions` header value: the reactions as base64 JSON.
+    pub fn header(reactions: &[Reacted]) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(reactions).unwrap_or_default())
+    }
+
+    /// The reactions a `Merel-Reactions` header value holds; none when it is not one.
+    pub fn from_header(value: Option<&str>) -> Vec<Reacted> {
+        use base64::Engine as _;
+        let Some(value) = value else { return Vec::new() };
+        let b64: String = value.chars().filter(|c| !c.is_whitespace()).collect();
+        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) else { return Vec::new() };
+        let all: Vec<Reacted> = serde_json::from_slice(&bytes).unwrap_or_default();
+        all.into_iter()
+            .take(MAX_REACTIONS)
+            .filter_map(|r| {
+                let emoji = clean_text(r.emoji.trim());
+                let name = clean_text(r.name.trim()).chars().take(MAX_GROUP_NAME).collect();
+                (!emoji.is_empty() && emoji.len() <= MAX_EMOJI).then_some(Reacted { emoji, name, mine: r.mine })
+            })
+            .collect()
+    }
+
+    /// The emoji used, each once with how many chose it, in the order they first came.
+    pub fn tally(reactions: &[Reacted]) -> Vec<(String, usize)> {
+        let mut out: Vec<(String, usize)> = Vec::new();
+        for r in reactions {
+            match out.iter_mut().find(|(e, _)| *e == r.emoji) {
+                Some((_, n)) => *n += 1,
+                None => out.push((r.emoji.clone(), 1)),
+            }
+        }
+        out
+    }
 }
 
 /// Most bytes of a session description a call step carries.
@@ -182,7 +243,7 @@ impl ChatTag {
             .and(group_name)
             .map(|n| clean_text(n.trim()).chars().take(MAX_GROUP_NAME).collect::<String>())
             .filter(|n| !n.is_empty());
-        Some(ChatTag { group_id, group_name, handshake: None, invite: false, call: None })
+        Some(ChatTag { group_id, group_name, ..ChatTag::default() })
     }
 
     /// A new group id: 16 characters from `random`, of the alphabet Delta Chat uses.

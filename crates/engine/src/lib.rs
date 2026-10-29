@@ -1007,6 +1007,8 @@ impl Session {
                 self.loading.remove(&folder_id);
                 let Some(folder) = self.folder(&folder_id) else { return };
                 let is_inbox = folder.kind == FolderKind::Inbox;
+                // Only Signal says who reacted how; from anyone else that would be made up.
+                let reactions_shown = self.accounts.iter().any(|a| a.id == folder.account_id && signal::is_signal(a));
                 if (headers.len() as u32) < limit.max(1) {
                     self.complete_folders.insert(folder_id.clone());
                 } else if offset == 0 {
@@ -1037,6 +1039,9 @@ impl Session {
                         fresh.push(id);
                     }
                     if let Some(mut m) = message_of(&folder_id, h) {
+                        if !reactions_shown && let Some(chat) = m.chat.as_mut() {
+                            chat.reactions.clear();
+                        }
                         if let Some(o) = opened.get(&m.id).filter(|_| m.sealed == merel_model::Sealed::Closed) {
                             (m.from, m.to, m.subject, m.date, m.chat, m.sealed) =
                                 (o.from.clone(), o.to.clone(), o.subject.clone(), o.date, o.chat.clone(), o.sealed);

@@ -126,6 +126,9 @@ fn build_message(from: &Address, draft: &Draft, keep_bcc: bool) -> Result<Messag
                 b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Chat-Group-Name"), name.clone()));
             }
         }
+        if let Some(to) = &chat.reaction_to {
+            b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Merel-Reaction"), to.clone()));
+        }
         // A step of setting up a meeting; the engine only sends it encrypted, and the
         // encryption keeps these headers inside.
         if let Some(call) = &chat.call {
@@ -231,7 +234,7 @@ mod tests {
         let one = Draft { chat: Some(ChatTag::default()), ..plain.clone() };
         let text = String::from_utf8(build(&from, &one).unwrap().formatted()).unwrap();
         assert!(text.contains("Chat-Version: 1.0\r\n") && !text.contains("Chat-Group"), "{text}");
-        let group = ChatTag { group_id: Some("Ab-9_x".into()), group_name: Some("Familie Rees".into()), handshake: None, invite: false, call: None };
+        let group = ChatTag { group_id: Some("Ab-9_x".into()), group_name: Some("Familie Rees".into()), ..ChatTag::default() };
         let text = String::from_utf8(build(&from, &Draft { chat: Some(group), ..plain.clone() }).unwrap().formatted()).unwrap();
         assert!(text.contains("Chat-Group-ID: Ab-9_x\r\n") && text.contains("Chat-Group-Name: Familie Rees\r\n"), "{text}");
 

@@ -539,6 +539,7 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
         }
         ui.with_layout(Layout::top_down(Align::Min), |ui| {
             let mut accept = None;
+            let mut react = None;
             egui::ScrollArea::vertical().auto_shrink(false).stick_to_bottom(true).show(ui, |ui| {
                 let mut day = None;
                 let mut previous: Option<String> = None;
@@ -553,8 +554,10 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                     let from = m.from.email().to_lowercase();
                     let first_of_run = previous.as_deref() != Some(from.as_str());
                     previous = Some(from);
-                    if let Some(link) = bubble(app, ui, t, chat, id, first_of_run) {
-                        accept = Some(link);
+                    match bubble(app, ui, t, chat, id, first_of_run) {
+                        Some(Clicked::Accept(link)) => accept = Some(link),
+                        Some(Clicked::React(emoji)) => react = Some((id.clone(), emoji)),
+                        None => {}
                     }
                 }
                 let waiting = waiting_in(app, chat);
@@ -567,6 +570,9 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                     }
                 }
             });
+            if let Some((id, emoji)) = react {
+                app.chat.error = app.engine.react(&id, &emoji).err();
+            }
             if let Some(link) = accept {
                 let account = chat.account_id.clone();
                 match app.take_invite(&account, &link) {
@@ -608,10 +614,22 @@ fn day_line(ui: &mut Ui, t: &Tokens, text: &str) {
     ui.add_space(6.0);
 }
 
+/// What was clicked on a message.
+enum Clicked {
+    /// Accept the invitation with this link.
+    Accept(String),
+    /// React with this emoji, or take it back when it was the account's own.
+    React(String),
+}
+
+/// The reactions Signal offers first, in its order.
+const QUICK_REACTIONS: [&str; 6] = ["❤️", "👍", "👎", "😂", "😮", "😢"];
+
 /// One message: on the right in the accent's tint when it is one's own, else on the left
 /// with the sender's avatar and name over the first of a run. An invitation shows as one,
-/// with a button to accept it; gives its link when that is clicked.
-fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_of_run: bool) -> Option<String> {
+/// with a button to accept it. In a Signal chat the reactions show under it, and a smiley
+/// beside it (on hover, or right-click the message) reacts.
+fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_of_run: bool) -> Option<Clicked> {
     let session = &app.engine.session;
     let m = session.message(id)?;
     let mine = session.chat_is_mine(id);
@@ -620,6 +638,11 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
     let ring = m.chat.as_ref().and_then(|c| c.call.as_ref()).is_some_and(|c| c.step == merel_model::CallStep::Ring);
     let max = (ui.available_width() * 0.7).min(480.0);
     let mut accept = None;
+    let reacts = app.engine.is_signal_account(&chat.account_id) && invite.is_none() && !ring;
+    let reactions = m.chat.as_ref().map(|c| c.reactions.clone()).unwrap_or_default();
+    // Whether the pointer was over this message last frame: then the smiley shows.
+    let hover_id = egui::Id::new(("chat-hover", id));
+    let hovered = ui.data(|d| d.get_temp::<bool>(hover_id)).unwrap_or(false);
     // Your own messages line up on the right, the others' on the left, as in any chat.
     let layout = Layout::top_down(if mine { Align::Max } else { Align::Min });
     ui.allocate_ui_with_layout(vec2(ui.available_width(), 0.0), layout, |ui| {
@@ -633,7 +656,10 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                 ui.label(RichText::new(who).size(12.0).color(t.text_dim));
             });
         }
-        ui.horizontal_top(|ui| {
+        let row = ui.horizontal_top(|ui| {
+            if mine && reacts {
+                react_button(ui, t, id, hovered, &mut accept);
+            }
             if !mine {
                 let (rect, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
                 if first_of_run {
@@ -656,7 +682,7 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                             if !mine && !app.engine.is_verified(m.from.email()) {
                                 ui.add_space(6.0);
                                 if helder::primary_button(ui, t, Icon::MessagesSquare, &tr("chat-accept-button")).clicked() {
-                                    accept = Some(link.clone());
+                                    accept = Some(Clicked::Accept(link.clone()));
                                 }
                             }
                         }
@@ -668,17 +694,102 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                                 ui.add(egui::Label::new(RichText::new(line).size(14.0).color(t.text)).wrap());
                             });
                         }
-                        None => {
-                            ui.add(egui::Label::new(RichText::new(text.as_str()).size(14.0).color(t.text)).wrap());
-                        }
+                        None => crate::emoji::label(ui, &text, 14.0, t.text),
                     }
                 },
             );
+            if !mine && reacts {
+                react_button(ui, t, id, hovered, &mut accept);
+            }
         });
+        if reacts {
+            let over = ui.rect_contains_pointer(row.response.rect);
+            ui.data_mut(|d| d.insert_temp(hover_id, over));
+            ui.interact(row.response.rect, egui::Id::new(("chat-bubble", id)), Sense::click()).context_menu(|ui| {
+                reaction_menu(ui, &mut accept);
+            });
+            if !reactions.is_empty() {
+                ui.horizontal(|ui| {
+                    if !mine {
+                        ui.add_space(40.0);
+                    }
+                    reaction_chips(ui, t, &reactions, &mut accept);
+                });
+            }
+        }
     });
-    let _ = chat;
     ui.add_space(4.0);
     accept
+}
+
+/// The smiley beside a message that opens the reactions; it shows while the pointer is over
+/// the message or the menu is open, and keeps its place otherwise so nothing moves.
+fn react_button(ui: &mut Ui, t: &Tokens, id: &str, hovered: bool, clicked: &mut Option<Clicked>) {
+    let menu_id = egui::Id::new(("chat-react", id));
+    let open = egui::Popup::is_id_open(ui.ctx(), menu_id);
+    let size = vec2(28.0, 28.0);
+    if !(hovered || open) {
+        ui.allocate_exact_size(size, Sense::hover());
+        return;
+    }
+    let button = egui::Button::new(RichText::new("☺").size(17.0).color(t.text_dim)).frame(false).min_size(size);
+    let r = ui.add(button);
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-react")));
+    egui::Popup::menu(&r).id(menu_id).show(|ui| reaction_menu(ui, clicked));
+    r.on_hover_text(tr("chat-react"));
+}
+
+/// Signal's six reactions in a row, and under them the other emoji.
+fn reaction_menu(ui: &mut Ui, clicked: &mut Option<Clicked>) {
+    let mut pick = |ui: &mut Ui, e: &str, size: f32| {
+        let b = ui.add(emoji_button_of(ui, e, size).frame(false).min_size(vec2(size + 12.0, size + 12.0)));
+        b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, e));
+        if b.clicked() {
+            *clicked = Some(Clicked::React(e.to_string()));
+            ui.close();
+        }
+    };
+    ui.horizontal(|ui| {
+        for e in QUICK_REACTIONS {
+            pick(ui, e, 24.0);
+        }
+    });
+    ui.separator();
+    egui::Grid::new("chat-react-more").spacing(vec2(2.0, 2.0)).show(ui, |ui| {
+        for (i, e) in EMOJI.iter().filter(|e| !QUICK_REACTIONS.iter().any(|q| q.trim_end_matches('\u{FE0F}') == **e)).enumerate() {
+            pick(ui, e, 18.0);
+            if i % 8 == 7 {
+                ui.end_row();
+            }
+        }
+    });
+}
+
+/// The reactions under a message: each emoji once with how many chose it, framed in the
+/// accent when one of them is the account's own. Clicking one reacts the same, or takes the
+/// account's own back; hovering says who.
+fn reaction_chips(ui: &mut Ui, t: &Tokens, reactions: &[merel_model::Reacted], clicked: &mut Option<Clicked>) {
+    for (emoji, count) in merel_model::Reacted::tally(reactions) {
+        let mine = reactions.iter().any(|r| r.mine && r.emoji == emoji);
+        let who: Vec<&str> = reactions.iter().filter(|r| r.emoji == emoji).map(|r| r.name.as_str()).collect();
+        let button = match crate::emoji::image_of(ui.ctx(), &emoji, 16.0) {
+            Some(img) if count > 1 => egui::Button::image_and_text(img, RichText::new(count.to_string()).size(13.0).color(t.text)),
+            Some(img) => egui::Button::image(img),
+            None if count > 1 => egui::Button::new(RichText::new(format!("{emoji} {count}")).size(14.0).color(t.text)),
+            None => egui::Button::new(RichText::new(emoji.as_str()).size(14.0).color(t.text)),
+        };
+        let button = button
+            .fill(if mine { t.checked } else { t.card })
+            .stroke(egui::Stroke::new(1.0, if mine { t.accent } else { t.card_border }))
+            .corner_radius(10)
+            .min_size(vec2(32.0, 24.0));
+        let r = ui.add(button);
+        let names = who.join(", ");
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{emoji} {names}")));
+        if r.on_hover_text(names).clicked() {
+            *clicked = Some(Clicked::React(emoji.clone()));
+        }
+    }
 }
 
 /// A message of one's own that waits for a key: dimmed, with what it waits for under it.
@@ -741,12 +852,26 @@ const EMOJI: [&str; 32] = [
     "✅", "❌", "⭐", "☕", "🍻", "🥂", "🎂", "🌹",
 ];
 
+/// A button showing emoji `e` in colour, `size` points.
+fn emoji_button_of(ui: &Ui, e: &str, size: f32) -> egui::Button<'static> {
+    match crate::emoji::image_of(ui.ctx(), e, size) {
+        Some(img) => egui::Button::image(img),
+        None => egui::Button::new(RichText::new(e.to_string()).size(size)),
+    }
+}
+
+/// Every emoji the pickers offer.
+#[cfg(test)]
+pub(crate) fn all_emoji() -> impl Iterator<Item = &'static str> {
+    EMOJI.into_iter().chain(QUICK_REACTIONS)
+}
+
 /// A smiley that opens the emoji to add to `input`; the computer's own picker works as well.
 fn emoji_button(ui: &mut Ui, t: &Tokens, input: &mut String) {
     let r = ui.menu_button(RichText::new("🙂").size(19.0).color(t.text_dim), |ui| {
         egui::Grid::new("chat-emoji").spacing(vec2(2.0, 2.0)).show(ui, |ui| {
             for (i, e) in EMOJI.iter().enumerate() {
-                let b = ui.add(egui::Button::new(RichText::new(*e).size(20.0)).frame(false).min_size(vec2(32.0, 32.0)));
+                let b = ui.add(emoji_button_of(ui, e, 20.0).frame(false).min_size(vec2(32.0, 32.0)));
                 b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, *e));
                 if b.clicked() {
                     input.push_str(e);
