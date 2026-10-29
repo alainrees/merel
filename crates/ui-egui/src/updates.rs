@@ -5,7 +5,10 @@
 //!
 //! An installed Merel, one that can update itself, asks at every start, and a newer release
 //! must be installed before Merel can be used ([`required_screen`]): a fix for a vulnerability
-//! then reaches everyone. Without internet Merel starts as usual. A build from source asks
+//! then reaches everyone. Without internet Merel starts as usual. While it keeps running it
+//! asks again every few hours; a release found then does not take the window away from work
+//! but puts a red "!" on the gear at the bottom left ([`badge`]), and is required at the next
+//! start. A build from source asks
 //! only when the person asks (Help tab) or has switched on the daily check, and never blocks.
 //! The question shows GitHub this computer's address and that Merel runs. It carries
 //! no account, no identifier and no version: one `https` GET with a short timeout and a size
@@ -31,6 +34,8 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_REPLY_BYTES: u64 = 512 * 1024;
 /// How often the daily check asks while the app keeps running.
 pub const INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+/// How often an installed Merel asks while it keeps running, so the gear soon shows a release.
+pub const INSTALLED_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 /// Where the list GitHub adds to the release notes begins.
 const GENERATED: [&str; 3] = ["## What's Changed", "## New Contributors", "**Full Changelog**"];
 
@@ -118,6 +123,12 @@ pub struct Updates {
     pub self_update: bool,
     /// The offer is a required update: Merel cannot be used until it is installed.
     pub required: bool,
+    /// The newest release a check found, while it is newer than this build: the gear shows it
+    /// with a red "!" and Bestand > Updates offers it, also after "Later".
+    pub newest: Option<Release>,
+    /// Whether a check has answered since Merel started. Only the first one, at start, makes an
+    /// update required; one found later waits on the gear until the next start.
+    answered: bool,
 }
 
 impl Updates {
@@ -128,6 +139,14 @@ impl Updates {
     pub fn running(&self) -> bool {
         self.pending.is_some()
     }
+}
+
+/// The release the gear points at with a red "!", if any: a newer one that is not required
+/// yet (a required one fills the window) and not skipped by the person.
+pub fn badge(app: &MailApp) -> Option<&Release> {
+    let newest = app.updates.newest.as_ref()?;
+    let skipped = !app.updates.self_update && app.view.skipped_version.as_deref() == Some(newest.version.as_str());
+    (!app.updates.required && !skipped).then_some(newest)
 }
 
 /// A version number "1.2.3" (a leading "v" allowed) as three numbers; anything else is `None`,
@@ -205,6 +224,10 @@ impl MailApp {
         self.updates.pending = Some(slot.clone());
         self.updates.manual = manual;
         self.updates.last = Some(Instant::now());
+        // Tests give the answer themselves, through `finish_update_check`, and stay offline.
+        if cfg!(test) {
+            return;
+        }
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let outcome = ask();
@@ -219,12 +242,25 @@ impl MailApp {
     /// speaks only of a newer release they have not chosen to skip.
     pub fn finish_update_check(&mut self, outcome: Outcome) {
         let manual = std::mem::take(&mut self.updates.manual);
+        let first = !std::mem::replace(&mut self.updates.answered, true);
+        if let Outcome::UpToDate | Outcome::NoneYet = outcome {
+            self.updates.newest = None;
+        }
         match outcome {
-            Outcome::Newer(release) if self.updates.self_update => {
+            Outcome::Newer(release) if self.updates.self_update && first => {
+                self.updates.newest = Some(release.clone());
                 self.updates.offer = Some(release);
                 self.updates.required = true;
             }
+            // Found while Merel is in use: the gear shows it; the window only when asked.
+            Outcome::Newer(release) if self.updates.self_update => {
+                self.updates.newest = Some(release.clone());
+                if manual {
+                    self.updates.offer = Some(release);
+                }
+            }
             Outcome::Newer(release) => {
+                self.updates.newest = Some(release.clone());
                 if manual || self.view.skipped_version.as_deref() != Some(release.version.as_str()) {
                     self.updates.offer = Some(release);
                 }
@@ -246,16 +282,16 @@ impl MailApp {
     }
 
     /// Picks up a finished check and starts the next when it is due; every frame. An installed
-    /// Merel asks at every start, whatever the daily setting says.
+    /// Merel asks at every start and every few hours after, whatever the daily setting says.
     pub fn tick_updates(&mut self, ctx: &egui::Context) {
         let done = self.updates.pending.as_ref().and_then(|slot| slot.lock().ok().and_then(|mut s| s.take()));
         if let Some(outcome) = done {
             self.updates.pending = None;
             self.finish_update_check(outcome);
         }
-        let due = self.updates.last.is_none_or(|t| t.elapsed() >= INTERVAL);
-        let start = self.updates.last.is_none() && self.updates.self_update;
-        if (start || self.view.update_check == Some(true)) && due && !self.updates.running() {
+        let every = if self.updates.self_update { INSTALLED_INTERVAL } else { INTERVAL };
+        let due = self.updates.last.is_none_or(|t| t.elapsed() >= every);
+        if (self.updates.self_update || self.view.update_check == Some(true)) && due && !self.updates.running() {
             self.check_for_updates(ctx, false);
         }
     }
@@ -285,6 +321,57 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let closed = helder::dialog(ctx, t, &window_label(), 460.0, |ui| close = offer(app, ui, t, &release));
     if close || closed {
         app.updates.offer = None;
+    }
+}
+
+/// Bestand > Updates, where the gear leads: the version in use, a newer one with "Bijwerken"
+/// when there is one, a button to check now and the daily check.
+pub fn page(app: &mut MailApp, ui: &mut egui::Ui, t: &Tokens) {
+    ui.label(RichText::new(check()).size(helder::TITLE_TEXT).strong().color(t.text));
+    ui.add_space(4.0);
+    ui.label(RichText::new(crate::i18n::tr_args("updates-current", &[("version", env!("CARGO_PKG_VERSION").into())])).size(14.0).color(t.text_dim));
+    ui.add_space(16.0);
+    if let Some(release) = badge(app).cloned() {
+        helder::card_frame(t).inner_margin(20).show(ui, |ui| {
+            ui.set_width(ui.available_width().min(560.0));
+            ui.horizontal(|ui| {
+                helder::badge(ui, t, Icon::Download);
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(crate::i18n::tr_args("updates-available", &[("version", release.version.as_str().into())]))
+                        .size(18.0)
+                        .strong()
+                        .color(t.text),
+                );
+            });
+            if !release.notes.is_empty() {
+                ui.add_space(12.0);
+                egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| crate::release_notes::show(ui, t, &release.notes));
+            }
+            ui.add_space(12.0);
+            // The window walks through the update, as when Merel offers it by itself.
+            if helder::primary_button(ui, t, Icon::Download, &update()).clicked() {
+                app.updates.offer = Some(release.clone());
+            }
+        });
+        ui.add_space(16.0);
+    }
+    ui.horizontal(|ui| {
+        let running = app.updates.running();
+        let label = if running { tr("updates-checking-now") } else { tr("updates-check-now") };
+        if ui.add_enabled(!running, egui::Button::new(RichText::new(label).size(14.0).color(t.text))).clicked() {
+            app.check_for_updates(ui.ctx(), true);
+        }
+    });
+    ui.add_space(12.0);
+    let mut auto = app.view.update_check == Some(true);
+    if helder::toggle(ui, t, &mut auto, &self::auto()).changed() {
+        app.view.update_check = Some(auto);
+        app.save_view(ui.ctx());
+    }
+    if app.updates.self_update {
+        ui.add_space(8.0);
+        ui.add(egui::Label::new(RichText::new(tr("updates-page-installed")).size(12.0).color(t.text_dim)).wrap());
     }
 }
 

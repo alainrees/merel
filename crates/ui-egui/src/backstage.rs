@@ -274,6 +274,7 @@ pub enum Page {
     Accounts,
     Notifications,
     Search,
+    Updates,
 }
 
 pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
@@ -297,6 +298,14 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             if helder::nav_item(ui, t, Icon::Search, &crate::search_page::page_label(), app.file_page == Page::Search).clicked() {
                 app.file_page = Page::Search;
             }
+            let mut r = helder::nav_item(ui, t, Icon::Download, &crate::updates::check(), app.file_page == Page::Updates);
+            if let Some(release) = crate::updates::badge(app) {
+                helder::alert_dot(ui, t, r.rect.right_center() - egui::vec2(18.0, 0.0), 8.0);
+                r = r.on_hover_text(crate::i18n::tr_args("updates-available", &[("version", release.version.as_str().into())]));
+            }
+            if r.clicked() {
+                app.file_page = Page::Updates;
+            }
             for action in FileAction::ALL {
                 if helder::nav_item(ui, t, action.icon(), &action.label(), false).clicked() {
                     run(app, action);
@@ -312,6 +321,9 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
             Page::Search => {
                 egui::ScrollArea::vertical().show(ui, |ui| crate::search_page::page(app, ui, t));
+            }
+            Page::Updates => {
+                egui::ScrollArea::vertical().show(ui, |ui| crate::updates::page(app, ui, t));
             }
         });
     });
