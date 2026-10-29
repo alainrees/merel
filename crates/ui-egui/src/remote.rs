@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use merel_html::{Block, Document, ImageSource, Inline};
+use merel_html::{Document, ImageSource, Inline};
 
 /// The largest picture fetched, in bytes.
 pub const MAX_IMAGE_BYTES: u64 = 5 * 1024 * 1024;
@@ -102,28 +102,17 @@ pub fn fetchable(url: &str) -> bool {
 
 /// Every remote picture URL in `doc`, in reading order, each once.
 pub fn remote_urls(doc: &Document) -> Vec<String> {
-    fn walk(blocks: &[Block], out: &mut Vec<String>) {
-        for b in blocks {
-            match b {
-                Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
-                    for i in inlines {
-                        if let Inline::Image(img) = i
-                            && let ImageSource::Remote(url) = &img.source
-                            && !out.contains(url)
-                        {
-                            out.push(url.clone());
-                        }
-                    }
-                }
-                Block::Quote(inner) => walk(inner, out),
-                Block::List { items, .. } => items.iter().for_each(|item| walk(item, out)),
-                Block::Table(rows) => rows.iter().flatten().for_each(|c| walk(&c.blocks, out)),
-                Block::Code(_) | Block::Rule => {}
+    let mut out: Vec<String> = Vec::new();
+    merel_html::for_each_run(&doc.blocks, &mut |inlines| {
+        for i in inlines {
+            if let Inline::Image(img) = i
+                && let ImageSource::Remote(url) = &img.source
+                && !out.contains(url)
+            {
+                out.push(url.clone());
             }
         }
-    }
-    let mut out = Vec::new();
-    walk(&doc.blocks, &mut out);
+    });
     out
 }
 

@@ -2,8 +2,8 @@
 //!
 //! Everything that comes out of here is bounded and cleaned: names and subjects go through
 //! [`merel_model::clean_text`], addresses through [`Address::new`], and HTML goes through
-//! `merel_html` into a small layout tree (no scripts, no styles, no remote loads can
-//! survive that), with a plain-text rendering next to it for previews and replies.
+//! `merel_html` into a small layout tree (no scripts, no remote loads can survive that, and
+//! of the styles only colours, sizes and alignments read into numbers), with a plain-text rendering next to it for previews and replies.
 
 use std::sync::Arc;
 
