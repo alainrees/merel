@@ -443,7 +443,7 @@ fn controls(app: &mut MailApp, ui: &mut Ui, t: &Tokens) -> bool {
 
 /// A round button with its name under it, as in the design: filled in the selection colour
 /// when on, red for leaving.
-fn round(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str, on: bool, danger: bool) -> egui::Response {
+pub(crate) fn round(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str, on: bool, danger: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(vec2(96.0, 72.0), Sense::click());
     response.widget_info(|| {
         if danger {

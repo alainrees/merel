@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use merel_model::{Account, Address, Auth, Draft, FolderKind, Protocol, Server, Tls};
 use merel_secrets::Secret;
-pub use merel_signal_link::is_signal_address;
+pub use merel_signal_link::{CallPhase as SignalCallPhase, CallUpdate as SignalCallUpdate, is_signal_address};
 use merel_signal_link::{LinkStep, Linking};
 
 use crate::{AccountStatus, Engine};
@@ -197,6 +197,52 @@ impl Engine {
     /// Whether `account_id` is a Signal account.
     pub fn is_signal_account(&self, account_id: &str) -> bool {
         self.session.accounts.iter().any(|a| a.id == account_id && is_signal(a))
+    }
+
+    /// The address of the Signal account `account_id`, which its program is known by.
+    fn signal_address(&self, account_id: &str) -> Result<String, String> {
+        self.session
+            .accounts
+            .iter()
+            .find(|a| a.id == account_id && is_signal(a))
+            .map(|a| a.address.email().to_string())
+            .ok_or_else(|| merel_i18n::tr("signal-stopped"))
+    }
+
+    /// Whether the Signal account `account_id` can call from this computer: Signal's calling
+    /// library is in this build of its program, and the program runs.
+    pub fn signal_can_call(&self, account_id: &str) -> bool {
+        self.signal_address(account_id).is_ok_and(|me| merel_signal_link::can_call(&me))
+    }
+
+    /// Calls the person behind the Signal address `to` (sound only); how it goes comes from
+    /// [`Engine::take_signal_calls`].
+    pub fn signal_call(&self, account_id: &str, to: &str) -> Result<(), String> {
+        merel_signal_link::call(&self.signal_address(account_id)?, to)
+    }
+
+    pub fn signal_accept(&self, account_id: &str, call_id: u64) -> Result<(), String> {
+        merel_signal_link::accept_call(&self.signal_address(account_id)?, call_id)
+    }
+
+    /// Ends the Signal call going on, or declines the one ringing.
+    pub fn signal_hang_up(&self, account_id: &str) -> Result<(), String> {
+        merel_signal_link::hang_up(&self.signal_address(account_id)?)
+    }
+
+    pub fn signal_mute(&self, account_id: &str, on: bool) -> Result<(), String> {
+        merel_signal_link::mute(&self.signal_address(account_id)?, on)
+    }
+
+    /// How Signal calls went since the last time, with the account each is on.
+    pub fn take_signal_calls(&self) -> Vec<(String, SignalCallUpdate)> {
+        merel_signal_link::take_call_updates()
+            .into_iter()
+            .filter_map(|(me, update)| {
+                let account = self.session.accounts.iter().find(|a| is_signal(a) && a.address.email().eq_ignore_ascii_case(&me))?;
+                Some((account.id.clone(), update))
+            })
+            .collect()
     }
 }
 

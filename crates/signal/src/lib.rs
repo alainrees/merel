@@ -67,13 +67,29 @@ pub fn is_signal_address(email: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Said {
-    Link { url: String },
-    Linked { number: Option<String>, id: String },
+    Link {
+        url: String,
+    },
+    Linked {
+        number: Option<String>,
+        id: String,
+    },
     Message(Received),
     Reaction(Reaction),
-    Synced,
-    Sent { thread: String, timestamp: u64 },
-    Error { message: String },
+    /// `calls` says whether this build of the program can call.
+    Synced {
+        #[serde(default)]
+        calls: bool,
+    },
+    Sent {
+        thread: String,
+        timestamp: u64,
+    },
+    /// How a call goes.
+    Call(CallUpdate),
+    Error {
+        message: String,
+    },
 }
 
 /// A message as the program passes it on.
@@ -211,6 +227,110 @@ impl Received {
 enum Asked<'a> {
     Send { thread: &'a str, text: &'a str },
     React { thread: &'a str, emoji: &'a str, remove: bool, target_author: &'a str, target_timestamp: u64 },
+    Call { thread: &'a str },
+    Accept { call_id: u64 },
+    HangUp,
+    Mute { on: bool },
+}
+
+/// How a call in Merel goes, as the program says.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct CallUpdate {
+    /// The chat with the other person: their Signal address.
+    #[serde(deserialize_with = "thread_address_of")]
+    pub thread: String,
+    #[serde(default)]
+    pub name: String,
+    pub call_id: u64,
+    pub state: CallPhase,
+}
+
+fn thread_address_of<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<String, D::Error> {
+    String::deserialize(d).map(|t| address_of(&t))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallPhase {
+    /// Someone calls: ring, and offer to answer.
+    Incoming,
+    /// Merel calls someone.
+    Outgoing,
+    /// It rings at the other side.
+    Ringing,
+    Connecting,
+    Connected,
+    /// Answered on another device of the account.
+    AnsweredElsewhere,
+    /// Declined, or busy.
+    Declined,
+    Ended,
+    Failed,
+}
+
+impl CallPhase {
+    /// Whether the call is over.
+    pub fn is_over(self) -> bool {
+        matches!(self, CallPhase::AnsweredElsewhere | CallPhase::Declined | CallPhase::Ended | CallPhase::Failed)
+    }
+}
+
+/// The line to each running program, by the account's own address, for calls: they go past
+/// the mail jobs, as they cannot wait.
+struct Line {
+    stdin: Arc<Mutex<ChildStdin>>,
+    messages: Arc<Mutex<Messages>>,
+    calls: bool,
+}
+
+static LINES: Mutex<Option<HashMap<String, Line>>> = Mutex::new(None);
+/// What the programs said about calls, by account address, until Merel takes it.
+static UPDATES: Mutex<Vec<(String, CallUpdate)>> = Mutex::new(Vec::new());
+
+fn lines() -> std::sync::MutexGuard<'static, Option<HashMap<String, Line>>> {
+    LINES.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Whether the Signal account with address `me` can call from here.
+pub fn can_call(me: &str) -> bool {
+    lines().as_ref().and_then(|l| l.get(&me.to_lowercase())).is_some_and(|l| l.calls)
+}
+
+/// What happened with calls since the last time, with the account address it is about.
+pub fn take_call_updates() -> Vec<(String, CallUpdate)> {
+    std::mem::take(&mut *UPDATES.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+}
+
+fn ask(me: &str, asked: &Asked) -> std::result::Result<(), String> {
+    let guard = lines();
+    let line = guard.as_ref().and_then(|l| l.get(&me.to_lowercase())).ok_or_else(|| merel_i18n::tr("signal-stopped"))?;
+    let text = serde_json::to_string(asked).map_err(|e| e.to_string())?;
+    let mut stdin = line.stdin.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    writeln!(stdin, "{text}").and_then(|()| stdin.flush()).map_err(|_| merel_i18n::tr("signal-stopped"))
+}
+
+/// Calls the person behind the Signal address `to`, from the account `me`.
+pub fn call(me: &str, to: &str) -> std::result::Result<(), String> {
+    let thread = {
+        let guard = lines();
+        let line = guard.as_ref().and_then(|l| l.get(&me.to_lowercase())).ok_or_else(|| merel_i18n::tr("signal-stopped"))?;
+        let thread = lock(&line.messages).threads.get(&to.to_lowercase()).cloned();
+        thread.ok_or_else(|| merel_i18n::tr("signal-unknown"))?
+    };
+    ask(me, &Asked::Call { thread: &thread })
+}
+
+pub fn accept_call(me: &str, call_id: u64) -> std::result::Result<(), String> {
+    ask(me, &Asked::Accept { call_id })
+}
+
+/// Ends the call going on, or declines the one ringing.
+pub fn hang_up(me: &str) -> std::result::Result<(), String> {
+    ask(me, &Asked::HangUp)
+}
+
+pub fn mute(me: &str, on: bool) -> std::result::Result<(), String> {
+    ask(me, &Asked::Mute { on })
 }
 
 /// The program running, and what it said so far.
@@ -416,7 +536,7 @@ fn is_name(name: &str, id: &str) -> bool {
 /// A linked Signal account, read through the program.
 pub struct SignalMailbox {
     program: Program,
-    stdin: ChildStdin,
+    stdin: Arc<Mutex<ChildStdin>>,
     messages: Arc<Mutex<Messages>>,
     /// What came from the program besides messages, for [`SignalMailbox::send`].
     replies: Receiver<Said>,
@@ -437,12 +557,16 @@ impl SignalMailbox {
         let stdin = stdin.ok_or_else(|| unreachable("no input".into()))?;
         let messages = Arc::new(Mutex::new(Messages::default()));
         let deadline = Instant::now() + FIRST_SYNC;
+        let mut calls = false;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             match program.said.recv_timeout(left) {
                 Ok(Said::Message(m)) => lock(&messages).add(m),
                 Ok(Said::Reaction(r)) => lock(&messages).react(r),
-                Ok(Said::Synced) => break,
+                Ok(Said::Synced { calls: c }) => {
+                    calls = c;
+                    break;
+                }
                 Ok(Said::Error { message }) => return Err(unreachable(message)),
                 Ok(_) => {}
                 // Slow, not broken: what came so far is shown, the rest follows.
@@ -454,6 +578,9 @@ impl SignalMailbox {
         let (tx, replies) = channel();
         let said = std::mem::replace(&mut program.said, channel().1);
         let into = messages.clone();
+        let account = me.email().to_lowercase();
+        let stdin = Arc::new(Mutex::new(stdin));
+        lines().get_or_insert_with(HashMap::new).insert(account.clone(), Line { stdin: stdin.clone(), messages: messages.clone(), calls });
         let stopped = Arc::new(Mutex::new(None));
         let stop = stopped.clone();
         std::thread::Builder::new()
@@ -464,6 +591,12 @@ impl SignalMailbox {
                     match s {
                         Said::Message(m) => lock(&into).add(m),
                         Said::Reaction(r) => lock(&into).react(r),
+                        Said::Call(update) => UPDATES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((account.clone(), update)),
+                        Said::Synced { calls } => {
+                            if let Some(line) = lines().as_mut().and_then(|l| l.get_mut(&account)) {
+                                line.calls = calls;
+                            }
+                        }
                         other => {
                             if let Said::Error { message } = &other {
                                 log::warn!("signal: {}", clean(message));
@@ -516,7 +649,10 @@ impl SignalMailbox {
     /// Passes `asked` to the program and waits until what it sent to `thread` went out.
     fn ask(&mut self, asked: &Asked<'_>, thread: &str) -> Result<bool> {
         let line = serde_json::to_string(asked).map_err(|e| MailboxError::Protocol(e.to_string()))?;
-        writeln!(self.stdin, "{line}").and_then(|()| self.stdin.flush()).map_err(|_| MailboxError::Protocol(merel_i18n::tr("signal-stopped")))?;
+        {
+            let mut stdin = self.stdin.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            writeln!(stdin, "{line}").and_then(|()| stdin.flush()).map_err(|_| MailboxError::Protocol(merel_i18n::tr("signal-stopped")))?;
+        }
         let deadline = Instant::now() + SEND_WAIT;
         loop {
             match self.replies.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
@@ -651,6 +787,9 @@ impl Mailbox for SignalMailbox {
     }
 
     fn logout(mut self: Box<Self>) {
+        if let Some(lines) = lines().as_mut() {
+            lines.remove(&self.me.to_lowercase());
+        }
         self.program.stop();
     }
 }
@@ -872,7 +1011,12 @@ mod tests {
         let Ok(Said::Message(m)) = serde_json::from_str::<Said>(line) else { panic!("not read") };
         assert_eq!(m.attachments, vec!["foto.jpg".to_string()]);
         assert_eq!(m.id(), "5.1b2c");
-        assert_eq!(serde_json::from_str::<Said>(r#"{"type":"synced"}"#).ok(), Some(Said::Synced));
+        assert_eq!(serde_json::from_str::<Said>(r#"{"type":"synced"}"#).ok(), Some(Said::Synced { calls: false }));
+        let line = r#"{"type":"call","thread":"1B2C","name":"Jan","call_id":7,"state":"incoming"}"#;
+        let Ok(Said::Call(update)) = serde_json::from_str::<Said>(line) else { panic!("not read") };
+        assert_eq!(update.thread, "1b2c@signal.invalid");
+        assert_eq!(update.state, CallPhase::Incoming);
+        assert!(!update.state.is_over() && CallPhase::Declined.is_over());
     }
 
     #[test]
