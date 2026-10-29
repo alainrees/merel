@@ -37,6 +37,8 @@ const FIRST_SYNC: Duration = Duration::from_secs(60);
 const SEND_WAIT: Duration = Duration::from_secs(30);
 /// Longest message text kept, in bytes.
 const MAX_TEXT: usize = 64 * 1024;
+/// How long a call rings at most, after which it is no longer shown as ringing.
+const RING_TIME: Duration = Duration::from_secs(120);
 /// Most messages kept.
 const MAX_MESSAGES: usize = 50_000;
 /// Files up to this size come along when a message is opened; bigger ones only by name.
@@ -144,6 +146,57 @@ pub struct Received {
     /// program's.
     #[serde(skip)]
     pub delivery: Option<&'static str>,
+    /// Set when this is a call rather than a message.
+    #[serde(default)]
+    pub call: Option<Call>,
+}
+
+/// A Signal call in a chat. Merel cannot take part in it: it shows who calls and how it ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+pub struct Call {
+    /// Signal's id of the call: news about the same call replaces what was shown before.
+    pub id: u64,
+    pub kind: CallKind,
+    pub state: CallState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallKind {
+    Audio,
+    Video,
+    Group,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallState {
+    Ringing,
+    Answered,
+    Missed,
+    Started,
+}
+
+impl Call {
+    /// What the chat shows for it, in the person's language.
+    pub fn text(&self, mine: bool) -> String {
+        let key = match (self.kind, self.state, mine) {
+            (CallKind::Group, _, _) => "signal-call-group",
+            (_, CallState::Ringing, _) => "signal-call-ringing",
+            (CallKind::Video, CallState::Missed, false) => "signal-call-missed-video",
+            (_, CallState::Missed, false) => "signal-call-missed",
+            (CallKind::Video, _, true) => "signal-call-out-video",
+            (_, _, true) => "signal-call-out",
+            (CallKind::Video, _, false) => "signal-call-in-video",
+            (_, _, false) => "signal-call-in",
+        };
+        format!("📞 {}", merel_i18n::tr(key))
+    }
+
+    /// A call that needs no attention: answered, made by the account, or a group call.
+    fn settled(&self, mine: bool) -> bool {
+        mine || matches!(self.state, CallState::Answered | CallState::Started)
+    }
 }
 
 /// A file sent with a message: its id to fetch it with, and what it is.
@@ -208,9 +261,31 @@ fn message_id(timestamp: u64, sender: &str) -> String {
 }
 
 impl Received {
-    /// The id Merel lists it under: unique, as Signal makes a sender's timestamps unique.
+    /// The id Merel lists it under: unique, as Signal makes a sender's timestamps unique. A
+    /// call keeps one id from ringing to its end, so its entry changes instead of adding up.
     pub fn id(&self) -> String {
-        message_id(self.timestamp, &self.sender)
+        match self.call {
+            Some(call) if call.kind != CallKind::Group => format!("call.{}", call.id),
+            _ => message_id(self.timestamp, &self.sender),
+        }
+    }
+
+    /// The text to show: the message, or what happened with the call.
+    fn shown_text(&self) -> String {
+        match self.call {
+            // No news of how it ended (it may have been answered on the phone): just "a call".
+            Some(mut call) if call.state == CallState::Ringing && self.age() > RING_TIME => {
+                call.state = CallState::Answered;
+                call.text(self.mine)
+            }
+            Some(call) => call.text(self.mine),
+            None => self.text.clone(),
+        }
+    }
+
+    fn age(&self) -> Duration {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+        now.saturating_sub(Duration::from_millis(self.timestamp))
     }
 }
 
@@ -365,6 +440,14 @@ impl Messages {
         }
         if !m.mine && is_name(&m.sender_name, &m.sender) {
             self.names.insert(m.sender.clone(), m.sender_name.clone());
+        }
+        // News of a call can come in any order (the store passes the newest first): once any
+        // device says it was answered, it was.
+        if let (Some(new), Some(Received { call: Some(old), .. })) = (m.call, self.by_id.get(&m.id()))
+            && old.state == CallState::Answered
+            && new.state != CallState::Answered
+        {
+            return;
         }
         if m.mine {
             self.me_id = Some(m.sender.clone());
@@ -565,7 +648,7 @@ impl SignalMailbox {
         named.delivery = self.delivery(&named);
         let raw = message(&named, &self.me, &messages.reactions_on(m, &self.me_name));
         RemoteHeader {
-            seen: m.mine || self.flags.has(Flag::Seen, &id),
+            seen: m.mine || m.call.is_some_and(|c| c.settled(m.mine)) || self.flags.has(Flag::Seen, &id),
             flagged: self.flags.has(Flag::Flagged, &id),
             answered: false,
             size: u32::try_from(raw.len()).unwrap_or(u32::MAX),
@@ -847,7 +930,7 @@ fn message_with(m: &Received, me: &str, reactions: &[merel_model::Reacted], file
     let to = if m.mine { thread_address(m) } else { me.to_string() };
     let from_name = if m.sender_name.is_empty() { &m.sender } else { &m.sender_name };
     let date = chrono::DateTime::from_timestamp_millis(i64::try_from(m.timestamp).unwrap_or_default()).unwrap_or_default().to_rfc2822();
-    let mut text = m.text.clone();
+    let mut text = m.shown_text();
     for (f, bytes) in files {
         if bytes.is_none() {
             if !text.is_empty() {
@@ -863,7 +946,7 @@ fn message_with(m: &Received, me: &str, reactions: &[merel_model::Reacted], file
     } else {
         out.push_str(&format!("To: {} <{to}>\r\n", word(&m.thread_name)));
     }
-    out.push_str(&format!("Subject: {}\r\n", word(&merel_mime::preview(&m.text, 80))));
+    out.push_str(&format!("Subject: {}\r\n", word(&merel_mime::preview(&m.shown_text(), 80))));
     out.push_str(&format!("Date: {date}\r\n"));
     out.push_str(&format!("Message-ID: <{}@{DOMAIN}>\r\n", m.id()));
     out.push_str("Chat-Version: 1.0\r\n");
@@ -1050,6 +1133,7 @@ mod tests {
             timestamp: 1_761_681_600_123,
             text: text.into(),
             attachments: Vec::new(),
+            call: None,
             quote: None,
             delivery: None,
         }
@@ -1211,6 +1295,40 @@ mod tests {
         assert_eq!(m.attachments.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["foto.jpg"]);
         assert_eq!(m.id(), "5.1b2c");
         assert_eq!(serde_json::from_str::<Said>(r#"{"type":"synced"}"#).ok(), Some(Said::Synced));
+    }
+
+    #[test]
+    fn a_call_keeps_one_entry_from_ringing_to_its_end() {
+        let line = |state: &str, ts: u64| {
+            format!(
+                r#"{{"type":"message","thread":"1b2c","sender":"1b2c","timestamp":{ts},"text":"","call":{{"id":77,"kind":"audio","state":"{state}"}}}}"#
+            )
+        };
+        let mut messages = Messages::default();
+        for (state, ts) in [("ringing", 5), ("missed", 9)] {
+            let Ok(Said::Message(m)) = serde_json::from_str::<Said>(&line(state, ts)) else { panic!("not read") };
+            messages.add(m);
+        }
+        assert_eq!(messages.by_id.len(), 1);
+        let m = messages.by_id.values().next().cloned().unwrap_or_else(|| received(""));
+        assert_eq!(m.call.map(|c| c.state), Some(CallState::Missed));
+        let raw = message(&m, "me@signal.invalid", &[]);
+        let text = merel_mime::parse_body(&raw).text;
+        assert!(text.starts_with("📞 ") && text.trim().len() > "📞 ".len(), "{text}");
+        for (state, ts) in [("answered", 6), ("missed", 9)] {
+            let Ok(Said::Message(m)) = serde_json::from_str::<Said>(&line(state, ts)) else { panic!("not read") };
+            messages.add(m);
+        }
+        assert_eq!(messages.by_id.values().next().and_then(|m| m.call).map(|c| c.state), Some(CallState::Answered));
+    }
+
+    #[test]
+    fn a_missed_call_is_unread_and_an_answered_one_is_not() {
+        let call = |state| Call { id: 1, kind: CallKind::Video, state };
+        assert!(!call(CallState::Missed).settled(false));
+        assert!(!call(CallState::Ringing).settled(false));
+        assert!(call(CallState::Answered).settled(false));
+        assert!(call(CallState::Missed).settled(true));
     }
 
     #[test]
