@@ -147,6 +147,53 @@ impl Engine {
         Ok(self.session.send(account_id, draft))
     }
 
+    /// Reacts with `emoji` to the Signal message `message_id`, as Signal does: one reaction per
+    /// person, so it replaces the account's earlier one, and the same emoji again takes it back.
+    /// It shows at once; the next listing confirms it.
+    pub fn react(&mut self, message_id: &str, emoji: &str) -> Result<(), String> {
+        self.reaction(message_id, emoji)?;
+        self.dispatch();
+        Ok(())
+    }
+
+    /// Queues the reaction [`Engine::react`] sends.
+    fn reaction(&mut self, message_id: &str, emoji: &str) -> Result<(), String> {
+        let emoji = emoji.trim();
+        if emoji.is_empty() || emoji.len() > merel_model::MAX_EMOJI {
+            return Err(merel_i18n::tr("signal-cannot"));
+        }
+        let m = self.session.message(message_id).ok_or_else(|| merel_i18n::tr("signal-unknown"))?;
+        let account_id = self.session.folder(&m.folder_id).map(|f| f.account_id.clone()).ok_or_else(|| merel_i18n::tr("signal-unknown"))?;
+        if !self.is_signal_account(&account_id) {
+            return Err(merel_i18n::tr("signal-cannot"));
+        }
+        let target = m.message_id.clone().ok_or_else(|| merel_i18n::tr("signal-unknown"))?;
+        let tag = m.chat.clone().unwrap_or_default();
+        let again = tag.reactions.iter().any(|r| r.mine && r.emoji == emoji);
+        let draft = Draft {
+            to: vec![m.from.clone()],
+            body: if again { String::new() } else { emoji.to_string() },
+            chat: Some(merel_model::ChatTag {
+                group_id: tag.group_id.clone(),
+                group_name: tag.group_name.clone(),
+                reaction_to: Some(target),
+                ..Default::default()
+            }),
+            encrypt: false,
+            sign: Some(false),
+            ..Draft::default()
+        };
+        let me = self.session.accounts.iter().find(|a| a.id == account_id).map(|a| a.address.display().to_string()).unwrap_or_default();
+        if let Some(chat) = self.session.messages.iter_mut().find(|x| x.id == message_id).and_then(|x| x.chat.as_mut()) {
+            chat.reactions.retain(|r| !r.mine);
+            if !again {
+                chat.reactions.push(merel_model::Reacted { emoji: emoji.to_string(), name: me, mine: true });
+            }
+        }
+        self.session.send(&account_id, draft);
+        Ok(())
+    }
+
     /// Whether `account_id` is a Signal account.
     pub fn is_signal_account(&self, account_id: &str) -> bool {
         self.session.accounts.iter().any(|a| a.id == account_id && is_signal(a))
@@ -184,6 +231,39 @@ mod tests {
         assert_eq!(a.address.display(), "+31612345678");
         assert!(is_signal(&a));
         assert!(a.outgoing.is_none());
+    }
+
+    #[test]
+    fn a_reaction_shows_at_once_and_the_same_emoji_takes_it_back() {
+        let mut e = Engine::sample();
+        e.session.accounts.push(signal_account("signal-1", Some("+31612345678"), "me").unwrap());
+        e.session.folders.push(merel_model::Folder {
+            id: "signal-1/signal".into(),
+            account_id: "signal-1".into(),
+            name: "Signal".into(),
+            path: "signal".into(),
+            kind: FolderKind::Inbox,
+            unread: 0,
+            parent: None,
+        });
+        let mut m = e.session.messages[0].clone();
+        m.id = "signal-1/signal#5.jan".into();
+        m.folder_id = "signal-1/signal".into();
+        m.message_id = Some("<5.jan@signal.invalid>".into());
+        m.chat = Some(merel_model::ChatTag::default());
+        e.session.messages.push(m);
+        e.reaction("signal-1/signal#5.jan", "👍").unwrap();
+        let shown = |e: &Engine| e.session.message("signal-1/signal#5.jan").and_then(|m| m.chat.clone()).unwrap_or_default().reactions;
+        assert_eq!(shown(&e).iter().map(|r| (r.emoji.as_str(), r.mine)).collect::<Vec<_>>(), [("👍", true)]);
+        let jobs = e.session.take_jobs();
+        let Some(crate::Job::Send { draft, .. }) = jobs.iter().find(|j| matches!(j, crate::Job::Send { .. })) else { panic!("{jobs:?}") };
+        assert_eq!(draft.body, "👍");
+        assert_eq!(draft.chat.as_ref().and_then(|c| c.reaction_to.as_deref()), Some("<5.jan@signal.invalid>"));
+        e.reaction("signal-1/signal#5.jan", "👍").unwrap();
+        assert!(shown(&e).is_empty());
+        let jobs = e.session.take_jobs();
+        assert!(jobs.iter().any(|j| matches!(j, crate::Job::Send { draft, .. } if draft.body.is_empty())));
+        assert!(e.reaction("acc/INBOX#1", "👍").is_err());
     }
 
     #[test]

@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*"]
 exclude = ["apps/ios", "apps/android", "apps/merel-signal"]
 
 [workspace.package]
-version = "0.1.23"
+version = "0.1.24"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"

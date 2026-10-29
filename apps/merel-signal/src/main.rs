@@ -8,6 +8,7 @@
 //! merel-signal run <dir>                   → {"type":"message",…}… and {"type":"synced"}
 //!                                            (first every stored message, then the new ones)
 //!                                          ← {"type":"send","thread":…,"text":…}
+//!                                          ← {"type":"react","thread":…,"emoji":…,…}
 //! ```
 //!
 //! The store in `<dir>` is encrypted with the key in the environment variable `MEREL_SIGNAL_KEY`,
@@ -27,6 +28,7 @@ use presage::libsignal_service::protocol::ServiceId;
 use presage::manager::Registered;
 use presage::model::identity::OnNewIdentity;
 use presage::model::messages::Received;
+use presage::proto::data_message::Reaction;
 use presage::proto::sync_message::{CallEvent, Content as SyncContent, Sent, call_event};
 use presage::proto::{CallMessage, EditMessage, SyncMessage, call_message};
 use presage::store::{ContentExt, Store, Thread};
@@ -62,6 +64,19 @@ enum Event {
         /// Set when this is a call rather than a message: the text is then empty.
         #[serde(skip_serializing_if = "Option::is_none")]
         call: Option<Call>,
+    },
+    /// Someone reacted with an emoji to a message, or took a reaction back (`remove`). The
+    /// message is the one `target_author` sent at `target_timestamp`.
+    Reaction {
+        thread: String,
+        sender: String,
+        sender_name: String,
+        mine: bool,
+        timestamp: u64,
+        emoji: String,
+        remove: bool,
+        target_author: String,
+        target_timestamp: u64,
     },
     /// Every message waiting on the server is in.
     Synced,
@@ -109,7 +124,19 @@ enum CallState {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Command {
-    Send { thread: String, text: String },
+    Send {
+        thread: String,
+        text: String,
+    },
+    /// Reacts to the message `target_author` sent at `target_timestamp`; `remove` takes the
+    /// reaction back. Signal keeps one reaction per person per message.
+    React {
+        thread: String,
+        emoji: String,
+        remove: bool,
+        target_author: String,
+        target_timestamp: u64,
+    },
 }
 
 fn emit(event: &Event) {
@@ -249,6 +276,34 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                         }
                         Err(e) => emit(&Event::Error { message: format!("{e:#}") }),
                     },
+                    Ok(Command::React { thread, emoji, remove, target_author, target_timestamp }) => {
+                        let reaction = Reaction {
+                            emoji: Some(emoji.clone()),
+                            remove: Some(remove),
+                            target_author_aci: Some(target_author.clone()),
+                            target_sent_timestamp: Some(target_timestamp),
+                            ..Default::default()
+                        };
+                        let message = DataMessage { reaction: Some(reaction), ..Default::default() };
+                        match send_data(&mut sending, dir, key, &thread, message).await {
+                            Ok((_, timestamp)) => {
+                                let me = ServiceId::from(manager.registration_data().service_ids.aci());
+                                emit(&Event::Reaction {
+                                    thread: thread.clone(),
+                                    sender: me.service_id_string(),
+                                    sender_name: contact_name(&manager, &me).await,
+                                    mine: true,
+                                    timestamp,
+                                    emoji,
+                                    remove,
+                                    target_author,
+                                    target_timestamp,
+                                });
+                                emit(&Event::Sent { thread, timestamp });
+                            }
+                            Err(e) => emit(&Event::Error { message: format!("{e:#}") }),
+                        }
+                    }
                     Err(e) => emit(&Event::Error { message: format!("unknown command: {e}") }),
                 },
                 // Merel closed: done.
@@ -308,6 +363,7 @@ async fn contact_name<S: Store>(manager: &Manager<S, Registered>, id: &ServiceId
 /// The kind of a message, for the log.
 fn kind(body: &ContentBody) -> &'static str {
     match body {
+        ContentBody::DataMessage(DataMessage { reaction: Some(_), .. }) => "a reaction",
         ContentBody::DataMessage(_) => "a message",
         ContentBody::EditMessage(_) => "an edit",
         ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Sent(_)), .. }) => "a message sent from another device",
@@ -343,8 +399,21 @@ async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content)
         _ => return None,
     };
     let DataMessage { body, attachments, reaction, group_call_update, .. } = data;
-    if reaction.is_some() {
-        return None;
+    if let Some(r) = reaction {
+        let thread = Thread::try_from(content).ok()?;
+        let sender = &content.metadata.sender;
+        let own = ServiceId::from(manager.registration_data().service_ids.aci());
+        return Some(Event::Reaction {
+            thread: thread_id(&thread),
+            sender: sender.service_id_string(),
+            sender_name: contact_name(manager, sender).await,
+            mine: mine || *sender == own,
+            timestamp: content.timestamp(),
+            emoji: r.emoji.clone().filter(|e| !e.is_empty())?,
+            remove: r.remove.unwrap_or(false),
+            target_author: r.target_author_aci.clone()?,
+            target_timestamp: r.target_sent_timestamp?,
+        });
     }
     if group_call_update.is_some() {
         let call = Call { id: content.timestamp(), kind: CallKind::Group, state: CallState::Started };
@@ -500,8 +569,19 @@ impl Ringing {
 }
 
 async fn send<S: Store>(manager: &mut Manager<S, Registered>, dir: &str, key: &str, thread: &str, text: &str) -> Result<(Thread, u64)> {
+    send_data(manager, dir, key, thread, DataMessage { body: Some(text.to_string()), ..Default::default() }).await
+}
+
+/// Sends `message` to the chat `thread`, stamped with the time now.
+async fn send_data<S: Store>(
+    manager: &mut Manager<S, Registered>,
+    dir: &str,
+    key: &str,
+    thread: &str,
+    mut message: DataMessage,
+) -> Result<(Thread, u64)> {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
-    let message = DataMessage { body: Some(text.to_string()), timestamp: Some(timestamp), ..Default::default() };
+    message.timestamp = Some(timestamp);
     match thread.starts_with('g') {
         true => {
             let groups = threads(dir, key).await?;

@@ -1997,6 +1997,7 @@ signal-link-failed = Koppelen is niet gelukt.
 channel-chat = Chat
 signal-via = via Signal
 chat-emoji = Emoji toevoegen
+chat-react = Reageren
 signal-attachment = Bijlage
 signal-call-ringing = Belt je via Signal. Neem op op je telefoon.
 signal-call-missed = Gemiste spraakoproep
