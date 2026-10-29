@@ -27,7 +27,8 @@ jobs:
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
       # The Signal libraries compile their protocol buffers at build time.
-      - run: brew install protobuf
+      # coreutils: RingRTC's build scripts use grealpath.
+      - run: brew install protobuf coreutils
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |

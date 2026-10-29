@@ -43,7 +43,8 @@ jobs:
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libpulse-dev
       - if: runner.os == 'macOS'
-        run: brew install protobuf
+        # coreutils: RingRTC's build scripts use grealpath.
+        run: brew install protobuf coreutils
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/merel-signal
