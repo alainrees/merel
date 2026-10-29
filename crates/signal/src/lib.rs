@@ -39,6 +39,12 @@ const SEND_WAIT: Duration = Duration::from_secs(30);
 const MAX_TEXT: usize = 64 * 1024;
 /// Most messages kept.
 const MAX_MESSAGES: usize = 50_000;
+/// Files up to this size come along when a message is opened; bigger ones only by name.
+const FETCH_UP_TO: u64 = 25 * 1024 * 1024;
+/// Most bytes of fetched files kept in memory; the oldest go first.
+const KEEP_FILES: usize = 300 * 1024 * 1024;
+/// How long a file may take to come.
+const FETCH_WAIT: Duration = Duration::from_secs(90);
 
 /// The program, next to Merel's own (in the app bundle, or `target/` while developing), unless
 /// `MEREL_SIGNAL_HELPER` names another.
@@ -65,13 +71,30 @@ pub fn is_signal_address(email: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Said {
-    Link { url: String },
-    Linked { number: Option<String>, id: String },
+    Link {
+        url: String,
+    },
+    Linked {
+        number: Option<String>,
+        id: String,
+    },
     Message(Received),
     Reaction(Reaction),
+    File {
+        id: String,
+        #[serde(default)]
+        data: String,
+        #[serde(default)]
+        error: Option<String>,
+    },
     Synced,
-    Sent { thread: String, timestamp: u64 },
-    Error { message: String },
+    Sent {
+        thread: String,
+        timestamp: u64,
+    },
+    Error {
+        message: String,
+    },
 }
 
 /// A message as the program passes it on.
@@ -91,10 +114,30 @@ pub struct Received {
     #[serde(default)]
     pub text: String,
     #[serde(default)]
-    pub attachments: Vec<String>,
+    pub attachments: Vec<FileRef>,
     /// The message this one answers.
     #[serde(default)]
     pub quote: Option<QuoteOf>,
+}
+
+/// A file sent with a message: its id to fetch it with, and what it is.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileRef {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub mime: String,
+    #[serde(default)]
+    pub size: u64,
+}
+
+/// A file going out with a message, its contents in base64.
+#[derive(Serialize)]
+struct OutFile<'a> {
+    name: &'a str,
+    mime: &'a str,
+    data: String,
 }
 
 /// The message a message answers, as the program passes it on and is asked to send it.
@@ -153,6 +196,11 @@ enum Asked<'a> {
         text: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
         quote: Option<QuoteOf>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        files: Vec<OutFile<'a>>,
+    },
+    Fetch {
+        id: &'a str,
     },
     React {
         thread: &'a str,
@@ -376,6 +424,8 @@ pub struct SignalMailbox {
     flags: Flags,
     /// Set when the program stopped, with why: the next listing fails, so Merel connects again.
     stopped: Arc<Mutex<Option<String>>>,
+    /// Files fetched, by id, oldest first.
+    files: std::collections::VecDeque<(String, Arc<[u8]>)>,
 }
 
 impl SignalMailbox {
@@ -437,6 +487,7 @@ impl SignalMailbox {
             me_name: me.display().to_string(),
             flags: Flags::open(dir),
             stopped,
+            files: std::collections::VecDeque::new(),
         })
     }
 
@@ -474,6 +525,34 @@ impl SignalMailbox {
                 Ok(Said::Error { message }) => return Err(MailboxError::Protocol(message)),
                 Ok(_) => {}
                 Err(_) => return Err(MailboxError::Protocol(merel_i18n::tr("signal-no-answer"))),
+            }
+        }
+    }
+
+    /// The contents of file `id`, from memory or from the program; `None` when it cannot come.
+    fn fetch(&mut self, id: &str) -> Option<Arc<[u8]>> {
+        if let Some((_, bytes)) = self.files.iter().find(|(f, _)| f == id) {
+            return Some(bytes.clone());
+        }
+        let line = serde_json::to_string(&Asked::Fetch { id }).ok()?;
+        writeln!(self.stdin, "{line}").and_then(|()| self.stdin.flush()).ok()?;
+        let deadline = Instant::now() + FETCH_WAIT;
+        loop {
+            match self.replies.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(Said::File { id: got, data, error }) if got == id => {
+                    if let Some(e) = error {
+                        log::warn!("signal: a file did not come: {}", clean(&e));
+                        return None;
+                    }
+                    let bytes: Arc<[u8]> = base64::engine::general_purpose::STANDARD.decode(data.as_bytes()).ok()?.into();
+                    self.files.push_back((id.to_string(), bytes.clone()));
+                    while self.files.iter().map(|(_, b)| b.len()).sum::<usize>() > KEEP_FILES && self.files.len() > 1 {
+                        self.files.pop_front();
+                    }
+                    return Some(bytes);
+                }
+                Ok(_) => {}
+                Err(_) => return None,
             }
         }
     }
@@ -538,9 +617,15 @@ impl Mailbox for SignalMailbox {
 
     fn body(&mut self, folder: &str, id: &str) -> Result<Vec<u8>> {
         only_folder(folder)?;
-        let messages = lock(&self.messages);
-        let m = messages.by_id.get(id).ok_or_else(|| MailboxError::NotFound(id.to_string()))?;
-        Ok(message(&messages.named(m, &self.me_name), &self.me, &messages.reactions_on(m, &self.me_name)))
+        let (m, reactions) = {
+            let messages = lock(&self.messages);
+            let m = messages.by_id.get(id).ok_or_else(|| MailboxError::NotFound(id.to_string()))?;
+            (messages.named(m, &self.me_name), messages.reactions_on(m, &self.me_name))
+        };
+        // The files come along, as Signal shows pictures in the chat; very big ones by name only.
+        let files: Vec<(FileRef, Option<Arc<[u8]>>)> =
+            m.attachments.iter().map(|f| (f.clone(), if f.size <= FETCH_UP_TO { self.fetch(&f.id) } else { None })).collect();
+        Ok(message_with(&m, &self.me, &reactions, &files))
     }
 
     fn set_flag(&mut self, folder: &str, id: &str, flag: Flag, on: bool) -> Result<()> {
@@ -584,7 +669,13 @@ impl Mailbox for SignalMailbox {
                 text: m.text.chars().take(merel_model::MAX_QUOTE).collect(),
             })
         });
-        self.ask(&Asked::Send { thread: &thread, text: &text, quote }, &thread)
+        let body = merel_mime::parse_body(raw);
+        let files: Vec<OutFile<'_>> = body
+            .attachments
+            .iter()
+            .map(|a| OutFile { name: &a.name, mime: &a.mime, data: base64::engine::general_purpose::STANDARD.encode(&a.bytes) })
+            .collect();
+        self.ask(&Asked::Send { thread: &thread, text: &text, quote, files }, &thread)
     }
 
     fn create_folder(&mut self, _parent: Option<&str>, _name: &str) -> Result<()> {
@@ -619,13 +710,24 @@ impl Mailbox for SignalMailbox {
 /// The message as mail: the text as a plain part, from the sender to the account, with the
 /// chat headers that put it in its chat.
 fn message(m: &Received, me: &str, reactions: &[merel_model::Reacted]) -> Vec<u8> {
+    let files: Vec<(FileRef, Option<Arc<[u8]>>)> = m.attachments.iter().map(|f| (f.clone(), None)).collect();
+    message_with(m, me, reactions, &files)
+}
+
+/// The message with its files: those fetched as attachments, the others named in the text.
+fn message_with(m: &Received, me: &str, reactions: &[merel_model::Reacted], files: &[(FileRef, Option<Arc<[u8]>>)]) -> Vec<u8> {
     let from = if m.mine { me.to_string() } else { address_of(&m.sender) };
     let to = if m.mine { thread_address(m) } else { me.to_string() };
     let from_name = if m.sender_name.is_empty() { &m.sender } else { &m.sender_name };
     let date = chrono::DateTime::from_timestamp_millis(i64::try_from(m.timestamp).unwrap_or_default()).unwrap_or_default().to_rfc2822();
     let mut text = m.text.clone();
-    for name in &m.attachments {
-        text.push_str(&format!("\n[{}: {}]", merel_i18n::tr("signal-attachment"), clean(name)));
+    for (f, bytes) in files {
+        if bytes.is_none() {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&format!("[{}: {}]", merel_i18n::tr("signal-attachment"), clean(&file_name(f))));
+        }
     }
     let mut out = String::new();
     out.push_str(&format!("From: {} <{from}>\r\n", word(from_name)));
@@ -654,13 +756,73 @@ fn message(m: &Received, me: &str, reactions: &[merel_model::Reacted]) -> Vec<u8
         let value = merel_model::Reacted::header(reactions);
         out.push_str(&format!("Merel-Reactions: {}\r\n", fold(&value)));
     }
-    out.push_str("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n");
-    let body = base64::engine::general_purpose::STANDARD.encode(text.replace('\n', "\r\n"));
+    out.push_str("MIME-Version: 1.0\r\n");
+    let fetched: Vec<(&FileRef, &Arc<[u8]>)> = files.iter().filter_map(|(f, b)| b.as_ref().map(|b| (f, b))).collect();
+    let boundary = format!("merel-signal-{}", m.id().replace(['.', '-'], ""));
+    if !fetched.is_empty() {
+        out.push_str(&format!("Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n--{boundary}\r\n"));
+    }
+    out.push_str("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n");
+    push_base64(&mut out, text.replace('\n', "\r\n").as_bytes());
+    for (f, bytes) in &fetched {
+        let mime = if f.mime.contains('/') && f.mime.chars().all(|c| c.is_ascii_graphic()) { f.mime.as_str() } else { "application/octet-stream" };
+        out.push_str(&format!(
+            "--{boundary}\r\nContent-Type: {mime}\r\nContent-Disposition: attachment; filename*=utf-8''{}\r\nContent-Transfer-Encoding: base64\r\n\r\n",
+            percent(&file_name(f))
+        ));
+        push_base64(&mut out, bytes);
+    }
+    if !fetched.is_empty() {
+        out.push_str(&format!("--{boundary}--\r\n"));
+    }
+    out.into_bytes()
+}
+
+/// `bytes` in base64, in lines of 76.
+fn push_base64(out: &mut String, bytes: &[u8]) {
+    let body = base64::engine::general_purpose::STANDARD.encode(bytes);
     for chunk in body.as_bytes().chunks(76) {
         out.push_str(&String::from_utf8_lossy(chunk));
         out.push_str("\r\n");
     }
-    out.into_bytes()
+}
+
+/// A file's name, or one made from its kind when it came without (a photo taken in Signal).
+fn file_name(f: &FileRef) -> String {
+    let name = clean(f.name.trim());
+    if !name.is_empty() {
+        return name;
+    }
+    let ext = match f.mime.as_str() {
+        "image/jpeg" => "jpg",
+        "image/png" => "png",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "video/mp4" => "mp4",
+        "audio/aac" => "aac",
+        "audio/mpeg" => "mp3",
+        "audio/ogg" => "ogg",
+        "application/pdf" => "pdf",
+        _ => "bin",
+    };
+    let kind = if f.mime.starts_with("image/") {
+        "foto"
+    } else if f.mime.starts_with("audio/") {
+        "audio"
+    } else if f.mime.starts_with("video/") {
+        "video"
+    } else {
+        "bestand"
+    };
+    format!("{kind}.{ext}")
+}
+
+/// `s` for a `filename*` parameter (RFC 2231): everything but plain letters, digits and a few
+/// marks as `%XX`.
+fn percent(s: &str) -> String {
+    s.bytes()
+        .map(|b| if b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_') { (b as char).to_string() } else { format!("%{b:02X}") })
+        .collect()
 }
 
 /// A long base64 header value over several lines.
@@ -857,10 +1019,25 @@ mod tests {
     }
 
     #[test]
+    fn a_fetched_file_comes_as_an_attachment_and_one_not_fetched_by_name() {
+        let mut m = received("Kijk!");
+        let photo = FileRef { id: "a1".into(), name: String::new(), mime: "image/png".into(), size: 4 };
+        let big = FileRef { id: "b2".into(), name: "film.mp4".into(), mime: "video/mp4".into(), size: 900_000_000 };
+        m.attachments = vec![photo.clone(), big.clone()];
+        let bytes: Arc<[u8]> = vec![1u8, 2, 3, 4].into();
+        let raw = message_with(&m, "me@signal.invalid", &[], &[(photo, Some(bytes)), (big, None)]);
+        let body = merel_mime::parse_body(&raw);
+        assert_eq!(body.attachments.len(), 1);
+        assert_eq!(body.attachments[0].name, "foto.png");
+        assert_eq!(&body.attachments[0].bytes[..], [1, 2, 3, 4]);
+        assert!(body.text.contains("Kijk!") && body.text.contains("film.mp4"), "{}", body.text);
+    }
+
+    #[test]
     fn what_the_program_says_is_read() {
-        let line = r#"{"type":"message","thread":"1b2c","thread_name":"Jan","group":false,"sender":"1b2c","sender_name":"Jan","mine":false,"timestamp":5,"text":"hoi","attachments":["foto.jpg"]}"#;
+        let line = r#"{"type":"message","thread":"1b2c","thread_name":"Jan","group":false,"sender":"1b2c","sender_name":"Jan","mine":false,"timestamp":5,"text":"hoi","attachments":[{"id":"ab12","name":"foto.jpg","mime":"image/jpeg","size":3}]}"#;
         let Ok(Said::Message(m)) = serde_json::from_str::<Said>(line) else { panic!("not read") };
-        assert_eq!(m.attachments, vec!["foto.jpg".to_string()]);
+        assert_eq!(m.attachments.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["foto.jpg"]);
         assert_eq!(m.id(), "5.1b2c");
         assert_eq!(serde_json::from_str::<Said>(r#"{"type":"synced"}"#).ok(), Some(Said::Synced));
     }

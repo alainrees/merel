@@ -21,6 +21,8 @@ use crate::{AccountStatus, Engine};
 pub const SIGNAL_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 /// Most messages whose text is fetched at each listing.
 const SIGNAL_BODIES: usize = 50;
+/// Most bytes of files one Signal message may carry, as Signal allows.
+const MAX_SIGNAL_FILES: usize = 100 * 1024 * 1024;
 /// How the phone lists Merel among its linked devices.
 const DEVICE_NAME: &str = "Merel";
 
@@ -134,13 +136,13 @@ impl Engine {
     }
 
     /// Sends a chat message over Signal: Signal encrypts it end to end itself, so it goes without
-    /// OpenPGP, and as text only.
+    /// OpenPGP; files go along.
     pub(crate) fn send_signal(&mut self, account_id: &str, mut draft: Draft) -> Result<u64, String> {
-        if draft.body.trim().is_empty() {
+        if draft.body.trim().is_empty() && draft.attachments.is_empty() {
             return Err(merel_i18n::tr("chat-type-first"));
         }
-        if !draft.attachments.is_empty() {
-            return Err(merel_i18n::tr("signal-text-only"));
+        if draft.attachment_bytes() > MAX_SIGNAL_FILES {
+            return Err(merel_i18n::tr("signal-too-big"));
         }
         draft.encrypt = false;
         draft.sign = Some(false);

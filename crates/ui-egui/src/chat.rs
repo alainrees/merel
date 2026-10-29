@@ -45,6 +45,8 @@ pub struct State {
     pub input: String,
     /// The message the next one answers, quoted above it (Signal).
     pub replying: Option<String>,
+    /// Files going with the next message (Signal).
+    pub files: Vec<merel_model::DraftAttachment>,
     pub new: Option<NewChat>,
     /// Why the last message did not go out, or chat could not be turned on.
     pub error: Option<String>,
@@ -117,6 +119,7 @@ impl MailApp {
 
     fn open_chat(&mut self, id: &str) {
         self.chat.replying = None;
+        self.chat.files.clear();
         self.chat.selected = Some(id.to_string());
         self.chat.new = None;
         self.chat.error = None;
@@ -132,10 +135,11 @@ impl MailApp {
     fn send_in_chat(&mut self) {
         let Some(chat) = self.chat.selected.as_deref().and_then(|id| self.chat_by_id(id)) else { return };
         let text = self.chat.input.trim().to_string();
-        if text.is_empty() {
+        if text.is_empty() && self.chat.files.is_empty() {
             return;
         }
         let mut draft = self.engine.session.chat_reply(&chat, &text);
+        draft.attachments = self.chat.files.clone();
         if let (Some(id), Some(tag)) = (self.chat.replying.as_deref(), draft.chat.as_mut()) {
             tag.quote = self.engine.session.chat_quote(id);
         }
@@ -144,6 +148,7 @@ impl MailApp {
                 self.chat.sending = id;
                 self.chat.input.clear();
                 self.chat.replying = None;
+                self.chat.files.clear();
                 self.chat.error = None;
             }
             Err(e) => self.chat.error = Some(e),
@@ -538,6 +543,7 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
     // The line to write sits at the bottom; the messages fill what is above it.
     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
         composer(app, ui, t, chat);
+        picked_files(app, ui, t);
         replying_strip(app, ui, t);
         if let Some(e) = &app.chat.error {
             ui.label(RichText::new(e).color(t.flag));
@@ -549,6 +555,8 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
             let mut accept = None;
             let mut react = None;
             let mut reply = None;
+            let mut picture = None;
+            let mut save = None;
             egui::ScrollArea::vertical().auto_shrink(false).stick_to_bottom(true).show(ui, |ui| {
                 let mut day = None;
                 let mut previous: Option<String> = None;
@@ -567,6 +575,8 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                         Some(Clicked::Accept(link)) => accept = Some(link),
                         Some(Clicked::React(emoji)) => react = Some((id.clone(), emoji)),
                         Some(Clicked::Reply) => reply = Some(id.clone()),
+                        Some(Clicked::Picture(n)) => picture = Some((id.clone(), n)),
+                        Some(Clicked::Save(n)) => save = Some((id.clone(), n)),
                         None => {}
                     }
                 }
@@ -580,6 +590,14 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                     }
                 }
             });
+            let file = |app: &MailApp, (id, n): &(String, usize)| app.engine.session.bodies.get(id).and_then(|b| b.attachments.get(*n).cloned());
+            if let Some(a) = picture.as_ref().and_then(|p| file(app, p)) {
+                let uri = crate::attachments::preview_uri(&picture.as_ref().map(|p| p.0.clone()).unwrap_or_default(), picture.map_or(0, |p| p.1));
+                app.preview = Some(crate::attachments::Preview { attachment: a, uri });
+            }
+            if let Some(a) = save.as_ref().and_then(|p| file(app, p)) {
+                app.save_attachment(&a);
+            }
             if let Some(id) = reply {
                 app.chat.replying = Some(id);
                 ui.memory_mut(|m| m.request_focus(egui::Id::new(INPUT)));
@@ -636,6 +654,10 @@ enum Clicked {
     React(String),
     /// Answer this message.
     Reply,
+    /// Open the picture that is attachment `n` of the message.
+    Picture(usize),
+    /// Save attachment `n` of the message under Downloads.
+    Save(usize),
 }
 
 /// The reactions Signal offers first, in its order.
@@ -712,17 +734,26 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                                 ui.add(egui::Label::new(RichText::new(line).size(14.0).color(t.text)).wrap());
                             });
                         }
-                        None => crate::emoji::label(ui, &text, 14.0, t.text),
-                    };
-                    // A quote goes above the text; without one the text keeps the bubble narrow.
-                    match quote {
-                        Some(q) => {
-                            ui.vertical(|ui| {
-                                quote_block(ui, t, session, q, mine);
-                                content(ui);
-                            });
+                        None => {
+                            let files = session.bodies.get(id).map(|b| b.attachments.as_slice()).unwrap_or_default();
+                            if !text.trim().is_empty() || files.is_empty() {
+                                crate::emoji::label(ui, &text, 14.0, t.text);
+                            }
+                            files_in_bubble(ui, t, id, files, &mut accept);
                         }
-                        None => content(ui),
+                    };
+                    // A quote goes above the text and files under it; without either the text
+                    // keeps the bubble narrow.
+                    let has_files = session.bodies.get(id).is_some_and(|b| !b.attachments.is_empty());
+                    if quote.is_some() || has_files {
+                        ui.vertical(|ui| {
+                            if let Some(q) = quote {
+                                quote_block(ui, t, session, q, mine);
+                            }
+                            content(ui);
+                        });
+                    } else {
+                        content(ui);
                     }
                 },
             );
@@ -754,6 +785,91 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
     });
     ui.add_space(4.0);
     accept
+}
+
+/// The files of a message: pictures small, to open big with a click, as in Signal; other
+/// files as a line with their name and size, to save with a click.
+fn files_in_bubble(ui: &mut Ui, t: &Tokens, id: &str, files: &[merel_mime::Attachment], clicked: &mut Option<Clicked>) {
+    for (n, a) in files.iter().enumerate() {
+        if crate::attachments::previewable(a) {
+            // Sized from the picture's own header: the bubble's row has no height to fit it in.
+            let (w, h) = image::ImageReader::new(std::io::Cursor::new(&a.bytes[..]))
+                .with_guessed_format()
+                .ok()
+                .and_then(|r| r.into_dimensions().ok())
+                .unwrap_or((260, 260));
+            let scale = (260.0 / w.max(1) as f32).min(260.0 / h.max(1) as f32).min(1.0);
+            let image = egui::Image::from_bytes(crate::attachments::preview_uri(id, n), egui::load::Bytes::Shared(a.bytes.clone()))
+                .fit_to_exact_size(vec2(w as f32 * scale, h as f32 * scale))
+                .corner_radius(8)
+                .sense(Sense::click());
+            let r = ui.add(image);
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::attachments::preview_label(&a.name)));
+            if r.on_hover_text(crate::attachments::preview_label(&a.name)).clicked() {
+                *clicked = Some(Clicked::Picture(n));
+            }
+        } else {
+            let label = format!("{}  ({})", a.name, crate::size_text(a.size));
+            let r = ui.add(egui::Button::image_and_text(Icon::Paperclip.image(14.0, t.text), RichText::new(label).size(13.0).color(t.text)));
+            if r.on_hover_text(tr("attachment-save-downloads")).clicked() {
+                *clicked = Some(Clicked::Save(n));
+            }
+        }
+    }
+}
+
+/// The files picked to go with the next message, each with a cross to leave it out.
+fn picked_files(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    if app.chat.files.is_empty() {
+        return;
+    }
+    let mut drop = None;
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        for (n, f) in app.chat.files.iter().enumerate() {
+            egui::Frame::new()
+                .fill(t.card)
+                .stroke(egui::Stroke::new(1.0, t.card_border))
+                .corner_radius(8)
+                .inner_margin(Margin::symmetric(8, 4))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add(Icon::Paperclip.image(14.0, t.text_dim));
+                        ui.label(RichText::new(format!("{}  ({})", f.name, crate::size_text(f.bytes.len()))).size(12.5).color(t.text));
+                        let r = ui.add(egui::Button::image(Icon::X.image(12.0, t.text_dim)).frame(false));
+                        r.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                tr_args("chat-file-remove", &[("name", f.name.as_str().into())]),
+                            )
+                        });
+                        if r.clicked() {
+                            drop = Some(n);
+                        }
+                    });
+                });
+        }
+    });
+    if let Some(n) = drop {
+        app.chat.files.remove(n);
+    }
+}
+
+/// Most bytes of files one Signal message may carry.
+const MAX_CHAT_FILES: usize = 100 * 1024 * 1024;
+
+/// Adds the files at `paths` to the next message, within Signal's limit.
+fn add_chat_files(app: &mut MailApp, paths: Vec<std::path::PathBuf>) {
+    for path in paths {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("bestand").to_string();
+        let room = MAX_CHAT_FILES.saturating_sub(app.chat.files.iter().map(|f| f.bytes.len()).sum());
+        match std::fs::read(&path) {
+            Ok(bytes) if bytes.len() <= room => app.chat.files.push(merel_model::DraftAttachment::new(&name, bytes)),
+            Ok(_) => app.chat.error = Some(tr("signal-too-big")),
+            Err(_) => app.chat.error = Some(tr_args("attach-unreadable", &[("name", name.as_str().into())])),
+        }
+    }
 }
 
 /// The arrow beside a message that answers it, quoting it; shown like the smiley.
@@ -914,11 +1030,13 @@ fn waiting_bubble(ui: &mut Ui, t: &Tokens, chat: &Chat, w: &Waiting) {
 fn composer(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
     ui.add_space(6.0);
     let mut send = false;
+    let mut pick = false;
+    let signal = app.engine.is_signal_account(&chat.account_id);
     egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.0, t.card_border)).corner_radius(10).inner_margin(Margin::symmetric(12, 6)).show(
         ui,
         |ui| {
             ui.allocate_ui_with_layout(vec2(ui.available_width(), 36.0), Layout::left_to_right(Align::Center), |ui| {
-                let width = (ui.available_width() - 82.0).max(120.0);
+                let width = (ui.available_width() - if signal { 116.0 } else { 82.0 }).max(120.0);
                 let hint = tr_args("chat-input-hint", &[("name", chat.title.as_str().into())]);
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut app.chat.input)
@@ -931,12 +1049,22 @@ fn composer(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                 r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tr("chat-input")));
                 let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 emoji_button(ui, t, &mut app.chat.input);
-                let ready = !app.chat.input.trim().is_empty();
+                // Files go over Signal; chat over mail stays text, as Delta Chat keeps it.
+                if signal {
+                    let r = ui.add(egui::Button::image(Icon::Paperclip.image(18.0, t.text_dim)).frame(false).min_size(vec2(30.0, 30.0)));
+                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-attach")));
+                    pick = r.on_hover_text(tr("chat-attach")).clicked();
+                }
+                let ready = !app.chat.input.trim().is_empty() || !app.chat.files.is_empty();
                 let clicked = ui.add_enabled_ui(ready, |ui| send_button(ui, t)).inner.clicked();
                 send = (enter || clicked) && ready;
             });
         },
     );
+    if pick && let Some(paths) = rfd::FileDialog::new().set_title(tr("chat-attach")).pick_files() {
+        app.chat.error = None;
+        add_chat_files(app, paths);
+    }
     if send {
         app.send_in_chat();
         ui.memory_mut(|m| m.request_focus(egui::Id::new(INPUT)));
