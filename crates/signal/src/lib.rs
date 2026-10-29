@@ -68,6 +68,7 @@ pub enum Said {
     Link { url: String },
     Linked { number: Option<String>, id: String },
     Message(Received),
+    Reaction(Reaction),
     Synced,
     Sent { thread: String, timestamp: u64 },
     Error { message: String },
@@ -93,10 +94,40 @@ pub struct Received {
     pub attachments: Vec<String>,
 }
 
+/// A reaction as the program passes it on: `sender` reacted with `emoji` to the message
+/// `target_author` sent at `target_timestamp`, or took it back.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Reaction {
+    pub thread: String,
+    pub sender: String,
+    #[serde(default)]
+    pub sender_name: String,
+    #[serde(default)]
+    pub mine: bool,
+    pub timestamp: u64,
+    pub emoji: String,
+    #[serde(default)]
+    pub remove: bool,
+    pub target_author: String,
+    pub target_timestamp: u64,
+}
+
+impl Reaction {
+    /// The id of the message it is on, as [`Received::id`] makes them.
+    fn target(&self) -> String {
+        message_id(self.target_timestamp, &self.target_author)
+    }
+}
+
+/// The id Merel lists a message under: unique, as Signal makes a sender's timestamps unique.
+fn message_id(timestamp: u64, sender: &str) -> String {
+    format!("{timestamp}.{}", sender.to_lowercase().replace(':', "."))
+}
+
 impl Received {
     /// The id Merel lists it under: unique, as Signal makes a sender's timestamps unique.
     pub fn id(&self) -> String {
-        format!("{}.{}", self.timestamp, self.sender.to_lowercase().replace(':', "."))
+        message_id(self.timestamp, &self.sender)
     }
 }
 
@@ -104,6 +135,7 @@ impl Received {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Asked<'a> {
     Send { thread: &'a str, text: &'a str },
+    React { thread: &'a str, emoji: &'a str, remove: bool, target_author: &'a str, target_timestamp: u64 },
 }
 
 /// The program running, and what it said so far.
@@ -208,6 +240,8 @@ struct Messages {
     /// The latest name each person was given, by service id: a name may come only with a later
     /// message (once the phone shared its contacts), and then goes for the earlier ones too.
     names: HashMap<String, String>,
+    /// The reactions on each message, by its id: one per person, the latest.
+    reactions: HashMap<String, Vec<Reaction>>,
 }
 
 impl Messages {
@@ -237,6 +271,45 @@ impl Messages {
 }
 
 impl Messages {
+    /// Takes in a reaction: it replaces the sender's earlier one on that message, unless that
+    /// one is newer; one taken back goes.
+    fn react(&mut self, r: Reaction) {
+        if !self.reactions.contains_key(&r.target()) && self.reactions.len() >= MAX_MESSAGES {
+            return;
+        }
+        if !r.mine && is_name(&r.sender_name, &r.sender) {
+            self.names.insert(r.sender.clone(), r.sender_name.clone());
+        }
+        let on = self.reactions.entry(r.target()).or_default();
+        if on.iter().any(|o| o.sender == r.sender && o.timestamp > r.timestamp) {
+            return;
+        }
+        on.retain(|o| o.sender != r.sender);
+        if !r.remove && on.len() < merel_model::MAX_REACTIONS {
+            on.push(r);
+        }
+    }
+
+    /// The reactions on `m`, named, oldest first.
+    fn reactions_on(&self, m: &Received, me: &str) -> Vec<merel_model::Reacted> {
+        let mut on: Vec<&Reaction> = self.reactions.get(&m.id()).map(|v| v.iter().collect()).unwrap_or_default();
+        on.sort_by_key(|r| r.timestamp);
+        on.into_iter()
+            .map(|r| merel_model::Reacted {
+                emoji: r.emoji.clone(),
+                name: if r.mine {
+                    me.to_string()
+                } else {
+                    self.names
+                        .get(&r.sender)
+                        .cloned()
+                        .unwrap_or_else(|| if r.sender_name.is_empty() { r.sender.clone() } else { r.sender_name.clone() })
+                },
+                mine: r.mine,
+            })
+            .collect()
+    }
+
     /// `m` with the best names known now: the account's own for what it sent.
     fn named(&self, m: &Received, me: &str) -> Received {
         let name = |id: &str, given: &str| match self.names.get(id) {
@@ -285,6 +358,7 @@ impl SignalMailbox {
             let left = deadline.saturating_duration_since(Instant::now());
             match program.said.recv_timeout(left) {
                 Ok(Said::Message(m)) => lock(&messages).add(m),
+                Ok(Said::Reaction(r)) => lock(&messages).react(r),
                 Ok(Said::Synced) => break,
                 Ok(Said::Error { message }) => return Err(unreachable(message)),
                 Ok(_) => {}
@@ -306,6 +380,7 @@ impl SignalMailbox {
                 for s in said {
                     match s {
                         Said::Message(m) => lock(&into).add(m),
+                        Said::Reaction(r) => lock(&into).react(r),
                         other => {
                             if let Said::Error { message } = &other {
                                 log::warn!("signal: {}", clean(message));
@@ -333,7 +408,7 @@ impl SignalMailbox {
     }
 
     fn header(&self, messages: &Messages, m: &Received) -> RemoteHeader {
-        let raw = message(&messages.named(m, &self.me_name), &self.me);
+        let raw = message(&messages.named(m, &self.me_name), &self.me, &messages.reactions_on(m, &self.me_name));
         let id = m.id();
         RemoteHeader {
             seen: m.mine || self.flags.has(Flag::Seen, &id),
@@ -353,6 +428,43 @@ impl SignalMailbox {
         let mut all: Vec<&Received> = messages.by_id.values().filter(|m| keep(m)).collect();
         all.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.sender.cmp(&b.sender)));
         all.into_iter().skip(offset as usize).take(limit as usize).map(|m| self.header(&messages, m)).collect()
+    }
+
+    /// Passes `asked` to the program and waits until what it sent to `thread` went out.
+    fn ask(&mut self, asked: &Asked<'_>, thread: &str) -> Result<bool> {
+        let line = serde_json::to_string(asked).map_err(|e| MailboxError::Protocol(e.to_string()))?;
+        writeln!(self.stdin, "{line}").and_then(|()| self.stdin.flush()).map_err(|_| MailboxError::Protocol(merel_i18n::tr("signal-stopped")))?;
+        let deadline = Instant::now() + SEND_WAIT;
+        loop {
+            match self.replies.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(Said::Sent { thread: t, .. }) if t == thread => return Ok(true),
+                Ok(Said::Error { message }) => return Err(MailboxError::Protocol(message)),
+                Ok(_) => {}
+                Err(_) => return Err(MailboxError::Protocol(merel_i18n::tr("signal-no-answer"))),
+            }
+        }
+    }
+
+    /// Reacts with `emoji` to the message with Message-ID `to`; no emoji takes the account's
+    /// reaction on it back.
+    fn react(&mut self, to: &str, emoji: &str) -> Result<bool> {
+        let id = to.trim().trim_matches(['<', '>']).strip_suffix(&format!("@{DOMAIN}")).unwrap_or_default().to_string();
+        let (thread, author, timestamp, emoji, remove) = {
+            let messages = lock(&self.messages);
+            let m = messages.by_id.get(&id).ok_or_else(|| MailboxError::NotFound(id.clone()))?;
+            // Signal takes a reaction back by naming its emoji.
+            let mine = messages.reactions.get(&id).and_then(|on| on.iter().find(|r| r.mine)).map(|r| r.emoji.clone());
+            let (emoji, remove) = match (emoji.is_empty(), mine) {
+                (false, _) => (emoji.to_string(), false),
+                (true, Some(old)) => (old, true),
+                (true, None) => return Ok(true),
+            };
+            (m.thread.clone(), m.sender.clone(), m.timestamp, emoji, remove)
+        };
+        if emoji.len() > merel_model::MAX_EMOJI {
+            return Err(MailboxError::Protocol(merel_i18n::tr("signal-cannot")));
+        }
+        self.ask(&Asked::React { thread: &thread, emoji: &emoji, remove, target_author: &author, target_timestamp: timestamp }, &thread)
     }
 }
 
@@ -395,7 +507,7 @@ impl Mailbox for SignalMailbox {
         only_folder(folder)?;
         let messages = lock(&self.messages);
         let m = messages.by_id.get(id).ok_or_else(|| MailboxError::NotFound(id.to_string()))?;
-        Ok(message(&messages.named(m, &self.me_name), &self.me))
+        Ok(message(&messages.named(m, &self.me_name), &self.me, &messages.reactions_on(m, &self.me_name)))
     }
 
     fn set_flag(&mut self, folder: &str, id: &str, flag: Flag, on: bool) -> Result<()> {
@@ -416,6 +528,9 @@ impl Mailbox for SignalMailbox {
     /// it is to.
     fn send(&mut self, raw: &[u8]) -> Result<bool> {
         let header = merel_mime::parse_header(raw);
+        if let Some(to) = header.chat.as_ref().and_then(|c| c.reaction_to.clone()) {
+            return self.react(&to, merel_mime::parse_body(raw).text.trim());
+        }
         let thread = match header.chat.as_ref().and_then(|c| c.group_id.clone()) {
             Some(group) => group,
             None => {
@@ -425,17 +540,7 @@ impl Mailbox for SignalMailbox {
             }
         };
         let text = merel_mime::parse_body(raw).text.trim_end().to_string();
-        let line = serde_json::to_string(&Asked::Send { thread: &thread, text: &text }).map_err(|e| MailboxError::Protocol(e.to_string()))?;
-        writeln!(self.stdin, "{line}").and_then(|()| self.stdin.flush()).map_err(|_| MailboxError::Protocol(merel_i18n::tr("signal-stopped")))?;
-        let deadline = Instant::now() + SEND_WAIT;
-        loop {
-            match self.replies.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-                Ok(Said::Sent { thread: t, .. }) if t == thread => return Ok(true),
-                Ok(Said::Error { message }) => return Err(MailboxError::Protocol(message)),
-                Ok(_) => {}
-                Err(_) => return Err(MailboxError::Protocol(merel_i18n::tr("signal-no-answer"))),
-            }
-        }
+        self.ask(&Asked::Send { thread: &thread, text: &text }, &thread)
     }
 
     fn create_folder(&mut self, _parent: Option<&str>, _name: &str) -> Result<()> {
@@ -469,7 +574,7 @@ impl Mailbox for SignalMailbox {
 
 /// The message as mail: the text as a plain part, from the sender to the account, with the
 /// chat headers that put it in its chat.
-fn message(m: &Received, me: &str) -> Vec<u8> {
+fn message(m: &Received, me: &str, reactions: &[merel_model::Reacted]) -> Vec<u8> {
     let from = if m.mine { me.to_string() } else { address_of(&m.sender) };
     let to = if m.mine { thread_address(m) } else { me.to_string() };
     let from_name = if m.sender_name.is_empty() { &m.sender } else { &m.sender_name };
@@ -494,6 +599,11 @@ fn message(m: &Received, me: &str) -> Vec<u8> {
         if !m.thread_name.is_empty() {
             out.push_str(&format!("Chat-Group-Name: {}\r\n", word(&m.thread_name)));
         }
+    }
+    if !reactions.is_empty() {
+        let value = merel_model::Reacted::header(reactions);
+        let folded: Vec<String> = value.as_bytes().chunks(76).map(|c| String::from_utf8_lossy(c).into_owned()).collect();
+        out.push_str(&format!("Merel-Reactions: {}\r\n", folded.join("\r\n ")));
     }
     out.push_str("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n");
     let body = base64::engine::general_purpose::STANDARD.encode(text.replace('\n', "\r\n"));
@@ -580,7 +690,7 @@ mod tests {
 
     #[test]
     fn a_message_reads_as_a_chat_message_from_the_sender() {
-        let raw = message(&received("Hoi, kom je morgen ook?\nGroet"), "me@signal.invalid");
+        let raw = message(&received("Hoi, kom je morgen ook?\nGroet"), "me@signal.invalid", &[]);
         let header = merel_mime::parse_header(&raw);
         assert_eq!(header.from.as_ref().map(|a| a.email().to_string()).as_deref(), Some("1b2c@signal.invalid"));
         assert_eq!(header.from.as_ref().map(|a| a.display().to_string()).as_deref(), Some("Jan de Vries"));
@@ -595,7 +705,7 @@ mod tests {
         m.group = true;
         m.thread = "g0123abcd".into();
         m.thread_name = "Familie".into();
-        let header = merel_mime::parse_header(&message(&m, "me@signal.invalid"));
+        let header = merel_mime::parse_header(&message(&m, "me@signal.invalid", &[]));
         let chat = header.chat.unwrap_or_default();
         assert_eq!(chat.group_id.as_deref(), Some("g0123abcd"));
         assert_eq!(chat.group_name.as_deref(), Some("Familie"));
@@ -605,7 +715,7 @@ mod tests {
     fn a_name_cannot_add_a_header() {
         let mut m = received("x");
         m.sender_name = "Jan\r\nBcc: a@b.nl".into();
-        let raw = String::from_utf8(message(&m, "me@signal.invalid")).unwrap_or_default();
+        let raw = String::from_utf8(message(&m, "me@signal.invalid", &[])).unwrap_or_default();
         assert!(!raw.lines().any(|l| l.starts_with("Bcc")));
     }
 
@@ -626,8 +736,50 @@ mod tests {
         let named = messages.named(&first, "+31612345678");
         assert_eq!(named.thread_name, "Maarten");
         assert_eq!(named.sender_name, "+31612345678");
-        let header = merel_mime::parse_header(&message(&named, "me@signal.invalid"));
+        let header = merel_mime::parse_header(&message(&named, "me@signal.invalid", &[]));
         assert_eq!(header.to.first().map(|a| a.display().to_string()).as_deref(), Some("Maarten"));
+    }
+
+    fn reaction(sender: &str, emoji: &str, timestamp: u64) -> Reaction {
+        Reaction {
+            thread: "1b2c".into(),
+            sender: sender.into(),
+            sender_name: "Jan de Vries".into(),
+            mine: sender == "me",
+            timestamp,
+            emoji: emoji.into(),
+            remove: false,
+            target_author: "1b2c".into(),
+            target_timestamp: 1_761_681_600_123,
+        }
+    }
+
+    #[test]
+    fn a_reaction_shows_on_its_message_one_per_person() {
+        let mut messages = Messages::default();
+        let m = received("Kom je ook?");
+        messages.add(m.clone());
+        messages.react(reaction("1b2c", "👍", 10));
+        messages.react(reaction("1b2c", "❤️", 12));
+        // An older one that arrives late changes nothing.
+        messages.react(reaction("1b2c", "😂", 11));
+        messages.react(reaction("me", "🎉", 13));
+        let on = messages.reactions_on(&m, "Alain");
+        assert_eq!(on.iter().map(|r| r.emoji.as_str()).collect::<Vec<_>>(), ["❤️", "🎉"]);
+        assert!(on[1].mine && on[1].name == "Alain");
+        let header = merel_mime::parse_header(&message(&m, "me@signal.invalid", &on));
+        assert_eq!(header.chat.map(|c| c.reactions), Some(on));
+        let mut back = reaction("me", "🎉", 14);
+        back.remove = true;
+        messages.react(back);
+        assert_eq!(messages.reactions_on(&m, "Alain").len(), 1);
+    }
+
+    #[test]
+    fn a_reaction_the_program_passes_on_is_read() {
+        let line = r#"{"type":"reaction","thread":"1b2c","sender":"1b2c","sender_name":"Jan","mine":false,"timestamp":9,"emoji":"👍","remove":false,"target_author":"1b2c","target_timestamp":5}"#;
+        let Ok(Said::Reaction(r)) = serde_json::from_str::<Said>(line) else { panic!("not read") };
+        assert_eq!(r.target(), "5.1b2c");
     }
 
     #[test]

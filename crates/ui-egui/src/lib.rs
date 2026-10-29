@@ -18,6 +18,7 @@ pub mod contacts;
 mod date_picker;
 mod dates;
 pub mod eml;
+mod emoji;
 pub mod folders;
 mod fonts;
 mod found;
