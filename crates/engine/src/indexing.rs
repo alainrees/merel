@@ -600,6 +600,18 @@ impl Indexer {
             return;
         }
         self.searched = Some(key);
+        // The words search on meaning learned from the mail, for the search's plain words; a
+        // word the model is still reading comes in later, and the search runs again. Also with
+        // only what was typed, so the strip under the box still offers the way back.
+        let typed = crate::search::Query::parse(&s.search);
+        s.learned_words.clear();
+        if let Some(meaning) = &mut self.meaning {
+            for word in typed.words.iter().filter(|w| !typed.quoted.contains(*w)) {
+                if let Some(learned) = meaning.learned(word).filter(|l| !l.is_empty()) {
+                    s.learned_words.insert(word.clone(), learned);
+                }
+            }
+        }
         let query = s.search_query();
         let terms = Terms {
             words: &query.words,

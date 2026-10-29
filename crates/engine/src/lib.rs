@@ -433,6 +433,9 @@ pub struct Session {
     pub search_all: bool,
     /// Searches words only as typed, not also in other languages ("Ook gezocht: …" switched off).
     pub search_exact: bool,
+    /// For a search word, the words of the person's own mail that mean the same, which search
+    /// on meaning learned ([`crate::meaning`]); searched along like the built-in ones.
+    pub learned_words: HashMap<String, Vec<String>>,
     /// Which messages of the folder the list shows, and in what order ("Beeld" tab).
     pub filter: view::Filter,
     pub sort: view::Sort,
@@ -728,7 +731,8 @@ impl Session {
 
     /// The search box as a query, with the words in other languages unless switched off.
     pub fn search_query(&self) -> search::Query {
-        let q = search::Query::parse(&self.search);
+        let mut q = search::Query::parse(&self.search);
+        q.learn(&self.learned_words);
         if self.search_exact { q.exact() } else { q }
     }
 
