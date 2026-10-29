@@ -2388,7 +2388,6 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         );
                         from = format!("{} ({})", clip(m.from.display(), 28), fold.count);
                     }
-                    p.text(egui::pos2(x, rect.top() + 14.0), egui::Align2::LEFT_CENTER, from, egui::FontId::proportional(14.0), from_color);
                     let mut right = dates::short(m.date);
                     if m.has_attachments {
                         right = format!("📎 {right}");
@@ -2403,22 +2402,28 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         egui::FontId::proportional(12.0),
                         if m.flags.flagged { t.flag } else { t.text_dim },
                     );
+                    let mut from_end = right_rect.left() - 8.0;
                     if let Some((glyph, color)) = importance::mark(m.importance, t) {
-                        p.text(
+                        let mark = p.text(
                             egui::pos2(right_rect.left() - 6.0, rect.top() + 14.0),
                             egui::Align2::RIGHT_CENTER,
                             glyph,
                             egui::FontId::proportional(15.0),
                             color,
                         );
+                        from_end = mark.left() - 8.0;
                     }
+                    // Each line ends in "…" where the room ends, never over the date or the edge.
+                    one_line(ui, p, egui::pos2(x, rect.top() + 14.0), &from, egui::FontId::proportional(14.0), from_color, from_end - x);
                     let squares = categories::squares(app, p, egui::pos2(x + w, rect.top() + 34.0), &m.categories);
-                    p.text(
+                    one_line(
+                        ui,
+                        p,
                         egui::pos2(x, rect.top() + 34.0),
-                        egui::Align2::LEFT_CENTER,
-                        clip(&m.subject, if squares > 0.0 { 34 } else { 42 }),
+                        &m.subject,
                         egui::FontId::proportional(13.0),
                         if m.flags.seen { t.text } else { t.accent_text },
+                        w - squares - if squares > 0.0 { 8.0 } else { 0.0 },
                     );
                     if !compact {
                         // Which channel a chat came by, always; the folder when searching everywhere.
@@ -2437,7 +2442,8 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                                     }
                                     None => folder,
                                 };
-                                let job = snippet_job(&folder, snip, 48, t);
+                                let mut job = snippet_job(&folder, snip, 48, t);
+                                job.wrap = egui::text::TextWrapping::truncate_at_width(w);
                                 let galley = ui.fonts_mut(|f| f.layout_job(job));
                                 p.galley(egui::pos2(x, rect.top() + 52.0 - galley.size().y / 2.0), galley, t.text_dim);
                             }
@@ -2445,12 +2451,14 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                                 // Found on meaning alone: says why it is here without the words.
                                 let related = app.engine.session.current_index_hits().is_some_and(|h| h.related.contains(&m.id));
                                 let folder = if related { format!("{folder}{} ", crate::i18n::tr("search-related")) } else { folder };
-                                p.text(
+                                one_line(
+                                    ui,
+                                    p,
                                     egui::pos2(x, rect.top() + 52.0),
-                                    egui::Align2::LEFT_CENTER,
-                                    clip(&format!("{folder}{}", m.preview), 48),
+                                    &format!("{folder}{}", m.preview),
                                     egui::FontId::proportional(12.0),
                                     t.text_dim,
+                                    w,
                                 );
                             }
                         }
@@ -2728,54 +2736,38 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             return;
         }
     }
-    let mut reply: Option<ComposeKind> = None;
-    let mut sender = false;
-    let mut report = false;
+    let known = app.engine.session.contact_with_email(m.from.email()).is_some();
+    // The buttons get their own row when the pane is too narrow to keep the sender readable
+    // beside them; their width is the one measured in the previous frame.
+    let buttons_id = ui.id().with("header-buttons-width");
+    let buttons_width = ui.data(|d| d.get_temp::<f32>(buttons_id)).unwrap_or(0.0);
+    let one_row = ui.available_width() - buttons_width >= HEADER_SENDER_MIN_WIDTH;
+    let mut actions = HeaderActions::default();
+    let mut measured = 0.0;
     ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
-        helder::avatar(ui.painter(), rect.center(), 20.0, m.from.display(), m.from.email());
-        ui.vertical(|ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                ui.label(RichText::new(m.from.display()).strong().color(t.text));
-                if m.from.display() != m.from.email() && !merel_engine::signal::is_signal_address(m.from.email()) {
-                    ui.label(RichText::new(format!("<{}>", m.from.email())).color(t.text_dim));
-                }
+        if one_row {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let before = ui.available_width();
+                actions = header_actions(ui, t, known, in_junk);
+                measured = before - ui.available_width();
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| header_sender(ui, t, &m));
             });
-            // A Signal message says it came over Signal; its addresses are made up.
-            let to = if merel_engine::signal::is_signal_address(m.from.email()) {
-                tr("signal-via")
-            } else {
-                let to: Vec<&str> = m.to.iter().map(|a| a.display()).collect();
-                crate::i18n::tr_args("to-line", &[("to", to.join("; ").into())])
-            };
-            ui.label(RichText::new(format!("{to} · {}", dates::long(m.date))).size(12.0).color(t.text_dim));
-        });
-        // The answers at hand in the message's own header, and the sender's contact card.
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            helder::quiet(ui, t, |ui| {
-                let known = app.engine.session.contact_with_email(m.from.email()).is_some();
-                let (label, hint, icon) = if known {
-                    (tr("contact-open"), tr("contact-open-hint"), helder::Icon::User)
-                } else {
-                    (tr("contact-add"), tr("contact-add-hint"), helder::Icon::UserPlus)
-                };
-                sender = header_button(ui, t, icon, &label).on_hover_text(hint).clicked();
-                report = helder::tool_button(ui, t, helder::Icon::ShieldAlert, &tr("report-button")).on_hover_text(tr("report-hint")).clicked();
-                if !in_junk {
-                    for (icon, label, kind) in [
-                        (helder::Icon::Forward, &header_forward(), ComposeKind::Forward),
-                        (helder::Icon::ReplyAll, &header_reply_all(), ComposeKind::ReplyAll),
-                        (helder::Icon::Reply, &header_reply(), ComposeKind::Reply),
-                    ] {
-                        if header_button(ui, t, icon, label).on_hover_text(label).clicked() {
-                            reply = Some(kind);
-                        }
-                    }
-                }
-            });
-        });
+        } else {
+            header_sender(ui, t, &m);
+        }
     });
+    if !one_row {
+        ui.allocate_ui_with_layout(vec2(ui.available_width(), 34.0), Layout::right_to_left(Align::Center), |ui| {
+            let before = ui.available_width();
+            actions = header_actions(ui, t, known, in_junk);
+            measured = before - ui.available_width();
+        });
+    }
+    ui.data_mut(|d| d.insert_temp(buttons_id, measured));
+    if measured != buttons_width {
+        ui.ctx().request_discard("the header buttons changed width");
+    }
+    let HeaderActions { reply, sender, mut report } = actions;
     if sender {
         app.open_or_add_sender(&m.from);
     }
@@ -3092,6 +3084,69 @@ pub(crate) fn quick_reply_label() -> String {
 }
 
 /// A quiet square icon button in the reading pane's header.
+/// The least room the sender's name and address keep beside the header buttons; below it the
+/// buttons move to a row of their own.
+const HEADER_SENDER_MIN_WIDTH: f32 = 260.0;
+
+/// What was clicked among the buttons in the message's header.
+#[derive(Default)]
+struct HeaderActions {
+    reply: Option<ComposeKind>,
+    sender: bool,
+    report: bool,
+}
+
+/// The sender's picture, name, address and the "Aan" line, cut short with "…" when the pane
+/// is narrow, so the header buttons never cover them.
+fn header_sender(ui: &mut Ui, t: &Tokens, m: &merel_model::MessageHeader) {
+    let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
+    helder::avatar(ui.painter(), rect.center(), 20.0, m.from.display(), m.from.email());
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.add(egui::Label::new(RichText::new(m.from.display()).strong().color(t.text)).truncate());
+            if m.from.display() != m.from.email() && !merel_engine::signal::is_signal_address(m.from.email()) {
+                ui.add(egui::Label::new(RichText::new(format!("<{}>", m.from.email())).color(t.text_dim)).truncate()).on_hover_text(m.from.email());
+            }
+        });
+        // A Signal message says it came over Signal; its addresses are made up.
+        let to = if merel_engine::signal::is_signal_address(m.from.email()) {
+            tr("signal-via")
+        } else {
+            let to: Vec<&str> = m.to.iter().map(|a| a.display()).collect();
+            crate::i18n::tr_args("to-line", &[("to", to.join("; ").into())])
+        };
+        ui.add(egui::Label::new(RichText::new(format!("{to} · {}", dates::long(m.date))).size(12.0).color(t.text_dim)).truncate());
+    });
+}
+
+/// The answers at hand in the message's own header, and the sender's contact card, laid out
+/// from the right.
+fn header_actions(ui: &mut Ui, t: &Tokens, known: bool, in_junk: bool) -> HeaderActions {
+    let mut actions = HeaderActions::default();
+    helder::quiet(ui, t, |ui| {
+        let (label, hint, icon) = if known {
+            (tr("contact-open"), tr("contact-open-hint"), helder::Icon::User)
+        } else {
+            (tr("contact-add"), tr("contact-add-hint"), helder::Icon::UserPlus)
+        };
+        actions.sender = header_button(ui, t, icon, &label).on_hover_text(hint).clicked();
+        actions.report = helder::tool_button(ui, t, helder::Icon::ShieldAlert, &tr("report-button")).on_hover_text(tr("report-hint")).clicked();
+        if !in_junk {
+            for (icon, label, kind) in [
+                (helder::Icon::Forward, &header_forward(), ComposeKind::Forward),
+                (helder::Icon::ReplyAll, &header_reply_all(), ComposeKind::ReplyAll),
+                (helder::Icon::Reply, &header_reply(), ComposeKind::Reply),
+            ] {
+                if header_button(ui, t, icon, label).on_hover_text(label).clicked() {
+                    actions.reply = Some(kind);
+                }
+            }
+        }
+    });
+    actions
+}
+
 fn header_button(ui: &mut Ui, t: &Tokens, icon: helder::Icon, label: &str) -> egui::Response {
     let r = ui.add(
         egui::Button::image(icon.image(helder::ICON, t.text))
@@ -3224,6 +3279,14 @@ fn status_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 }
 
 /// `s` cut to `n` characters with an ellipsis.
+/// `text` on one line from `pos` (its left middle), cut off with "…" where `width` ends.
+fn one_line(ui: &Ui, p: &egui::Painter, pos: egui::Pos2, text: &str, font: egui::FontId, color: Color32, width: f32) {
+    let mut job = egui::text::LayoutJob::simple_singleline(text.replace(['\n', '\r'], " "), font, color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(width.max(20.0));
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    p.galley(egui::pos2(pos.x, pos.y - galley.size().y / 2.0), galley, color);
+}
+
 fn clip(s: &str, n: usize) -> String {
     if s.chars().count() <= n { s.to_string() } else { format!("{}…", s.chars().take(n.saturating_sub(1)).collect::<String>()) }
 }
@@ -3528,6 +3591,31 @@ mod tests {
         h.get_by_label(&notice::close_label()).click();
         h.run();
         assert!(h.state().notice.is_none());
+    }
+
+    #[test]
+    fn the_header_buttons_never_cover_the_sender() {
+        for width in [1280.0, 1000.0, 820.0] {
+            let mut h = egui_kittest::Harness::builder()
+                .with_size(vec2(width, 800.0))
+                .build_ui_state(|ui, app: &mut MailApp| app.ui(ui), MailApp::new(Engine::sample()));
+            h.run();
+            h.state_mut().select_message("m1");
+            h.run();
+            let from = h.state().engine.session.selected().map(|m| m.from.clone()).unwrap();
+            let pane = h.get_by_label(&header_reply()).rect().left() - 400.0;
+            let texts: Vec<egui::Rect> = [from.display().to_string(), format!("<{}>", from.email())]
+                .iter()
+                .filter_map(|text| h.query_all_by_label(text).map(|n| n.rect()).find(|r| r.left() > pane))
+                .collect();
+            assert_eq!(texts.len(), 2, "the name and address show at {width} px");
+            for button in [header_reply(), header_reply_all(), header_forward(), tr("report-button"), tr("contact-add"), tr("contact-open")] {
+                let Some(b) = h.query_by_label(&button).map(|n| n.rect()) else { continue };
+                for text in &texts {
+                    assert!(!b.intersects(*text), "{button} covers the sender at {width} px: {b:?} over {text:?}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -5749,6 +5837,23 @@ mod tests {
             }
         }
         assert!(missing.is_empty(), "these characters would draw as empty boxes: {missing:?}");
+    }
+
+    #[test]
+    fn emoji_from_a_phone_draw_without_empty_boxes() {
+        let mut h = harness();
+        h.run();
+        let boxes = |h: &mut egui_kittest::Harness<'static, MailApp>, text: &str| {
+            let replacement =
+                h.ctx.fonts_mut(|f| f.layout_no_wrap("\u{4E00}".into(), egui::FontId::proportional(14.0), Color32::WHITE)).rows[0].row.glyphs[0]
+                    .uv_rect;
+            let galley = h.ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), egui::FontId::proportional(14.0), Color32::WHITE));
+            galley.rows.iter().flat_map(|r| &r.row.glyphs).filter(|g| g.uv_rect == replacement).count()
+        };
+        // Newer emoji, and the variation selector phones put after a heart.
+        for text in ["🤔", "🥳", "🙂", "🥂", "🫠", "❤\u{FE0F}", "👍🏽", "👨\u{200D}👩\u{200D}👧"] {
+            assert_eq!(boxes(&mut h, text), 0, "{text:?} draws an empty box");
+        }
     }
 
     /// Every label on screen, for the checks that look for words left in the wrong language.

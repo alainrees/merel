@@ -19,6 +19,8 @@ use crate::{AccountStatus, Engine};
 /// How often the chats of a Signal account are listed again; the program has them in memory,
 /// so this costs nothing.
 pub const SIGNAL_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+/// Most messages whose text is fetched at each listing.
+const SIGNAL_BODIES: usize = 50;
 /// How the phone lists Merel among its linked devices.
 const DEVICE_NAME: &str = "Merel";
 
@@ -113,6 +115,19 @@ impl Engine {
             .filter_map(|a| self.session.folder_of_kind(&a.id, FolderKind::Inbox))
             .map(|f| f.id.clone())
             .collect();
+        // Their text is at hand in the program, so it is fetched right away: a new message in
+        // an open chat shows its words, not "being fetched".
+        let mut unread: Vec<(i64, String)> = self
+            .session
+            .messages
+            .iter()
+            .filter(|m| inboxes.contains(&m.folder_id) && !self.session.bodies.contains_key(&m.id))
+            .map(|m| (m.date, m.id.clone()))
+            .collect();
+        unread.sort_by_key(|m| std::cmp::Reverse(m.0));
+        for (_, id) in unread.into_iter().take(SIGNAL_BODIES) {
+            self.session.request_body(&id);
+        }
         for id in inboxes {
             self.session.request_headers(&id);
         }

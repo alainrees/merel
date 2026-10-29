@@ -190,11 +190,19 @@ struct Program {
 impl Program {
     fn start(helper: &Path, args: &[&std::ffi::OsStr], key: &Secret) -> std::io::Result<(Program, Option<ChildStdin>)> {
         let mut child =
-            Command::new(helper).args(args).env(KEY_VAR, key.expose()).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()?;
+            Command::new(helper).args(args).env(KEY_VAR, key.expose()).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
         let stdin = child.stdin.take();
         let stdout = child.stdout.take().ok_or_else(|| std::io::Error::other("no output"))?;
         let (tx, rx) = channel();
         std::thread::Builder::new().name("signal".into()).spawn(move || read(stdout, &tx))?;
+        // What the program notes along the way (never message text) goes to Merel's log.
+        if let Some(stderr) = child.stderr.take() {
+            std::thread::Builder::new().name("signal-log".into()).spawn(move || {
+                for line in BufReader::new(stderr).lines().map_while(std::result::Result::ok) {
+                    log::warn!("{}", clean(&line));
+                }
+            })?;
+        }
         Ok((Program { child, said: rx }, stdin))
     }
 
@@ -272,6 +280,9 @@ struct Messages {
     by_id: HashMap<String, Received>,
     /// Who each Signal address is, for sending: the address to the program's thread.
     threads: HashMap<String, String>,
+    /// The latest name each person was given, by service id: a name may come only with a later
+    /// message (once the phone shared its contacts), and then goes for the earlier ones too.
+    names: HashMap<String, String>,
 }
 
 impl Messages {
@@ -281,6 +292,12 @@ impl Messages {
         }
         if !m.group {
             self.threads.insert(address_of(&m.thread), m.thread.clone());
+            if is_name(&m.thread_name, &m.thread) {
+                self.names.insert(m.thread.clone(), m.thread_name.clone());
+            }
+        }
+        if !m.mine && is_name(&m.sender_name, &m.sender) {
+            self.names.insert(m.sender.clone(), m.sender_name.clone());
         }
         // News of a call can come in any order (the store passes the newest first): once any
         // device says it was answered, it was.
@@ -302,6 +319,27 @@ impl Messages {
     }
 }
 
+impl Messages {
+    /// `m` with the best names known now: the account's own for what it sent.
+    fn named(&self, m: &Received, me: &str) -> Received {
+        let name = |id: &str, given: &str| match self.names.get(id) {
+            Some(known) if !is_name(given, id) => known.clone(),
+            _ => given.to_string(),
+        };
+        let mut m = m.clone();
+        m.sender_name = if m.mine { me.to_string() } else { name(&m.sender, &m.sender_name) };
+        if !m.group {
+            m.thread_name = name(&m.thread, &m.thread_name);
+        }
+        m
+    }
+}
+
+/// Whether `name` is a name, not empty or the service id it stands for.
+fn is_name(name: &str, id: &str) -> bool {
+    !name.trim().is_empty() && !name.eq_ignore_ascii_case(id)
+}
+
 /// A linked Signal account, read through the program.
 pub struct SignalMailbox {
     program: Program,
@@ -309,14 +347,17 @@ pub struct SignalMailbox {
     messages: Arc<Mutex<Messages>>,
     /// What came from the program besides messages, for [`SignalMailbox::send`].
     replies: Receiver<Said>,
-    /// The account's own address.
+    /// The account's own address and name.
     me: String,
+    me_name: String,
     flags: Flags,
+    /// Set when the program stopped, with why: the next listing fails, so Merel connects again.
+    stopped: Arc<Mutex<Option<String>>>,
 }
 
 impl SignalMailbox {
     /// Starts the program on the store in `dir` and waits until it passed on everything it has.
-    pub fn connect(helper: &Path, dir: &Path, key: &Secret, me: &str) -> Result<SignalMailbox> {
+    pub fn connect(helper: &Path, dir: &Path, key: &Secret, me: &merel_model::Address) -> Result<SignalMailbox> {
         let unreachable = |reason: String| MailboxError::Connect { host: "Signal".into(), reason };
         let args = [std::ffi::OsStr::new("run"), dir.as_os_str()];
         let (mut program, stdin) = Program::start(helper, &args, key).map_err(|e| unreachable(e.to_string()))?;
@@ -339,26 +380,43 @@ impl SignalMailbox {
         let (tx, replies) = channel();
         let said = std::mem::replace(&mut program.said, channel().1);
         let into = messages.clone();
+        let stopped = Arc::new(Mutex::new(None));
+        let stop = stopped.clone();
         std::thread::Builder::new()
             .name("signal-in".into())
             .spawn(move || {
+                let mut last_error = None;
                 for s in said {
                     match s {
                         Said::Message(m) => lock(&into).add(m),
                         other => {
-                            if tx.send(other).is_err() {
-                                break;
+                            if let Said::Error { message } = &other {
+                                log::warn!("signal: {}", clean(message));
+                                last_error = Some(message.clone());
                             }
+                            // Nobody waits for a reply between sends; that is fine.
+                            let _ = tx.send(other);
                         }
                     }
                 }
+                *stop.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+                    Some(last_error.unwrap_or_else(|| merel_i18n::tr("signal-stopped")));
             })
             .map_err(|e| unreachable(e.to_string()))?;
-        Ok(SignalMailbox { program, stdin, messages, replies, me: me.to_string(), flags: Flags::open(dir) })
+        Ok(SignalMailbox {
+            program,
+            stdin,
+            messages,
+            replies,
+            me: me.email().to_string(),
+            me_name: me.display().to_string(),
+            flags: Flags::open(dir),
+            stopped,
+        })
     }
 
-    fn header(&self, m: &Received) -> RemoteHeader {
-        let raw = message(m, &self.me);
+    fn header(&self, messages: &Messages, m: &Received) -> RemoteHeader {
+        let raw = message(&messages.named(m, &self.me_name), &self.me);
         let id = m.id();
         RemoteHeader {
             seen: m.mine || m.call.is_some_and(|c| c.settled(m.mine)) || self.flags.has(Flag::Seen, &id),
@@ -377,7 +435,7 @@ impl SignalMailbox {
         let messages = lock(&self.messages);
         let mut all: Vec<&Received> = messages.by_id.values().filter(|m| keep(m)).collect();
         all.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.sender.cmp(&b.sender)));
-        all.into_iter().skip(offset as usize).take(limit as usize).map(|m| self.header(m)).collect()
+        all.into_iter().skip(offset as usize).take(limit as usize).map(|m| self.header(&messages, m)).collect()
     }
 }
 
@@ -400,6 +458,9 @@ impl Mailbox for SignalMailbox {
 
     fn headers(&mut self, folder: &str, offset: u32, limit: u32) -> Result<Vec<RemoteHeader>> {
         only_folder(folder)?;
+        if let Some(why) = self.stopped.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
+            return Err(MailboxError::Connect { host: "Signal".into(), reason: why });
+        }
         Ok(self.listed(|_| true, offset, limit))
     }
 
@@ -417,7 +478,7 @@ impl Mailbox for SignalMailbox {
         only_folder(folder)?;
         let messages = lock(&self.messages);
         let m = messages.by_id.get(id).ok_or_else(|| MailboxError::NotFound(id.to_string()))?;
-        Ok(message(m, &self.me))
+        Ok(message(&messages.named(m, &self.me_name), &self.me))
     }
 
     fn set_flag(&mut self, folder: &str, id: &str, flag: Flag, on: bool) -> Result<()> {
@@ -630,6 +691,27 @@ mod tests {
         m.sender_name = "Jan\r\nBcc: a@b.nl".into();
         let raw = String::from_utf8(message(&m, "me@signal.invalid")).unwrap_or_default();
         assert!(!raw.lines().any(|l| l.starts_with("Bcc")));
+    }
+
+    #[test]
+    fn a_name_that_comes_later_names_the_earlier_messages_too() {
+        let mut messages = Messages::default();
+        let mut first = received("Heb ik de borrel gemist?");
+        first.mine = true;
+        first.sender = "me".into();
+        first.sender_name = "me".into();
+        first.thread_name = "1b2c".into();
+        messages.add(first.clone());
+        let mut answer = received("Die komt nog.");
+        answer.sender_name = "Maarten".into();
+        answer.thread_name = "1b2c".into();
+        answer.timestamp += 1;
+        messages.add(answer);
+        let named = messages.named(&first, "+31612345678");
+        assert_eq!(named.thread_name, "Maarten");
+        assert_eq!(named.sender_name, "+31612345678");
+        let header = merel_mime::parse_header(&message(&named, "me@signal.invalid"));
+        assert_eq!(header.to.first().map(|a| a.display().to_string()).as_deref(), Some("Maarten"));
     }
 
     #[test]
