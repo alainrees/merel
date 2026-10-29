@@ -1708,9 +1708,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A stretch of more than a week around now, so the weekly sample appointment falls in it
+    /// on any day and at any hour.
     fn day() -> (i64, i64) {
         let now = now() as i64;
-        (now - 3 * 86_400, now + 3 * 86_400)
+        (now - 4 * 86_400, now + 4 * 86_400)
     }
 
     #[test]
