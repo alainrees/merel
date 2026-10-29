@@ -357,6 +357,8 @@ fn replace_file(new: &Path, target: &Path) -> Result<(), String> {
     })
 }
 
+const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+
 /// Copies `Merel.app` out of the disk image next to `app`, then swaps the two.
 fn install_mac(dmg: &Path, app: &Path, dir: &Path) -> Result<(), String> {
     let mount = dir.join("mnt");
@@ -379,7 +381,10 @@ fn install_mac(dmg: &Path, app: &Path, dir: &Path) -> Result<(), String> {
         let _ = std::fs::remove_dir_all(&staging);
         // ditto keeps the app's signature and attributes intact.
         command("ditto", &[mount.join("Merel.app").as_os_str(), staging.as_os_str()])?;
-        swap(&staging, app, &parent.join(".Merel-old.app"))
+        swap(&staging, app, &parent.join(".Merel-old.app"))?;
+        // Registered anew, so the Dock and Notification Center pick up a changed icon.
+        let _ = command(LSREGISTER, &["-f".as_ref(), app.as_os_str()]);
+        Ok(())
     })();
     let _ = command("hdiutil", &["detach".as_ref(), mount.as_os_str(), "-quiet".as_ref()]);
     copied

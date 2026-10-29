@@ -202,6 +202,20 @@ mod platform {
         center.getNotificationSettingsWithCompletionHandler(&answer);
     }
 
+    /// Tells Launch Services about this Merel.app again. Notification Center keeps the icon it
+    /// once read for the bundle id, and an update that swaps the bundle (or a new icon) leaves
+    /// it showing the old one until the app is registered anew.
+    fn register(bundle: String) {
+        const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+        let _ = std::thread::Builder::new().name("merel-lsregister".into()).spawn(move || {
+            match std::process::Command::new(LSREGISTER).args(["-f", &bundle]).status() {
+                Ok(status) if status.success() => {}
+                Ok(status) => log::info!("lsregister: {status}"),
+                Err(e) => log::info!("lsregister: {e}"),
+            }
+        });
+    }
+
     /// The notification center, only inside an app bundle: outside one the framework aborts.
     fn center() -> Option<Retained<UNUserNotificationCenter>> {
         NSBundle::mainBundle().bundleIdentifier()?;
@@ -230,6 +244,7 @@ mod platform {
             });
             let options = UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound | UNAuthorizationOptions::Badge;
             center.requestAuthorizationWithOptions_completionHandler(options, &answer);
+            register(NSBundle::mainBundle().bundlePath().to_string());
         }
 
         pub fn check_settings(&mut self) {
@@ -326,9 +341,29 @@ mod platform {
         }
     }
 
+    /// Merel's own icon as a file: an AppImage puts no icon in the desktop's theme, so the name
+    /// "merel" alone finds nothing (or an old one). Falls back to that name if the file cannot
+    /// be written.
+    fn icon() -> String {
+        const ICON: &[u8] = include_bytes!("../../../packaging/icon-256.png");
+        let cache = std::env::var_os("XDG_CACHE_HOME")
+            .filter(|d| !d.is_empty())
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")));
+        let Some(dir) = cache.map(|c| c.join("merel")) else { return "merel".into() };
+        let path = dir.join("merel-icon.png");
+        if std::fs::read(&path).ok().as_deref() != Some(ICON)
+            && let Err(e) = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, ICON))
+        {
+            log::info!("notification icon not written: {e}");
+            return "merel".into();
+        }
+        path.to_string_lossy().into_owned()
+    }
+
     fn show(alert: Alert) {
         let mut n = Notification::new();
-        n.appname("Merel").icon("merel").summary(&alert.title).body(&alert.body).action("default", "Openen");
+        n.appname("Merel").icon(&icon()).summary(&alert.title).body(&alert.body).action("default", "Openen");
         n.hint(Hint::DesktopEntry("merel".into()));
         n.hint(Hint::Category(if alert.kind == Kind::Mail { "email.arrived" } else { "im" }.into()));
         if alert.sound {
