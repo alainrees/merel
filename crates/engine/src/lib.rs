@@ -1027,6 +1027,14 @@ impl Session {
                     .filter(|m| m.folder_id == folder_id && m.sealed == merel_model::Sealed::Opened)
                     .map(|m| (m.id.clone(), m.clone()))
                     .collect();
+                // A Signal message changes in place (an edit, a deletion, a reaction): then its
+                // text is fetched again.
+                let sizes: HashMap<String, u64> = if reactions_shown {
+                    self.messages.iter().filter(|m| m.folder_id == folder_id).map(|m| (m.id.clone(), m.size)).collect()
+                } else {
+                    HashMap::new()
+                };
+                let mut changed = Vec::new();
                 if offset == 0 {
                     self.messages.retain(|m| m.folder_id != folder_id);
                 }
@@ -1045,6 +1053,13 @@ impl Session {
                     if let Some(mut m) = message_of(&folder_id, h) {
                         if !reactions_shown && let Some(chat) = m.chat.as_mut() {
                             chat.reactions.clear();
+                            chat.quote = None;
+                            chat.delivery = None;
+                            chat.edited = false;
+                            chat.deleted = false;
+                        }
+                        if sizes.get(&m.id).is_some_and(|&old| old != m.size) && self.bodies.contains_key(&m.id) {
+                            changed.push(m.id.clone());
                         }
                         if let Some(o) = opened.get(&m.id).filter(|_| m.sealed == merel_model::Sealed::Closed) {
                             (m.from, m.to, m.subject, m.date, m.chat, m.sealed) =
@@ -1059,6 +1074,9 @@ impl Session {
                     if !self.apply_junk(&id) && !self.apply_ignored(&id) {
                         self.apply_rules(&id, false);
                     }
+                }
+                for id in changed {
+                    self.fetch_body_again(&id);
                 }
                 self.recount_unread();
                 self.fetch_answers(&folder_id);
@@ -1311,6 +1329,18 @@ impl Session {
         let offset = self.messages.iter().filter(|m| m.folder_id == folder_id).count() as u32;
         self.loading.insert(folder_id.to_string());
         self.pending.push(Job::Headers { account_id: f.account_id, folder_id: f.id, path: f.path, offset, limit: HEADER_LIMIT });
+    }
+
+    /// Fetches the text of message `message_id` again; what was shown stays until it comes.
+    fn fetch_body_again(&mut self, message_id: &str) {
+        let Some(m) = self.message(message_id) else { return };
+        let Some(f) = self.folder(&m.folder_id) else { return };
+        if self.loading.contains(message_id) {
+            return;
+        }
+        let job = Job::Body { account_id: f.account_id.clone(), message_id: m.id.clone(), path: f.path.clone(), id: m.remote_id.clone() };
+        self.loading.insert(message_id.to_string());
+        self.pending.push(job);
     }
 
     fn request_body(&mut self, message_id: &str) {

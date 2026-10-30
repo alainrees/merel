@@ -9,30 +9,44 @@
 //!                                            (first every stored message, then the new ones)
 //!                                          ← {"type":"send","thread":…,"text":…}
 //!                                          ← {"type":"react","thread":…,"emoji":…,…}
+//!                                          ← {"type":"edit","thread":…,"timestamp":…,"text":…}
+//!                                          ← {"type":"delete","thread":…,"timestamp":…,"everyone":…}
 //! ```
 //!
 //! The store in `<dir>` is encrypted with the key in the environment variable `MEREL_SIGNAL_KEY`,
 //! which Merel keeps in the system keychain.
 
+mod phone;
+mod wire;
+
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result, anyhow, bail};
+use base64::Engine as _;
 use futures::channel::oneshot;
 use futures::{StreamExt, future, pin_mut};
 use presage::Manager;
 use presage::libsignal_service::configuration::SignalServers;
+use presage::libsignal_service::content::Metadata;
 use presage::libsignal_service::content::{Content, ContentBody, DataMessage};
 use presage::libsignal_service::protocol::ServiceId;
+use presage::libsignal_service::sender::AttachmentSpec;
 use presage::manager::Registered;
 use presage::model::identity::OnNewIdentity;
 use presage::model::messages::Received;
-use presage::proto::data_message::Reaction;
-use presage::proto::sync_message::{Content as SyncContent, Sent};
-use presage::proto::{EditMessage, SyncMessage};
+use presage::proto::AttachmentPointer;
+use presage::proto::data_message::{Delete, Quote, Reaction, quote};
+use presage::proto::sync_message::{CallEvent, Content as SyncContent, Sent, call_event};
+use presage::proto::{CallMessage, EditMessage, GroupContextV2, SyncMessage, call_message};
+use presage::proto::{ReceiptMessage, receipt_message, typing_message};
 use presage::store::{ContentExt, Store, Thread};
 use presage_store_sqlite::SqliteStore;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
+
+use crate::phone::Phone;
+use crate::wire::Phase;
 
 /// What Merel hears.
 #[derive(Serialize)]
@@ -58,7 +72,19 @@ enum Event {
         /// Milliseconds since the epoch, as Signal counts them; unique within a thread.
         timestamp: u64,
         text: String,
-        attachments: Vec<String>,
+        attachments: Vec<FileInfo>,
+        /// The message this one answers, quoted.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        quote: Option<Quoted>,
+        /// Set when this is a call rather than a message: the text is then empty.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        call: Option<Call>,
+        /// When the writer last changed the text after sending it; 0 when never.
+        #[serde(skip_serializing_if = "is_zero")]
+        edited: u64,
+        /// The writer deleted it for everyone: only that it was there is left.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        deleted: bool,
     },
     /// Someone reacted with an emoji to a message, or took a reaction back (`remove`). The
     /// message is the one `target_author` sent at `target_timestamp`.
@@ -73,8 +99,51 @@ enum Event {
         target_author: String,
         target_timestamp: u64,
     },
-    /// Every message waiting on the server is in.
-    Synced,
+    /// The contents of a file Merel asked for, in base64; `data` is empty when it could not
+    /// be fetched, with why in `error`.
+    File {
+        id: String,
+        data: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    /// `sender` got (`delivered`) or read (`read`) the account's messages sent at `timestamps`.
+    Receipt {
+        sender: String,
+        kind: &'static str,
+        timestamps: Vec<u64>,
+    },
+    /// `sender` started or stopped typing in the chat between the two of them.
+    Typing {
+        sender: String,
+        sender_name: String,
+        typing: bool,
+    },
+    /// The account read these messages on another device: by author and timestamp.
+    ReadElsewhere {
+        read: Vec<(String, u64)>,
+    },
+    /// The account's Signal settings, from the phone: whether to send read receipts and show
+    /// typing.
+    Settings {
+        read_receipts: Option<bool>,
+        typing_indicators: Option<bool>,
+    },
+    /// Every message waiting on the server is in. `calls` says whether this build can call.
+    Synced {
+        calls: bool,
+    },
+    /// Whether calls can be made from here now (the calls program runs and has sound).
+    Calls {
+        available: bool,
+    },
+    /// How a call in Merel goes: ringing, connected, ended….
+    Call {
+        thread: String,
+        name: String,
+        call_id: u64,
+        state: Phase,
+    },
     Sent {
         thread: String,
         timestamp: u64,
@@ -84,6 +153,71 @@ enum Event {
     },
 }
 
+/// A file sent with a message. `id` is how Merel asks for its contents.
+#[derive(Serialize, Clone)]
+struct FileInfo {
+    id: String,
+    name: String,
+    mime: String,
+    size: u64,
+}
+
+/// A file Merel sends with a message, its contents in base64.
+#[derive(Deserialize)]
+struct OutFile {
+    name: String,
+    mime: String,
+    data: String,
+}
+
+/// Every file of the messages passed on, by id, to fetch when Merel asks.
+type Files = HashMap<String, AttachmentPointer>;
+
+/// Most bytes a file to fetch or send may have: Signal's own limit is 100 MB.
+const MAX_FILE: usize = 100 * 1024 * 1024;
+
+/// The message a message answers: who sent it when, and (the start of) its text.
+#[derive(Serialize, Deserialize, Clone)]
+struct Quoted {
+    author: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    author_name: String,
+    timestamp: u64,
+    #[serde(default)]
+    text: String,
+}
+
+/// A Signal call, as Merel shows it in the chat. Merel cannot take part in calls (yet): it
+/// shows that someone is calling, and how the call ended.
+#[derive(Serialize, Clone, Copy)]
+struct Call {
+    /// Signal's id of the call; later news about the same call has the same id.
+    id: u64,
+    kind: CallKind,
+    state: CallState,
+}
+
+#[derive(Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum CallKind {
+    Audio,
+    Video,
+    Group,
+}
+
+#[derive(Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum CallState {
+    /// Ringing now: on the phone, as Merel cannot answer.
+    Ringing,
+    /// Answered, here or on another device; or for a call the account made, it went through.
+    Answered,
+    /// Nobody answered, or it was declined.
+    Missed,
+    /// A group call started.
+    Started,
+}
+
 /// What Merel asks.
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -91,6 +225,21 @@ enum Command {
     Send {
         thread: String,
         text: String,
+        /// The message this one answers.
+        #[serde(default)]
+        quote: Option<Quoted>,
+        #[serde(default)]
+        files: Vec<OutFile>,
+    },
+    /// The contents of file `id`, as `{"type":"file"}`.
+    Fetch {
+        id: String,
+    },
+    /// Tells `author` their messages sent at `timestamps` were read. Merel only asks when the
+    /// account's Signal settings send read receipts.
+    MarkRead {
+        author: String,
+        timestamps: Vec<u64>,
     },
     /// Reacts to the message `target_author` sent at `target_timestamp`; `remove` takes the
     /// reaction back. Signal keeps one reaction per person per message.
@@ -101,6 +250,36 @@ enum Command {
         target_author: String,
         target_timestamp: u64,
     },
+    /// Call the person of this chat (sound only).
+    Call {
+        thread: String,
+    },
+    /// Answer the call ringing.
+    Accept {
+        call_id: u64,
+    },
+    /// End the call, or decline the one ringing.
+    HangUp,
+    Mute {
+        on: bool,
+    },
+    /// Replaces the text of the account's own message sent at `timestamp`, as Signal does.
+    Edit {
+        thread: String,
+        timestamp: u64,
+        text: String,
+    },
+    /// Deletes the account's message sent at `timestamp`: for `everyone`, as Signal does, else
+    /// only here.
+    Delete {
+        thread: String,
+        timestamp: u64,
+        everyone: bool,
+    },
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 fn emit(event: &Event) {
@@ -124,16 +303,17 @@ async fn start() -> Result<()> {
         [cmd, dir, name] if cmd == "link" => link(open(dir, &key).await?, name).await,
         [cmd, dir] if cmd == "run" => {
             let manager = Manager::load_registered(open(dir, &key).await?).await?;
+            let mut files = Files::new();
             // Without the stored messages Merel still gets the new ones.
             match threads(dir, &key).await {
                 Ok(threads) => {
-                    if let Err(e) = replay(&manager, &threads).await {
+                    if let Err(e) = replay(&manager, &threads, &mut files).await {
                         eprintln!("merel-signal: the stored messages did not come: {e:#}");
                     }
                 }
                 Err(e) => eprintln!("merel-signal: the stored chats could not be listed: {e:#}"),
             }
-            run(manager, dir, &key).await
+            run(manager, dir, &key, files).await
         }
         _ => bail!("usage: merel-signal link <dir> <device name> | merel-signal run <dir>"),
     }
@@ -162,12 +342,15 @@ async fn link(store: SqliteStore, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Most calls kept ringing at once; a caller that never hangs up is forgotten.
+const MAX_RINGING: usize = 64;
+
 /// Most stored messages passed on at the start, the newest of each chat first.
 const MAX_REPLAY: usize = 20_000;
 
 /// Passes on every message the store keeps, so Merel has the whole conversation each time it
 /// starts the helper (and keeps nothing of its own).
-async fn replay<S: Store>(manager: &Manager<S, Registered>, threads: &[Thread]) -> Result<()> {
+async fn replay<S: Store>(manager: &Manager<S, Registered>, threads: &[Thread], files: &mut Files) -> Result<()> {
     let mut sent = 0;
     for thread in threads {
         let Ok(messages) = manager.store().messages(thread, ..).await else { continue };
@@ -175,7 +358,7 @@ async fn replay<S: Store>(manager: &Manager<S, Registered>, threads: &[Thread]) 
             if sent >= MAX_REPLAY {
                 return Ok(());
             }
-            if let Some(event) = describe(manager, &content).await {
+            if let Some(event) = describe(manager, &content, files).await {
                 emit(&event);
                 sent += 1;
             }
@@ -184,23 +367,49 @@ async fn replay<S: Store>(manager: &Manager<S, Registered>, threads: &[Thread]) 
     Ok(())
 }
 
-async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str) -> Result<()> {
+async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str, mut files: Files) -> Result<()> {
     let sender = manager.clone();
     let messages = manager.receive_messages().await.map_err(|e| anyhow!("{e}"))?;
     pin_mut!(messages);
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut sending = sender;
+    let mut ringing = Ringing::default();
+    let (mut phone, mut notes) = Phone::start();
+    let mut calls_open = true;
     loop {
         tokio::select! {
+            note = notes.recv(), if calls_open => match note {
+                Some(note) => {
+                    for event in phone.handle(note, &mut sending, &mut ringing).await {
+                        emit(&event);
+                    }
+                }
+                None => {
+                    calls_open = false;
+                    if let Some(event) = phone.stopped() {
+                        emit(&event);
+                    }
+                }
+            },
             received = messages.next() => match received {
                 Some(Received::QueueEmpty) => {
                     eprintln!("merel-signal: all waiting messages are in");
-                    emit(&Event::Synced)
+                    emit(&Event::Synced { calls: phone.ready() })
                 }
                 Some(Received::Content(content)) => {
+                    if let Some(event) = status(&manager, &content).await {
+                        emit(&event);
+                        continue;
+                    }
                     // What kind of message came, never who or what: for finding out why one
                     // does not show.
-                    let shown = describe(&manager, &content).await;
+                    let shown = match &content.body {
+                        ContentBody::CallMessage(call) => {
+                            phone.received(&manager, &content, call).await;
+                            ringing.hear(&manager, &content, call).await
+                        }
+                        _ => describe(&manager, &content, &mut files).await,
+                    };
                     eprintln!("merel-signal: received {}, {}", kind(&content.body), if shown.is_some() { "shown" } else { "not shown" });
                     if let Some(event) = shown {
                         emit(&event);
@@ -212,8 +421,9 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
             },
             line = lines.next_line() => match line? {
                 Some(line) => match serde_json::from_str::<Command>(&line) {
-                    Ok(Command::Send { thread, text }) => match send(&mut sending, dir, key, &thread, &text).await {
-                        Ok((to, timestamp)) => {
+                    Ok(Command::Send { thread, text, quote, files: out }) => match send(&mut sending, dir, key, &thread, &text, quote.as_ref(), out).await {
+                        Ok((to, timestamp, sent_files)) => {
+                            let attachments = sent_files.into_iter().map(|p| info(&p, &mut files)).collect();
                             // As it came from another device of the account's, so Merel lists it.
                             let me = ServiceId::from(manager.registration_data().service_ids.aci());
                             let (thread_name, group) = name_of(&manager, &to).await;
@@ -226,12 +436,57 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                                 mine: true,
                                 timestamp,
                                 text,
-                                attachments: Vec::new(),
+                                attachments,
+                                quote,
+                                call: None,
+                                edited: 0,
+                                deleted: false,
                             });
                             emit(&Event::Sent { thread, timestamp });
                         }
                         Err(e) => emit(&Event::Error { message: format!("{e:#}") }),
                     },
+                    Ok(Command::Edit { thread, timestamp, text }) => match edit(&mut sending, dir, key, &thread, timestamp, &text).await {
+                        Ok(edited) => {
+                            if let Some(event) = describe(&manager, &edited, &mut files).await {
+                                emit(&event);
+                            }
+                            emit(&Event::Sent { thread, timestamp });
+                        }
+                        Err(e) => emit(&Event::Error { message: format!("{e:#}") }),
+                    },
+                    Ok(Command::Delete { thread, timestamp, everyone }) => match delete(&mut sending, dir, key, &thread, timestamp, everyone).await {
+                        Ok(left) => {
+                            if let Some(event) = left {
+                                emit(&event);
+                            }
+                            emit(&Event::Sent { thread, timestamp });
+                        }
+                        Err(e) => emit(&Event::Error { message: format!("{e:#}") }),
+                    },
+                    Ok(Command::MarkRead { author, timestamps }) => {
+                        let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Read as i32), timestamp: timestamps };
+                        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+                        match ServiceId::parse_from_service_id_string(&author) {
+                            Some(to) => {
+                                if let Err(e) = sending.send_message(to, ContentBody::ReceiptMessage(receipt), now).await {
+                                    eprintln!("merel-signal: a read receipt did not go: {e}");
+                                }
+                            }
+                            None => eprintln!("merel-signal: a read receipt for no one"),
+                        }
+                    }
+                    Ok(Command::Fetch { id }) => {
+                        let event = match files.get(&id) {
+                            Some(pointer) if pointer.size.unwrap_or(0) as usize <= MAX_FILE => match manager.get_attachment(pointer).await {
+                                Ok(bytes) => Event::File { id, data: base64::engine::general_purpose::STANDARD.encode(bytes), error: None },
+                                Err(e) => Event::File { id, data: String::new(), error: Some(format!("{e}")) },
+                            },
+                            Some(_) => Event::File { id, data: String::new(), error: Some("too big".into()) },
+                            None => Event::File { id, data: String::new(), error: Some("unknown file".into()) },
+                        };
+                        emit(&event);
+                    }
                     Ok(Command::React { thread, emoji, remove, target_author, target_timestamp }) => {
                         let reaction = Reaction {
                             emoji: Some(emoji.clone()),
@@ -258,6 +513,26 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                                 emit(&Event::Sent { thread, timestamp });
                             }
                             Err(e) => emit(&Event::Error { message: format!("{e:#}") }),
+                        }
+                    }
+                    Ok(Command::Call { thread }) => {
+                        if let Err(e) = phone.call(&manager, &thread).await {
+                            emit(&Event::Error { message: format!("{e:#}") });
+                        }
+                    }
+                    Ok(Command::Accept { call_id }) => {
+                        if let Err(e) = phone.accept(call_id).await {
+                            emit(&Event::Error { message: format!("{e:#}") });
+                        }
+                    }
+                    Ok(Command::HangUp) => {
+                        if let Err(e) = phone.hang_up().await {
+                            emit(&Event::Error { message: format!("{e:#}") });
+                        }
+                    }
+                    Ok(Command::Mute { on }) => {
+                        if let Err(e) = phone.mute(on).await {
+                            emit(&Event::Error { message: format!("{e:#}") });
                         }
                     }
                     Err(e) => emit(&Event::Error { message: format!("unknown command: {e}") }),
@@ -316,6 +591,35 @@ async fn contact_name<S: Store>(manager: &Manager<S, Registered>, id: &ServiceId
         .unwrap_or_else(|| id.service_id_string())
 }
 
+/// What a receipt, typing or a sync of reading or settings says; `None` for anything else.
+async fn status<S: Store>(manager: &Manager<S, Registered>, content: &Content) -> Option<Event> {
+    let sender = &content.metadata.sender;
+    match &content.body {
+        ContentBody::ReceiptMessage(r) => {
+            let kind = match r.r#type.and_then(|t| receipt_message::Type::try_from(t).ok()) {
+                Some(receipt_message::Type::Delivery) => "delivered",
+                Some(receipt_message::Type::Read | receipt_message::Type::Viewed) => "read",
+                None => return None,
+            };
+            Some(Event::Receipt { sender: sender.service_id_string(), kind, timestamps: r.timestamp.clone() })
+        }
+        // Typing in a group names the group only by an id Merel does not keep; between two
+        // people the sender is the chat.
+        ContentBody::TypingMessage(t) if t.group_id.is_none() => Some(Event::Typing {
+            sender: sender.service_id_string(),
+            sender_name: contact_name(manager, sender).await,
+            typing: t.action.and_then(|a| typing_message::Action::try_from(a).ok()) == Some(typing_message::Action::Started),
+        }),
+        ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Configuration(c)), .. }) => {
+            Some(Event::Settings { read_receipts: c.read_receipts, typing_indicators: c.typing_indicators })
+        }
+        ContentBody::SynchronizeMessage(m) if !m.read.is_empty() => {
+            Some(Event::ReadElsewhere { read: m.read.iter().filter_map(|r| Some((r.sender_aci.clone()?, r.timestamp?))).collect() })
+        }
+        _ => None,
+    }
+}
+
 /// The kind of a message, for the log.
 fn kind(body: &ContentBody) -> &'static str {
     match body {
@@ -340,22 +644,35 @@ async fn name_of<S: Store>(manager: &Manager<S, Registered>, thread: &Thread) ->
 }
 
 /// A message worth showing and searching: text sent or received, here or on another device.
-async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content) -> Option<Event> {
-    let (data, mine) = match &content.body {
-        ContentBody::DataMessage(d) => (d, false),
-        ContentBody::EditMessage(EditMessage { data_message: Some(d), .. }) => (d, false),
-        ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Sent(Sent { message: Some(d), .. })), .. }) => (d, true),
+async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content, files: &mut Files) -> Option<Event> {
+    if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::CallEvent(event)), .. }) = &content.body {
+        return logged_call(manager, content, event).await;
+    }
+    let (data, mine, edited) = match &content.body {
+        ContentBody::DataMessage(d) => (d, false, false),
+        ContentBody::EditMessage(EditMessage { data_message: Some(d), .. }) => (d, false, true),
+        ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Sent(Sent { message: Some(d), .. })), .. }) => (d, true, false),
         ContentBody::SynchronizeMessage(SyncMessage {
             content: Some(SyncContent::Sent(Sent { edit_message: Some(EditMessage { data_message: Some(d), .. }), .. })),
             ..
-        }) => (d, true),
+        }) => (d, true, true),
         _ => return None,
     };
-    let DataMessage { body, attachments, reaction, .. } = data;
+    // What Merel itself sent is kept as the message, not as a sync from another device: it is
+    // the account's own, in the chat it went to.
+    let own = ServiceId::from(manager.registration_data().service_ids.aci());
+    let sent_here = !mine && content.metadata.sender == own;
+    let mine = mine || sent_here;
+    let thread = match &data.group_v2 {
+        None if sent_here => Thread::Contact(content.metadata.destination),
+        _ => Thread::try_from(content).ok()?,
+    };
+    let DataMessage { body, attachments, reaction, quote, group_call_update, delete, .. } = data;
+    if let Some(Delete { target_sent_timestamp: Some(target) }) = delete {
+        return deleted(manager, content, thread, *target).await;
+    }
     if let Some(r) = reaction {
-        let thread = Thread::try_from(content).ok()?;
         let sender = &content.metadata.sender;
-        let own = ServiceId::from(manager.registration_data().service_ids.aci());
         return Some(Event::Reaction {
             thread: thread_id(&thread),
             sender: sender.service_id_string(),
@@ -368,12 +685,15 @@ async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content)
             target_timestamp: r.target_sent_timestamp?,
         });
     }
-    let names: Vec<String> = attachments.iter().filter_map(|a| a.file_name.clone()).collect();
+    if group_call_update.is_some() {
+        let call = Call { id: content.timestamp(), kind: CallKind::Group, state: CallState::Started };
+        return chat_call(manager, thread, &content.metadata.sender, mine, call, content.timestamp()).await;
+    }
+    let names: Vec<FileInfo> = attachments.iter().map(|a| info(a, files)).collect();
     let text = body.clone().unwrap_or_default();
     if text.is_empty() && attachments.is_empty() {
         return None;
     }
-    let thread = Thread::try_from(content).ok()?;
     let (thread_name, group) = name_of(manager, &thread).await;
     let me = &content.metadata.sender;
     Some(Event::Message {
@@ -386,11 +706,225 @@ async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content)
         timestamp: content.timestamp(),
         text,
         attachments: names,
+        quote: match quote {
+            Some(q) => quoted(manager, q).await,
+            None => None,
+        },
+        call: None,
+        edited: if edited { data.timestamp.unwrap_or(1) } else { 0 },
+        deleted: false,
     })
 }
 
-async fn send<S: Store>(manager: &mut Manager<S, Registered>, dir: &str, key: &str, thread: &str, text: &str) -> Result<(Thread, u64)> {
-    send_data(manager, dir, key, thread, DataMessage { body: Some(text.to_string()), ..Default::default() }).await
+/// A call as an entry in its chat, from `caller`.
+async fn chat_call<S: Store>(
+    manager: &Manager<S, Registered>,
+    thread: Thread,
+    caller: &ServiceId,
+    mine: bool,
+    call: Call,
+    timestamp: u64,
+) -> Option<Event> {
+    let (thread_name, group) = name_of(manager, &thread).await;
+    Some(Event::Message {
+        thread: thread_id(&thread),
+        thread_name,
+        group,
+        sender: caller.service_id_string(),
+        sender_name: contact_name(manager, caller).await,
+        mine,
+        timestamp,
+        text: String::new(),
+        attachments: Vec::new(),
+        quote: None,
+        call: Some(call),
+        edited: 0,
+        deleted: false,
+    })
+}
+
+/// A finished call between two people, as the account's devices log it.
+async fn logged_call<S: Store>(manager: &Manager<S, Registered>, content: &Content, event: &CallEvent) -> Option<Event> {
+    use call_event::{Direction, Event as Outcome, Type};
+    let kind = match event.r#type() {
+        Type::AudioCall => CallKind::Audio,
+        Type::VideoCall => CallKind::Video,
+        // Group calls show as the group's "call started" message instead.
+        Type::GroupCall | Type::AdHocCall | Type::UnknownType => return None,
+    };
+    let state = match event.event() {
+        Outcome::Accepted => CallState::Answered,
+        Outcome::NotAccepted => CallState::Missed,
+        Outcome::Observed | Outcome::Delete | Outcome::UnknownEvent => return None,
+    };
+    let peer = ServiceId::parse_from_service_id_binary(event.conversation_id.as_deref()?)?;
+    let mine = event.direction() == Direction::Outgoing;
+    let me = ServiceId::from(manager.registration_data().service_ids.aci());
+    let caller = if mine { me } else { peer };
+    // An outgoing call that nobody answered is not "missed" by the account itself.
+    let state = if mine && state == CallState::Missed { CallState::Answered } else { state };
+    let call = Call { id: event.call_id?, kind, state };
+    let started = event.timestamp.unwrap_or_else(|| content.timestamp());
+    chat_call(manager, Thread::Contact(peer), &caller, mine, call, started).await
+}
+
+/// Calls ringing now, by Signal's id of the call: who calls, what kind, and when it started.
+#[derive(Default)]
+struct Ringing(HashMap<u64, (ServiceId, CallKind, u64)>);
+
+impl Ringing {
+    /// Merel itself took the call: how it ends is Merel's to log.
+    fn taken(&mut self, call_id: u64) {
+        self.0.remove(&call_id);
+    }
+}
+
+impl Ringing {
+    /// What the signalling of a call says for Merel: someone calls, or how their call ended.
+    /// An ended call goes into the store as the call log entry Signal keeps, so it is still
+    /// there after a restart (signalling itself is not kept).
+    async fn hear<S: Store>(&mut self, manager: &Manager<S, Registered>, content: &Content, message: &CallMessage) -> Option<Event> {
+        use call_message::hangup::Type as Why;
+        let me = ServiceId::from(manager.registration_data().service_ids.aci());
+        if let Some(offer) = &message.offer {
+            let caller = content.metadata.sender;
+            if caller == me {
+                return None;
+            }
+            let kind = match offer.r#type() {
+                call_message::offer::Type::OfferVideoCall => CallKind::Video,
+                call_message::offer::Type::OfferAudioCall => CallKind::Audio,
+            };
+            let id = offer.id?;
+            if self.0.len() >= MAX_RINGING {
+                self.0.clear();
+            }
+            self.0.insert(id, (caller, kind, content.timestamp()));
+            let call = Call { id, kind, state: CallState::Ringing };
+            return chat_call(manager, Thread::Contact(caller), &caller, false, call, content.timestamp()).await;
+        }
+        let (id, state) = if let Some(hangup) = &message.hangup {
+            let state = match hangup.r#type() {
+                Why::HangupAccepted => CallState::Answered,
+                Why::HangupNormal | Why::HangupDeclined | Why::HangupBusy | Why::HangupNeedPermission => CallState::Missed,
+            };
+            (hangup.id?, state)
+        } else if let Some(busy) = &message.busy {
+            (busy.id?, CallState::Missed)
+        } else {
+            return None;
+        };
+        let (caller, kind, started) = self.0.remove(&id)?;
+        let log = CallEvent {
+            conversation_id: Some(caller.service_id_binary()),
+            call_id: Some(id),
+            timestamp: Some(started),
+            r#type: Some(match kind {
+                CallKind::Video => call_event::Type::VideoCall,
+                _ => call_event::Type::AudioCall,
+            } as i32),
+            direction: Some(call_event::Direction::Incoming as i32),
+            event: Some(match state {
+                CallState::Answered => call_event::Event::Accepted,
+                _ => call_event::Event::NotAccepted,
+            } as i32),
+        };
+        let event = logged_call(manager, content, &log).await;
+        let entry = Content {
+            metadata: Metadata {
+                sender: me,
+                destination: me,
+                sender_device: content.metadata.sender_device,
+                server_guid: None,
+                client_timestamp: content.metadata.client_timestamp,
+                server_timestamp: content.metadata.server_timestamp,
+                needs_receipt: false,
+                unidentified_sender: false,
+                was_plaintext: false,
+                pni_verified: None,
+            },
+            body: ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::CallEvent(log)), ..Default::default() }),
+        };
+
+        if let Err(e) = manager.store().save_message(&Thread::Contact(caller), entry).await {
+            emit(&Event::Error { message: format!("could not keep the call: {e}") });
+        }
+        event
+    }
+}
+
+async fn send<S: Store>(
+    manager: &mut Manager<S, Registered>,
+    dir: &str,
+    key: &str,
+    thread: &str,
+    text: &str,
+    quote: Option<&Quoted>,
+    out: Vec<OutFile>,
+) -> Result<(Thread, u64, Vec<AttachmentPointer>)> {
+    let quote = quote.map(|q| Quote {
+        id: Some(q.timestamp),
+        author_aci: Some(q.author.clone()),
+        text: Some(q.text.clone()).filter(|t| !t.is_empty()),
+        r#type: Some(quote::Type::Normal as i32),
+        ..Default::default()
+    });
+    let mut specs = Vec::new();
+    for f in out {
+        let bytes = base64::engine::general_purpose::STANDARD.decode(f.data.as_bytes())?;
+        if bytes.len() > MAX_FILE {
+            bail!("{} is too big for Signal", f.name);
+        }
+        let spec = AttachmentSpec {
+            content_type: f.mime,
+            length: bytes.len(),
+            file_name: Some(f.name),
+            preview: None,
+            voice_note: None,
+            borderless: None,
+            width: None,
+            height: None,
+            caption: None,
+            blur_hash: None,
+        };
+        specs.push((spec, bytes));
+    }
+    let mut pointers = Vec::new();
+    for uploaded in manager.upload_attachments(specs).await.map_err(|e| anyhow!("{e}"))? {
+        pointers.push(uploaded.map_err(|e| anyhow!("{e:?}"))?);
+    }
+    let body = Some(text.to_string()).filter(|t| !t.is_empty());
+    let message = DataMessage { body, quote, attachments: pointers.clone(), ..Default::default() };
+    let (to, timestamp) = send_data(manager, dir, key, thread, message).await?;
+    Ok((to, timestamp, pointers))
+}
+
+/// What Merel hears of file `a`, kept under its id to fetch later.
+fn info(a: &AttachmentPointer, files: &mut Files) -> FileInfo {
+    use sha2::Digest as _;
+    let seed = a.digest.clone().or_else(|| a.key.clone()).unwrap_or_default();
+    let id = hex::encode(&sha2::Sha256::digest(seed)[..12]);
+    files.insert(id.clone(), a.clone());
+    FileInfo {
+        id,
+        name: a.file_name.clone().unwrap_or_default(),
+        mime: a.content_type.clone().unwrap_or_else(|| "application/octet-stream".into()),
+        size: u64::from(a.size.unwrap_or(0)),
+    }
+}
+
+/// The message `q` quotes, with its author's name.
+async fn quoted<S: Store>(manager: &Manager<S, Registered>, q: &Quote) -> Option<Quoted> {
+    let author = q.author_aci.clone()?;
+    let name = match ServiceId::parse_from_service_id_string(&author) {
+        Some(id) => contact_name(manager, &id).await,
+        None => String::new(),
+    };
+    let mut text = q.text.clone().unwrap_or_default();
+    if text.is_empty() {
+        text = q.attachments.iter().filter_map(|a| a.file_name.clone()).collect::<Vec<_>>().join(", ");
+    }
+    Some(Quoted { author, author_name: name, timestamp: q.id?, text })
 }
 
 /// Sends `message` to the chat `thread`, stamped with the time now.
@@ -401,21 +935,170 @@ async fn send_data<S: Store>(
     thread: &str,
     mut message: DataMessage,
 ) -> Result<(Thread, u64)> {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+    let timestamp = now()?;
     message.timestamp = Some(timestamp);
-    match thread.starts_with('g') {
-        true => {
-            let groups = threads(dir, key).await?;
-            let Some(Thread::Group(key)) = groups.iter().find(|t| matches!(t, Thread::Group(k) if group_id(k) == thread)) else {
-                bail!("unknown chat {thread}");
-            };
-            manager.send_message_to_group(key, message, timestamp).await.map_err(|e| anyhow!("{e}"))?;
-            Ok((Thread::Group(*key), timestamp))
-        }
-        false => {
-            let to = ServiceId::parse_from_service_id_string(thread).ok_or_else(|| anyhow!("unknown chat {thread}"))?;
-            manager.send_message(to, message, timestamp).await.map_err(|e| anyhow!("{e}"))?;
-            Ok((Thread::Contact(to), timestamp))
-        }
+    let to = find_thread(dir, key, thread).await?;
+    in_group(manager, &to, &mut message).await;
+    send_body(manager, &to, message.into(), timestamp).await?;
+    Ok((to, timestamp))
+}
+
+fn now() -> Result<u64> {
+    Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64)
+}
+
+/// The chat Merel names `thread`: a person's service id, or a group by its hashed key.
+async fn find_thread(dir: &str, key: &str, thread: &str) -> Result<Thread> {
+    if thread.starts_with('g') {
+        let groups = threads(dir, key).await?;
+        groups.into_iter().find(|t| matches!(t, Thread::Group(k) if group_id(k) == thread)).ok_or_else(|| anyhow!("unknown chat {thread}"))
+    } else {
+        ServiceId::parse_from_service_id_string(thread).map(Thread::Contact).ok_or_else(|| anyhow!("unknown chat {thread}"))
     }
+}
+
+/// For a group, says in `message` which group it is for, as Signal wants it: the members'
+/// apps put it in the group by that.
+async fn in_group<S: Store>(manager: &Manager<S, Registered>, thread: &Thread, message: &mut DataMessage) {
+    if let Thread::Group(key) = thread
+        && message.group_v2.is_none()
+    {
+        let revision = manager.store().group(*key).await.ok().flatten().map(|g| g.revision);
+        message.group_v2 = Some(GroupContextV2 { master_key: Some(key.to_vec()), revision, ..Default::default() });
+    }
+}
+
+async fn send_body<S: Store>(manager: &mut Manager<S, Registered>, to: &Thread, body: ContentBody, timestamp: u64) -> Result<()> {
+    match to {
+        Thread::Group(key) => manager.send_message_to_group(key, body, timestamp).await,
+        Thread::Contact(id) => manager.send_message(*id, body, timestamp).await,
+    }
+    .map_err(|e| anyhow!("{e}"))
+}
+
+/// The message the account sent at `timestamp` in `to`, as it went out first.
+async fn own_message<S: Store>(manager: &Manager<S, Registered>, to: &Thread, timestamp: u64) -> Result<(Content, DataMessage)> {
+    let me = ServiceId::from(manager.registration_data().service_ids.aci());
+    let original = manager.store().message(to, timestamp).await?.ok_or_else(|| anyhow!("unknown message"))?;
+    if original.metadata.sender != me {
+        bail!("only one's own message can be changed");
+    }
+    let data = match &original.body {
+        ContentBody::DataMessage(d) => d.clone(),
+        ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Sent(Sent { message: Some(d), .. })), .. }) => d.clone(),
+        _ => bail!("this message cannot be changed"),
+    };
+    Ok((original, data))
+}
+
+/// Replaces the text of the account's message sent at `timestamp`, keeping what else it had
+/// (files, the message it answers), as Signal does; gives back the message as it is now.
+async fn edit<S: Store>(manager: &mut Manager<S, Registered>, dir: &str, key: &str, thread: &str, timestamp: u64, text: &str) -> Result<Content> {
+    let to = find_thread(dir, key, thread).await?;
+    let (original, mut data) = own_message(manager, &to, timestamp).await?;
+    if text.trim().is_empty() && data.attachments.is_empty() {
+        bail!("an edit needs text");
+    }
+    let at = now()?;
+    data.body = Some(text.to_string()).filter(|t| !t.is_empty());
+    data.timestamp = Some(at);
+    in_group(manager, &to, &mut data).await;
+    let edit = EditMessage { target_sent_timestamp: Some(timestamp), data_message: Some(data) };
+    send_body(manager, &to, edit.clone().into(), at).await?;
+    // As another device of the account's would pass it on.
+    let destination_service_id = match &to {
+        Thread::Contact(id) => Some(id.service_id_string()),
+        Thread::Group(_) => None,
+    };
+    let sent = Sent { destination_service_id, timestamp: Some(at), edit_message: Some(edit), ..Default::default() };
+    Ok(Content {
+        metadata: original.metadata,
+        body: ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Sent(sent)), ..Default::default() }),
+    })
+}
+
+/// Deletes the account's message sent at `timestamp`: for everyone, as Signal does, or only
+/// from this device. Gives back the line left in its place, if any.
+async fn delete<S: Store>(
+    manager: &mut Manager<S, Registered>,
+    dir: &str,
+    key: &str,
+    thread: &str,
+    timestamp: u64,
+    everyone: bool,
+) -> Result<Option<Event>> {
+    let to = find_thread(dir, key, thread).await?;
+    if !everyone {
+        // Its changes are kept apart, and would bring it back.
+        let mut store = manager.store().clone();
+        let mut changes = Vec::new();
+        for content in store.messages(&to, ..).await?.flatten() {
+            if let ContentBody::EditMessage(EditMessage { target_sent_timestamp: Some(t), .. })
+            | ContentBody::SynchronizeMessage(SyncMessage {
+                content: Some(SyncContent::Sent(Sent { edit_message: Some(EditMessage { target_sent_timestamp: Some(t), .. }), .. })),
+                ..
+            }) = &content.body
+                && *t == timestamp
+            {
+                changes.push(content.metadata.client_timestamp.timestamp_millis() as u64);
+            }
+        }
+        for at in changes.into_iter().chain([timestamp]) {
+            store.delete_message(&to, at).await?;
+        }
+        return Ok(None);
+    }
+    let (original, _) = own_message(manager, &to, timestamp).await?;
+    let at = now()?;
+    let mut message = DataMessage { delete: Some(Delete { target_sent_timestamp: Some(timestamp) }), timestamp: Some(at), ..Default::default() };
+    in_group(manager, &to, &mut message).await;
+    send_body(manager, &to, message.clone().into(), at).await?;
+    let content = Content { metadata: original.metadata, body: message.into() };
+    Ok(deleted(manager, &content, to, timestamp).await)
+}
+
+/// The line a message deleted for everyone leaves, as Signal shows it. The store then holds
+/// an empty message in its place, with no sender; this puts the deletion there instead, so
+/// the line is still there after a restart. `None` for a message the store never had.
+async fn deleted<S: Store>(manager: &Manager<S, Registered>, content: &Content, thread: Thread, target: u64) -> Option<Event> {
+    let me = ServiceId::from(manager.registration_data().service_ids.aci());
+    let author = content.metadata.sender;
+    let mut kept = manager.store().message(&thread, target).await.ok()??;
+    let ContentBody::DataMessage(DataMessage { delete: Some(_), .. }) = kept.body else {
+        let data = match &content.body {
+            ContentBody::DataMessage(d) => d.clone(),
+            ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Sent(Sent { message: Some(d), .. })), .. }) => d.clone(),
+            _ => return None,
+        };
+        kept.metadata.sender = author;
+        kept.metadata.destination = match thread {
+            Thread::Contact(id) if author == me => id,
+            _ => me,
+        };
+        kept.body = data.into();
+        if let Err(e) = manager.store().save_message(&thread, kept).await {
+            eprintln!("merel-signal: could not keep a deletion: {e}");
+        }
+        return deleted_line(manager, thread, author, author == me, target).await;
+    };
+    deleted_line(manager, thread, author, author == me, target).await
+}
+
+async fn deleted_line<S: Store>(manager: &Manager<S, Registered>, thread: Thread, author: ServiceId, mine: bool, target: u64) -> Option<Event> {
+    let (thread_name, group) = name_of(manager, &thread).await;
+    Some(Event::Message {
+        thread: thread_id(&thread),
+        thread_name,
+        group,
+        sender: author.service_id_string(),
+        sender_name: contact_name(manager, &author).await,
+        mine,
+        timestamp: target,
+        text: String::new(),
+        attachments: Vec::new(),
+        quote: None,
+        call: None,
+        edited: 0,
+        deleted: true,
+    })
 }

@@ -51,6 +51,7 @@ pub mod room;
 pub mod rules;
 pub mod search_folders;
 mod search_page;
+pub mod signal_call;
 mod signature;
 pub mod tasks;
 pub mod templates;
@@ -151,6 +152,8 @@ pub struct MailApp {
     pub meet: meet::State,
     /// Merel's own meeting room (see [`room`]).
     pub room: room::State,
+    /// A call over Signal (see [`signal_call`]).
+    pub signal_call: signal_call::State,
     /// What the last action has to say, shown at the top of the window (see [`notice`]).
     notice: Option<notice::Notice>,
     /// The message whose body is on screen; when it changes, its pictures leave the cache.
@@ -313,6 +316,7 @@ impl MailApp {
             chat: chat::State::default(),
             meet: meet::State::default(),
             room: room::State::default(),
+            signal_call: signal_call::State::default(),
             notice: None,
             unsubscribe: None,
             receipts_sent: Default::default(),
@@ -384,6 +388,7 @@ impl MailApp {
     pub fn logic(&mut self, ctx: &egui::Context) {
         self.engine.poll();
         room::tick(self, ctx);
+        signal_call::tick(self, ctx);
         self.wake_snoozed();
         self.tick_updates(ctx);
         let arrivals = self.engine.session.take_arrivals();
@@ -447,6 +452,7 @@ impl MailApp {
         compose::show(self, &ctx, &t);
         chat::windows(self, &ctx, &t);
         room::window(self, &ctx, &t);
+        signal_call::window(self, &ctx, &t);
         calendar::window(self, &ctx, &t);
         calendar::goto_window(self, &ctx, &t);
         calendars::window(self, &ctx, &t);

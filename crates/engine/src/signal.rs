@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use merel_model::{Account, Address, Auth, Draft, FolderKind, Protocol, Server, Tls};
 use merel_secrets::Secret;
-pub use merel_signal_link::is_signal_address;
+pub use merel_signal_link::{CallPhase as SignalCallPhase, CallUpdate as SignalCallUpdate, is_signal_address};
 use merel_signal_link::{LinkStep, Linking};
 
 use crate::{AccountStatus, Engine};
@@ -21,6 +21,11 @@ use crate::{AccountStatus, Engine};
 pub const SIGNAL_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 /// Most messages whose text is fetched at each listing.
 const SIGNAL_BODIES: usize = 50;
+/// Most bytes of files one Signal message may carry, as Signal allows.
+const MAX_SIGNAL_FILES: usize = 100 * 1024 * 1024;
+/// How long after sending a Signal message it may be changed or deleted for everyone, in
+/// seconds: a day, as Signal allows.
+const CHANGE_FOR: i64 = 24 * 60 * 60;
 /// How the phone lists Merel among its linked devices.
 const DEVICE_NAME: &str = "Merel";
 
@@ -134,13 +139,13 @@ impl Engine {
     }
 
     /// Sends a chat message over Signal: Signal encrypts it end to end itself, so it goes without
-    /// OpenPGP, and as text only.
+    /// OpenPGP; files go along.
     pub(crate) fn send_signal(&mut self, account_id: &str, mut draft: Draft) -> Result<u64, String> {
-        if draft.body.trim().is_empty() {
+        if draft.body.trim().is_empty() && draft.attachments.is_empty() {
             return Err(merel_i18n::tr("chat-type-first"));
         }
-        if !draft.attachments.is_empty() {
-            return Err(merel_i18n::tr("signal-text-only"));
+        if draft.attachment_bytes() > MAX_SIGNAL_FILES {
+            return Err(merel_i18n::tr("signal-too-big"));
         }
         draft.encrypt = false;
         draft.sign = Some(false);
@@ -194,9 +199,142 @@ impl Engine {
         Ok(())
     }
 
+    /// Whether the Signal message `message_id` is one's own and may still be changed or deleted
+    /// for everyone: Signal allows it for a day.
+    pub fn signal_can_change(&self, message_id: &str) -> bool {
+        let Some(m) = self.session.message(message_id) else { return false };
+        let signal = self.session.folder(&m.folder_id).is_some_and(|f| self.is_signal_account(&f.account_id));
+        let tag = m.chat.as_ref();
+        let age = chrono::Utc::now().timestamp() - m.date;
+        signal && self.session.chat_is_mine(message_id) && !tag.is_some_and(|c| c.deleted) && age < CHANGE_FOR
+    }
+
+    /// Replaces the text of one's own Signal message `message_id`, for everyone in the chat, as
+    /// Signal does. It shows at once; the next listing confirms it.
+    pub fn signal_edit(&mut self, message_id: &str, text: &str) -> Result<(), String> {
+        let text = text.trim_end();
+        if text.trim().is_empty() {
+            return Err(merel_i18n::tr("chat-type-first"));
+        }
+        let draft = self.change_draft(message_id, text, false)?;
+        let (account_id, draft) = draft;
+        if let Some(body) = self.session.bodies.get_mut(message_id) {
+            body.text = text.to_string();
+        }
+        if let Some(chat) = self.session.messages.iter_mut().find(|x| x.id == message_id).and_then(|x| x.chat.as_mut()) {
+            chat.edited = true;
+        }
+        self.session.send(&account_id, draft);
+        self.dispatch();
+        Ok(())
+    }
+
+    /// Deletes the Signal message `message_id`: for everyone (one's own, within a day), as
+    /// Signal does, leaving a line in its place; or only here.
+    pub fn signal_delete(&mut self, message_id: &str, everyone: bool) -> Result<(), String> {
+        if !everyone {
+            crate::commands::delete_message(&mut self.session, message_id).map_err(|_| merel_i18n::tr("signal-unknown"))?;
+            self.dispatch();
+            return Ok(());
+        }
+        let (account_id, draft) = self.change_draft(message_id, "", true)?;
+        if let Some(body) = self.session.bodies.get_mut(message_id) {
+            body.text = merel_i18n::tr("signal-deleted");
+            body.attachments.clear();
+        }
+        if let Some(chat) = self.session.messages.iter_mut().find(|x| x.id == message_id).and_then(|x| x.chat.as_mut()) {
+            chat.deleted = true;
+            chat.reactions.clear();
+            chat.quote = None;
+        }
+        self.session.send(&account_id, draft);
+        self.dispatch();
+        Ok(())
+    }
+
+    /// What goes to the Signal program to change or delete message `message_id`.
+    fn change_draft(&self, message_id: &str, text: &str, delete: bool) -> Result<(String, Draft), String> {
+        if !self.signal_can_change(message_id) {
+            return Err(merel_i18n::tr("signal-cannot"));
+        }
+        let m = self.session.message(message_id).ok_or_else(|| merel_i18n::tr("signal-unknown"))?;
+        let account_id = self.session.folder(&m.folder_id).map(|f| f.account_id.clone()).ok_or_else(|| merel_i18n::tr("signal-unknown"))?;
+        let target = m.message_id.clone().ok_or_else(|| merel_i18n::tr("signal-unknown"))?;
+        let tag = m.chat.clone().unwrap_or_default();
+        let draft = Draft {
+            to: m.to.clone(),
+            body: text.to_string(),
+            chat: Some(merel_model::ChatTag {
+                group_id: tag.group_id.clone(),
+                group_name: tag.group_name.clone(),
+                edit_of: (!delete).then(|| target.clone()),
+                delete_of: delete.then_some(target),
+                ..Default::default()
+            }),
+            encrypt: false,
+            sign: Some(false),
+            ..Draft::default()
+        };
+        Ok((account_id, draft))
+    }
+
+    /// Who is typing in `chat` now, by name, when it is a Signal chat between two people.
+    pub fn signal_typing(&self, chat: &crate::chat::Chat) -> Option<String> {
+        if !self.is_signal_account(&chat.account_id) || chat.is_group() {
+            return None;
+        }
+        chat.people.iter().find_map(|p| merel_signal_link::typing(p.email()))
+    }
+
     /// Whether `account_id` is a Signal account.
     pub fn is_signal_account(&self, account_id: &str) -> bool {
         self.session.accounts.iter().any(|a| a.id == account_id && is_signal(a))
+    }
+
+    /// The address of the Signal account `account_id`, which its program is known by.
+    fn signal_address(&self, account_id: &str) -> Result<String, String> {
+        self.session
+            .accounts
+            .iter()
+            .find(|a| a.id == account_id && is_signal(a))
+            .map(|a| a.address.email().to_string())
+            .ok_or_else(|| merel_i18n::tr("signal-stopped"))
+    }
+
+    /// Whether the Signal account `account_id` can call from this computer: Signal's calling
+    /// library is in this build of its program, and the program runs.
+    pub fn signal_can_call(&self, account_id: &str) -> bool {
+        self.signal_address(account_id).is_ok_and(|me| merel_signal_link::can_call(&me))
+    }
+
+    /// Calls the person behind the Signal address `to` (sound only); how it goes comes from
+    /// [`Engine::take_signal_calls`].
+    pub fn signal_call(&self, account_id: &str, to: &str) -> Result<(), String> {
+        merel_signal_link::call(&self.signal_address(account_id)?, to)
+    }
+
+    pub fn signal_accept(&self, account_id: &str, call_id: u64) -> Result<(), String> {
+        merel_signal_link::accept_call(&self.signal_address(account_id)?, call_id)
+    }
+
+    /// Ends the Signal call going on, or declines the one ringing.
+    pub fn signal_hang_up(&self, account_id: &str) -> Result<(), String> {
+        merel_signal_link::hang_up(&self.signal_address(account_id)?)
+    }
+
+    pub fn signal_mute(&self, account_id: &str, on: bool) -> Result<(), String> {
+        merel_signal_link::mute(&self.signal_address(account_id)?, on)
+    }
+
+    /// How Signal calls went since the last time, with the account each is on.
+    pub fn take_signal_calls(&self) -> Vec<(String, SignalCallUpdate)> {
+        merel_signal_link::take_call_updates()
+            .into_iter()
+            .filter_map(|(me, update)| {
+                let account = self.session.accounts.iter().find(|a| is_signal(a) && a.address.email().eq_ignore_ascii_case(&me))?;
+                Some((account.id.clone(), update))
+            })
+            .collect()
     }
 }
 
@@ -264,6 +402,17 @@ mod tests {
         let jobs = e.session.take_jobs();
         assert!(jobs.iter().any(|j| matches!(j, crate::Job::Send { draft, .. } if draft.body.is_empty())));
         assert!(e.reaction("acc/INBOX#1", "👍").is_err());
+    }
+
+    #[test]
+    fn an_answer_quotes_who_wrote_what() {
+        let mut e = Engine::sample();
+        let m = e.session.messages[0].clone();
+        e.session.bodies.insert(m.id.clone(), merel_mime::Body { text: "Kom je ook?".into(), ..Default::default() });
+        let q = e.session.chat_quote(&m.id).unwrap();
+        assert_eq!(q.text, "Kom je ook?");
+        assert_eq!(q.name, m.from.display());
+        assert_eq!(Some(q.message_id), m.message_id);
     }
 
     #[test]

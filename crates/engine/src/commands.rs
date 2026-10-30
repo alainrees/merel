@@ -316,8 +316,11 @@ fn toggle_flag(s: &mut Session, params: &Value) -> Result<(), CommandError> {
 /// goes for good, the way Outlook has it (the window asks first).
 fn message_delete(s: &mut Session, _: &Value) -> Result<(), CommandError> {
     for id in selection(s)? {
-        let in_deleted = s.message(&id).and_then(|m| s.folder(&m.folder_id)).is_some_and(|f| f.kind == FolderKind::Deleted);
-        if in_deleted {
+        let folder = s.message(&id).and_then(|m| s.folder(&m.folder_id));
+        let in_deleted = folder.is_some_and(|f| f.kind == FolderKind::Deleted);
+        // Signal has no Deleted folder: deleting is Signal's "Delete for me".
+        let signal = folder.is_some_and(|f| s.accounts.iter().any(|a| a.id == f.account_id && crate::signal::is_signal(a)));
+        if in_deleted || signal {
             delete_message(s, &id)?;
         } else {
             move_to_kind(s, &id, FolderKind::Deleted, "Deleted Items")?;

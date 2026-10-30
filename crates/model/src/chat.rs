@@ -42,6 +42,86 @@ pub struct ChatTag {
     /// account's messages carry them; the engine drops them from any other.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reactions: Vec<Reacted>,
+    /// The message this one answers, quoted above it (`Merel-Quote`). Going out, its
+    /// Message-ID says which message; coming in, its name and text show. Only Signal sends
+    /// and shows it; the engine drops it from any other account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quote: Option<Quoted>,
+    /// For one's own message: whether it arrived or was read (`Merel-Delivery`), as Signal's
+    /// receipts say. Only Signal says it; the engine drops it from any other account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<Delivery>,
+    /// Set on an edit going out (`Merel-Edit`): the Message-ID of one's own message whose
+    /// text this one's text replaces. Only Signal sends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit_of: Option<String>,
+    /// Set on a deletion going out (`Merel-Delete`): the Message-ID of one's own message to
+    /// delete for everyone. Only Signal sends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delete_of: Option<String>,
+    /// Whether the writer changed the text after sending it (`Merel-Edited`). Only Signal says
+    /// it; the engine drops it from any other account.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub edited: bool,
+    /// Whether the writer deleted the message for everyone (`Merel-Deleted`): what is left is
+    /// a line saying so. Only Signal says it; the engine drops it from any other account.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deleted: bool,
+}
+
+/// How far a message one sent came.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Delivery {
+    Delivered,
+    Read,
+}
+
+impl Delivery {
+    /// From a `Merel-Delivery` header value.
+    pub fn from_header(value: Option<&str>) -> Option<Delivery> {
+        match value?.trim() {
+            "delivered" => Some(Delivery::Delivered),
+            "read" => Some(Delivery::Read),
+            _ => None,
+        }
+    }
+}
+
+/// A message quoted in the answer to it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Quoted {
+    /// Its Message-ID, as Merel lists it; empty when the message is not known.
+    #[serde(default)]
+    pub message_id: String,
+    /// Who wrote it, by name.
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub text: String,
+}
+
+/// Most characters of a quoted message kept.
+pub const MAX_QUOTE: usize = 500;
+
+impl Quoted {
+    /// The `Merel-Quote` header value: base64 JSON.
+    pub fn header(&self) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(self).unwrap_or_default())
+    }
+
+    /// The quote a `Merel-Quote` header value holds, if it is one.
+    pub fn from_header(value: Option<&str>) -> Option<Quoted> {
+        use base64::Engine as _;
+        let b64: String = value?.chars().filter(|c| !c.is_whitespace()).collect();
+        let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
+        let q: Quoted = serde_json::from_slice(&bytes).ok()?;
+        let message_id = clean_text(q.message_id.trim()).chars().take(998).collect();
+        let name = clean_text(q.name.trim()).chars().take(MAX_GROUP_NAME).collect();
+        // Line breaks stay: the quote shows its first lines.
+        let text = q.text.chars().filter(|c| *c == '\n' || !c.is_control()).take(MAX_QUOTE).collect();
+        Some(Quoted { message_id, name, text })
+    }
 }
 
 /// One person's reaction to a message.
