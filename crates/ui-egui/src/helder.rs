@@ -465,6 +465,20 @@ pub fn alert_dot(ui: &Ui, t: &Tokens, center: egui::Pos2, radius: f32) {
     painter.text(center, egui::Align2::CENTER_CENTER, "!", FontId::proportional(radius * 1.5), t.on_flag);
 }
 
+/// A count on an icon, such as the unread mail on Mail in the rail: in the app colour, in a pill
+/// centred on `center`, ringed in the window colour so it stands off the icon; past 99 it
+/// reads "99+".
+pub fn count_badge(ui: &Ui, t: &Tokens, center: egui::Pos2, count: u32) {
+    let text = if count > 99 { "99+".to_string() } else { count.to_string() };
+    let painter = ui.painter();
+    let galley = painter.layout_no_wrap(text, FontId::proportional(11.0), t.on_accent);
+    let height = 18.0;
+    let width = (galley.size().x + 10.0).max(height);
+    let rect = Rect::from_center_size(center + vec2((width - height) / 2.0, 0.0), vec2(width, height));
+    painter.rect(rect, height / 2.0, t.accent, Stroke::new(2.0, t.window), egui::StrokeKind::Outside);
+    painter.galley(rect.center() - galley.size() / 2.0, galley, t.on_accent);
+}
+
 /// A day of the week as a round button, lit in the app colour while `on`, as Outlook's
 /// repeat pane shows the days; a screen reader hears a checkbox named `text`.
 pub fn day_toggle(ui: &mut Ui, t: &Tokens, text: &str, on: bool) -> Response {

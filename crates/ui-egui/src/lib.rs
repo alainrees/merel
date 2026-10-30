@@ -101,6 +101,14 @@ impl Module {
         })
     }
 
+    /// The message that reads a module's count out, such as "Mail, 3 ongelezen".
+    fn count_key(self) -> &'static str {
+        match self {
+            Module::Tasks => "module-count-tasks",
+            _ => "module-count-unread",
+        }
+    }
+
     fn icon(self) -> helder::Icon {
         match self {
             Module::Mail => helder::Icon::Mail,
@@ -1679,6 +1687,33 @@ fn ribbon_button(app: &mut MailApp, ui: &mut Ui, t: &Tokens, glyph: &str, label:
     }
 }
 
+impl MailApp {
+    /// The number on a module's icon in the rail, as Outlook and Signal show it: the unread
+    /// mail in the inboxes, the unread chat messages, and the open tasks due today or before;
+    /// 0 shows none.
+    fn module_count(&self, m: Module) -> u32 {
+        let s = &self.engine.session;
+        let inboxes = |signal: bool| {
+            s.folders
+                .iter()
+                .filter(|f| f.kind == FolderKind::Inbox)
+                .filter(|f| s.accounts.iter().any(|a| a.id == f.account_id && merel_engine::signal::is_signal(a) == signal))
+                .map(|f| f.unread)
+                .fold(0, u32::saturating_add)
+        };
+        match m {
+            Module::Mail => inboxes(false),
+            Module::Chat => inboxes(true),
+            Module::Tasks => {
+                let today = calendar::to_timestamp(calendar::today().and_time(chrono::NaiveTime::MIN)).unwrap_or(0);
+                let n = s.tasks.iter().filter(|task| !task.done && task.due.is_some_and(|d| d <= today)).count();
+                u32::try_from(n).unwrap_or(u32::MAX)
+            }
+            Module::Calendar | Module::Meet | Module::People => 0,
+        }
+    }
+}
+
 fn rail(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     egui::Panel::left("rail")
         .exact_size(60.0)
@@ -1696,8 +1731,16 @@ fn rail(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         .corner_radius(10)
                         .min_size(vec2(48.0, 48.0));
                     let r = ui.add(b);
-                    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, m.label()));
-                    if r.on_hover_text(m.label()).clicked() {
+                    let count = app.module_count(m);
+                    let label = match count {
+                        0 => m.label(),
+                        n => crate::i18n::tr_args(m.count_key(), &[("module", m.label().into()), ("count", n.into())]),
+                    };
+                    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &label));
+                    if count > 0 {
+                        helder::count_badge(ui, t, r.rect.center() + vec2(11.0, -11.0), count);
+                    }
+                    if r.on_hover_text(&label).clicked() {
                         app.module = m;
                     }
                     ui.add_space(4.0);
@@ -4037,6 +4080,31 @@ mod tests {
         assert_eq!(h.state().chat.selected.as_deref(), Some(id.as_str()));
         assert_eq!(h.state().engine.session.chat(&id).unwrap().unread, 0, "opening reads it");
         h.get_by_label("Zie ik je om tien uur?");
+    }
+
+    #[test]
+    fn the_rail_counts_unread_mail_and_chat_and_the_tasks_due_apart() {
+        let mut h = harness();
+        with_a_signal_chat(h.state_mut());
+        let s = &mut h.state_mut().engine.session;
+        s.folders.iter_mut().filter(|f| f.account_id == "sample" && f.kind == FolderKind::Inbox).for_each(|f| f.unread = 120);
+        s.tasks.iter_mut().for_each(|t| t.done = true);
+        s.tasks[0].done = false;
+        s.tasks[0].due = Some(0);
+        h.run();
+        assert_eq!(h.state().module_count(Module::Mail), 120, "the Signal inbox is not mail");
+        h.get_by_label("E-mail, 120 ongelezen");
+        h.get_by_label("Chat, 1 ongelezen");
+        h.get_by_label("Taken, 1 voor vandaag of te laat");
+        h.get_by_label("Agenda");
+
+        let s = &mut h.state_mut().engine.session;
+        s.folders.iter_mut().for_each(|f| f.unread = 0);
+        s.tasks[0].done = true;
+        h.run();
+        h.get_by_label("E-mail");
+        h.get_by_label("Chat");
+        h.get_by_label("Taken");
     }
 
     #[test]
