@@ -720,6 +720,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "autotools"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef941527c41b0fc0dd48511a8154cd5fc7e29200a0ff8b7203c5d777dbc795cf"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "aws-lc-rs"
 version = "1.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2716,6 +2725,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "extended"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af9673d8203fcb076b19dfd17e38b3d4ae9f44959416ea532ce72415a6020365"
+
+[[package]]
 name = "fancy-regex"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4350,7 +4365,7 @@ dependencies = [
 
 [[package]]
 name = "merel"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "eframe",
  "egui",
@@ -4367,7 +4382,7 @@ dependencies = [
 
 [[package]]
 name = "merel-call"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "async-trait",
  "audiopus",
@@ -4382,7 +4397,7 @@ dependencies = [
 
 [[package]]
 name = "merel-dav"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4401,7 +4416,7 @@ dependencies = [
 
 [[package]]
 name = "merel-engine"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4436,7 +4451,7 @@ dependencies = [
 
 [[package]]
 name = "merel-exchange"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4453,7 +4468,7 @@ dependencies = [
 
 [[package]]
 name = "merel-extract"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "log",
  "lopdf",
@@ -4464,7 +4479,7 @@ dependencies = [
 
 [[package]]
 name = "merel-google"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "chrono",
  "iana-time-zone",
@@ -4480,7 +4495,7 @@ dependencies = [
 
 [[package]]
 name = "merel-graph"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4498,7 +4513,7 @@ dependencies = [
 
 [[package]]
 name = "merel-html"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "base64 0.23.1",
  "html5ever",
@@ -4507,7 +4522,7 @@ dependencies = [
 
 [[package]]
 name = "merel-i18n"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "fluent-bundle",
  "fluent-syntax",
@@ -4518,7 +4533,7 @@ dependencies = [
 
 [[package]]
 name = "merel-imap"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "imap",
  "imap-proto",
@@ -4535,7 +4550,7 @@ dependencies = [
 
 [[package]]
 name = "merel-mailbox"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "merel-mime",
  "merel-model",
@@ -4546,7 +4561,7 @@ dependencies = [
 
 [[package]]
 name = "merel-mime"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "base64 0.23.1",
  "html2text",
@@ -4560,7 +4575,7 @@ dependencies = [
 
 [[package]]
 name = "merel-mobile"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "chrono",
  "jni",
@@ -4577,7 +4592,7 @@ dependencies = [
 
 [[package]]
 name = "merel-model"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4590,7 +4605,7 @@ dependencies = [
 
 [[package]]
 name = "merel-notify"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "block2 0.6.2",
  "log",
@@ -4604,7 +4619,7 @@ dependencies = [
 
 [[package]]
 name = "merel-oauth"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.4.3",
@@ -4622,7 +4637,7 @@ dependencies = [
 
 [[package]]
 name = "merel-pgp"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "base64 0.23.1",
  "merel-i18n",
@@ -4635,7 +4650,7 @@ dependencies = [
 
 [[package]]
 name = "merel-search"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "log",
  "merel-extract",
@@ -4648,7 +4663,7 @@ dependencies = [
 
 [[package]]
 name = "merel-secrets"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -4661,7 +4676,7 @@ dependencies = [
 
 [[package]]
 name = "merel-semantic"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -4677,7 +4692,7 @@ dependencies = [
 
 [[package]]
 name = "merel-sign"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -4687,7 +4702,7 @@ dependencies = [
 
 [[package]]
 name = "merel-signal-link"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4704,7 +4719,7 @@ dependencies = [
 
 [[package]]
 name = "merel-smime"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -4720,7 +4735,7 @@ dependencies = [
 
 [[package]]
 name = "merel-smtp"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "lettre",
  "merel-i18n",
@@ -4732,7 +4747,7 @@ dependencies = [
 
 [[package]]
 name = "merel-store"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -4749,7 +4764,7 @@ dependencies = [
 
 [[package]]
 name = "merel-touch-bar"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "log",
  "objc2 0.6.5",
@@ -4757,7 +4772,7 @@ dependencies = [
 
 [[package]]
 name = "merel-ui-egui"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4781,6 +4796,7 @@ dependencies = [
  "merel-secrets",
  "merel-sign",
  "merel-smime",
+ "merel-voice",
  "open",
  "qrcode",
  "rfd",
@@ -4792,8 +4808,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "merel-voice"
+version = "0.1.33"
+dependencies = [
+ "cpal",
+ "log",
+ "mp3lame-encoder",
+ "symphonia",
+]
+
+[[package]]
 name = "merel-window-buttons"
-version = "0.1.27"
+version = "0.1.33"
 dependencies = [
  "log",
  "objc2 0.6.5",
@@ -4875,6 +4901,26 @@ checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
  "num-traits",
  "pxfm",
+]
+
+[[package]]
+name = "mp3lame-encoder"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60cb9bdd89806317373e36ff745f264b7ed7ffc5bc5aab02dc7d1b837c16a8d4"
+dependencies = [
+ "mp3lame-sys",
+]
+
+[[package]]
+name = "mp3lame-sys"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54e3b1772db47828840702e5a2e05694527f731abadf9b931355d54035f019d8"
+dependencies = [
+ "autotools",
+ "cc",
+ "libc",
 ]
 
 [[package]]
@@ -8027,6 +8073,140 @@ checksum = "68c7541fff44b35860c1a7a47a7cadf3e4a304c457b58f9870d9706ece028afc"
 dependencies = [
  "kurbo 0.11.3",
  "siphasher",
+]
+
+[[package]]
+name = "symphonia"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5773a4c030a19d9bfaa090f49746ff35c75dfddfa700df7a5939d5e076a57039"
+dependencies = [
+ "lazy_static",
+ "symphonia-bundle-mp3",
+ "symphonia-codec-aac",
+ "symphonia-codec-pcm",
+ "symphonia-codec-vorbis",
+ "symphonia-core",
+ "symphonia-format-isomp4",
+ "symphonia-format-ogg",
+ "symphonia-format-riff",
+ "symphonia-metadata",
+]
+
+[[package]]
+name = "symphonia-bundle-mp3"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4872dd6bb56bf5eac799e3e957aa1981086c3e613b27e0ac23b176054f7c57ed"
+dependencies = [
+ "lazy_static",
+ "log",
+ "symphonia-core",
+ "symphonia-metadata",
+]
+
+[[package]]
+name = "symphonia-codec-aac"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c263845aa86881416849c1729a54c7f55164f8b96111dba59de46849e73a790"
+dependencies = [
+ "lazy_static",
+ "log",
+ "symphonia-core",
+]
+
+[[package]]
+name = "symphonia-codec-pcm"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e89d716c01541ad3ebe7c91ce4c8d38a7cf266a3f7b2f090b108fb0cb031d95"
+dependencies = [
+ "log",
+ "symphonia-core",
+]
+
+[[package]]
+name = "symphonia-codec-vorbis"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f025837c309cd69ffef572750b4a2257b59552c5399a5e49707cc5b1b85d1c73"
+dependencies = [
+ "log",
+ "symphonia-core",
+ "symphonia-utils-xiph",
+]
+
+[[package]]
+name = "symphonia-core"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea00cc4f79b7f6bb7ff87eddc065a1066f3a43fe1875979056672c9ef948c2af"
+dependencies = [
+ "arrayvec",
+ "bitflags 1.3.2",
+ "bytemuck",
+ "lazy_static",
+ "log",
+]
+
+[[package]]
+name = "symphonia-format-isomp4"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "243739585d11f81daf8dac8d9f3d18cc7898f6c09a259675fc364b382c30e0a5"
+dependencies = [
+ "encoding_rs",
+ "log",
+ "symphonia-core",
+ "symphonia-metadata",
+ "symphonia-utils-xiph",
+]
+
+[[package]]
+name = "symphonia-format-ogg"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b4955c67c1ed3aa8ae8428d04ca8397fbef6a19b2b051e73b5da8b1435639cb"
+dependencies = [
+ "log",
+ "symphonia-core",
+ "symphonia-metadata",
+ "symphonia-utils-xiph",
+]
+
+[[package]]
+name = "symphonia-format-riff"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2d7c3df0e7d94efb68401d81906eae73c02b40d5ec1a141962c592d0f11a96f"
+dependencies = [
+ "extended",
+ "log",
+ "symphonia-core",
+ "symphonia-metadata",
+]
+
+[[package]]
+name = "symphonia-metadata"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36306ff42b9ffe6e5afc99d49e121e0bd62fe79b9db7b9681d48e29fa19e6b16"
+dependencies = [
+ "encoding_rs",
+ "lazy_static",
+ "log",
+ "symphonia-core",
+]
+
+[[package]]
+name = "symphonia-utils-xiph"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee27c85ab799a338446b68eec77abf42e1a6f1bb490656e121c6e27bfbab9f16"
+dependencies = [
+ "symphonia-core",
+ "symphonia-metadata",
 ]
 
 [[package]]

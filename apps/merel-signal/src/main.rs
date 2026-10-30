@@ -30,6 +30,7 @@ use presage::Manager;
 use presage::libsignal_service::configuration::SignalServers;
 use presage::libsignal_service::content::Metadata;
 use presage::libsignal_service::content::{Content, ContentBody, DataMessage};
+use presage::libsignal_service::prelude::{GroupMasterKey, GroupSecretParams};
 use presage::libsignal_service::protocol::ServiceId;
 use presage::libsignal_service::sender::AttachmentSpec;
 use presage::manager::Registered;
@@ -37,7 +38,8 @@ use presage::model::identity::OnNewIdentity;
 use presage::model::messages::Received;
 use presage::proto::AttachmentPointer;
 use presage::proto::data_message::{Delete, Quote, Reaction, quote};
-use presage::proto::sync_message::{CallEvent, Content as SyncContent, Sent, call_event};
+use presage::proto::sync_message::{CallEvent, Content as SyncContent, DeleteForMe, Sent, call_event, delete_for_me};
+use presage::proto::{AddressableMessage, ConversationIdentifier, addressable_message, conversation_identifier};
 use presage::proto::{CallMessage, EditMessage, GroupContextV2, SyncMessage, call_message};
 use presage::proto::{ReceiptMessage, receipt_message, typing_message};
 use presage::store::{ContentExt, Store, Thread};
@@ -53,6 +55,10 @@ use crate::wire::Phase;
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Event {
     /// The link to show as a QR code, for the Signal app on the phone to scan.
+    /// The chat `thread` was deleted on another device of the account's, so it goes here too.
+    ChatDeleted {
+        thread: String,
+    },
     Link {
         url: String,
     },
@@ -129,6 +135,10 @@ enum Event {
         read_receipts: Option<bool>,
         typing_indicators: Option<bool>,
     },
+    /// The account's Signal contacts, as the phone shares them: to start a chat with.
+    Contacts {
+        people: Vec<Person>,
+    },
     /// Every message waiting on the server is in. `calls` says whether this build can call.
     Synced {
         calls: bool,
@@ -153,6 +163,31 @@ enum Event {
     },
 }
 
+/// A Signal contact: `id` is their service id, the `thread` of a chat with them.
+#[derive(Serialize)]
+struct Person {
+    id: String,
+    name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    number: String,
+}
+
+/// The contacts the phone shared, by name; ones without a name or number are left out, as
+/// Signal leaves them out of its own list.
+async fn contacts<S: Store>(manager: &Manager<S, Registered>) -> Vec<Person> {
+    let Ok(all) = manager.store().contacts().await else { return Vec::new() };
+    let mut people: Vec<Person> = all
+        .flatten()
+        .filter_map(|c| {
+            let number = c.phone_number.map(|p| p.to_string()).unwrap_or_default();
+            let name = if c.name.trim().is_empty() { number.clone() } else { c.name.trim().to_string() };
+            (!name.is_empty()).then(|| Person { id: ServiceId::Aci(c.uuid.into()).service_id_string(), name, number })
+        })
+        .collect();
+    people.sort_by_key(|p| p.name.to_lowercase());
+    people
+}
+
 /// A file sent with a message. `id` is how Merel asks for its contents.
 #[derive(Serialize, Clone)]
 struct FileInfo {
@@ -160,6 +195,9 @@ struct FileInfo {
     name: String,
     mime: String,
     size: u64,
+    /// A voice message, recorded in the app, not a file sent.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    voice: bool,
 }
 
 /// A file Merel sends with a message, its contents in base64.
@@ -168,6 +206,9 @@ struct OutFile {
     name: String,
     mime: String,
     data: String,
+    /// A voice message: Signal shows it with a play button.
+    #[serde(default)]
+    voice: bool,
 }
 
 /// Every file of the messages passed on, by id, to fetch when Merel asks.
@@ -276,6 +317,11 @@ enum Command {
         timestamp: u64,
         everyone: bool,
     },
+    /// Deletes the whole chat here and on the account's other devices, as Signal's "Delete
+    /// chat" does; the others in it keep their messages.
+    DeleteChat {
+        thread: String,
+    },
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -376,8 +422,23 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
     let mut ringing = Ringing::default();
     let (mut phone, mut notes) = Phone::start();
     let mut calls_open = true;
+    // Signal on the phone knows which of its contacts are on Signal; a linked device asks it
+    // for that list, as Signal Desktop does, once the waiting messages are in.
+    let mut contacts_asked = false;
+    let mut asking: Option<future::LocalBoxFuture<'static, std::result::Result<(), String>>> = None;
     loop {
         tokio::select! {
+            asked = async {
+                match asking.as_mut() {
+                    Some(f) => f.await,
+                    None => Ok(()),
+                }
+            }, if asking.is_some() => {
+                asking = None;
+                if let Err(e) = asked {
+                    eprintln!("merel-signal: could not ask the phone for its contacts: {e}");
+                }
+            }
             note = notes.recv(), if calls_open => match note {
                 Some(note) => {
                     for event in phone.handle(note, &mut sending, &mut ringing).await {
@@ -394,9 +455,23 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
             received = messages.next() => match received {
                 Some(Received::QueueEmpty) => {
                     eprintln!("merel-signal: all waiting messages are in");
-                    emit(&Event::Synced { calls: phone.ready() })
+                    emit(&Event::Contacts { people: contacts(&manager).await });
+                    emit(&Event::Synced { calls: phone.ready() });
+                    // Asked on the side: sending it can take long, and Merel waits for
+                    // `synced` before it shows the chats.
+                    if !contacts_asked {
+                        contacts_asked = true;
+                        let mut asker = sending.clone();
+                        asking = Some(Box::pin(async move { asker.request_contacts().await.map_err(|e| e.to_string()) }));
+                    }
                 }
                 Some(Received::Content(content)) => {
+                    if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::DeleteForMe(d)), .. }) = &content.body {
+                        for thread in chats_deleted(&manager, d).await {
+                            emit(&Event::ChatDeleted { thread });
+                        }
+                        continue;
+                    }
                     if let Some(event) = status(&manager, &content).await {
                         emit(&event);
                         continue;
@@ -415,7 +490,10 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                         emit(&event);
                     }
                 }
-                Some(Received::Contacts) => eprintln!("merel-signal: contacts synced"),
+                Some(Received::Contacts) => {
+                    eprintln!("merel-signal: contacts synced");
+                    emit(&Event::Contacts { people: contacts(&manager).await });
+                }
                 Some(Received::DecryptionError(_)) => eprintln!("merel-signal: a message could not be decrypted"),
                 None => bail!("the connection with Signal closed"),
             },
@@ -464,6 +542,13 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                         }
                         Err(e) => emit(&Event::Error { message: format!("{e:#}") }),
                     },
+                    // Merel let go of the chat already; should telling the phone fail, it stays
+                    // gone here all the same.
+                    Ok(Command::DeleteChat { thread }) => {
+                        if let Err(e) = delete_chat(&mut sending, dir, key, &thread).await {
+                            eprintln!("merel-signal: deleting a chat: {e:#}");
+                        }
+                    }
                     Ok(Command::MarkRead { author, timestamps }) => {
                         let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Read as i32), timestamp: timestamps };
                         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
@@ -880,7 +965,7 @@ async fn send<S: Store>(
             length: bytes.len(),
             file_name: Some(f.name),
             preview: None,
-            voice_note: None,
+            voice_note: f.voice.then_some(true),
             borderless: None,
             width: None,
             height: None,
@@ -910,8 +995,12 @@ fn info(a: &AttachmentPointer, files: &mut Files) -> FileInfo {
         name: a.file_name.clone().unwrap_or_default(),
         mime: a.content_type.clone().unwrap_or_else(|| "application/octet-stream".into()),
         size: u64::from(a.size.unwrap_or(0)),
+        voice: a.flags.unwrap_or(0) & VOICE_MESSAGE != 0,
     }
 }
+
+/// The flag Signal sets on an attachment that is a voice message.
+const VOICE_MESSAGE: u32 = 1;
 
 /// The message `q` quotes, with its author's name.
 async fn quoted<S: Store>(manager: &Manager<S, Registered>, q: &Quote) -> Option<Quoted> {
@@ -1055,6 +1144,82 @@ async fn delete<S: Store>(
     send_body(manager, &to, message.clone().into(), at).await?;
     let content = Content { metadata: original.metadata, body: message.into() };
     Ok(deleted(manager, &content, to, timestamp).await)
+}
+
+/// How many of a chat's latest messages tell the other devices up to where it was deleted, as
+/// Signal sends them.
+const DELETE_UP_TO: usize = 5;
+
+/// Deletes chat `thread` from the store, and asks the account's other devices (the phone) to
+/// delete it too, as Signal Desktop does: they delete up to its latest messages.
+async fn delete_chat<S: Store>(manager: &mut Manager<S, Registered>, dir: &str, key: &str, thread: &str) -> Result<()> {
+    let to = find_thread(dir, key, thread).await?;
+    let mut latest: Vec<(u64, ServiceId)> = Vec::new();
+    for content in manager.store().messages(&to, ..).await?.flatten() {
+        if matches!(
+            &content.body,
+            ContentBody::DataMessage(_) | ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Sent(_)), .. })
+        ) {
+            latest.push((content.metadata.client_timestamp.timestamp_millis() as u64, content.metadata.sender));
+        }
+    }
+    latest.sort_by_key(|m| std::cmp::Reverse(m.0));
+    let most_recent_messages = latest
+        .into_iter()
+        .take(DELETE_UP_TO)
+        .map(|(at, author)| AddressableMessage {
+            author: Some(addressable_message::Author::AuthorServiceId(author.service_id_string())),
+            sent_timestamp: Some(at),
+        })
+        .collect();
+    let conversation = match &to {
+        Thread::Contact(id) => conversation_identifier::Identifier::ThreadServiceId(id.service_id_string()),
+        Thread::Group(key) => conversation_identifier::Identifier::ThreadGroupId(
+            GroupSecretParams::derive_from_master_key(GroupMasterKey::new(*key)).get_group_identifier().to_vec(),
+        ),
+    };
+    let delete = delete_for_me::ConversationDelete {
+        conversation: Some(ConversationIdentifier { identifier: Some(conversation) }),
+        most_recent_messages,
+        is_full_delete: Some(true),
+        most_recent_non_expiring_messages: Vec::new(),
+    };
+    let mut store = manager.store().clone();
+    store.clear_thread(&to).await?;
+    let sync = SyncMessage {
+        content: Some(SyncContent::DeleteForMe(DeleteForMe { conversation_deletes: vec![delete], ..Default::default() })),
+        ..Default::default()
+    };
+    let me = manager.registration_data().service_ids.aci();
+    manager.send_message(me, sync, now()?).await.map_err(|e| anyhow!("{e}"))
+}
+
+/// The chats another device of the account's deleted: gone from the store here too, by the id
+/// Merel knows them by.
+async fn chats_deleted<S: Store>(manager: &Manager<S, Registered>, d: &DeleteForMe) -> Vec<String> {
+    let ids = d.conversation_deletes.iter().map(|c| &c.conversation).chain(d.local_only_conversation_deletes.iter().map(|c| &c.conversation));
+    let mut out = Vec::new();
+    for id in ids.flatten().filter_map(|c| c.identifier.as_ref()) {
+        let thread = match id {
+            conversation_identifier::Identifier::ThreadServiceId(s) => ServiceId::parse_from_service_id_string(s).map(Thread::Contact),
+            conversation_identifier::Identifier::ThreadServiceIdBinary(b) => ServiceId::parse_from_service_id_binary(b).map(Thread::Contact),
+            conversation_identifier::Identifier::ThreadGroupId(g) => group_by_id(manager, g).await.map(Thread::Group),
+            conversation_identifier::Identifier::ThreadE164(_) => None,
+        };
+        let Some(thread) = thread else { continue };
+        let mut store = manager.store().clone();
+        match store.clear_thread(&thread).await {
+            Ok(()) => out.push(thread_id(&thread)),
+            Err(e) => eprintln!("merel-signal: a chat deleted on the phone stays: {e}"),
+        }
+    }
+    out
+}
+
+/// The master key of the group Signal names by `id`, the hash of its key.
+async fn group_by_id<S: Store>(manager: &Manager<S, Registered>, id: &[u8]) -> Option<[u8; 32]> {
+    let groups = manager.store().groups().await.ok()?;
+    groups.flatten().map(|(key, _)| key).find(|key| GroupSecretParams::derive_from_master_key(GroupMasterKey::new(*key)).get_group_identifier() == id)
 }
 
 /// The line a message deleted for everyone leaves, as Signal shows it. The store then holds

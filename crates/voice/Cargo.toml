@@ -1,0 +1,20 @@
+[package]
+name = "merel-voice"
+description = "Voice messages: playing the ones that come in, recording new ones as MP3."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+log = { workspace = true }
+# Decoding in pure Rust: AAC in MP4 (the phones' voice messages), MP3 (Signal Desktop's), Ogg
+# Vorbis and WAV. MPL-2.0.
+symphonia = { version = "0.5.4", default-features = false, features = ["aac", "isomp4", "mp3", "ogg", "vorbis", "wav", "pcm"] }
+# LAME, as Signal Desktop uses it, so every Signal app plays what Merel records. LGPL.
+mp3lame-encoder = "0.2.5"
+# The computer's microphone and speakers.
+cpal = "0.18"
+
+[lints]
+workspace = true

@@ -184,6 +184,20 @@ pub fn saved(what: &str, path: &Path) -> Notice {
         .revealing(path)
 }
 
+/// Opens the attachment in the program the computer has for it, from a folder of Merel's own
+/// that only this user can read.
+pub fn open_in_app(a: &Attachment) -> Result<(), String> {
+    let dir = std::env::temp_dir().join("merel-open");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    }
+    let path = save_to(&dir, &a.name, &a.bytes).map_err(|e| e.to_string())?;
+    open::that_detached(path).map_err(|e| e.to_string())
+}
+
 impl MailApp {
     /// Saves the attachment under Downloads and says where it went.
     pub fn save_attachment(&mut self, a: &Attachment) {

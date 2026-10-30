@@ -111,6 +111,11 @@ pub enum Said {
         #[serde(default)]
         error: Option<String>,
     },
+    /// The account's Signal contacts, to start a chat with.
+    Contacts {
+        #[serde(default)]
+        people: Vec<Person>,
+    },
     /// `calls` says whether this build of the program can call.
     Synced {
         #[serde(default)]
@@ -119,6 +124,11 @@ pub enum Said {
     Sent {
         thread: String,
         timestamp: u64,
+    },
+    /// The chat `thread` was deleted on another device of the account's, as Signal's "Delete
+    /// chat" does: it goes here too.
+    ChatDeleted {
+        thread: String,
     },
     /// How a call goes.
     Call(CallUpdate),
@@ -129,6 +139,22 @@ pub enum Said {
     Error {
         message: String,
     },
+}
+
+/// A Signal contact, as the phone shares them: `id` is their service id.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Person {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub number: String,
+}
+
+impl Person {
+    /// Their address in Merel, as their messages come from.
+    pub fn address(&self) -> String {
+        address_of(&self.id)
+    }
 }
 
 /// A message as the program passes it on.
@@ -225,6 +251,9 @@ pub struct FileRef {
     pub mime: String,
     #[serde(default)]
     pub size: u64,
+    /// A voice message, recorded in the app.
+    #[serde(default)]
+    pub voice: bool,
 }
 
 /// A file going out with a message, its contents in base64.
@@ -233,6 +262,9 @@ struct OutFile<'a> {
     name: &'a str,
     mime: &'a str,
     data: String,
+    /// A voice message recorded in Merel: Signal shows it with a play button.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    voice: bool,
 }
 
 /// The message a message answers, as the program passes it on and is asked to send it.
@@ -353,6 +385,9 @@ enum Asked<'a> {
     Mute {
         on: bool,
     },
+    DeleteChat {
+        thread: &'a str,
+    },
 }
 
 /// How a call in Merel goes, as the program says.
@@ -418,6 +453,11 @@ pub fn can_call(me: &str) -> bool {
     lines().as_ref().and_then(|l| l.get(&me.to_lowercase())).is_some_and(|l| l.calls)
 }
 
+/// The Signal contacts of the account with address `me`, by name, to start a chat with.
+pub fn contacts(me: &str) -> Vec<Person> {
+    lines().as_ref().and_then(|l| l.get(&me.to_lowercase())).map(|l| lock(&l.messages).contacts.clone()).unwrap_or_default()
+}
+
 /// What happened with calls since the last time, with the account address it is about.
 pub fn take_call_updates() -> Vec<(String, CallUpdate)> {
     std::mem::take(&mut *UPDATES.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
@@ -440,6 +480,22 @@ pub fn call(me: &str, to: &str) -> std::result::Result<(), String> {
         thread.ok_or_else(|| merel_i18n::tr("signal-unknown"))?
     };
     ask(me, &Asked::Call { thread: &thread })
+}
+
+/// Deletes the whole chat with `with` (a person's Signal address, or a group's id) from the
+/// account `me`: here, and on the account's other devices, as Signal's "Delete chat" does. The
+/// others in the chat keep their messages.
+pub fn delete_chat(me: &str, with: &str) -> std::result::Result<(), String> {
+    let thread = {
+        let guard = lines();
+        let line = guard.as_ref().and_then(|l| l.get(&me.to_lowercase())).ok_or_else(|| merel_i18n::tr("signal-stopped"))?;
+        let mut messages = lock(&line.messages);
+        let thread = if is_signal_address(with) { messages.threads.get(&with.to_lowercase()).cloned() } else { Some(with.to_string()) };
+        let thread = thread.ok_or_else(|| merel_i18n::tr("signal-unknown"))?;
+        messages.forget(&thread);
+        thread
+    };
+    ask(me, &Asked::DeleteChat { thread: &thread })
 }
 
 pub fn accept_call(me: &str, call_id: u64) -> std::result::Result<(), String> {
@@ -564,6 +620,8 @@ struct Messages {
     /// What the program said since the last listing about receipts, reading elsewhere and
     /// settings, for the mailbox to keep.
     news: Vec<Said>,
+    /// The account's Signal contacts, by name.
+    contacts: Vec<Person>,
 }
 
 impl Messages {
@@ -611,6 +669,15 @@ impl Messages {
 }
 
 impl Messages {
+    /// Lets go of every message of chat `thread` and the reactions on them.
+    fn forget(&mut self, thread: &str) {
+        let gone: Vec<String> = self.by_id.iter().filter(|(_, m)| m.thread == thread).map(|(id, _)| id.clone()).collect();
+        for id in gone {
+            self.by_id.remove(&id);
+            self.reactions.remove(&id);
+        }
+    }
+
     /// Takes in a reaction: it replaces the sender's earlier one on that message, unless that
     /// one is newer; one taken back goes.
     fn react(&mut self, r: Reaction) {
@@ -698,7 +765,16 @@ fn take_news(messages: &Mutex<Messages>, said: Said) -> Option<Said> {
         Said::Message(m) => lock(messages).add(m),
         Said::Reaction(r) => lock(messages).react(r),
         Said::Typing { sender, sender_name, typing } => note_typing(&sender, &sender_name, typing),
+        Said::ChatDeleted { thread } => lock(messages).forget(&thread),
         news @ (Said::Receipt { .. } | Said::ReadElsewhere { .. } | Said::Settings { .. }) => lock(messages).news.push(news),
+        Said::Contacts { people } => {
+            let mut m = lock(messages);
+            // A chat with any of them can start: their address is their thread.
+            for p in &people {
+                m.threads.entry(p.address()).or_insert_with(|| p.id.clone());
+            }
+            m.contacts = people;
+        }
         other => return Some(other),
     }
     None
@@ -1074,10 +1150,16 @@ impl Mailbox for SignalMailbox {
             })
         });
         let body = merel_mime::parse_body(raw);
+        let voice = header.chat.as_ref().is_some_and(|c| c.voice);
         let files: Vec<OutFile<'_>> = body
             .attachments
             .iter()
-            .map(|a| OutFile { name: &a.name, mime: &a.mime, data: base64::engine::general_purpose::STANDARD.encode(&a.bytes) })
+            .map(|a| OutFile {
+                name: &a.name,
+                mime: &a.mime,
+                data: base64::engine::general_purpose::STANDARD.encode(&a.bytes),
+                voice: voice && a.mime.starts_with("audio/"),
+            })
             .collect();
         self.ask(&Asked::Send { thread: &thread, text: &text, quote, files }, &thread)
     }
@@ -1172,6 +1254,9 @@ fn message_with(m: &Received, me: &str, reactions: &[merel_model::Reacted], file
     if m.deleted {
         out.push_str("Merel-Deleted: yes\r\n");
     }
+    if m.attachments.iter().any(|f| f.voice) {
+        out.push_str("Merel-Voice: yes\r\n");
+    }
     if let Some(q) = &m.quote {
         let name = if q.author_name.is_empty() { q.author.clone() } else { q.author_name.clone() };
         let text: String = q.text.chars().take(merel_model::MAX_QUOTE).collect();
@@ -1226,12 +1311,15 @@ fn file_name(f: &FileRef) -> String {
         "image/webp" => "webp",
         "video/mp4" => "mp4",
         "audio/aac" => "aac",
+        "audio/mp4" | "audio/x-m4a" => "m4a",
         "audio/mpeg" => "mp3",
         "audio/ogg" => "ogg",
         "application/pdf" => "pdf",
         _ => "bin",
     };
-    let kind = if f.mime.starts_with("image/") {
+    let kind = if f.voice {
+        "spraakbericht"
+    } else if f.mime.starts_with("image/") {
         "foto"
     } else if f.mime.starts_with("audio/") {
         "audio"
@@ -1377,6 +1465,42 @@ mod tests {
     }
 
     #[test]
+    fn a_chat_deleted_on_the_phone_goes_here_too_and_only_that_chat() {
+        let messages = Mutex::new(Messages::default());
+        let jan = received("Tot morgen");
+        let mut piet = received("Hoi");
+        piet.thread = "3d4e".into();
+        piet.sender = "3d4e".into();
+        take_news(&messages, Said::Message(jan.clone()));
+        take_news(&messages, Said::Message(piet.clone()));
+        let r = Reaction {
+            thread: "1b2c".into(),
+            sender: "1b2c".into(),
+            sender_name: String::new(),
+            mine: false,
+            timestamp: 1,
+            emoji: "👍".into(),
+            remove: false,
+            target_author: jan.sender.clone(),
+            target_timestamp: jan.timestamp,
+        };
+        take_news(&messages, Said::Reaction(r));
+        assert_eq!(take_news(&messages, Said::ChatDeleted { thread: "1b2c".into() }), None);
+        let left = lock(&messages);
+        assert!(!left.by_id.contains_key(&jan.id()) && !left.reactions.contains_key(&jan.id()));
+        assert!(left.by_id.contains_key(&piet.id()), "the other chat stays");
+    }
+
+    #[test]
+    fn a_voice_message_says_so_and_gets_a_name() {
+        let mut m = received("");
+        m.attachments = vec![FileRef { id: "v1".into(), name: String::new(), mime: "audio/aac".into(), size: 9000, voice: true }];
+        let header = merel_mime::parse_header(&message(&m, "me@signal.invalid", &[]));
+        assert!(header.chat.is_some_and(|c| c.voice));
+        assert_eq!(file_name(&m.attachments[0]), "spraakbericht.aac");
+    }
+
+    #[test]
     fn a_changed_message_says_so() {
         let mut m = received("Tot overmorgen");
         m.edited = 1_761_681_700_000;
@@ -1500,8 +1624,8 @@ mod tests {
     #[test]
     fn a_fetched_file_comes_as_an_attachment_and_one_not_fetched_by_name() {
         let mut m = received("Kijk!");
-        let photo = FileRef { id: "a1".into(), name: String::new(), mime: "image/png".into(), size: 4 };
-        let big = FileRef { id: "b2".into(), name: "film.mp4".into(), mime: "video/mp4".into(), size: 900_000_000 };
+        let photo = FileRef { id: "a1".into(), name: String::new(), mime: "image/png".into(), size: 4, voice: false };
+        let big = FileRef { id: "b2".into(), name: "film.mp4".into(), mime: "video/mp4".into(), size: 900_000_000, voice: false };
         m.attachments = vec![photo.clone(), big.clone()];
         let bytes: Arc<[u8]> = vec![1u8, 2, 3, 4].into();
         let raw = message_with(&m, "me@signal.invalid", &[], &[(photo, Some(bytes)), (big, None)]);

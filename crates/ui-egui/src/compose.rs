@@ -592,8 +592,7 @@ pub fn show(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let accounts: Vec<(String, String)> = app
         .engine
         .session
-        .accounts
-        .iter()
+        .mail_accounts()
         .map(|a| {
             let (name, email) = (a.address.display(), a.address.email());
             (a.id.clone(), if name == email { email.to_string() } else { format!("{name} ({email})") })

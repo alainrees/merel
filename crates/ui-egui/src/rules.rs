@@ -135,7 +135,7 @@ fn save_error(e: &merel_engine::CommandError) -> String {
 }
 
 fn form_ui(app: &MailApp, ui: &mut Ui, t: &Tokens, form: &mut Form) -> (bool, bool) {
-    let accounts: Vec<(String, String)> = app.engine.session.accounts.iter().map(|a| (a.id.clone(), a.address.email().to_string())).collect();
+    let accounts: Vec<(String, String)> = app.engine.session.mail_accounts().map(|a| (a.id.clone(), a.address.email().to_string())).collect();
     if form.account_id.is_empty() {
         form.account_id = accounts.first().map(|(id, _)| id.clone()).unwrap_or_default();
     }

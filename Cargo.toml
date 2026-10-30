@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*"]
 exclude = ["apps/ios", "apps/android", "apps/merel-signal"]
 
 [workspace.package]
-version = "0.1.27"
+version = "0.1.33"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -36,6 +36,7 @@ merel-sign = { path = "crates/sign" }
 merel-notify = { path = "crates/notify" }
 merel-i18n = { path = "crates/i18n" }
 merel-call = { path = "crates/call" }
+merel-voice = { path = "crates/voice" }
 merel-mobile = { path = "crates/mobile" }
 merel-search = { path = "crates/search" }
 merel-extract = { path = "crates/extract" }

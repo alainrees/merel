@@ -292,7 +292,7 @@ impl Engine {
     }
 
     /// The address of the Signal account `account_id`, which its program is known by.
-    fn signal_address(&self, account_id: &str) -> Result<String, String> {
+    pub(crate) fn signal_address(&self, account_id: &str) -> Result<String, String> {
         self.session
             .accounts
             .iter()
@@ -305,6 +305,30 @@ impl Engine {
     /// library is in this build of its program, and the program runs.
     pub fn signal_can_call(&self, account_id: &str) -> bool {
         self.signal_address(account_id).is_ok_and(|me| merel_signal_link::can_call(&me))
+    }
+
+    /// The Signal contacts of `account_id` as people to chat with, by name, each with their
+    /// phone number when Signal shares it; also whoever a chat of the account is with, so
+    /// there is someone to pick before Signal has sent its list.
+    pub fn signal_contacts(&self, account_id: &str) -> Vec<(merel_model::Address, String)> {
+        let Ok(me) = self.signal_address(account_id) else { return Vec::new() };
+        let mut out: Vec<(merel_model::Address, String)> = merel_signal_link::contacts(&me)
+            .into_iter()
+            .filter_map(|p| {
+                let name = if p.name.trim().is_empty() { p.number.trim() } else { p.name.trim() };
+                let address = merel_model::Address::new(Some(name).filter(|n| !n.is_empty()), &p.address()).ok()?;
+                Some((address, p.number))
+            })
+            .collect();
+        for chat in self.session.chats().into_iter().filter(|c| c.account_id == account_id && !c.is_group()) {
+            for person in chat.people {
+                if is_signal_address(person.email()) && !out.iter().any(|(a, _)| a.email().eq_ignore_ascii_case(person.email())) {
+                    out.push((person, String::new()));
+                }
+            }
+        }
+        out.sort_by_cached_key(|(a, _)| a.display().to_lowercase());
+        out
     }
 
     /// Calls the person behind the Signal address `to` (sound only); how it goes comes from

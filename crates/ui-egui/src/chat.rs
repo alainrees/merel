@@ -7,9 +7,9 @@
 use chrono::{Local, NaiveDate};
 use egui::{Align, FontId, Layout, Margin, RichText, Sense, Ui, vec2};
 
+use merel_engine::SendState;
 use merel_engine::chat::{self as engine_chat, Chat};
 use merel_engine::securejoin::{INVITE_LINK, Waiting};
-use merel_engine::{SAMPLE_ACCOUNT, SendState};
 use merel_model::Address;
 
 use crate::calendar::to_local;
@@ -23,8 +23,6 @@ pub(crate) const SEARCH_BOX: &str = "chat_search_box";
 pub(crate) const INPUT: &str = "chat-input";
 /// The field for people in a new chat: its widget id.
 pub(crate) const PEOPLE: &str = "chat-people";
-/// The most suggestions shown under the people field.
-const MAX_SUGGESTIONS: usize = 6;
 
 /// Which chats the list shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -51,7 +49,16 @@ pub struct State {
     pub editing: Option<String>,
     /// The message the window to delete it asks about (Signal).
     pub deleting: Option<String>,
+    /// The chat the window to delete it asks about.
+    pub deleting_chat: Option<String>,
+    /// The voice messages heard and the one playing (Signal).
+    pub voice: crate::voice::Player,
+    /// A voice message being recorded (Signal).
+    pub recording: Option<merel_voice::Recording>,
     pub new: Option<NewChat>,
+    /// The chat just picked in the new-chat window, before its first message makes it a
+    /// real one.
+    pub fresh: Option<Chat>,
     /// Why the last message did not go out, or chat could not be turned on.
     pub error: Option<String>,
     /// The message on its way, by outbox id.
@@ -67,26 +74,19 @@ pub struct State {
     pub accept_note: Option<Result<String, String>>,
 }
 
-/// The window for a new chat.
+/// The window for a new chat: the Signal contacts to pick from, as Signal's pencil shows them.
 #[derive(Default)]
 pub struct NewChat {
     /// The account to chat from.
     pub account_id: String,
-    /// The people picked, as chips.
-    pub people: Vec<Address>,
-    /// What is typed after the chips: part of a name or an address.
+    /// What is typed to find someone: part of a name or a number.
     pub typed: String,
-    /// Outlook's "Groepschat": the chat gets a name and everyone sees everyone.
-    pub group: bool,
-    pub name: String,
-    pub text: String,
-    pub error: Option<String>,
 }
 
 impl MailApp {
     /// Opens the window for a new chat, from the first account that can chat.
     pub fn new_chat(&mut self) {
-        let account_id = self.chat_accounts().into_iter().find(|id| self.engine.chat_ready(id)).or_else(|| self.chat_accounts().into_iter().next());
+        let account_id = self.chat_accounts().into_iter().next();
         self.chat.new = Some(NewChat { account_id: account_id.unwrap_or_default(), ..NewChat::default() });
         self.chat.error = None;
     }
@@ -95,19 +95,18 @@ impl MailApp {
     /// going, else the window for a new chat with them.
     pub fn chat_with(&mut self, person: Address) {
         self.module = crate::Module::Chat;
-        let existing = self
-            .engine
-            .session
-            .chats()
-            .into_iter()
-            .find(|c| !c.is_group() && c.people.iter().any(|p| p.email().eq_ignore_ascii_case(person.email())));
-        if let Some(chat) = existing {
-            self.open_chat(&chat.id);
-            return;
-        }
         self.new_chat();
-        if let Some(form) = self.chat.new.as_mut() {
-            form.people.push(person);
+        // Their Signal contact, by name; else the window opens with the name typed to look
+        // for them.
+        let account_id = self.chat.new.as_ref().map(|f| f.account_id.clone()).unwrap_or_default();
+        let name = person.display().to_lowercase();
+        match self.engine.signal_contacts(&account_id).into_iter().map(|(a, _)| a).find(|a| a.display().to_lowercase() == name) {
+            Some(known) => self.pick(&account_id, known),
+            None => {
+                if let Some(form) = self.chat.new.as_mut() {
+                    form.typed = person.display().to_string();
+                }
+            }
         }
     }
 
@@ -116,9 +115,10 @@ impl MailApp {
         !self.chat_accounts().is_empty()
     }
 
-    /// The accounts that can carry chat, by id.
+    /// The accounts that can carry chat, by id: Signal's. Chat over mail is gone (Alain
+    /// 2026-10-30); what was said that way reads as mail again.
     fn chat_accounts(&self) -> Vec<String> {
-        self.engine.session.accounts.iter().filter(|a| engine_chat::can_chat(a)).map(|a| a.id.clone()).collect()
+        self.engine.session.accounts.iter().filter(|a| merel_engine::signal::is_signal(a)).map(|a| a.id.clone()).collect()
     }
 
     fn open_chat(&mut self, id: &str) {
@@ -128,12 +128,35 @@ impl MailApp {
         self.chat.selected = Some(id.to_string());
         self.chat.new = None;
         self.chat.error = None;
+        if self.chat.fresh.as_ref().is_some_and(|c| c.id != id) {
+            self.chat.fresh = None;
+        }
         self.engine.open_chat(id);
     }
 
     /// The chat `id`: one with messages, or one whose first message waits for a key.
     fn chat_by_id(&self, id: &str) -> Option<Chat> {
-        self.engine.session.chat(id).or_else(|| waiting_chats(self).into_iter().find(|c| c.id == id))
+        self.engine.session.chat(id).or_else(|| self.chat.fresh.clone().filter(|c| c.id == id))
+    }
+
+    /// Opens the chat with the Signal contact `person` on `account_id`, as Signal does when one
+    /// is picked: the one going, else an empty one to type the first message in.
+    pub(crate) fn pick(&mut self, account_id: &str, person: Address) {
+        let id = engine_chat::person_chat_id(account_id, person.email());
+        if self.engine.session.chat(&id).is_none() {
+            self.chat.fresh = Some(Chat {
+                id: id.clone(),
+                account_id: account_id.to_string(),
+                title: person.display().to_string(),
+                people: vec![person],
+                group: None,
+                messages: Vec::new(),
+                last: 0,
+                unread: 0,
+            });
+        }
+        self.chat.input.clear();
+        self.open_chat(&id);
     }
 
     /// Leaves changing a message; what was typed for it goes.
@@ -179,163 +202,39 @@ impl MailApp {
         }
     }
 
-    /// Shows the invitation link of `account_id`, turning chat on for it if need be.
-    fn show_invite(&mut self, account_id: &str, renew: bool) {
-        let link = if renew { self.engine.renew_invite_link(account_id) } else { self.engine.invite_link(account_id) };
-        match link {
-            Ok(link) => {
-                self.chat.invite = Some((account_id.to_string(), link));
+    /// Stops recording and sends what was said as a voice message, as Signal does: MP3,
+    /// which every Signal app plays. Under half a second is a slip and goes nowhere.
+    fn send_voice(&mut self) {
+        let Some(recording) = self.chat.recording.take() else { return };
+        let clip = recording.finish();
+        let Some(chat) = self.chat.selected.as_deref().and_then(|id| self.chat_by_id(id)) else { return };
+        if clip.duration() < std::time::Duration::from_millis(500) {
+            return;
+        }
+        let bytes = match merel_voice::mp3(&clip) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                self.chat.error = Some(e);
+                return;
+            }
+        };
+        let mut draft = self.engine.session.chat_reply(&chat, "");
+        draft.attachments = vec![merel_model::DraftAttachment::new(&format!("{}.mp3", tr("chat-voice-file")), bytes)];
+        if let Some(tag) = draft.chat.as_mut() {
+            tag.voice = true;
+            if let Some(id) = self.chat.replying.as_deref() {
+                tag.quote = self.engine.session.chat_quote(id);
+            }
+        }
+        match self.engine.send_or_invite(&chat.account_id, draft) {
+            Ok(id) => {
+                self.chat.sending = id;
+                self.chat.replying = None;
                 self.chat.error = None;
             }
             Err(e) => self.chat.error = Some(e),
         }
     }
-
-    /// Opens a new message with the invitation link, for someone to get it by mail.
-    fn mail_invite(&mut self) {
-        let Some((account_id, link)) = self.chat.invite.clone() else { return };
-        let signature = self.engine.session.accounts.iter().find(|a| a.id == account_id).map(|a| a.signature.clone()).unwrap_or_default();
-        let mut c = crate::compose::Compose::new(crate::compose::Kind::New, None).with_signature(&signature);
-        c.subject = tr("chat-invite-mail-subject");
-        c.body = format!("{}\n\n{link}{}", tr("chat-invite-mail-text"), c.body);
-        self.compose = Some(c.opened_from(&account_id));
-    }
-
-    /// Accepts the invitation link pasted on the start page.
-    fn accept_invite(&mut self) {
-        let account_id = if self.chat.accept_account.is_empty() {
-            self.chat_accounts().into_iter().next().unwrap_or_default()
-        } else {
-            self.chat.accept_account.clone()
-        };
-        let text = self.chat.accept.trim().to_string();
-        self.chat.accept_note = Some(self.take_invite(&account_id, &text));
-        if matches!(self.chat.accept_note, Some(Ok(_))) {
-            self.chat.accept.clear();
-        }
-    }
-
-    /// Accepts the invitation `link` that came by mail to `account_id`, and shows the chats'
-    /// start page with what happens next. In a browser the link leads to Delta Chat's own page,
-    /// which only Delta Chat can follow; read in Merel it is taken here.
-    pub fn open_invite(&mut self, account_id: &str, link: &str) {
-        let chat_accounts = self.chat_accounts();
-        let account_id = if chat_accounts.iter().any(|id| id == account_id) {
-            account_id.to_string()
-        } else {
-            chat_accounts.into_iter().next().unwrap_or_default()
-        };
-        let account_id = account_id.as_str();
-        self.module = crate::Module::Chat;
-        self.chat.selected = None;
-        self.chat.accept_account = account_id.to_string();
-        self.chat.accept_note = Some(self.take_invite(account_id, link));
-    }
-
-    /// Accepts the invitation `link` on `account_id`; says what happens next.
-    fn take_invite(&mut self, account_id: &str, link: &str) -> Result<String, String> {
-        self.engine.accept_invite(account_id, link)?;
-        let name = merel_engine::securejoin::parse_invite(link).map(|i| if i.name.is_empty() { i.addr } else { i.name }).unwrap_or_default();
-        Ok(tr_args("chat-accept-sent", &[("name", name.into())]))
-    }
-
-    /// Starts the chat the window describes: sends the first message, or holds it while an
-    /// invitation goes to whoever has no key yet.
-    fn start_chat(&mut self) {
-        let Some(form) = self.chat.new.as_mut() else { return };
-        if !commit_typed(form) {
-            return;
-        }
-        let name = if form.group { form.name.trim().to_string() } else { String::new() };
-        let draft = match engine_chat::new_chat(&form.people, &name, &form.text) {
-            Ok(d) => d,
-            Err(e) => {
-                form.error = Some(e);
-                return;
-            }
-        };
-        let account_id = form.account_id.clone();
-        // The first chat from an account makes its key: chat needs one, and nobody should have
-        // to find a switch for that first.
-        if !self.engine.chat_ready(&account_id)
-            && let Err(e) = self.engine.enable_chat(&account_id)
-        {
-            if let Some(form) = self.chat.new.as_mut() {
-                form.error = Some(e);
-            }
-            return;
-        }
-        let id = match draft.chat.as_ref().and_then(|c| c.group_id.as_deref()) {
-            Some(group) => engine_chat::group_chat_id(&account_id, group),
-            None => engine_chat::person_chat_id(&account_id, draft.to.first().map(Address::email).unwrap_or("")),
-        };
-        match self.engine.send_or_invite(&account_id, draft) {
-            Ok(sent) => {
-                self.chat.sending = sent;
-                self.chat.new = None;
-                self.chat.selected = Some(id);
-            }
-            Err(e) => {
-                if let Some(form) = self.chat.new.as_mut() {
-                    form.error = Some(e);
-                }
-            }
-        }
-    }
-}
-
-/// Turns what is typed in the people field into a chip, when it is an address; false (with
-/// the reason in the form) when it is something else.
-fn commit_typed(form: &mut NewChat) -> bool {
-    let typed = form.typed.trim().trim_end_matches([',', ';']).trim().to_string();
-    if typed.is_empty() {
-        return true;
-    }
-    match Address::new(None, &typed) {
-        Ok(a) => {
-            add_person(form, a);
-            form.typed.clear();
-            true
-        }
-        Err(_) => {
-            form.error = Some(tr("chat-not-an-address"));
-            false
-        }
-    }
-}
-
-fn add_person(form: &mut NewChat, person: Address) {
-    if !form.people.iter().any(|p| p.email().eq_ignore_ascii_case(person.email())) {
-        form.people.push(person);
-    }
-    form.error = None;
-}
-
-/// The chats whose first message waits for a key and that have no messages yet, as chats.
-fn waiting_chats(app: &MailApp) -> Vec<Chat> {
-    let mut out: Vec<Chat> = Vec::new();
-    for w in app.engine.waiting() {
-        let id = w.chat_id();
-        if out.iter().any(|c| c.id == id) || app.engine.session.chat(&id).is_some() {
-            continue;
-        }
-        let group = w.draft.chat.clone().filter(|c| c.group_id.is_some());
-        let title = group
-            .as_ref()
-            .and_then(|g| g.group_name.clone())
-            .unwrap_or_else(|| w.draft.to.iter().map(|a| a.display().to_string()).collect::<Vec<_>>().join(", "));
-        out.push(Chat {
-            id,
-            account_id: w.account_id.clone(),
-            title,
-            people: w.draft.to.clone(),
-            group,
-            messages: Vec::new(),
-            last: w.since,
-            unread: 0,
-        });
-    }
-    out
 }
 
 /// The messages of `chat` that wait for a key.
@@ -346,10 +245,12 @@ fn waiting_in<'a>(app: &'a MailApp, chat: &Chat) -> Vec<&'a Waiting> {
 /// The chats the list shows, by the filter and the search box.
 fn listed(app: &MailApp) -> Vec<Chat> {
     let needle = app.chat.query.trim().to_lowercase();
-    let mut chats = waiting_chats(app);
-    chats.extend(app.engine.session.chats());
-    chats
+    let signal = app.chat_accounts();
+    app.engine
+        .session
+        .chats()
         .into_iter()
+        .filter(|c| signal.contains(&c.account_id))
         .filter(|c| match app.chat.filter {
             Filter::All => true,
             Filter::Unread => c.unread > 0,
@@ -390,6 +291,7 @@ pub(crate) fn invite_in(text: &str) -> Option<&str> {
 
 pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     list_pane(app, ui, t);
+    delete_chat_window(app, ui.ctx(), t);
     let open = app.chat.selected.as_deref().and_then(|id| app.chat_by_id(id));
     match open {
         Some(chat) => {
@@ -456,15 +358,26 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 ui.label(RichText::new(text).color(t.text_dim));
             }
             let mut pick = None;
+            let mut delete = None;
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 for chat in &list {
-                    if chat_row(app, ui, t, chat).clicked() {
+                    let row = chat_row(app, ui, t, chat);
+                    if row.clicked() {
                         pick = Some(chat.id.clone());
                     }
+                    row.context_menu(|ui| {
+                        if ui.add(egui::Button::image_and_text(Icon::Trash.image(16.0, t.text), tr("chat-delete-chat"))).clicked() {
+                            delete = Some(chat.id.clone());
+                            ui.close();
+                        }
+                    });
                 }
             });
             if let Some(id) = pick {
                 app.open_chat(&id);
+            }
+            if delete.is_some() {
+                app.chat.deleting_chat = delete;
             }
         });
 }
@@ -555,10 +468,15 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                 ui.label(RichText::new(line).size(12.5).color(t.text_dim));
             });
         });
-        // Calls go over mail; a Signal chat has none in Merel.
-        if !signal_chat {
-            helder::right(ui, |ui| call_button(app, ui, t, chat));
-        }
+        helder::right(ui, |ui| {
+            if helder::secondary(ui, t, |ui| helder::tool_button(ui, t, Icon::Trash, &tr("delete")))
+                .on_hover_text(tr("chat-delete-chat-help"))
+                .clicked()
+            {
+                app.chat.deleting_chat = Some(chat.id.clone());
+            }
+            call_button(app, ui, t, chat);
+        });
     });
     ui.add_space(8.0);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
@@ -581,11 +499,11 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
             ui.label(RichText::new(tr_args("chat-not-sent", &[("reason", e.as_str().into())])).color(t.flag));
         }
         ui.with_layout(Layout::top_down(Align::Min), |ui| {
-            let mut accept = None;
             let mut react = None;
             let mut reply = None;
             let mut picture = None;
             let mut save = None;
+            let mut listen = None;
             let mut edit = None;
             let mut delete = None;
             egui::ScrollArea::vertical().auto_shrink(false).stick_to_bottom(true).show(ui, |ui| {
@@ -603,11 +521,11 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                     let first_of_run = previous.as_deref() != Some(from.as_str());
                     previous = Some(from);
                     match bubble(app, ui, t, chat, id, first_of_run) {
-                        Some(Clicked::Accept(link)) => accept = Some(link),
                         Some(Clicked::React(emoji)) => react = Some((id.clone(), emoji)),
                         Some(Clicked::Reply) => reply = Some(id.clone()),
                         Some(Clicked::Picture(n)) => picture = Some((id.clone(), n)),
                         Some(Clicked::Save(n)) => save = Some((id.clone(), n)),
+                        Some(Clicked::Voice(n, ask)) => listen = Some((id.clone(), n, ask)),
                         Some(Clicked::Edit) => edit = Some(id.clone()),
                         Some(Clicked::Delete) => delete = Some(id.clone()),
                         None => {}
@@ -631,6 +549,12 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
             if let Some(a) = save.as_ref().and_then(|p| file(app, p)) {
                 app.save_attachment(&a);
             }
+            if let Some((id, n, ask)) = listen
+                && let Some(a) = file(app, &(id.clone(), n))
+            {
+                app.chat.error = app.chat.voice.ask(&id, n, &a, ask).err();
+            }
+            app.chat.voice.tick(ui.ctx());
             if let Some(id) = edit {
                 app.chat.replying = None;
                 app.chat.files.clear();
@@ -648,13 +572,6 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
             }
             if let Some((id, emoji)) = react {
                 app.chat.error = app.engine.react(&id, &emoji).err();
-            }
-            if let Some(link) = accept {
-                let account = chat.account_id.clone();
-                match app.take_invite(&account, &link) {
-                    Ok(_) => app.chat.error = None,
-                    Err(e) => app.chat.error = Some(e),
-                }
             }
         });
     });
@@ -705,8 +622,6 @@ fn day_line(ui: &mut Ui, t: &Tokens, text: &str) {
 
 /// What was clicked on a message.
 enum Clicked {
-    /// Accept the invitation with this link.
-    Accept(String),
     /// React with this emoji, or take it back when it was the account's own.
     React(String),
     /// Answer this message.
@@ -715,6 +630,8 @@ enum Clicked {
     Picture(usize),
     /// Save attachment `n` of the message under Downloads.
     Save(usize),
+    /// Play, pause or jump in the voice message that is attachment `n`.
+    Voice(usize, crate::voice::Ask),
     /// Change the text of one's own message.
     Edit,
     /// Ask how to delete the message.
@@ -759,6 +676,16 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                 ui.label(RichText::new(who).size(12.0).color(t.text_dim));
             });
         }
+        // The right-click menu takes the whole row. It goes under the buttons, links and files
+        // in it, so they still take their own clicks: egui gives a click to the widget drawn
+        // last, so it is laid down first, where the row was last frame.
+        let rect_id = egui::Id::new(("chat-bubble-rect", id));
+        let menu = (signal && (reacts || deleted))
+            .then(|| ui.data(|d| d.get_temp::<egui::Rect>(rect_id)))
+            .flatten()
+            .map(|rect| ui.interact(rect, egui::Id::new(("chat-bubble", id)), Sense::click()));
+        // The text takes its own clicks too (to select it); a right click there gives the menu.
+        let mut text_clicks = None;
         let row = ui.horizontal_top(|ui| {
             if mine && reacts {
                 react_button(ui, t, id, hovered, &mut accept);
@@ -777,19 +704,13 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                     ui.set_max_width(max);
                     let quote = m.chat.as_ref().and_then(|c| c.quote.as_ref());
                     let mut content = |ui: &mut Ui| match &invite {
-                        Some(link) => {
+                        Some(_) => {
                             ui.horizontal(|ui| {
                                 ui.add(Icon::Link.image(16.0, t.text));
                                 let line =
                                     if mine { tr("chat-invite-sent") } else { tr_args("chat-invite-received", &[("name", m.from.display().into())]) };
                                 ui.add(egui::Label::new(RichText::new(line).size(14.0).color(t.text)).wrap());
                             });
-                            if !mine && !app.engine.is_verified(m.from.email()) {
-                                ui.add_space(6.0);
-                                if helder::primary_button(ui, t, Icon::MessagesSquare, &tr("chat-accept-button")).clicked() {
-                                    accept = Some(Clicked::Accept(link.clone()));
-                                }
-                            }
                         }
                         None if ring => {
                             ui.horizontal(|ui| {
@@ -809,9 +730,10 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                         None => {
                             let files = session.bodies.get(id).map(|b| b.attachments.as_slice()).unwrap_or_default();
                             if !text.trim().is_empty() || files.is_empty() {
-                                crate::emoji::label(ui, &text, 14.0, t.text);
+                                text_clicks = Some(crate::emoji::label(ui, &text, 14.0, t.text));
                             }
-                            files_in_bubble(ui, t, id, files, &mut accept);
+                            let voice = m.chat.as_ref().is_some_and(|c| c.voice);
+                            files_in_bubble(ui, t, &app.chat.voice, id, files, voice, &mut accept);
                         }
                     };
                     // A quote goes above the text and files under it; without either the text
@@ -858,8 +780,20 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
         });
         if signal && (reacts || deleted) {
             let over = ui.rect_contains_pointer(row.response.rect);
-            ui.data_mut(|d| d.insert_temp(hover_id, over));
-            ui.interact(row.response.rect, egui::Id::new(("chat-bubble", id)), Sense::click()).context_menu(|ui| {
+            ui.data_mut(|d| {
+                d.insert_temp(hover_id, over);
+                d.insert_temp(rect_id, row.response.rect);
+            });
+            if menu.is_none() {
+                ui.ctx().request_repaint();
+            }
+        }
+        if let Some(menu) = menu {
+            let menu = match text_clicks {
+                Some(text) => menu.union(text),
+                None => menu,
+            };
+            menu.context_menu(|ui| {
                 if reacts && ui.add(egui::Button::image_and_text(Icon::Reply.image(16.0, t.text), tr("chat-reply"))).clicked() {
                     accept = Some(Clicked::Reply);
                     ui.close();
@@ -893,9 +827,21 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
 
 /// The files of a message: pictures small, to open big with a click, as in Signal; other
 /// files as a line with their name and size, to save with a click.
-fn files_in_bubble(ui: &mut Ui, t: &Tokens, id: &str, files: &[merel_mime::Attachment], clicked: &mut Option<Clicked>) {
+fn files_in_bubble(
+    ui: &mut Ui,
+    t: &Tokens,
+    player: &crate::voice::Player,
+    id: &str,
+    files: &[merel_mime::Attachment],
+    voice: bool,
+    clicked: &mut Option<Clicked>,
+) {
     for (n, a) in files.iter().enumerate() {
-        if crate::attachments::previewable(a) {
+        if voice && a.mime.starts_with("audio/") {
+            if let Some(ask) = crate::voice::row(ui, t, player, id, n, a) {
+                *clicked = Some(Clicked::Voice(n, ask));
+            }
+        } else if crate::attachments::previewable(a) {
             // Sized from the picture's own header: the bubble's row has no height to fit it in.
             let (w, h) = image::ImageReader::new(std::io::Cursor::new(&a.bytes[..]))
                 .with_guessed_format()
@@ -1093,6 +1039,47 @@ fn delete_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     }
 }
 
+/// The window that asks before a whole chat goes, and says where: from Merel and the phone,
+/// as Signal does. The others in the chat keep their messages.
+fn delete_chat_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    let Some(id) = app.chat.deleting_chat.clone() else { return };
+    let Some(chat) = app.chat_by_id(&id) else {
+        app.chat.deleting_chat = None;
+        return;
+    };
+    let mut yes = false;
+    let closed = helder::dialog(ctx, t, &tr("chat-delete-chat-title"), 440.0, |ui| {
+        ui.label(RichText::new(tr_args("chat-delete-chat-ask", &[("title", chat.title.as_str().into())])).size(14.0).color(t.text));
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            if helder::primary_button(ui, t, Icon::Trash, &tr("chat-delete-chat-yes")).clicked() {
+                yes = true;
+            }
+            if helder::secondary(ui, t, |ui| ui.button(tr("cancel"))).clicked() {
+                app.chat.deleting_chat = None;
+            }
+        });
+    });
+    if closed {
+        app.chat.deleting_chat = None;
+    }
+    if yes {
+        app.chat.deleting_chat = None;
+        match app.engine.delete_chat(&id) {
+            Ok(()) => {
+                if app.chat.selected.as_deref() == Some(id.as_str()) {
+                    app.chat.selected = None;
+                    app.chat.replying = None;
+                    app.stop_editing();
+                    app.chat.files.clear();
+                }
+                app.notice = Some(crate::Notice::success(tr_args("chat-deleted", &[("title", chat.title.as_str().into())])));
+            }
+            Err(e) => app.notice = Some(crate::Notice::error(e)),
+        }
+    }
+}
+
 /// Above the line to write in while answering: whom and what, and a cross to stop.
 fn replying_strip(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let Some(id) = app.chat.replying.clone() else { return };
@@ -1220,7 +1207,12 @@ fn composer(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
     ui.add_space(6.0);
     let mut send = false;
     let mut pick = false;
+    let mut record = false;
     let signal = app.engine.is_signal_account(&chat.account_id);
+    if app.chat.recording.is_some() {
+        recording_bar(app, ui, t);
+        return;
+    }
     egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.0, t.card_border)).corner_radius(10).inner_margin(Margin::symmetric(12, 6)).show(
         ui,
         |ui| {
@@ -1245,8 +1237,13 @@ fn composer(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                     pick = r.on_hover_text(tr("chat-attach")).clicked();
                 }
                 let ready = !app.chat.input.trim().is_empty() || !app.chat.files.is_empty();
-                let clicked = ui.add_enabled_ui(ready, |ui| send_button(ui, t)).inner.clicked();
-                send = (enter || clicked) && ready;
+                // With nothing typed, Signal's microphone takes the send button's place.
+                if signal && !ready && app.chat.editing.is_none() {
+                    record = mic_button(ui, t).clicked();
+                } else {
+                    let clicked = ui.add_enabled_ui(ready, |ui| send_button(ui, t)).inner.clicked();
+                    send = (enter || clicked) && ready;
+                }
             });
         },
     );
@@ -1258,6 +1255,70 @@ fn composer(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
         app.send_in_chat();
         ui.memory_mut(|m| m.request_focus(egui::Id::new(INPUT)));
     }
+    if record {
+        app.chat.voice.stop();
+        match merel_voice::record() {
+            Ok(r) => {
+                app.chat.recording = Some(r);
+                app.chat.error = None;
+            }
+            Err(e) => app.chat.error = Some(tr_args("chat-voice-no-mic", &[("error", e.into())])),
+        }
+    }
+}
+
+/// While a voice message is recorded: a red dot, the time, how loud it is, and buttons to
+/// throw it away or send it.
+fn recording_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let Some(recording) = &app.chat.recording else { return };
+    let elapsed = recording.elapsed();
+    let level = recording.level();
+    let mut cancel = false;
+    let mut send = false;
+    egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.0, t.card_border)).corner_radius(10).inner_margin(Margin::symmetric(12, 6)).show(
+        ui,
+        |ui| {
+            ui.allocate_ui_with_layout(vec2(ui.available_width(), 36.0), Layout::left_to_right(Align::Center), |ui| {
+                let r = ui.add(egui::Button::image(Icon::X.image(18.0, t.text_dim)).frame(false).min_size(vec2(30.0, 30.0)));
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-voice-cancel")));
+                cancel = r.on_hover_text(tr("chat-voice-cancel")).clicked();
+                ui.add_space(6.0);
+                // The dot blinks, as on a recorder.
+                let (dot, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                if elapsed.as_millis() % 1000 < 600 {
+                    ui.painter().circle_filled(dot.center(), 6.0, t.flag);
+                }
+                ui.add_space(6.0);
+                let s = elapsed.as_secs();
+                let time = format!("{}:{:02}", s / 60, s % 60);
+                ui.label(RichText::new(format!("{}  {time}", tr("chat-voice-recording"))).size(14.0).color(t.text));
+                ui.add_space(10.0);
+                // How loud: a bar that grows, so one sees the microphone hears.
+                let width = (ui.available_width() - 50.0).clamp(40.0, 240.0);
+                let (bar, _) = ui.allocate_exact_size(vec2(width, 6.0), Sense::hover());
+                ui.painter().rect_filled(bar, 3.0, t.card_border);
+                let loud = egui::Rect::from_min_size(bar.min, vec2(bar.width() * level.sqrt().min(1.0), bar.height()));
+                ui.painter().rect_filled(loud, 3.0, t.accent);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| send = send_button(ui, t).clicked());
+            });
+        },
+    );
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+    if cancel {
+        app.chat.recording = None;
+    } else if send || elapsed >= merel_voice::MAX_LENGTH {
+        app.send_voice();
+    }
+}
+
+/// The microphone button: records a voice message.
+fn mic_button(ui: &mut Ui, t: &Tokens) -> egui::Response {
+    let (rect, r) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::click());
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-voice-record")));
+    let fill = if r.hovered() { t.accent.gamma_multiply(0.9) } else { t.accent };
+    ui.painter().rect_filled(rect, 8.0, fill);
+    Icon::Mic.image(18.0, t.on_accent).paint_at(ui, egui::Rect::from_center_size(rect.center(), vec2(18.0, 18.0)));
+    r.on_hover_text(tr("chat-voice-record"))
 }
 
 /// The emoji most used in chats, for the button next to the line to write in.
@@ -1330,123 +1391,27 @@ fn section<R>(ui: &mut Ui, t: &Tokens, title: &str, add: impl FnOnce(&mut Ui) ->
         .inner
 }
 
-/// What the right side shows without an open chat: chat to turn on, the invitation link, and
-/// a link someone sent to accept.
+/// What the right side shows without an open chat: what chat is, and Nieuwe chat; without a
+/// Signal account, the way to link one.
 fn start_page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
-    let accounts: Vec<(String, String)> =
-        app.engine.session.accounts.iter().filter(|a| engine_chat::can_chat(a)).map(|a| (a.id.clone(), a.address.email().to_string())).collect();
+    let linked = !app.chat_accounts().is_empty();
     section(ui, t, &tr("chat-title"), |ui| {
         helder::paragraph(ui, t, &tr("chat-intro"));
         ui.add_space(12.0);
-        if accounts.is_empty() {
-            let key = if app.engine.session.accounts.iter().all(|a| a.id == SAMPLE_ACCOUNT) { "chat-add-account" } else { "chat-imap-only" };
-            helder::note(ui, t, &tr(key));
+        if !linked {
+            helder::note(ui, t, &tr("chat-link-signal-first"));
+            ui.add_space(10.0);
+            if helder::primary_button(ui, t, Icon::Link, &tr("signal-link")).clicked() {
+                app.open_signal_link();
+            }
             return;
-        }
-        for (id, email) in &accounts {
-            account_row(app, ui, t, id, email);
         }
         if let Some(e) = &app.chat.error {
             ui.label(RichText::new(e).color(t.flag));
         }
-        ui.add_space(10.0);
         if helder::primary_button(ui, t, Icon::MessagesSquare, &tr("chat-new")).clicked() {
             app.new_chat();
         }
-    });
-    if accounts.is_empty() {
-        return;
-    }
-    if app.chat.invite.is_some() {
-        ui.add_space(12.0);
-        invite_card(app, ui, t);
-    }
-    ui.add_space(12.0);
-    accept_card(app, ui, t, &accounts);
-}
-
-/// An account's line on the start page: chat on with its invitation link, or a button to
-/// turn it on.
-fn account_row(app: &mut MailApp, ui: &mut Ui, t: &Tokens, id: &str, email: &str) {
-    egui::Frame::new().fill(t.window).corner_radius(helder::CONTROL_RADIUS).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        let ready = app.engine.chat_ready(id);
-        let height = if ready { helder::BUTTON_HEIGHT } else { 0.0 };
-        ui.allocate_ui_with_layout(vec2(ui.available_width(), height), Layout::left_to_right(if ready { Align::Center } else { Align::Min }), |ui| {
-            ui.add(Icon::Lock.image(18.0, t.text));
-            ui.add_space(6.0);
-            if app.engine.chat_ready(id) {
-                ui.label(RichText::new(tr_args("chat-on", &[("email", email.into())])).color(t.text));
-                helder::trailing(ui, |ui| {
-                    if helder::secondary(ui, t, |ui| helder::tool_button(ui, t, Icon::Link, &tr("chat-invite"))).clicked() {
-                        app.show_invite(id, false);
-                    }
-                });
-            } else {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(tr_args("chat-off", &[("email", email.into())])).color(t.text));
-                    ui.add(egui::Label::new(RichText::new(tr("chat-key-note")).size(12.5).color(t.text_dim)).wrap());
-                    ui.add_space(4.0);
-                    if helder::secondary(ui, t, |ui| ui.button(tr_args("chat-enable", &[("email", email.into())]))).clicked() {
-                        match app.engine.enable_chat(id) {
-                            Ok(_) => app.chat.error = None,
-                            Err(e) => app.chat.error = Some(e),
-                        }
-                    }
-                });
-            }
-        });
-    });
-    ui.add_space(6.0);
-}
-
-/// The invitation link of an account: its QR code to scan, the link to copy or mail, and a
-/// way to make a new one.
-fn invite_card(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
-    let Some((account_id, link)) = app.chat.invite.clone() else { return };
-    let email = app.engine.session.accounts.iter().find(|a| a.id == account_id).map(|a| a.address.email().to_string()).unwrap_or_default();
-    helder::card_frame(t).inner_margin(Margin::same(20)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(tr_args("chat-invite-for", &[("email", email.as_str().into())])).size(17.0).color(t.text));
-            helder::trailing(ui, |ui| {
-                if helder::quiet(ui, t, |ui| helder::icon_button(ui, t, Icon::X, &tr("chat-invite-close"))).clicked() {
-                    app.chat.invite = None;
-                }
-            });
-        });
-        ui.add_space(4.0);
-        helder::paragraph(ui, t, &tr("chat-invite-intro"));
-        ui.add_space(12.0);
-        ui.horizontal_top(|ui| {
-            qr_code(ui, &link, 188.0, &tr("chat-invite-qr"));
-            ui.add_space(20.0);
-            ui.vertical(|ui| {
-                egui::Frame::new().fill(t.window).corner_radius(helder::CONTROL_RADIUS).inner_margin(Margin::same(10)).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.add(egui::Label::new(RichText::new(&link).font(FontId::monospace(11.5)).color(t.text_dim)).wrap());
-                });
-                ui.add_space(12.0);
-                ui.horizontal_wrapped(|ui| {
-                    let now = ui.input(|i| i.time);
-                    let copied = app.chat.copied_at.is_some_and(|at| now - at < 2.0);
-                    let copy = if copied { tr("chat-invite-copied") } else { tr("chat-invite-copy") };
-                    if helder::primary_button(ui, t, Icon::Copy, &copy).clicked() {
-                        ui.ctx().copy_text(link.clone());
-                        app.chat.copied_at = Some(now);
-                    }
-                    if helder::secondary(ui, t, |ui| helder::tool_button(ui, t, Icon::Mail, &tr("chat-invite-mail"))).clicked() {
-                        app.mail_invite();
-                    }
-                    if helder::secondary(ui, t, |ui| helder::tool_button(ui, t, Icon::RefreshCw, &tr("chat-invite-renew")))
-                        .on_hover_text(tr("chat-invite-renew-hint"))
-                        .clicked()
-                    {
-                        app.show_invite(&account_id, true);
-                    }
-                });
-            });
-        });
     });
 }
 
@@ -1479,113 +1444,8 @@ fn t_border(ui: &Ui) -> egui::Color32 {
     ui.visuals().widgets.noninteractive.bg_stroke.color
 }
 
-/// Where a link someone sent is pasted to accept it, and the invitations waiting for an answer.
-fn accept_card(app: &mut MailApp, ui: &mut Ui, t: &Tokens, accounts: &[(String, String)]) {
-    section(ui, t, &tr("chat-accept"), |ui| {
-        helder::paragraph(ui, t, &tr("chat-accept-intro"));
-        ui.add_space(10.0);
-        if accounts.len() > 1 {
-            helder::icon_row(ui, t, Icon::Mail, |ui| {
-                let current = accounts
-                    .iter()
-                    .find(|(id, _)| *id == app.chat.accept_account)
-                    .or(accounts.first())
-                    .map(|(_, e)| tr_args("chat-via", &[("email", e.as_str().into())]))
-                    .unwrap_or_default();
-                helder::select(ui, t, &current, 360.0, |ui| {
-                    for (id, email) in accounts {
-                        if ui.selectable_label(app.chat.accept_account == *id, email).clicked() {
-                            app.chat.accept_account = id.clone();
-                            ui.close();
-                        }
-                    }
-                });
-            });
-        }
-        helder::icon_row(ui, t, Icon::Link, |ui| {
-            let width = (ui.available_width() - 140.0).clamp(200.0, 560.0);
-            let r = helder::underline_field(ui, t, &mut app.chat.accept, &tr("chat-accept-hint"), width, false);
-            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            ui.add_space(8.0);
-            let ready = !app.chat.accept.trim().is_empty();
-            let clicked =
-                ui.add_enabled_ui(ready, |ui| helder::primary_button(ui, t, Icon::MessagesSquare, &tr("chat-accept-button"))).inner.clicked();
-            if ready && (clicked || enter) {
-                app.accept_invite();
-            }
-        });
-        match &app.chat.accept_note {
-            Some(Ok(note)) => {
-                helder::icon_row(ui, t, Icon::CircleCheck, |ui| {
-                    ui.label(RichText::new(note).color(t.text_dim));
-                });
-            }
-            Some(Err(e)) => {
-                helder::icon_row(ui, t, Icon::CircleAlert, |ui| {
-                    ui.label(RichText::new(e).color(t.flag));
-                });
-            }
-            None => {}
-        }
-        for p in app.engine.pending_invites() {
-            let name = if p.name.is_empty() { p.addr.clone() } else { format!("{} ({})", p.name, p.addr) };
-            helder::icon_row(ui, t, Icon::Clock, |ui| {
-                ui.label(RichText::new(tr_args("chat-pending", &[("name", name.into())])).color(t.text_dim));
-            });
-        }
-    });
-}
-
-/// The people in the address book that match `typed`, by name or address, leaving out who is
-/// picked already.
-fn suggestions(app: &MailApp, form: &NewChat) -> Vec<Address> {
-    let needle = form.typed.trim().to_lowercase();
-    if needle.is_empty() {
-        return Vec::new();
-    }
-    let mut out: Vec<Address> = Vec::new();
-    for c in &app.engine.session.contacts {
-        for email in &c.emails {
-            let matches = c.name.to_lowercase().contains(&needle) || email.to_lowercase().contains(&needle);
-            let taken = form.people.iter().chain(&out).any(|p| p.email().eq_ignore_ascii_case(email));
-            if matches
-                && !taken
-                && let Ok(a) = Address::new(Some(c.name.trim()).filter(|n| !n.is_empty()), email)
-            {
-                out.push(a);
-            }
-        }
-        if out.len() >= MAX_SUGGESTIONS {
-            break;
-        }
-    }
-    out.truncate(MAX_SUGGESTIONS);
-    out
-}
-
-/// A person picked for the chat: avatar, name and a cross to take them out again. True when
-/// the cross is clicked.
-fn person_chip(ui: &mut Ui, t: &Tokens, person: &Address) -> bool {
-    let mut remove = false;
-    egui::Frame::new().fill(t.checked).corner_radius(14).inner_margin(Margin { left: 3, right: 4, top: 2, bottom: 2 }).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        let (rect, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
-        helder::avatar(ui.painter(), rect.center(), 11.0, person.display(), person.email());
-        ui.label(RichText::new(person.display()).size(13.5).color(t.accent_text));
-        let label = tr_args("chat-remove-person", &[("name", person.display().into())]);
-        let (rect, r) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
-        if r.hovered() {
-            ui.painter().circle_filled(rect.center(), 9.0, t.hover);
-        }
-        Icon::X.image(12.0, t.accent_text).paint_at(ui, egui::Rect::from_center_size(rect.center(), vec2(12.0, 12.0)));
-        remove = r.on_hover_text(label).clicked();
-    });
-    remove
-}
-
-/// One suggestion under the people field: avatar, name and address. True when clicked.
-fn suggestion_row(ui: &mut Ui, t: &Tokens, person: &Address) -> bool {
+/// One contact in the new-chat window: avatar, name and number. True when clicked.
+fn suggestion_row(ui: &mut Ui, t: &Tokens, person: &Address, number: &str) -> bool {
     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::click());
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, person.display()));
     let p = ui.painter();
@@ -1595,159 +1455,91 @@ fn suggestion_row(ui: &mut Ui, t: &Tokens, person: &Address) -> bool {
     helder::avatar(p, egui::pos2(rect.left() + 24.0, rect.center().y), 16.0, person.display(), person.email());
     let x = rect.left() + 50.0;
     p.text(egui::pos2(x, rect.top() + 7.0), egui::Align2::LEFT_TOP, person.display(), FontId::proportional(14.0), t.text);
-    let line = format!("{} · {}", person.email(), tr("chat-from-contacts"));
+    let line = if number.is_empty() { tr("signal-contact") } else { format!("{number} · {}", tr("signal-contact")) };
     p.text(egui::pos2(x, rect.top() + 25.0), egui::Align2::LEFT_TOP, line, FontId::proportional(12.0), t.text_dim);
     r.clicked()
 }
 
-/// The new-chat window: the command bar (Starten, the account, Groepschat, Annuleren), the
-/// people as chips with suggestions from the address book, a name for a group, and the first
-/// message.
+/// The `contacts` that match what is typed, by name or number: all of them when nothing is.
+fn matching(contacts: Vec<(Address, String)>, typed: &str) -> Vec<(Address, String)> {
+    let needle = typed.trim().to_lowercase();
+    // 06… finds +31 6…: the zero before the area is left out.
+    let digits: String = needle.chars().filter(char::is_ascii_digit).collect::<String>().trim_start_matches('0').to_string();
+    contacts
+        .into_iter()
+        .filter(|(a, number)| {
+            needle.is_empty()
+                || a.display().to_lowercase().contains(&needle)
+                || (!digits.is_empty() && number.chars().filter(char::is_ascii_digit).collect::<String>().contains(&digits))
+        })
+        .collect()
+}
+
+/// The new-chat window, as Signal's pencil: a field to find someone, the Signal account when
+/// there are more, and the contacts on Signal. A click opens the chat to type in.
 fn new_chat_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
-    let accounts: Vec<(String, String)> =
-        app.engine.session.accounts.iter().filter(|a| engine_chat::can_chat(a)).map(|a| (a.id.clone(), a.address.email().to_string())).collect();
-    let suggested = app.chat.new.as_ref().map(|f| suggestions(app, f)).unwrap_or_default();
-    let mut start = false;
+    let accounts: Vec<(String, String)> = app
+        .engine
+        .session
+        .accounts
+        .iter()
+        .filter(|a| merel_engine::signal::is_signal(a))
+        .map(|a| (a.id.clone(), if a.name.trim().is_empty() { a.address.display().to_string() } else { a.name.clone() }))
+        .collect();
+    let Some(form) = app.chat.new.as_ref() else { return };
+    let account_id = form.account_id.clone();
+    let shown = matching(app.engine.signal_contacts(&account_id), &form.typed);
+    let mut picked = None;
     let mut cancel = false;
-    let ready = app.chat.new.as_ref().is_some_and(|f| app.engine.chat_ready(&f.account_id));
     let Some(form) = app.chat.new.as_mut() else { return };
-    helder::quiet(ui, t, |ui| {
+    ui.horizontal(|ui| {
+        ui.add(Icon::Search.image(16.0, t.text_dim));
+        let r = ui.add(
+            egui::TextEdit::singleline(&mut form.typed)
+                .id(egui::Id::new(PEOPLE))
+                .hint_text(RichText::new(tr("chat-people-hint")).color(t.text_dim))
+                .desired_width((ui.available_width() - 48.0).max(160.0)),
+        );
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tr("chat-people")));
+        if !r.has_focus() && !ui.memory(|m| m.focused().is_some()) {
+            r.request_focus();
+        }
+        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && shown.len() == 1 {
+            picked = shown.first().map(|(a, _)| a.clone());
+        }
+        helder::trailing(ui, |ui| {
+            cancel = helder::tool_button(ui, t, Icon::X, &tr("chat-cancel")).clicked();
+        });
+    });
+    // Which Signal account, only when there is more than one.
+    if accounts.len() > 1 {
         ui.horizontal(|ui| {
-            let can_start = !form.account_id.is_empty();
-            start = ui.add_enabled_ui(can_start, |ui| helder::primary_button(ui, t, Icon::Send, &tr("chat-start"))).inner.clicked();
-            helder::bar_separator(ui, t);
-            let current = accounts
-                .iter()
-                .find(|(id, _)| *id == form.account_id)
-                .map(|(_, e)| tr_args("chat-via", &[("email", e.as_str().into())]))
-                .unwrap_or_else(|| tr("chat-pick-account"));
-            helder::menu_button(ui, t, Some(Icon::Mail), RichText::new(current).size(14.0).color(t.text), |ui| {
-                for (id, email) in &accounts {
-                    if ui.selectable_label(form.account_id == *id, email).clicked() {
-                        form.account_id = id.clone();
-                        ui.close();
-                    }
+            for (id, name) in &accounts {
+                if ui.selectable_label(form.account_id == *id, name).clicked() {
+                    form.account_id = id.clone();
                 }
-            });
-            helder::toggle(ui, t, &mut form.group, &tr("chat-group"));
-            helder::trailing(ui, |ui| {
-                cancel = helder::tool_button(ui, t, Icon::X, &tr("chat-cancel")).clicked();
-            });
+            }
         });
-    });
+    }
     ui.add_space(8.0);
-    helder::card_frame(t).inner_margin(Margin::same(20)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        let width = (ui.available_width() - 48.0).max(200.0);
-        // The people: chips, then the field to type more in.
-        helder::icon_row(ui, t, Icon::Users, |ui| {
-            ui.vertical(|ui| {
-                ui.set_width(width);
-                let mut remove = None;
-                let mut typed_r = None;
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                    for (i, p) in form.people.iter().enumerate() {
-                        if person_chip(ui, t, p) {
-                            remove = Some(i);
-                        }
-                    }
-                    let hint = if form.people.is_empty() { tr("chat-people-hint") } else { String::new() };
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut form.typed)
-                            .id(egui::Id::new(PEOPLE))
-                            .frame(egui::Frame::NONE)
-                            .hint_text(RichText::new(hint).color(t.text_dim))
-                            .desired_width((ui.available_size_before_wrap().x - 8.0).max(160.0))
-                            .margin(Margin::symmetric(2, 6)),
-                    );
-                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tr("chat-people")));
-                    typed_r = Some(r);
-                });
-                let (line, _) = ui.allocate_exact_size(vec2(width, 1.0), Sense::hover());
-                let focused = typed_r.as_ref().is_some_and(egui::Response::has_focus);
-                ui.painter().hline(
-                    line.x_range(),
-                    line.center().y,
-                    egui::Stroke::new(if focused { 2.0 } else { 1.0 }, if focused { t.accent } else { t.card_border }),
-                );
-                if let Some(i) = remove {
-                    form.people.remove(i);
+    if shown.is_empty() {
+        let key = if form.typed.trim().is_empty() { "chat-no-contacts" } else { "chat-not-a-contact" };
+        helder::note(ui, t, &tr(key));
+    } else {
+        ui.label(RichText::new(tr("chat-on-signal")).size(12.0).color(t.text_dim));
+        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+            for (person, number) in &shown {
+                if suggestion_row(ui, t, person, number) {
+                    picked = Some(person.clone());
                 }
-                if let Some(r) = typed_r {
-                    let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    let comma = form.typed.ends_with([',', ';']);
-                    let backspace = r.has_focus() && form.typed.is_empty() && ui.input(|i| i.key_pressed(egui::Key::Backspace));
-                    if backspace {
-                        form.people.pop();
-                    } else if enter || comma {
-                        match suggested.first().filter(|_| !comma) {
-                            Some(first) => {
-                                add_person(form, first.clone());
-                                form.typed.clear();
-                            }
-                            None => {
-                                commit_typed(form);
-                            }
-                        }
-                        ui.memory_mut(|m| m.request_focus(egui::Id::new(PEOPLE)));
-                    }
-                }
-                if !suggested.is_empty() {
-                    ui.add_space(4.0);
-                    egui::Frame::new()
-                        .fill(t.card)
-                        .stroke(egui::Stroke::new(1.0, t.card_border))
-                        .corner_radius(10)
-                        .inner_margin(Margin::same(6))
-                        .show(ui, |ui| {
-                            ui.set_width(width.min(420.0));
-                            ui.label(RichText::new(tr("chat-suggest")).size(12.0).color(t.text_dim));
-                            for person in &suggested {
-                                if suggestion_row(ui, t, person) {
-                                    add_person(form, person.clone());
-                                    form.typed.clear();
-                                    ui.memory_mut(|m| m.request_focus(egui::Id::new(PEOPLE)));
-                                }
-                            }
-                        });
-                }
-            });
+            }
         });
-        if form.group {
-            helder::icon_row(ui, t, Icon::Type, |ui| {
-                helder::underline_field(ui, t, &mut form.name, &tr("chat-name-hint"), width, false);
-            });
-        }
-        ui.add_space(4.0);
-        helder::icon_row(ui, t, Icon::Notes, |ui| {
-            egui::Frame::new().fill(t.window).corner_radius(helder::CONTROL_RADIUS).inner_margin(Margin::same(10)).show(ui, |ui| {
-                let r = ui.add(
-                    egui::TextEdit::multiline(&mut form.text)
-                        .frame(egui::Frame::NONE)
-                        .hint_text(RichText::new(tr("chat-first-hint")).color(t.text_dim))
-                        .desired_width(width - 20.0)
-                        .desired_rows(6),
-                );
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tr("chat-first-hint")));
-            });
-        });
-        if let Some(e) = &form.error {
-            ui.add_space(6.0);
-            helder::icon_row(ui, t, Icon::CircleAlert, |ui| {
-                ui.label(RichText::new(e).color(t.flag));
-            });
-        }
-        ui.add_space(10.0);
-        helder::icon_row(ui, t, Icon::ShieldCheck, |ui| {
-            let note = if ready { tr("chat-new-note") } else { tr("chat-key-on-start") };
-            ui.add(egui::Label::new(RichText::new(note).size(12.5).color(t.text_dim)).wrap());
-        });
-    });
+    }
     if cancel {
         app.chat.new = None;
-    } else if start {
-        app.start_chat();
+    } else if let Some(person) = picked {
+        app.pick(&account_id, person);
+        ui.memory_mut(|m| m.request_focus(egui::Id::new(INPUT)));
     }
 }
 
@@ -1783,15 +1575,14 @@ mod tests {
     }
 
     #[test]
-    fn typed_addresses_become_chips_and_other_text_does_not() {
-        let mut form = NewChat { typed: "sanne@example.org,".into(), ..NewChat::default() };
-        assert!(commit_typed(&mut form));
-        assert_eq!(form.people.len(), 1);
-        form.typed = "SANNE@example.org".into();
-        assert!(commit_typed(&mut form));
-        assert_eq!(form.people.len(), 1, "once");
-        form.typed = "Sanne".into();
-        assert!(!commit_typed(&mut form));
-        assert!(form.error.is_some());
+    fn the_new_chat_list_finds_contacts_by_name_or_number() {
+        let sanne = Address::new(Some("Sanne"), "abc@signal.invalid").unwrap();
+        let ravi = Address::new(Some("Ravi Kumar"), "def@signal.invalid").unwrap();
+        let contacts = || vec![(sanne.clone(), "+31 6 12345678".to_string()), (ravi.clone(), String::new())];
+        assert_eq!(matching(contacts(), "").len(), 2, "everyone before anything is typed");
+        assert_eq!(matching(contacts(), "sAn").into_iter().map(|(a, _)| a).collect::<Vec<_>>(), std::slice::from_ref(&sanne));
+        assert_eq!(matching(contacts(), "06 1234 5678").len(), 1, "as typed in the Netherlands");
+        assert_eq!(matching(contacts(), "612345678").len(), 1);
+        assert!(matching(contacts(), "sanne@example.org").is_empty());
     }
 }
