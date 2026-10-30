@@ -774,7 +774,7 @@ chat-not-sent = Niet verzonden: { $reason }
 chat-input = Typ een bericht
 chat-input-hint = Typ een bericht aan { $name }…
 chat-send = Verzenden
-chat-intro = Chatten gaat via je e-mail en is altijd end-to-end versleuteld: alleen jij en de ander kunnen het lezen. De ander hoeft geen Merel te hebben; Delta Chat werkt ook, op elke telefoon en computer.
+chat-intro = Chatten gaat via Signal en is altijd end-to-end versleuteld: alleen jij en de ander kunnen het lezen. Je chats staan op je telefoon en in Merel, en zoeken vindt ze naast je mail.
 chat-add-account = Voeg eerst een e-mailaccount toe om te kunnen chatten.
 chat-imap-only = Chat werkt nu met IMAP- en Microsoft 365-accounts. Exchange en Gmail volgen.
 chat-on = Chat staat aan voor { $email }.
@@ -824,10 +824,12 @@ chat-not-an-address = Kies iemand uit de voorstellen of typ een volledig e-maila
 chat-remove-person = { $name } weghalen
 chat-from-contacts = Contactpersonen
 chat-group = Groepschat
-chat-people-hint = Typ een naam of e-mailadres
+chat-people-hint = Typ een naam of telefoonnummer
+chat-not-a-contact = Kies iemand uit je Signal-contactpersonen.
+chat-link-signal-first = Koppel eerst Signal om te kunnen chatten.
 chat-people = Met wie
 chat-suggest = Voorstellen
-chat-new-note = Je bericht gaat end-to-end versleuteld weg. Heeft iemand nog geen versleutelde chat met je, dan stuurt Merel eerst zelf een uitnodiging, zonder je bericht. Je bericht volgt zodra die is aangenomen.
+chat-new-note = Je bericht gaat via Signal, end-to-end versleuteld.
 
 ## Months and days of the week (1 = January, 1 = Monday)
 month-1 = januari
@@ -1680,7 +1682,7 @@ cert-not-stored-because = Het certificaat kan niet worden bewaard: { $error }
 
 ## Chat errors
 
-chat-pick-someone = Kies ten minste één persoon om mee te chatten.
+chat-pick-someone = Kies met wie je wilt chatten.
 chat-type-first = Typ eerst een bericht.
 chat-turn-on-first = Zet eerst chat aan voor dit account.
 chat-too-many = Een chat kan met hoogstens { $max } personen.
@@ -1986,6 +1988,7 @@ signal-no-program = Het Signal-programma hoort naast Merel te staan, maar is er 
 signal-too-big = Via Signal kan per bericht hooguit 100 MB aan bestanden mee.
 signal-no-folder = Merel weet niet waar het Signal mag bewaren.
 signal-link-help = Merel wordt een gekoppeld apparaat van je Signal-account, net als Signal op de computer. Je chats komen dan ook in Merel, en zoeken vindt ze naast je mail.
+signal-contact = Signal-contactpersoon
 signal-link = Signal koppelen
 signal-link-starting = Signal maakt een koppelcode…
 signal-link-qr = QR-code om Merel aan Signal te koppelen

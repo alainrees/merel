@@ -777,7 +777,7 @@ chat-not-sent = Not sent: { $reason }
 chat-input = Type a message
 chat-input-hint = Type a message to { $name }…
 chat-send = Send
-chat-intro = Chat goes through your e-mail and is always end-to-end encrypted: only you and the other person can read it. They don't need Merel; Delta Chat works too, on any phone or computer.
+chat-intro = Chat goes through Signal and is always end-to-end encrypted: only you and the other person can read it. Your chats are on your phone and in Merel, and search finds them next to your mail.
 chat-add-account = Add an e-mail account first to chat.
 chat-imap-only = Chat works with IMAP and Microsoft 365 accounts for now. Exchange and Gmail will follow.
 chat-on = Chat is on for { $email }.
@@ -827,10 +827,12 @@ chat-not-an-address = Pick someone from the suggestions or type a full e-mail ad
 chat-remove-person = Remove { $name }
 chat-from-contacts = Contacts
 chat-group = Group chat
-chat-people-hint = Type a name or e-mail address
+chat-people-hint = Type a name or phone number
+chat-not-a-contact = Pick someone from your Signal contacts.
+chat-link-signal-first = Link Signal first to chat.
 chat-people = With whom
 chat-suggest = Suggestions
-chat-new-note = Your message goes out end-to-end encrypted. If someone has no encrypted chat with you yet, Merel first sends them an invitation itself, without your message. Your message follows once they accept.
+chat-new-note = Your message goes through Signal, end-to-end encrypted.
 
 ## Months and days of the week (1 = January, 1 = Monday)
 month-1 = January
@@ -1695,7 +1697,7 @@ cert-not-stored-because = The certificate cannot be stored: { $error }
 
 ## Chat errors
 
-chat-pick-someone = Choose at least one person to chat with.
+chat-pick-someone = Pick whom you want to chat with.
 chat-type-first = Type a message first.
 chat-turn-on-first = Turn on chat for this account first.
 chat-too-many = A chat can have at most { $max } people.
@@ -2001,6 +2003,7 @@ signal-no-program = The Signal program belongs next to Merel, but it is not ther
 signal-too-big = Signal takes at most 100 MB of files per message.
 signal-no-folder = Merel does not know where to keep Signal.
 signal-link-help = Merel becomes a linked device of your Signal account, like Signal on a computer. Your chats then come into Merel too, and search finds them next to your mail.
+signal-contact = Signal contact
 signal-link = Link Signal
 signal-link-starting = Signal is making a linking code…
 signal-link-qr = QR code to link Merel to Signal

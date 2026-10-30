@@ -41,8 +41,6 @@ const MIN_COLUMN: f32 = 40.0;
 pub enum Clicked {
     /// A `mailto:` link: the address (and nothing after a `?`).
     Mailto(String),
-    /// A chat invitation (`https://i.delta.chat/#…`), which Merel takes itself.
-    Invite(String),
 }
 
 struct Painter<'a> {
@@ -488,8 +486,6 @@ impl Painter<'_> {
         if let Some(rest) = lower.strip_prefix("mailto:") {
             let address = href.get(href.len() - rest.len()..).unwrap_or("").split('?').next().unwrap_or("").to_string();
             self.clicked = Some(Clicked::Mailto(address));
-        } else if lower.starts_with(merel_engine::securejoin::INVITE_LINK) {
-            self.clicked = Some(Clicked::Invite(href.to_string()));
         } else if lower.starts_with("http://") || lower.starts_with("https://") {
             ui.ctx().open_url(egui::OpenUrl::new_tab(href));
         }
