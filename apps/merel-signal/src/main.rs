@@ -135,6 +135,10 @@ enum Event {
         read_receipts: Option<bool>,
         typing_indicators: Option<bool>,
     },
+    /// The account's Signal contacts, as the phone shares them: to start a chat with.
+    Contacts {
+        people: Vec<Person>,
+    },
     /// Every message waiting on the server is in. `calls` says whether this build can call.
     Synced {
         calls: bool,
@@ -157,6 +161,31 @@ enum Event {
     Error {
         message: String,
     },
+}
+
+/// A Signal contact: `id` is their service id, the `thread` of a chat with them.
+#[derive(Serialize)]
+struct Person {
+    id: String,
+    name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    number: String,
+}
+
+/// The contacts the phone shared, by name; ones without a name or number are left out, as
+/// Signal leaves them out of its own list.
+async fn contacts<S: Store>(manager: &Manager<S, Registered>) -> Vec<Person> {
+    let Ok(all) = manager.store().contacts().await else { return Vec::new() };
+    let mut people: Vec<Person> = all
+        .flatten()
+        .filter_map(|c| {
+            let number = c.phone_number.map(|p| p.to_string()).unwrap_or_default();
+            let name = if c.name.trim().is_empty() { number.clone() } else { c.name.trim().to_string() };
+            (!name.is_empty()).then(|| Person { id: ServiceId::Aci(c.uuid.into()).service_id_string(), name, number })
+        })
+        .collect();
+    people.sort_by_key(|p| p.name.to_lowercase());
+    people
 }
 
 /// A file sent with a message. `id` is how Merel asks for its contents.
@@ -411,6 +440,7 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
             received = messages.next() => match received {
                 Some(Received::QueueEmpty) => {
                     eprintln!("merel-signal: all waiting messages are in");
+                    emit(&Event::Contacts { people: contacts(&manager).await });
                     emit(&Event::Synced { calls: phone.ready() })
                 }
                 Some(Received::Content(content)) => {
@@ -438,7 +468,10 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                         emit(&event);
                     }
                 }
-                Some(Received::Contacts) => eprintln!("merel-signal: contacts synced"),
+                Some(Received::Contacts) => {
+                    eprintln!("merel-signal: contacts synced");
+                    emit(&Event::Contacts { people: contacts(&manager).await });
+                }
                 Some(Received::DecryptionError(_)) => eprintln!("merel-signal: a message could not be decrypted"),
                 None => bail!("the connection with Signal closed"),
             },

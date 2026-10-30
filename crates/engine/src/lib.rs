@@ -773,6 +773,12 @@ impl Session {
                 .as_deref()
                 .and_then(|id| self.folder(id))
                 .is_some_and(|f| self.accounts.iter().any(|a| a.id == f.account_id && signal::is_signal(a)));
+        let signal_folders: std::collections::HashSet<&str> = self
+            .folders
+            .iter()
+            .filter(|f| self.accounts.iter().any(|a| a.id == f.account_id && signal::is_signal(a)))
+            .map(|f| f.id.as_str())
+            .collect();
         let mut list: Vec<&MessageHeader> = self
             .messages
             .iter()
@@ -792,8 +798,9 @@ impl Session {
             // filter shows.
             .filter(|m| (self.filter == view::Filter::Snoozed) == self.snoozed_until(m, now).is_some())
             .filter(|m| self.category_filter.as_deref().is_none_or(|c| m.categories.iter().any(|x| x.eq_ignore_ascii_case(c))))
-            // Chat messages are read in the chat module, as Gmail keeps its chat apart.
-            .filter(|m| chats_too || m.chat.is_none())
+            // Signal messages are read in the chat module, as Gmail keeps its chat apart. Chat
+            // that went by mail reads as mail again, now that the chat module is Signal's alone.
+            .filter(|m| chats_too || m.chat.is_none() || !signal_folders.contains(m.folder_id.as_str()))
             .collect();
         match found.filter(|_| !self.search_newest) {
             // Best match first, as the index ranked them; what only matched here comes after.

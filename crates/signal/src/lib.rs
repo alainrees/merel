@@ -111,6 +111,11 @@ pub enum Said {
         #[serde(default)]
         error: Option<String>,
     },
+    /// The account's Signal contacts, to start a chat with.
+    Contacts {
+        #[serde(default)]
+        people: Vec<Person>,
+    },
     /// `calls` says whether this build of the program can call.
     Synced {
         #[serde(default)]
@@ -134,6 +139,22 @@ pub enum Said {
     Error {
         message: String,
     },
+}
+
+/// A Signal contact, as the phone shares them: `id` is their service id.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Person {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub number: String,
+}
+
+impl Person {
+    /// Their address in Merel, as their messages come from.
+    pub fn address(&self) -> String {
+        address_of(&self.id)
+    }
 }
 
 /// A message as the program passes it on.
@@ -432,6 +453,11 @@ pub fn can_call(me: &str) -> bool {
     lines().as_ref().and_then(|l| l.get(&me.to_lowercase())).is_some_and(|l| l.calls)
 }
 
+/// The Signal contacts of the account with address `me`, by name, to start a chat with.
+pub fn contacts(me: &str) -> Vec<Person> {
+    lines().as_ref().and_then(|l| l.get(&me.to_lowercase())).map(|l| lock(&l.messages).contacts.clone()).unwrap_or_default()
+}
+
 /// What happened with calls since the last time, with the account address it is about.
 pub fn take_call_updates() -> Vec<(String, CallUpdate)> {
     std::mem::take(&mut *UPDATES.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
@@ -594,6 +620,8 @@ struct Messages {
     /// What the program said since the last listing about receipts, reading elsewhere and
     /// settings, for the mailbox to keep.
     news: Vec<Said>,
+    /// The account's Signal contacts, by name.
+    contacts: Vec<Person>,
 }
 
 impl Messages {
@@ -739,6 +767,14 @@ fn take_news(messages: &Mutex<Messages>, said: Said) -> Option<Said> {
         Said::Typing { sender, sender_name, typing } => note_typing(&sender, &sender_name, typing),
         Said::ChatDeleted { thread } => lock(messages).forget(&thread),
         news @ (Said::Receipt { .. } | Said::ReadElsewhere { .. } | Said::Settings { .. }) => lock(messages).news.push(news),
+        Said::Contacts { people } => {
+            let mut m = lock(messages);
+            // A chat with any of them can start: their address is their thread.
+            for p in &people {
+                m.threads.entry(p.address()).or_insert_with(|| p.id.clone());
+            }
+            m.contacts = people;
+        }
         other => return Some(other),
     }
     None

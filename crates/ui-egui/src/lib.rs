@@ -2872,27 +2872,6 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         }
         ui.add_space(8.0);
     }
-    // A chat invitation sent by mail. Its link leads to a web page only Delta Chat can follow,
-    // so Merel offers to take it here. Not in the Junk folder.
-    if !in_junk
-        && let Some(link) = body.as_ref().and_then(|b| chat::invite_in(&b.text)).map(str::to_string)
-        && let Ok(invite) = merel_engine::securejoin::parse_invite(&link)
-    {
-        let name = if invite.name.is_empty() { invite.addr.clone() } else { invite.name.clone() };
-        let mut open = false;
-        egui::Frame::new().fill(t.checked).corner_radius(4).inner_margin(8).show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(crate::i18n::tr_args("chat-invite-in-mail", &[("name", name.into())])).color(t.text));
-                open = ui.small_button(tr("chat-invite-open")).clicked();
-            });
-        });
-        ui.add_space(8.0);
-        if open {
-            let account_id = app.engine.session.folder(&m.folder_id).map(|f| f.account_id.clone()).unwrap_or_default();
-            app.open_invite(&account_id, &link);
-            return;
-        }
-    }
     if !in_junk && let Some(targets) = body.as_ref().map(|b| b.unsubscribe.as_slice()).filter(|u| !u.is_empty()) {
         let mut ask = false;
         egui::Frame::new().fill(t.checked).corner_radius(4).inner_margin(8).show(ui, |ui| {
@@ -3061,10 +3040,6 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let mut c = Compose::new(ComposeKind::New, None).with_signature(&signature);
                 c.to = address;
                 app.compose = Some(c);
-            }
-            Some(html::Clicked::Invite(link)) => {
-                let account_id = app.engine.session.folder(&m.folder_id).map(|f| f.account_id.clone()).unwrap_or_default();
-                app.open_invite(&account_id, &link);
             }
             None => {}
         }
@@ -4016,30 +3991,70 @@ mod tests {
         s.bodies.insert("a1/INBOX#1".into(), merel_engine::Body { text: "Zie ik je om tien uur?".into(), ..Default::default() });
     }
 
+    /// [`with_a_chat`] as a Signal account, Sanne writing from her Signal address.
+    fn with_a_signal_chat(app: &mut MailApp) {
+        with_a_chat(app);
+        let s = &mut app.engine.session;
+        s.accounts.iter_mut().filter(|a| a.id == "a1").for_each(|a| {
+            a.protocol = merel_model::Protocol::Signal;
+            a.address = merel_model::Address::new(Some("Alain Rees"), "alain@signal.invalid").unwrap();
+        });
+        s.messages.iter_mut().filter(|m| m.id == "a1/INBOX#1").for_each(|m| {
+            m.from = merel_model::Address::new(Some("Sanne de Vries"), "sanne@signal.invalid").unwrap();
+        });
+    }
+
     #[test]
-    fn the_chat_module_lists_a_chat_opens_it_and_sends_only_encrypted() {
+    fn chat_is_signal_alone_and_chat_by_mail_reads_as_mail() {
         let mut h = harness();
         with_a_chat(h.state_mut());
         h.state_mut().module = Module::Chat;
         h.run();
-        h.get_by_label("Chat staat uit voor alain@voorbeeld.nl.");
+        assert!(h.query_by_label("Sanne de Vries, 1 ongelezen").is_none(), "no chat by mail in the list");
+        h.get_by_label("Signal koppelen");
+        assert!(!h.state().can_chat());
+        h.state_mut().module = Module::Mail;
+        h.state_mut().engine.session.selected_folder = Some("a1/INBOX".into());
+        h.run();
+        assert_eq!(h.state().engine.session.visible_messages().len(), 1, "it is mail in the inbox again");
+
+        h.state_mut().engine.session.accounts.clear();
+        h.state_mut().engine.session.messages.clear();
+        with_a_signal_chat(h.state_mut());
+        h.state_mut().engine.session.selected_folder = Some("a1/INBOX".into());
+        h.state_mut().module = Module::Chat;
+        h.run();
         h.get_by_label("Sanne de Vries, 1 ongelezen").click();
         h.run();
-        let id = merel_engine::chat::person_chat_id("a1", "sanne@example.org");
+        let id = merel_engine::chat::person_chat_id("a1", "sanne@signal.invalid");
         assert_eq!(h.state().chat.selected.as_deref(), Some(id.as_str()));
         assert_eq!(h.state().engine.session.chat(&id).unwrap().unread, 0, "opening reads it");
         h.get_by_label("Zie ik je om tien uur?");
-        h.state_mut().chat.input = "Ja, tot dan".into();
-        h.run();
-        h.get_by_label("Verzenden").click();
-        h.run();
-        assert_eq!(h.state().chat.error.as_deref(), Some("Zet eerst chat aan voor dit account."));
-        assert_eq!(h.state().chat.input, "Ja, tot dan", "what was typed stays");
-        assert!(h.state().engine.session.outbox.is_empty(), "nothing went out");
+    }
 
+    #[test]
+    fn a_new_chat_picks_someone_from_the_signal_contacts() {
+        let mut h = harness();
+        with_a_signal_chat(h.state_mut());
+        h.state_mut().module = Module::Chat;
+        h.run();
         h.get_all_by_label("Nieuwe chat").next().unwrap().click();
         h.run();
         assert_eq!(h.state().chat.new.as_ref().map(|f| f.account_id.as_str()), Some("a1"));
+        assert!(h.query_by_label("Groepschat").is_none(), "one person, as Signal starts a chat");
+        // Before anything is typed, the contacts show.
+        h.get_by_label("Sanne de Vries").click();
+        h.run();
+        let form = h.state().chat.new.as_ref().unwrap();
+        assert_eq!(form.people.iter().map(|p| p.email()).collect::<Vec<_>>(), ["sanne@signal.invalid"]);
+        h.get_by_label("Sanne de Vries weghalen").click();
+        h.run();
+        h.state_mut().chat.new.as_mut().unwrap().typed = "sanne@example.org".into();
+        h.run();
+        h.get_by_label("Starten").click();
+        h.run();
+        assert!(h.state().chat.new.as_ref().is_some_and(|f| f.error.is_some()), "an e-mail address is no Signal contact");
+        assert!(h.state().engine.session.outbox.is_empty(), "nothing went out");
         h.get_by_label("Annuleren").click();
         h.run();
         assert!(h.state().chat.new.is_none());
@@ -4194,98 +4209,6 @@ mod tests {
     }
 
     #[test]
-    fn the_first_chat_from_an_account_makes_its_key_by_itself() {
-        let mut h = harness();
-        with_a_chat(h.state_mut());
-        h.state_mut().engine.session.accounts[0].protocol = merel_model::Protocol::Microsoft365;
-        assert!(!h.state().engine.chat_ready("a1"));
-        h.state_mut().module = Module::Chat;
-        h.state_mut().new_chat();
-        {
-            let form = h.state_mut().chat.new.as_mut().unwrap();
-            form.people = vec![merel_model::Address::new(Some("Ravi Kumar"), "ravi@example.org").unwrap()];
-            form.text = "Hoi Ravi".into();
-        }
-        h.run();
-        h.get_by_label_contains("Merel maakt die bij Starten");
-        h.get_by_label("Starten").click();
-        h.run_steps(3);
-        assert!(h.state().engine.chat_ready("a1"), "starting made the key");
-        assert!(h.state().chat.new.is_none(), "{:?}", h.state().chat.new.as_ref().and_then(|f| f.error.clone()));
-        assert_eq!(h.state().engine.waiting().len(), 1, "the message waits for Ravi's key");
-    }
-
-    #[test]
-    fn a_new_chat_picks_people_from_the_address_book_and_invites_them_by_itself() {
-        let mut h = harness();
-        with_a_chat(h.state_mut());
-        h.state_mut().engine.enable_chat("a1").unwrap();
-        h.state_mut().engine.session.contacts.push(merel_model::Contact {
-            id: "c1".into(),
-            name: "Ravi Kumar".into(),
-            emails: vec!["ravi@example.org".into()],
-            ..Default::default()
-        });
-        h.state_mut().module = Module::Chat;
-        h.state_mut().new_chat();
-        h.state_mut().chat.new.as_mut().unwrap().typed = "rav".into();
-        h.run();
-        h.get_by_label("Ravi Kumar").click();
-        h.run();
-        let form = h.state().chat.new.as_ref().unwrap();
-        assert_eq!((form.people.len(), form.typed.as_str()), (1, ""));
-        h.get_by_label("Ravi Kumar weghalen");
-        h.state_mut().chat.new.as_mut().unwrap().text = "Zullen we om tien uur beginnen?".into();
-        h.run();
-        h.get_by_label("Starten").click();
-        h.run_steps(3);
-        assert!(h.state().chat.new.is_none(), "the window closes");
-        let id = merel_engine::chat::person_chat_id("a1", "ravi@example.org");
-        assert_eq!(h.state().chat.selected.as_deref(), Some(id.as_str()));
-        assert_eq!(h.state().engine.waiting().len(), 1, "the message waits for Ravi's key");
-        h.get_by_label("Zullen we om tien uur beginnen?");
-        h.get_by_label_contains("Wacht tot Ravi Kumar de uitnodiging aanneemt");
-    }
-
-    #[test]
-    fn the_chat_start_page_shows_an_invitation_link_and_takes_one() {
-        let mut h = harness();
-        with_a_chat(h.state_mut());
-        h.state_mut().module = Module::Chat;
-        h.state_mut().engine.enable_chat("a1").unwrap();
-        h.run();
-        h.get_by_label("Uitnodigingslink").click();
-        h.run();
-        let (account, link) = h.state().chat.invite.clone().unwrap();
-        assert_eq!(account, "a1");
-        assert!(link.starts_with("https://i.delta.chat/#"), "{link}");
-        h.get_by_label("QR-code van de uitnodigingslink");
-        h.get_by_label("Link kopiëren").click();
-        h.run();
-        h.get_by_label("Gekopieerd");
-        h.get_by_label("Per e-mail sturen").click();
-        h.run();
-        assert!(h.state().compose.as_ref().is_some_and(|c| c.body.contains(&link) && c.account_id == "a1"));
-        h.state_mut().compose = None;
-        h.get_by_label("Sluiten").click();
-        h.run();
-        assert!(h.state().chat.invite.is_none());
-
-        h.state_mut().chat.accept = "geen link".into();
-        h.run();
-        h.get_by_label("Aannemen").click();
-        h.run();
-        assert!(matches!(&h.state().chat.accept_note, Some(Err(e)) if e.contains("geen uitnodiging")));
-        h.state_mut().chat.accept = "https://i.delta.chat/#1234567890ABCDEF1234567890ABCDEF12345678&i=abc&s=def&a=bob%40example.org&n=Bob".into();
-        h.run();
-        h.get_by_label("Aannemen").click();
-        // The first step waits to go out, so the window keeps waking.
-        h.run_steps(3);
-        h.get_by_label("Uitnodiging aangenomen. Zodra Bob antwoordt, staat de chat klaar.");
-        h.get_by_label("Wacht op antwoord van Bob (bob@example.org)");
-    }
-
-    #[test]
     fn the_meetings_module_lists_online_meetings_and_joins_them() {
         let mut h = harness();
         let now = chrono::Local::now().timestamp();
@@ -4312,16 +4235,6 @@ mod tests {
         h.get_all_by_label("Deelnemen").last().unwrap().click();
         h.run();
         assert!(h.state().meet.paste.is_empty() && h.state().meet.paste_error.is_none());
-    }
-
-    #[test]
-    fn chat_messages_stay_out_of_the_mail_list() {
-        let mut h = harness();
-        with_a_chat(h.state_mut());
-        h.state_mut().engine.session.selected_folder = Some("a1/INBOX".into());
-        h.run();
-        assert!(h.query_by_label("Zie ik je om tien uur?").is_none());
-        assert!(h.state().engine.session.visible_messages().is_empty());
     }
 
     #[test]
@@ -5216,26 +5129,6 @@ mod tests {
         assert!(h.state().engine.session.appointments.iter().any(|a| a.title == "Kickoff" && a.calendar_id == "local"));
         h.get_by_label("Staat al in je agenda.");
         assert!(h.query_by_label("Aan agenda toevoegen").is_none());
-    }
-
-    #[test]
-    fn a_chat_invitation_by_mail_is_taken_in_merel_not_in_the_browser() {
-        let mut h = harness();
-        with_a_chat(h.state_mut());
-        {
-            let s = &mut h.state_mut().engine.session;
-            let text =
-                "Ik wil graag chatten.\n\nhttps://i.delta.chat/#1234567890ABCDEF1234567890ABCDEF12345678&i=abc&s=def&a=bob%40example.org&n=Bob\n";
-            s.bodies.insert("m3".into(), merel_engine::Body { text: text.into(), ..Default::default() });
-            s.selected_message = Some("m3".into());
-        }
-        h.run();
-        h.get_by_label("Bob nodigt je in deze mail uit voor een versleutelde chat.");
-        h.get_by_label("Chat openen").click();
-        h.run_steps(3);
-        assert_eq!(h.state().module, Module::Chat);
-        assert!(matches!(&h.state().chat.accept_note, Some(Ok(n)) if n.contains("Bob")), "{:?}", h.state().chat.accept_note);
-        h.get_by_label("Uitnodiging aangenomen. Zodra Bob antwoordt, staat de chat klaar.");
     }
 
     #[test]
