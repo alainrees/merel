@@ -173,12 +173,23 @@ impl Session {
         account.is_some_and(|a| a.address.email().eq_ignore_ascii_case(m.from.email()))
     }
 
+    /// Message `id` as an answer quotes it: who wrote it and the start of its text.
+    pub fn chat_quote(&self, id: &str) -> Option<merel_model::Quoted> {
+        let m = self.message(id)?;
+        let text = self.chat_text(id).unwrap_or_default().chars().take(QUOTED).collect();
+        let name = if self.chat_is_mine(id) { merel_i18n::tr("chat-you") } else { m.from.display().to_string() };
+        Some(merel_model::Quoted { message_id: m.message_id.clone()?, name, text })
+    }
+
     /// A chat message with `text` for `chat`, as an answer to its last message.
     pub fn chat_reply(&self, chat: &Chat, text: &str) -> Draft {
         let last = chat.messages.last().and_then(|id| self.messages.iter().find(|m| &m.id == id)).and_then(|m| m.message_id.clone());
         chat_draft(chat.people.clone(), chat.group.clone().unwrap_or_default(), text, last)
     }
 }
+
+/// Most characters of a message an answer carries as its quote.
+const QUOTED: usize = 200;
 
 /// A new chat with `people`: between two people for one, a group for more, named `name` when
 /// given. A group gets a fresh id.

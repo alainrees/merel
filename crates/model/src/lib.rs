@@ -29,8 +29,8 @@ pub use calendar::{
 };
 pub use categories::{Category, CategoryColor, MAX_CATEGORY_NAME, MAX_ITEM_CATEGORIES, category_keyword, clean_categories};
 pub use chat::{
-    CHAT_VERSION, CallSignal, CallStep, ChatTag, Handshake, MAX_EMOJI, MAX_GROUP_ID, MAX_GROUP_NAME as MAX_CHAT_GROUP_NAME, MAX_REACTIONS, MAX_SDP,
-    Reacted, fingerprint_of, token as chat_token,
+    CHAT_VERSION, CallSignal, CallStep, ChatTag, Delivery, Handshake, MAX_EMOJI, MAX_GROUP_ID, MAX_GROUP_NAME as MAX_CHAT_GROUP_NAME, MAX_QUOTE,
+    MAX_REACTIONS, MAX_SDP, Quoted, Reacted, fingerprint_of, token as chat_token,
 };
 pub use contact::{Contact, ContactError, MAX_PHOTO, Phone, PhoneKind, Photo, Place, PlaceKind};
 pub use groups::{ContactGroup, ContactGroupError, MAX_GROUP_MEMBERS, MAX_GROUP_NAME, mailbox};

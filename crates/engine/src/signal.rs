@@ -21,6 +21,8 @@ use crate::{AccountStatus, Engine};
 pub const SIGNAL_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 /// Most messages whose text is fetched at each listing.
 const SIGNAL_BODIES: usize = 50;
+/// Most bytes of files one Signal message may carry, as Signal allows.
+const MAX_SIGNAL_FILES: usize = 100 * 1024 * 1024;
 /// How the phone lists Merel among its linked devices.
 const DEVICE_NAME: &str = "Merel";
 
@@ -134,13 +136,13 @@ impl Engine {
     }
 
     /// Sends a chat message over Signal: Signal encrypts it end to end itself, so it goes without
-    /// OpenPGP, and as text only.
+    /// OpenPGP; files go along.
     pub(crate) fn send_signal(&mut self, account_id: &str, mut draft: Draft) -> Result<u64, String> {
-        if draft.body.trim().is_empty() {
+        if draft.body.trim().is_empty() && draft.attachments.is_empty() {
             return Err(merel_i18n::tr("chat-type-first"));
         }
-        if !draft.attachments.is_empty() {
-            return Err(merel_i18n::tr("signal-text-only"));
+        if draft.attachment_bytes() > MAX_SIGNAL_FILES {
+            return Err(merel_i18n::tr("signal-too-big"));
         }
         draft.encrypt = false;
         draft.sign = Some(false);
@@ -192,6 +194,14 @@ impl Engine {
         }
         self.session.send(&account_id, draft);
         Ok(())
+    }
+
+    /// Who is typing in `chat` now, by name, when it is a Signal chat between two people.
+    pub fn signal_typing(&self, chat: &crate::chat::Chat) -> Option<String> {
+        if !self.is_signal_account(&chat.account_id) || chat.is_group() {
+            return None;
+        }
+        chat.people.iter().find_map(|p| merel_signal_link::typing(p.email()))
     }
 
     /// Whether `account_id` is a Signal account.
@@ -264,6 +274,17 @@ mod tests {
         let jobs = e.session.take_jobs();
         assert!(jobs.iter().any(|j| matches!(j, crate::Job::Send { draft, .. } if draft.body.is_empty())));
         assert!(e.reaction("acc/INBOX#1", "👍").is_err());
+    }
+
+    #[test]
+    fn an_answer_quotes_who_wrote_what() {
+        let mut e = Engine::sample();
+        let m = e.session.messages[0].clone();
+        e.session.bodies.insert(m.id.clone(), merel_mime::Body { text: "Kom je ook?".into(), ..Default::default() });
+        let q = e.session.chat_quote(&m.id).unwrap();
+        assert_eq!(q.text, "Kom je ook?");
+        assert_eq!(q.name, m.from.display());
+        assert_eq!(Some(q.message_id), m.message_id);
     }
 
     #[test]

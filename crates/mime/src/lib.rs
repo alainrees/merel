@@ -128,6 +128,8 @@ fn chat_of(m: &mail_parser::Message<'_>) -> Option<ChatTag> {
     });
     let mut tag = ChatTag::from_headers(raw("Chat-Version").as_deref(), raw("Chat-Group-ID").as_deref(), name.as_deref())?;
     tag.reactions = merel_model::Reacted::from_header(raw("Merel-Reactions").as_deref());
+    tag.quote = merel_model::Quoted::from_header(raw("Merel-Quote").as_deref());
+    tag.delivery = merel_model::Delivery::from_header(raw("Merel-Delivery").as_deref());
     tag.call = merel_model::CallSignal::from_headers(raw("Merel-Call").as_deref(), raw("Merel-Call-Sdp").as_deref());
     tag.handshake = merel_model::Handshake::from_headers(
         raw("Secure-Join").as_deref(),
