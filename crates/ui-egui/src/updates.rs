@@ -6,7 +6,7 @@
 //! An installed Merel, one that can update itself, asks at every start, and a newer release
 //! must be installed before Merel can be used ([`required_screen`]): a fix for a vulnerability
 //! then reaches everyone. Without internet Merel starts as usual. While it keeps running it
-//! asks again every few hours; a release found then does not take the window away from work
+//! asks again every hour; a release found then does not take the window away from work
 //! but puts a red "!" on the gear at the bottom left ([`badge`]), and is required at the next
 //! start. A build from source asks
 //! only when the person asks (Help tab) or has switched on the daily check, and never blocks.
@@ -17,7 +17,7 @@
 
 use crate::i18n::tr;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use egui::RichText;
 use serde_json::Value;
@@ -35,7 +35,7 @@ const MAX_REPLY_BYTES: u64 = 512 * 1024;
 /// How often the daily check asks while the app keeps running.
 pub const INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 /// How often an installed Merel asks while it keeps running, so the gear soon shows a release.
-pub const INSTALLED_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+pub const INSTALLED_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// Where the list GitHub adds to the release notes begins.
 const GENERATED: [&str; 3] = ["## What's Changed", "## New Contributors", "**Full Changelog**"];
 
@@ -112,8 +112,9 @@ pub struct Updates {
     pending: Option<Arc<Mutex<Option<Outcome>>>>,
     /// Whether the person asked for the running check (then every answer is shown).
     manual: bool,
-    /// When the last check started, for the daily check.
-    last: Option<Instant>,
+    /// When the last check started, for the next one. Wall-clock time, so the hours a laptop
+    /// sleeps count too (a monotonic clock stands still then on macOS).
+    last: Option<SystemTime>,
     /// The newer release the window shows, while it is open.
     pub offer: Option<Release>,
     /// The update that is downloading or installing, once the person chose "Bijwerken".
@@ -223,7 +224,7 @@ impl MailApp {
         let slot = Arc::new(Mutex::new(None));
         self.updates.pending = Some(slot.clone());
         self.updates.manual = manual;
-        self.updates.last = Some(Instant::now());
+        self.updates.last = Some(SystemTime::now());
         // Tests give the answer themselves, through `finish_update_check`, and stay offline.
         if cfg!(test) {
             return;
@@ -282,7 +283,7 @@ impl MailApp {
     }
 
     /// Picks up a finished check and starts the next when it is due; every frame. An installed
-    /// Merel asks at every start and every few hours after, whatever the daily setting says.
+    /// Merel asks at every start and every hour after, whatever the daily setting says.
     pub fn tick_updates(&mut self, ctx: &egui::Context) {
         let done = self.updates.pending.as_ref().and_then(|slot| slot.lock().ok().and_then(|mut s| s.take()));
         if let Some(outcome) = done {
@@ -290,7 +291,8 @@ impl MailApp {
             self.finish_update_check(outcome);
         }
         let every = if self.updates.self_update { INSTALLED_INTERVAL } else { INTERVAL };
-        let due = self.updates.last.is_none_or(|t| t.elapsed() >= every);
+        // A clock set back makes the check due, rather than never.
+        let due = self.updates.last.is_none_or(|t| !t.elapsed().is_ok_and(|e| e < every));
         if (self.updates.self_update || self.view.update_check == Some(true)) && due && !self.updates.running() {
             self.check_for_updates(ctx, false);
         }
@@ -641,6 +643,25 @@ fn end_progress(app: &mut MailApp, close: bool) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn an_installed_merel_asks_again_after_an_hour_of_clock_time() {
+        let ctx = egui::Context::default();
+        let mut app = MailApp::new(merel_engine::Engine::sample());
+        app.updates.self_update = true;
+        app.updates.last = Some(SystemTime::now() - Duration::from_secs(50 * 60));
+        app.tick_updates(&ctx);
+        assert!(!app.updates.running(), "not yet within the hour");
+        // Hours a laptop slept count as well: the clock on the wall decides.
+        app.updates.last = Some(SystemTime::now() - INSTALLED_INTERVAL);
+        app.tick_updates(&ctx);
+        assert!(app.updates.running());
+        // A clock set back does not stop the checks for good.
+        app.updates.pending = None;
+        app.updates.last = Some(SystemTime::now() + Duration::from_secs(3600));
+        app.tick_updates(&ctx);
+        assert!(app.updates.running());
+    }
 
     /// Runs `inside` in a window of its own, as eframe does, and returns the commands meant for
     /// the main window.

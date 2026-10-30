@@ -1505,7 +1505,7 @@ settings = Instellingen
 settings-update = Instellingen: Merel { $version } is beschikbaar
 updates-check-now = Nu controleren
 updates-checking-now = Bezig met controleren…
-updates-page-installed = Merel controleert bij elke start en daarna om de paar uur zelf. Een nieuwe versie zie je aan het rode uitroepteken op het tandwiel linksonder.
+updates-page-installed = Merel controleert bij elke start en daarna elk uur zelf. Een nieuwe versie zie je aan het rode uitroepteken op het tandwiel linksonder.
 
 ## Installing updates
 install-interrupted = Bijwerken is onderbroken.

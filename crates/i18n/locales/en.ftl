@@ -1520,7 +1520,7 @@ settings = Settings
 settings-update = Settings: Merel { $version } is available
 updates-check-now = Check now
 updates-checking-now = Checking…
-updates-page-installed = Merel checks at every start and every few hours after that. You see a new version by the red exclamation mark on the gear at the bottom left.
+updates-page-installed = Merel checks at every start and every hour after that. You see a new version by the red exclamation mark on the gear at the bottom left.
 
 ## Installing updates
 install-interrupted = Updating was interrupted.
