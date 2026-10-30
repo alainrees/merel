@@ -4099,7 +4099,8 @@ mod tests {
         s.messages.iter_mut().filter(|m| m.id == "a1/INBOX#1").for_each(|m| m.chat.as_mut().unwrap().voice = true);
         let body = s.bodies.get_mut("a1/INBOX#1").unwrap();
         body.text = String::new();
-        body.attachments = vec![merel_mime::Attachment { name: "spraakbericht.mp3".into(), mime: "audio/mpeg".into(), size: bytes.len(), bytes: bytes.into() }];
+        body.attachments =
+            vec![merel_mime::Attachment { name: "spraakbericht.mp3".into(), mime: "audio/mpeg".into(), size: bytes.len(), bytes: bytes.into() }];
         h.state_mut().module = Module::Chat;
         h.state_mut().chat.selected = Some(merel_engine::chat::person_chat_id("a1", "sanne@example.org"));
         h.run();
