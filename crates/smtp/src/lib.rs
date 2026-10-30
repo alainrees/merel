@@ -126,6 +126,9 @@ fn build_message(from: &Address, draft: &Draft, keep_bcc: bool) -> Result<Messag
                 b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Chat-Group-Name"), name.clone()));
             }
         }
+        if let Some(quote) = &chat.quote {
+            b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Merel-Quote"), quote.header()));
+        }
         if let Some(to) = &chat.reaction_to {
             b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Merel-Reaction"), to.clone()));
         }

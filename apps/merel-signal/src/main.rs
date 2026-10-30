@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result, anyhow, bail};
+use base64::Engine as _;
 use futures::channel::oneshot;
 use futures::{StreamExt, future, pin_mut};
 use presage::Manager;
@@ -28,12 +29,15 @@ use presage::libsignal_service::configuration::SignalServers;
 use presage::libsignal_service::content::Metadata;
 use presage::libsignal_service::content::{Content, ContentBody, DataMessage};
 use presage::libsignal_service::protocol::ServiceId;
+use presage::libsignal_service::sender::AttachmentSpec;
 use presage::manager::Registered;
 use presage::model::identity::OnNewIdentity;
 use presage::model::messages::Received;
-use presage::proto::data_message::Reaction;
+use presage::proto::AttachmentPointer;
+use presage::proto::data_message::{Quote, Reaction, quote};
 use presage::proto::sync_message::{CallEvent, Content as SyncContent, Sent, call_event};
 use presage::proto::{CallMessage, EditMessage, SyncMessage, call_message};
+use presage::proto::{ReceiptMessage, receipt_message, typing_message};
 use presage::store::{ContentExt, Store, Thread};
 use presage_store_sqlite::SqliteStore;
 use serde::{Deserialize, Serialize};
@@ -66,7 +70,10 @@ enum Event {
         /// Milliseconds since the epoch, as Signal counts them; unique within a thread.
         timestamp: u64,
         text: String,
-        attachments: Vec<String>,
+        attachments: Vec<FileInfo>,
+        /// The message this one answers, quoted.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        quote: Option<Quoted>,
         /// Set when this is a call rather than a message: the text is then empty.
         #[serde(skip_serializing_if = "Option::is_none")]
         call: Option<Call>,
@@ -83,6 +90,36 @@ enum Event {
         remove: bool,
         target_author: String,
         target_timestamp: u64,
+    },
+    /// The contents of a file Merel asked for, in base64; `data` is empty when it could not
+    /// be fetched, with why in `error`.
+    File {
+        id: String,
+        data: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    /// `sender` got (`delivered`) or read (`read`) the account's messages sent at `timestamps`.
+    Receipt {
+        sender: String,
+        kind: &'static str,
+        timestamps: Vec<u64>,
+    },
+    /// `sender` started or stopped typing in the chat between the two of them.
+    Typing {
+        sender: String,
+        sender_name: String,
+        typing: bool,
+    },
+    /// The account read these messages on another device: by author and timestamp.
+    ReadElsewhere {
+        read: Vec<(String, u64)>,
+    },
+    /// The account's Signal settings, from the phone: whether to send read receipts and show
+    /// typing.
+    Settings {
+        read_receipts: Option<bool>,
+        typing_indicators: Option<bool>,
     },
     /// Every message waiting on the server is in. `calls` says whether this build can call.
     Synced {
@@ -106,6 +143,40 @@ enum Event {
     Error {
         message: String,
     },
+}
+
+/// A file sent with a message. `id` is how Merel asks for its contents.
+#[derive(Serialize, Clone)]
+struct FileInfo {
+    id: String,
+    name: String,
+    mime: String,
+    size: u64,
+}
+
+/// A file Merel sends with a message, its contents in base64.
+#[derive(Deserialize)]
+struct OutFile {
+    name: String,
+    mime: String,
+    data: String,
+}
+
+/// Every file of the messages passed on, by id, to fetch when Merel asks.
+type Files = HashMap<String, AttachmentPointer>;
+
+/// Most bytes a file to fetch or send may have: Signal's own limit is 100 MB.
+const MAX_FILE: usize = 100 * 1024 * 1024;
+
+/// The message a message answers: who sent it when, and (the start of) its text.
+#[derive(Serialize, Deserialize, Clone)]
+struct Quoted {
+    author: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    author_name: String,
+    timestamp: u64,
+    #[serde(default)]
+    text: String,
 }
 
 /// A Signal call, as Merel shows it in the chat. Merel cannot take part in calls (yet): it
@@ -146,6 +217,21 @@ enum Command {
     Send {
         thread: String,
         text: String,
+        /// The message this one answers.
+        #[serde(default)]
+        quote: Option<Quoted>,
+        #[serde(default)]
+        files: Vec<OutFile>,
+    },
+    /// The contents of file `id`, as `{"type":"file"}`.
+    Fetch {
+        id: String,
+    },
+    /// Tells `author` their messages sent at `timestamps` were read. Merel only asks when the
+    /// account's Signal settings send read receipts.
+    MarkRead {
+        author: String,
+        timestamps: Vec<u64>,
     },
     /// Reacts to the message `target_author` sent at `target_timestamp`; `remove` takes the
     /// reaction back. Signal keeps one reaction per person per message.
@@ -192,16 +278,17 @@ async fn start() -> Result<()> {
         [cmd, dir, name] if cmd == "link" => link(open(dir, &key).await?, name).await,
         [cmd, dir] if cmd == "run" => {
             let manager = Manager::load_registered(open(dir, &key).await?).await?;
+            let mut files = Files::new();
             // Without the stored messages Merel still gets the new ones.
             match threads(dir, &key).await {
                 Ok(threads) => {
-                    if let Err(e) = replay(&manager, &threads).await {
+                    if let Err(e) = replay(&manager, &threads, &mut files).await {
                         eprintln!("merel-signal: the stored messages did not come: {e:#}");
                     }
                 }
                 Err(e) => eprintln!("merel-signal: the stored chats could not be listed: {e:#}"),
             }
-            run(manager, dir, &key).await
+            run(manager, dir, &key, files).await
         }
         _ => bail!("usage: merel-signal link <dir> <device name> | merel-signal run <dir>"),
     }
@@ -238,7 +325,7 @@ const MAX_REPLAY: usize = 20_000;
 
 /// Passes on every message the store keeps, so Merel has the whole conversation each time it
 /// starts the helper (and keeps nothing of its own).
-async fn replay<S: Store>(manager: &Manager<S, Registered>, threads: &[Thread]) -> Result<()> {
+async fn replay<S: Store>(manager: &Manager<S, Registered>, threads: &[Thread], files: &mut Files) -> Result<()> {
     let mut sent = 0;
     for thread in threads {
         let Ok(messages) = manager.store().messages(thread, ..).await else { continue };
@@ -246,7 +333,7 @@ async fn replay<S: Store>(manager: &Manager<S, Registered>, threads: &[Thread]) 
             if sent >= MAX_REPLAY {
                 return Ok(());
             }
-            if let Some(event) = describe(manager, &content).await {
+            if let Some(event) = describe(manager, &content, files).await {
                 emit(&event);
                 sent += 1;
             }
@@ -255,7 +342,7 @@ async fn replay<S: Store>(manager: &Manager<S, Registered>, threads: &[Thread]) 
     Ok(())
 }
 
-async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str) -> Result<()> {
+async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str, mut files: Files) -> Result<()> {
     let sender = manager.clone();
     let messages = manager.receive_messages().await.map_err(|e| anyhow!("{e}"))?;
     pin_mut!(messages);
@@ -285,6 +372,10 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                     emit(&Event::Synced { calls: phone.ready() })
                 }
                 Some(Received::Content(content)) => {
+                    if let Some(event) = status(&manager, &content).await {
+                        emit(&event);
+                        continue;
+                    }
                     // What kind of message came, never who or what: for finding out why one
                     // does not show.
                     let shown = match &content.body {
@@ -292,7 +383,7 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                             phone.received(&manager, &content, call).await;
                             ringing.hear(&manager, &content, call).await
                         }
-                        _ => describe(&manager, &content).await,
+                        _ => describe(&manager, &content, &mut files).await,
                     };
                     eprintln!("merel-signal: received {}, {}", kind(&content.body), if shown.is_some() { "shown" } else { "not shown" });
                     if let Some(event) = shown {
@@ -305,8 +396,9 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
             },
             line = lines.next_line() => match line? {
                 Some(line) => match serde_json::from_str::<Command>(&line) {
-                    Ok(Command::Send { thread, text }) => match send(&mut sending, dir, key, &thread, &text).await {
-                        Ok((to, timestamp)) => {
+                    Ok(Command::Send { thread, text, quote, files: out }) => match send(&mut sending, dir, key, &thread, &text, quote.as_ref(), out).await {
+                        Ok((to, timestamp, sent_files)) => {
+                            let attachments = sent_files.into_iter().map(|p| info(&p, &mut files)).collect();
                             // As it came from another device of the account's, so Merel lists it.
                             let me = ServiceId::from(manager.registration_data().service_ids.aci());
                             let (thread_name, group) = name_of(&manager, &to).await;
@@ -319,13 +411,37 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                                 mine: true,
                                 timestamp,
                                 text,
-                                attachments: Vec::new(),
+                                attachments,
+                                quote,
                                 call: None,
                             });
                             emit(&Event::Sent { thread, timestamp });
                         }
                         Err(e) => emit(&Event::Error { message: format!("{e:#}") }),
                     },
+                    Ok(Command::MarkRead { author, timestamps }) => {
+                        let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Read as i32), timestamp: timestamps };
+                        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+                        match ServiceId::parse_from_service_id_string(&author) {
+                            Some(to) => {
+                                if let Err(e) = sending.send_message(to, ContentBody::ReceiptMessage(receipt), now).await {
+                                    eprintln!("merel-signal: a read receipt did not go: {e}");
+                                }
+                            }
+                            None => eprintln!("merel-signal: a read receipt for no one"),
+                        }
+                    }
+                    Ok(Command::Fetch { id }) => {
+                        let event = match files.get(&id) {
+                            Some(pointer) if pointer.size.unwrap_or(0) as usize <= MAX_FILE => match manager.get_attachment(pointer).await {
+                                Ok(bytes) => Event::File { id, data: base64::engine::general_purpose::STANDARD.encode(bytes), error: None },
+                                Err(e) => Event::File { id, data: String::new(), error: Some(format!("{e}")) },
+                            },
+                            Some(_) => Event::File { id, data: String::new(), error: Some("too big".into()) },
+                            None => Event::File { id, data: String::new(), error: Some("unknown file".into()) },
+                        };
+                        emit(&event);
+                    }
                     Ok(Command::React { thread, emoji, remove, target_author, target_timestamp }) => {
                         let reaction = Reaction {
                             emoji: Some(emoji.clone()),
@@ -430,6 +546,35 @@ async fn contact_name<S: Store>(manager: &Manager<S, Registered>, id: &ServiceId
         .unwrap_or_else(|| id.service_id_string())
 }
 
+/// What a receipt, typing or a sync of reading or settings says; `None` for anything else.
+async fn status<S: Store>(manager: &Manager<S, Registered>, content: &Content) -> Option<Event> {
+    let sender = &content.metadata.sender;
+    match &content.body {
+        ContentBody::ReceiptMessage(r) => {
+            let kind = match r.r#type.and_then(|t| receipt_message::Type::try_from(t).ok()) {
+                Some(receipt_message::Type::Delivery) => "delivered",
+                Some(receipt_message::Type::Read | receipt_message::Type::Viewed) => "read",
+                None => return None,
+            };
+            Some(Event::Receipt { sender: sender.service_id_string(), kind, timestamps: r.timestamp.clone() })
+        }
+        // Typing in a group names the group only by an id Merel does not keep; between two
+        // people the sender is the chat.
+        ContentBody::TypingMessage(t) if t.group_id.is_none() => Some(Event::Typing {
+            sender: sender.service_id_string(),
+            sender_name: contact_name(manager, sender).await,
+            typing: t.action.and_then(|a| typing_message::Action::try_from(a).ok()) == Some(typing_message::Action::Started),
+        }),
+        ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Configuration(c)), .. }) => {
+            Some(Event::Settings { read_receipts: c.read_receipts, typing_indicators: c.typing_indicators })
+        }
+        ContentBody::SynchronizeMessage(m) if !m.read.is_empty() => {
+            Some(Event::ReadElsewhere { read: m.read.iter().filter_map(|r| Some((r.sender_aci.clone()?, r.timestamp?))).collect() })
+        }
+        _ => None,
+    }
+}
+
 /// The kind of a message, for the log.
 fn kind(body: &ContentBody) -> &'static str {
     match body {
@@ -454,7 +599,7 @@ async fn name_of<S: Store>(manager: &Manager<S, Registered>, thread: &Thread) ->
 }
 
 /// A message worth showing and searching: text sent or received, here or on another device.
-async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content) -> Option<Event> {
+async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content, files: &mut Files) -> Option<Event> {
     if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::CallEvent(event)), .. }) = &content.body {
         return logged_call(manager, content, event).await;
     }
@@ -468,7 +613,7 @@ async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content)
         }) => (d, true),
         _ => return None,
     };
-    let DataMessage { body, attachments, reaction, group_call_update, .. } = data;
+    let DataMessage { body, attachments, reaction, quote, group_call_update, .. } = data;
     if let Some(r) = reaction {
         let thread = Thread::try_from(content).ok()?;
         let sender = &content.metadata.sender;
@@ -489,7 +634,7 @@ async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content)
         let call = Call { id: content.timestamp(), kind: CallKind::Group, state: CallState::Started };
         return chat_call(manager, Thread::try_from(content).ok()?, &content.metadata.sender, mine, call, content.timestamp()).await;
     }
-    let names: Vec<String> = attachments.iter().filter_map(|a| a.file_name.clone()).collect();
+    let names: Vec<FileInfo> = attachments.iter().map(|a| info(a, files)).collect();
     let text = body.clone().unwrap_or_default();
     if text.is_empty() && attachments.is_empty() {
         return None;
@@ -507,6 +652,10 @@ async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content)
         timestamp: content.timestamp(),
         text,
         attachments: names,
+        quote: match quote {
+            Some(q) => quoted(manager, q).await,
+            None => None,
+        },
         call: None,
     })
 }
@@ -531,6 +680,7 @@ async fn chat_call<S: Store>(
         timestamp,
         text: String::new(),
         attachments: Vec::new(),
+        quote: None,
         call: Some(call),
     })
 }
@@ -645,8 +795,78 @@ impl Ringing {
     }
 }
 
-async fn send<S: Store>(manager: &mut Manager<S, Registered>, dir: &str, key: &str, thread: &str, text: &str) -> Result<(Thread, u64)> {
-    send_data(manager, dir, key, thread, DataMessage { body: Some(text.to_string()), ..Default::default() }).await
+async fn send<S: Store>(
+    manager: &mut Manager<S, Registered>,
+    dir: &str,
+    key: &str,
+    thread: &str,
+    text: &str,
+    quote: Option<&Quoted>,
+    out: Vec<OutFile>,
+) -> Result<(Thread, u64, Vec<AttachmentPointer>)> {
+    let quote = quote.map(|q| Quote {
+        id: Some(q.timestamp),
+        author_aci: Some(q.author.clone()),
+        text: Some(q.text.clone()).filter(|t| !t.is_empty()),
+        r#type: Some(quote::Type::Normal as i32),
+        ..Default::default()
+    });
+    let mut specs = Vec::new();
+    for f in out {
+        let bytes = base64::engine::general_purpose::STANDARD.decode(f.data.as_bytes())?;
+        if bytes.len() > MAX_FILE {
+            bail!("{} is too big for Signal", f.name);
+        }
+        let spec = AttachmentSpec {
+            content_type: f.mime,
+            length: bytes.len(),
+            file_name: Some(f.name),
+            preview: None,
+            voice_note: None,
+            borderless: None,
+            width: None,
+            height: None,
+            caption: None,
+            blur_hash: None,
+        };
+        specs.push((spec, bytes));
+    }
+    let mut pointers = Vec::new();
+    for uploaded in manager.upload_attachments(specs).await.map_err(|e| anyhow!("{e}"))? {
+        pointers.push(uploaded.map_err(|e| anyhow!("{e:?}"))?);
+    }
+    let body = Some(text.to_string()).filter(|t| !t.is_empty());
+    let message = DataMessage { body, quote, attachments: pointers.clone(), ..Default::default() };
+    let (to, timestamp) = send_data(manager, dir, key, thread, message).await?;
+    Ok((to, timestamp, pointers))
+}
+
+/// What Merel hears of file `a`, kept under its id to fetch later.
+fn info(a: &AttachmentPointer, files: &mut Files) -> FileInfo {
+    use sha2::Digest as _;
+    let seed = a.digest.clone().or_else(|| a.key.clone()).unwrap_or_default();
+    let id = hex::encode(&sha2::Sha256::digest(seed)[..12]);
+    files.insert(id.clone(), a.clone());
+    FileInfo {
+        id,
+        name: a.file_name.clone().unwrap_or_default(),
+        mime: a.content_type.clone().unwrap_or_else(|| "application/octet-stream".into()),
+        size: u64::from(a.size.unwrap_or(0)),
+    }
+}
+
+/// The message `q` quotes, with its author's name.
+async fn quoted<S: Store>(manager: &Manager<S, Registered>, q: &Quote) -> Option<Quoted> {
+    let author = q.author_aci.clone()?;
+    let name = match ServiceId::parse_from_service_id_string(&author) {
+        Some(id) => contact_name(manager, &id).await,
+        None => String::new(),
+    };
+    let mut text = q.text.clone().unwrap_or_default();
+    if text.is_empty() {
+        text = q.attachments.iter().filter_map(|a| a.file_name.clone()).collect::<Vec<_>>().join(", ");
+    }
+    Some(Quoted { author, author_name: name, timestamp: q.id?, text })
 }
 
 /// Sends `message` to the chat `thread`, stamped with the time now.

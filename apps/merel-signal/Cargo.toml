@@ -17,6 +17,7 @@ presage-store-sqlite = { git = "https://github.com/whisperfish/presage", rev = "
 # SQLCipher with its own OpenSSL, so the app needs nothing installed on the computer.
 libsqlite3-sys = { version = "0.36.0", features = ["bundled-sqlcipher-vendored-openssl"] }
 anyhow = "1.0"
+base64 = "0.22"
 futures = "0.3"
 hex = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
