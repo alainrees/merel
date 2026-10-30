@@ -555,10 +555,7 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                 ui.label(RichText::new(line).size(12.5).color(t.text_dim));
             });
         });
-        // Calls go over mail; a Signal chat has none in Merel.
-        if !signal_chat {
-            helder::right(ui, |ui| call_button(app, ui, t, chat));
-        }
+        helder::right(ui, |ui| call_button(app, ui, t, chat));
     });
     ui.add_space(8.0);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
