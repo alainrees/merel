@@ -51,6 +51,8 @@ pub struct State {
     pub editing: Option<String>,
     /// The message the window to delete it asks about (Signal).
     pub deleting: Option<String>,
+    /// The chat the window to delete it asks about.
+    pub deleting_chat: Option<String>,
     /// The voice messages heard and the one playing (Signal).
     pub voice: crate::voice::Player,
     /// A voice message being recorded (Signal).
@@ -428,6 +430,7 @@ pub(crate) fn invite_in(text: &str) -> Option<&str> {
 
 pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     list_pane(app, ui, t);
+    delete_chat_window(app, ui.ctx(), t);
     let open = app.chat.selected.as_deref().and_then(|id| app.chat_by_id(id));
     match open {
         Some(chat) => {
@@ -494,15 +497,26 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 ui.label(RichText::new(text).color(t.text_dim));
             }
             let mut pick = None;
+            let mut delete = None;
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 for chat in &list {
-                    if chat_row(app, ui, t, chat).clicked() {
+                    let row = chat_row(app, ui, t, chat);
+                    if row.clicked() {
                         pick = Some(chat.id.clone());
                     }
+                    row.context_menu(|ui| {
+                        if ui.add(egui::Button::image_and_text(Icon::Trash.image(16.0, t.text), tr("chat-delete-chat"))).clicked() {
+                            delete = Some(chat.id.clone());
+                            ui.close();
+                        }
+                    });
                 }
             });
             if let Some(id) = pick {
                 app.open_chat(&id);
+            }
+            if delete.is_some() {
+                app.chat.deleting_chat = delete;
             }
         });
 }
@@ -593,7 +607,15 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                 ui.label(RichText::new(line).size(12.5).color(t.text_dim));
             });
         });
-        helder::right(ui, |ui| call_button(app, ui, t, chat));
+        helder::right(ui, |ui| {
+            if helder::secondary(ui, t, |ui| helder::tool_button(ui, t, Icon::Trash, &tr("delete")))
+                .on_hover_text(tr("chat-delete-chat-help"))
+                .clicked()
+            {
+                app.chat.deleting_chat = Some(chat.id.clone());
+            }
+            call_button(app, ui, t, chat);
+        });
     });
     ui.add_space(8.0);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
@@ -1170,6 +1192,47 @@ fn delete_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             app.stop_editing();
         }
         app.chat.error = app.engine.signal_delete(&id, everyone).err();
+    }
+}
+
+/// The window that asks before a whole chat goes, and says where: from Merel and the phone,
+/// as Signal does. The others in the chat keep their messages.
+fn delete_chat_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    let Some(id) = app.chat.deleting_chat.clone() else { return };
+    let Some(chat) = app.chat_by_id(&id) else {
+        app.chat.deleting_chat = None;
+        return;
+    };
+    let mut yes = false;
+    let closed = helder::dialog(ctx, t, &tr("chat-delete-chat-title"), 440.0, |ui| {
+        ui.label(RichText::new(tr_args("chat-delete-chat-ask", &[("title", chat.title.as_str().into())])).size(14.0).color(t.text));
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            if helder::primary_button(ui, t, Icon::Trash, &tr("chat-delete-chat-yes")).clicked() {
+                yes = true;
+            }
+            if helder::secondary(ui, t, |ui| ui.button(tr("cancel"))).clicked() {
+                app.chat.deleting_chat = None;
+            }
+        });
+    });
+    if closed {
+        app.chat.deleting_chat = None;
+    }
+    if yes {
+        app.chat.deleting_chat = None;
+        match app.engine.delete_chat(&id) {
+            Ok(()) => {
+                if app.chat.selected.as_deref() == Some(id.as_str()) {
+                    app.chat.selected = None;
+                    app.chat.replying = None;
+                    app.stop_editing();
+                    app.chat.files.clear();
+                }
+                app.notice = Some(crate::Notice::success(tr_args("chat-deleted", &[("title", chat.title.as_str().into())])));
+            }
+            Err(e) => app.notice = Some(crate::Notice::error(e)),
+        }
     }
 }
 

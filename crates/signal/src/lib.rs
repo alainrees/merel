@@ -120,6 +120,11 @@ pub enum Said {
         thread: String,
         timestamp: u64,
     },
+    /// The chat `thread` was deleted on another device of the account's, as Signal's "Delete
+    /// chat" does: it goes here too.
+    ChatDeleted {
+        thread: String,
+    },
     /// How a call goes.
     Call(CallUpdate),
     /// Whether calls can be made now: the calls program runs and has sound.
@@ -359,6 +364,9 @@ enum Asked<'a> {
     Mute {
         on: bool,
     },
+    DeleteChat {
+        thread: &'a str,
+    },
 }
 
 /// How a call in Merel goes, as the program says.
@@ -446,6 +454,22 @@ pub fn call(me: &str, to: &str) -> std::result::Result<(), String> {
         thread.ok_or_else(|| merel_i18n::tr("signal-unknown"))?
     };
     ask(me, &Asked::Call { thread: &thread })
+}
+
+/// Deletes the whole chat with `with` (a person's Signal address, or a group's id) from the
+/// account `me`: here, and on the account's other devices, as Signal's "Delete chat" does. The
+/// others in the chat keep their messages.
+pub fn delete_chat(me: &str, with: &str) -> std::result::Result<(), String> {
+    let thread = {
+        let guard = lines();
+        let line = guard.as_ref().and_then(|l| l.get(&me.to_lowercase())).ok_or_else(|| merel_i18n::tr("signal-stopped"))?;
+        let mut messages = lock(&line.messages);
+        let thread = if is_signal_address(with) { messages.threads.get(&with.to_lowercase()).cloned() } else { Some(with.to_string()) };
+        let thread = thread.ok_or_else(|| merel_i18n::tr("signal-unknown"))?;
+        messages.forget(&thread);
+        thread
+    };
+    ask(me, &Asked::DeleteChat { thread: &thread })
 }
 
 pub fn accept_call(me: &str, call_id: u64) -> std::result::Result<(), String> {
@@ -617,6 +641,15 @@ impl Messages {
 }
 
 impl Messages {
+    /// Lets go of every message of chat `thread` and the reactions on them.
+    fn forget(&mut self, thread: &str) {
+        let gone: Vec<String> = self.by_id.iter().filter(|(_, m)| m.thread == thread).map(|(id, _)| id.clone()).collect();
+        for id in gone {
+            self.by_id.remove(&id);
+            self.reactions.remove(&id);
+        }
+    }
+
     /// Takes in a reaction: it replaces the sender's earlier one on that message, unless that
     /// one is newer; one taken back goes.
     fn react(&mut self, r: Reaction) {
@@ -704,6 +737,7 @@ fn take_news(messages: &Mutex<Messages>, said: Said) -> Option<Said> {
         Said::Message(m) => lock(messages).add(m),
         Said::Reaction(r) => lock(messages).react(r),
         Said::Typing { sender, sender_name, typing } => note_typing(&sender, &sender_name, typing),
+        Said::ChatDeleted { thread } => lock(messages).forget(&thread),
         news @ (Said::Receipt { .. } | Said::ReadElsewhere { .. } | Said::Settings { .. }) => lock(messages).news.push(news),
         other => return Some(other),
     }
@@ -1392,6 +1426,33 @@ mod tests {
         let header = merel_mime::parse_header(&raw);
         assert!(header.chat.as_ref().is_some_and(|c| c.deleted && !c.edited));
         assert_eq!(merel_mime::parse_body(&raw).text.trim_end(), merel_i18n::tr("signal-deleted"));
+    }
+
+    #[test]
+    fn a_chat_deleted_on_the_phone_goes_here_too_and_only_that_chat() {
+        let messages = Mutex::new(Messages::default());
+        let jan = received("Tot morgen");
+        let mut piet = received("Hoi");
+        piet.thread = "3d4e".into();
+        piet.sender = "3d4e".into();
+        take_news(&messages, Said::Message(jan.clone()));
+        take_news(&messages, Said::Message(piet.clone()));
+        let r = Reaction {
+            thread: "1b2c".into(),
+            sender: "1b2c".into(),
+            sender_name: String::new(),
+            mine: false,
+            timestamp: 1,
+            emoji: "👍".into(),
+            remove: false,
+            target_author: jan.sender.clone(),
+            target_timestamp: jan.timestamp,
+        };
+        take_news(&messages, Said::Reaction(r));
+        assert_eq!(take_news(&messages, Said::ChatDeleted { thread: "1b2c".into() }), None);
+        let left = lock(&messages);
+        assert!(!left.by_id.contains_key(&jan.id()) && !left.reactions.contains_key(&jan.id()));
+        assert!(left.by_id.contains_key(&piet.id()), "the other chat stays");
     }
 
     #[test]

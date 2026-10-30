@@ -288,6 +288,24 @@ impl Engine {
         self.dispatch();
     }
 
+    /// Deletes the Signal chat `id` with all its messages, after the person said so: from
+    /// Merel and from the account's other devices, as Signal's "Delete chat" does. The others
+    /// in the chat keep theirs; a message that comes later starts it afresh.
+    pub fn delete_chat(&mut self, id: &str) -> Result<(), String> {
+        let chat = self.session.chat(id).filter(|c| self.is_signal_account(&c.account_id)).ok_or_else(|| merel_i18n::tr("signal-unknown"))?;
+        let me = self.signal_address(&chat.account_id)?;
+        let with = match (&chat.group, chat.people.first()) {
+            (Some(g), _) => g.group_id.clone().unwrap_or_default(),
+            (None, Some(p)) => p.email().to_string(),
+            (None, None) => return Err(merel_i18n::tr("signal-unknown")),
+        };
+        merel_signal_link::delete_chat(&me, &with)?;
+        for message in &chat.messages {
+            crate::commands::forget_message(&mut self.session, message);
+        }
+        Ok(())
+    }
+
     /// Whether `account_id` can chat: it has an OpenPGP key.
     pub fn chat_ready(&self, account_id: &str) -> bool {
         self.pgp_key(account_id).is_some()

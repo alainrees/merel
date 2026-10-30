@@ -336,6 +336,12 @@ pub(crate) fn delete_message(s: &mut Session, message_id: &str) -> Result<(), Co
     if from.account_id != crate::SAMPLE_ACCOUNT {
         s.pending.push(Job::Delete { account_id: from.account_id, path: from.path, id: m.remote_id });
     }
+    forget_message(s, message_id);
+    Ok(())
+}
+
+/// Lets go of message `id` here only: what the server has, it keeps.
+pub(crate) fn forget_message(s: &mut Session, message_id: &str) {
     s.messages.retain(|h| h.id != message_id);
     s.left.push(message_id.to_string());
     s.bodies.remove(message_id);
@@ -344,7 +350,6 @@ pub(crate) fn delete_message(s: &mut Session, message_id: &str) -> Result<(), Co
         s.selected_message = None;
     }
     s.recount_unread();
-    Ok(())
 }
 
 /// Moves one message to its account's folder of `kind`.
