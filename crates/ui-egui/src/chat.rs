@@ -663,6 +663,19 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
 /// Bellen, or Deelnemen while the others are in a meeting of this chat, or Terug naar het
 /// gesprek while this computer is in one.
 fn call_button(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
+    // A Signal chat with one person is called over Signal, when this build of its program can.
+    if app.engine.is_signal_account(&chat.account_id) {
+        if let ([person], false) = (chat.people.as_slice(), chat.is_group())
+            && crate::signal_call::can_call(app, &chat.account_id)
+            && helder::secondary(ui, t, |ui| helder::tool_button(ui, t, Icon::Phone, &tr("call-start")))
+                .on_hover_text(tr("signal-call-start-help"))
+                .clicked()
+        {
+            let (account, with, name) = (chat.account_id.clone(), person.email().to_string(), chat.title.clone());
+            crate::signal_call::start(app, &account, &with, &name);
+        }
+        return;
+    }
     if let Some(room) = crate::room::joined_in(app, &chat.id).map(|c| c.room.clone()) {
         if helder::secondary(ui, t, |ui| helder::tool_button(ui, t, Icon::Phone, &tr("call-back"))).clicked() {
             app.room.open = Some(room);

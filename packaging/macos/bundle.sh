@@ -25,6 +25,12 @@ if [ -f "$signal/aarch64-apple-darwin/release/merel-signal" ] && [ -f "$signal/x
     "$signal/x86_64-apple-darwin/release/merel-signal"
   cp apps/merel-signal/LICENSE "$app/Contents/Resources/merel-signal-LICENSE.txt"
 fi
+# Calls over Signal run in a program of their own, next to merel-signal.
+if [ -f "$signal/aarch64-apple-darwin/release/merel-signal-calls" ] && [ -f "$signal/x86_64-apple-darwin/release/merel-signal-calls" ]; then
+  lipo -create -output "$app/Contents/MacOS/merel-signal-calls" \
+    "$signal/aarch64-apple-darwin/release/merel-signal-calls" \
+    "$signal/x86_64-apple-darwin/release/merel-signal-calls"
+fi
 
 iconset="$work/Merel.iconset"
 mkdir -p "$iconset"

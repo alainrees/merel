@@ -19,14 +19,35 @@ libsqlite3-sys = { version = "0.36.0", features = ["bundled-sqlcipher-vendored-o
 anyhow = "1.0"
 base64 = "0.22"
 futures = "0.3"
-hex = "0.4"
+hex = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 # Only to list the chats in the store; presage keeps no list of them.
 sqlx = { version = "0.9.0", default-features = false, features = ["sqlite", "uuid", "runtime-tokio"] }
-uuid = "1.12"
-tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync"] }
+uuid = { version = "1.12", features = ["v4"] }
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync", "process"] }
+
+# Signal's own calling library, for calls in Merel. It plays and records sound itself.
+ringrtc = { git = "https://github.com/signalapp/ringrtc", tag = "v2.73.0", features = ["native"], optional = true }
+
+[features]
+# The calls program merel-signal-calls, with RingRTC on a WebRTC built locally (see RingRTC's
+# BUILDING.md)…
+calls = ["dep:ringrtc"]
+# …or on the WebRTC Signal builds for its own desktop app, fetched while building.
+calls-prebuilt = ["calls", "ringrtc/prebuilt_webrtc"]
+
+[[bin]]
+name = "merel-signal"
+path = "src/main.rs"
+
+# Calls run in a program of their own: WebRTC brings BoringSSL, which cannot be linked next to
+# the OpenSSL of the encrypted store (see src/wire.rs).
+[[bin]]
+name = "merel-signal-calls"
+path = "src/bin/merel-signal-calls.rs"
+required-features = ["calls"]
 
 [patch.crates-io]
 libsqlite3-sys = { version = "0.36.0", git = "https://github.com/whisperfish/rusqlite", rev = "2a42b3354c9194700d08aa070f70a131a470e7dc" }
