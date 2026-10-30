@@ -160,6 +160,9 @@ struct FileInfo {
     name: String,
     mime: String,
     size: u64,
+    /// A voice message, recorded in the app, not a file sent.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    voice: bool,
 }
 
 /// A file Merel sends with a message, its contents in base64.
@@ -910,8 +913,12 @@ fn info(a: &AttachmentPointer, files: &mut Files) -> FileInfo {
         name: a.file_name.clone().unwrap_or_default(),
         mime: a.content_type.clone().unwrap_or_else(|| "application/octet-stream".into()),
         size: u64::from(a.size.unwrap_or(0)),
+        voice: a.flags.unwrap_or(0) & VOICE_MESSAGE != 0,
     }
 }
+
+/// The flag Signal sets on an attachment that is a voice message.
+const VOICE_MESSAGE: u32 = 1;
 
 /// The message `q` quotes, with its author's name.
 async fn quoted<S: Store>(manager: &Manager<S, Registered>, q: &Quote) -> Option<Quoted> {

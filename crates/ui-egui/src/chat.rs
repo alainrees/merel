@@ -586,6 +586,7 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
             let mut reply = None;
             let mut picture = None;
             let mut save = None;
+            let mut listen = None;
             let mut edit = None;
             let mut delete = None;
             egui::ScrollArea::vertical().auto_shrink(false).stick_to_bottom(true).show(ui, |ui| {
@@ -608,6 +609,7 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                         Some(Clicked::Reply) => reply = Some(id.clone()),
                         Some(Clicked::Picture(n)) => picture = Some((id.clone(), n)),
                         Some(Clicked::Save(n)) => save = Some((id.clone(), n)),
+                        Some(Clicked::Listen(n)) => listen = Some((id.clone(), n)),
                         Some(Clicked::Edit) => edit = Some(id.clone()),
                         Some(Clicked::Delete) => delete = Some(id.clone()),
                         None => {}
@@ -630,6 +632,9 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
             }
             if let Some(a) = save.as_ref().and_then(|p| file(app, p)) {
                 app.save_attachment(&a);
+            }
+            if let Some(a) = listen.as_ref().and_then(|p| file(app, p)) {
+                app.chat.error = crate::attachments::open_in_app(&a).err();
             }
             if let Some(id) = edit {
                 app.chat.replying = None;
@@ -715,6 +720,8 @@ enum Clicked {
     Picture(usize),
     /// Save attachment `n` of the message under Downloads.
     Save(usize),
+    /// Listen to the voice message that is attachment `n`.
+    Listen(usize),
     /// Change the text of one's own message.
     Edit,
     /// Ask how to delete the message.
@@ -811,7 +818,8 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                             if !text.trim().is_empty() || files.is_empty() {
                                 crate::emoji::label(ui, &text, 14.0, t.text);
                             }
-                            files_in_bubble(ui, t, id, files, &mut accept);
+                            let voice = m.chat.as_ref().is_some_and(|c| c.voice);
+                            files_in_bubble(ui, t, id, files, voice, &mut accept);
                         }
                     };
                     // A quote goes above the text and files under it; without either the text
@@ -893,9 +901,11 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
 
 /// The files of a message: pictures small, to open big with a click, as in Signal; other
 /// files as a line with their name and size, to save with a click.
-fn files_in_bubble(ui: &mut Ui, t: &Tokens, id: &str, files: &[merel_mime::Attachment], clicked: &mut Option<Clicked>) {
+fn files_in_bubble(ui: &mut Ui, t: &Tokens, id: &str, files: &[merel_mime::Attachment], voice: bool, clicked: &mut Option<Clicked>) {
     for (n, a) in files.iter().enumerate() {
-        if crate::attachments::previewable(a) {
+        if voice && a.mime.starts_with("audio/") {
+            voice_row(ui, t, a, clicked, n);
+        } else if crate::attachments::previewable(a) {
             // Sized from the picture's own header: the bubble's row has no height to fit it in.
             let (w, h) = image::ImageReader::new(std::io::Cursor::new(&a.bytes[..]))
                 .with_guessed_format()
@@ -920,6 +930,22 @@ fn files_in_bubble(ui: &mut Ui, t: &Tokens, id: &str, files: &[merel_mime::Attac
             }
         }
     }
+}
+
+/// A voice message, as Signal shows it: a round play button and what it is.
+fn voice_row(ui: &mut Ui, t: &Tokens, a: &merel_mime::Attachment, clicked: &mut Option<Clicked>, n: usize) {
+    ui.horizontal(|ui| {
+        let (rect, r) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
+        ui.painter().circle_filled(rect.center(), 16.0, t.accent);
+        Icon::Play.image(16.0, t.on_accent).paint_at(ui, egui::Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
+        let label = tr("chat-voice-play");
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone()));
+        if r.on_hover_text(label).clicked() {
+            *clicked = Some(Clicked::Listen(n));
+        }
+        ui.add(Icon::Mic.image(14.0, t.text_dim));
+        ui.label(RichText::new(format!("{}  ({})", tr("chat-voice"), crate::size_text(a.size))).size(13.0).color(t.text));
+    });
 }
 
 /// The files picked to go with the next message, each with a cross to leave it out.

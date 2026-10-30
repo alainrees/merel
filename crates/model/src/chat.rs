@@ -67,6 +67,10 @@ pub struct ChatTag {
     /// a line saying so. Only Signal says it; the engine drops it from any other account.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub deleted: bool,
+    /// Whether it is a voice message (`Merel-Voice`): its audio is to listen to, not a file.
+    /// Only Signal says it; the engine drops it from any other account.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub voice: bool,
 }
 
 /// How far a message one sent came.

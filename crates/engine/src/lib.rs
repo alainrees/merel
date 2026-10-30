@@ -1053,6 +1053,7 @@ impl Session {
                             chat.delivery = None;
                             chat.edited = false;
                             chat.deleted = false;
+                            chat.voice = false;
                         }
                         if sizes.get(&m.id).is_some_and(|&old| old != m.size) && self.bodies.contains_key(&m.id) {
                             changed.push(m.id.clone());

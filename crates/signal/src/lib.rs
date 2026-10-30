@@ -225,6 +225,9 @@ pub struct FileRef {
     pub mime: String,
     #[serde(default)]
     pub size: u64,
+    /// A voice message, recorded in the app.
+    #[serde(default)]
+    pub voice: bool,
 }
 
 /// A file going out with a message, its contents in base64.
@@ -1172,6 +1175,9 @@ fn message_with(m: &Received, me: &str, reactions: &[merel_model::Reacted], file
     if m.deleted {
         out.push_str("Merel-Deleted: yes\r\n");
     }
+    if m.attachments.iter().any(|f| f.voice) {
+        out.push_str("Merel-Voice: yes\r\n");
+    }
     if let Some(q) = &m.quote {
         let name = if q.author_name.is_empty() { q.author.clone() } else { q.author_name.clone() };
         let text: String = q.text.chars().take(merel_model::MAX_QUOTE).collect();
@@ -1226,12 +1232,15 @@ fn file_name(f: &FileRef) -> String {
         "image/webp" => "webp",
         "video/mp4" => "mp4",
         "audio/aac" => "aac",
+        "audio/mp4" | "audio/x-m4a" => "m4a",
         "audio/mpeg" => "mp3",
         "audio/ogg" => "ogg",
         "application/pdf" => "pdf",
         _ => "bin",
     };
-    let kind = if f.mime.starts_with("image/") {
+    let kind = if f.voice {
+        "spraakbericht"
+    } else if f.mime.starts_with("image/") {
         "foto"
     } else if f.mime.starts_with("audio/") {
         "audio"
@@ -1377,6 +1386,15 @@ mod tests {
     }
 
     #[test]
+    fn a_voice_message_says_so_and_gets_a_name() {
+        let mut m = received("");
+        m.attachments = vec![FileRef { id: "v1".into(), name: String::new(), mime: "audio/aac".into(), size: 9000, voice: true }];
+        let header = merel_mime::parse_header(&message(&m, "me@signal.invalid", &[]));
+        assert!(header.chat.is_some_and(|c| c.voice));
+        assert_eq!(file_name(&m.attachments[0]), "spraakbericht.aac");
+    }
+
+    #[test]
     fn a_changed_message_says_so() {
         let mut m = received("Tot overmorgen");
         m.edited = 1_761_681_700_000;
@@ -1500,8 +1518,8 @@ mod tests {
     #[test]
     fn a_fetched_file_comes_as_an_attachment_and_one_not_fetched_by_name() {
         let mut m = received("Kijk!");
-        let photo = FileRef { id: "a1".into(), name: String::new(), mime: "image/png".into(), size: 4 };
-        let big = FileRef { id: "b2".into(), name: "film.mp4".into(), mime: "video/mp4".into(), size: 900_000_000 };
+        let photo = FileRef { id: "a1".into(), name: String::new(), mime: "image/png".into(), size: 4, voice: false };
+        let big = FileRef { id: "b2".into(), name: "film.mp4".into(), mime: "video/mp4".into(), size: 900_000_000, voice: false };
         m.attachments = vec![photo.clone(), big.clone()];
         let bytes: Arc<[u8]> = vec![1u8, 2, 3, 4].into();
         let raw = message_with(&m, "me@signal.invalid", &[], &[(photo, Some(bytes)), (big, None)]);
