@@ -215,6 +215,16 @@ mod tests {
     }
 
     #[test]
+    fn mail_never_goes_out_from_signal() {
+        let mut s = two_accounts();
+        s.accounts[0].protocol = merel_model::Protocol::Signal;
+        assert_eq!(s.mail_accounts().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["b"]);
+        assert_eq!(s.current_account().map(|a| a.id.as_str()), Some("b"), "the first mail account");
+        s.run("message.select", &json!({ "id": "a/INBOX#1" })).expect("select message");
+        assert_eq!(s.current_account().map(|a| a.id.as_str()), Some("b"), "not the Signal account the message is in");
+    }
+
+    #[test]
     fn a_message_dropped_on_it_stays_in_its_own_account() {
         let s = two_accounts();
         assert_eq!(s.drop_target("*alle/deleted", "a/INBOX#1").as_deref(), Some("a/Trash"));
