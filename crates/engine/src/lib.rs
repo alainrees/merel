@@ -908,8 +908,13 @@ impl Session {
             Some(id) if unified::is_unified(id) => self.selected().map(|m| m.folder_id.as_str()),
             id => id,
         };
-        let by_folder = folder.and_then(|f| self.folder(f)).and_then(|f| self.accounts.iter().find(|a| a.id == f.account_id));
-        by_folder.or_else(|| self.accounts.first())
+        let by_folder = folder.and_then(|f| self.folder(f)).and_then(|f| self.mail_accounts().find(|a| a.id == f.account_id));
+        by_folder.or_else(|| self.mail_accounts().next())
+    }
+
+    /// The accounts that send and receive mail: all but Signal, which only chats.
+    pub fn mail_accounts(&self) -> impl Iterator<Item = &Account> {
+        self.accounts.iter().filter(|a| !signal::is_signal(a))
     }
 
     /// Jobs left behind by commands since the last call.
