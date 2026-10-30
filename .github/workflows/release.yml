@@ -37,8 +37,15 @@ jobs:
       - run: cargo build --release --locked -p merel --target aarch64-apple-darwin
       - run: cargo build --release --locked -p merel --target x86_64-apple-darwin
       # Signal's own program, which Merel starts next to itself (AGPL, so a separate program).
+      # RingRTC fetches WebRTC into OUTPUT_DIR, by default one folder in its checkout for every
+      # target: from the cache, the arm build found the Intel library of the last build there.
+      # A fresh folder per target makes it fetch the right one each time.
       - run: cargo build --release --locked --manifest-path apps/merel-signal/Cargo.toml --features calls-prebuilt --target aarch64-apple-darwin
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/webrtc-aarch64
       - run: cargo build --release --locked --manifest-path apps/merel-signal/Cargo.toml --features calls-prebuilt --target x86_64-apple-darwin
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/webrtc-x86_64
       - run: packaging/macos/bundle.sh
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
