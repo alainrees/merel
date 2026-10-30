@@ -89,9 +89,10 @@ pub fn page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     Some(tr_args("search-meaning-downloading", &[("done", mb(*done)), ("total", mb((*total).max(*done)))]))
                 }
                 ModelState::Preparing => Some(tr("search-meaning-preparing")),
-                ModelState::Ready => {
-                    Some(tr_args("search-meaning-ready", &[("count", status.vectors.into()), ("size", size(status.model_size).into())]))
-                }
+                ModelState::Ready => Some(tr_args(
+                    "search-meaning-ready",
+                    &[("count", status.vectors.into()), ("words", status.words.into()), ("size", size(status.model_size).into())],
+                )),
                 ModelState::Failed(e) => Some(tr_args("search-meaning-failed", &[("error", e.as_str().into())])),
             };
             if let Some(line) = line {

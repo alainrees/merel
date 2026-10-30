@@ -125,7 +125,9 @@ kitchen. Switching it on downloads an open language model once (`intfloat/multil
 fixed revision, checked by SHA-256; trimmed to the Latin-script vocabulary and stored at half precision), and from then
 on everything runs on this computer: in the background, at an easy pace, Merel turns each message it has the text of into
 a vector, sealed on disk like the index, and a search mixes the closest messages in under the ones with the words
-(reciprocal rank fusion). Such a row says "Over hetzelfde". Switching it off throws the model and the vectors away. A phrase in quotes must occur as it stands, `-woord`
+(reciprocal rank fusion). Such a row says "Over hetzelfde". The model also learns the words of your own mail: it takes
+the words that come back in several messages, gives each a vector too, and a search word then also looks for the words
+that are its own and the other's closest (at most three, after the built-in list's, named under "Ook gezocht"). Switching it off throws the model and the vectors away. A phrase in quotes must occur as it stands, `-woord`
 leaves out what holds it, and `OF` between words lets either do (the English `from:`, `to:`, `subject:`, `has:attachment`,
 `is:unread`, `is:flagged`, `date:`, `before:`, `after:`, `folder:`, `attachment:`, `category:`, `OR`, `today`, `this-week`
 and so on too); the rest are plain words that may occur anywhere. While a word is typed, a list under the box suggests

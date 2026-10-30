@@ -4,11 +4,17 @@
 //! search's join the index's hits, mixed in by rank (reciprocal rank fusion), so a message
 //! that has the words stays on top and one that is only about the same thing comes along.
 //!
+//! The model also learns the person's own words ([`Meaning::learned`]): it reads the words
+//! their mail uses most, one by one, and a search word whose vector lies closest to another
+//! word's, both ways, has that word searched along, as the built-in list of words in four
+//! languages has ([`merel_search::lexicon`]). So mail that says "Kostenvoranschlag" or
+//! "devis" is found with "offerte", also where the list does not know the word.
+//!
 //! Off unless the person switches it on in "Bestand > Zoeken"; switching it off throws away
 //! the model and every vector. The vectors say what mail is about, so they are sealed on disk
 //! with the index's key and live in memory only.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -18,6 +24,29 @@ use merel_semantic::{Reply, Request, Vectors, Worker};
 
 /// Name of the sealed file with the vectors, in the index's directory.
 pub const VECTORS_FILE: &str = "meaning.vec";
+/// Name of the sealed file with the vectors of the mail's words.
+pub const WORDS_FILE: &str = "words.vec";
+/// Ids of the words at the model, apart from the messages': a word of the mail, and a search
+/// word the mail does not use often.
+const WORD: &str = "\u{1}word:";
+const SEARCH_WORD: &str = "\u{1}search:";
+/// How many of the mail's words the model reads, the most used first; each in at least this
+/// many messages and in no more than one in this many, which leaves out "de" and "the".
+const VOCABULARY: usize = 20_000;
+const WORD_MIN_DOCS: u32 = 3;
+const WORD_MAX_SHARE: u32 = 5;
+/// How often the mail's words are looked at again.
+const RESCAN: Duration = Duration::from_secs(6 * 3600);
+/// Below this many words there is too little to learn from.
+const LEAST_WORDS: usize = 200;
+/// A word is learned for a search word when it is at least this close, not much less than the
+/// closest, the search word is among its own closest few, and it is not the same word in
+/// another form; at most a few per search word.
+const WORD_SIMILARITY: f32 = 0.88;
+const WORD_BELOW_BEST: f32 = 0.04;
+const WORD_NEIGHBOURS: usize = 12;
+const MUTUAL: usize = 3;
+const MOST_LEARNED: usize = 3;
 /// How many messages wait at the model at a time.
 const IN_FLIGHT: usize = 4;
 /// How many ids one look at the index takes, catching up on messages without a vector.
@@ -60,6 +89,8 @@ pub struct MeaningStatus {
     pub model: ModelState,
     /// Messages with a vector.
     pub vectors: usize,
+    /// Words of the mail with a vector, to learn from ([`Meaning::learned`]).
+    pub words: usize,
     /// Whether messages are still being read.
     pub busy: bool,
     /// Bytes the prepared model takes.
@@ -88,6 +119,19 @@ pub struct Meaning {
     /// How close counts as about the same thing; see [`MIN_SIMILARITY`].
     min_similarity: f32,
     below_best: f32,
+    /// The vectors of the mail's words, and whether they changed since they were written.
+    words: Vectors,
+    words_dirty: bool,
+    /// Words still to be read, and when the mail's words were last looked at.
+    word_todo: Vec<String>,
+    scanned: Option<Instant>,
+    /// Vectors of search words the mail does not use often, and the words asked about.
+    search_words: HashMap<String, Vec<f32>>,
+    asked_words: HashSet<String>,
+    /// The words learned for a search word, once all words are read.
+    learned: HashMap<String, Vec<String>>,
+    /// How close counts as the same word; see [`WORD_SIMILARITY`].
+    word_similarity: f32,
 }
 
 impl Meaning {
@@ -98,11 +142,12 @@ impl Meaning {
         if !ready {
             worker.send(Request::Install);
         }
-        let vectors = match (&index_dir, &sealer) {
-            (Some(dir), Some(sealer)) => load(dir, sealer.as_ref()),
+        let read = |file: &str| match (&index_dir, &sealer) {
+            (Some(dir), Some(sealer)) => load(dir, sealer.as_ref(), file),
             _ => None,
-        }
-        .unwrap_or_else(|| Vectors::new(merel_semantic::DIM));
+        };
+        let vectors = read(VECTORS_FILE).unwrap_or_else(|| Vectors::new(merel_semantic::DIM));
+        let words = read(WORDS_FILE).unwrap_or_else(|| Vectors::new(merel_semantic::DIM));
         Meaning {
             model_dir,
             index_dir,
@@ -119,6 +164,14 @@ impl Meaning {
             asked: None,
             min_similarity: MIN_SIMILARITY,
             below_best: BELOW_BEST,
+            words,
+            words_dirty: false,
+            word_todo: Vec::new(),
+            scanned: None,
+            search_words: HashMap::new(),
+            asked_words: HashSet::new(),
+            learned: HashMap::new(),
+            word_similarity: WORD_SIMILARITY,
         }
     }
 
@@ -126,7 +179,8 @@ impl Meaning {
         MeaningStatus {
             model: self.state.clone(),
             vectors: self.vectors.len(),
-            busy: !self.pending.is_empty() || !self.todo.is_empty() || self.backfill.is_some(),
+            words: self.words.len(),
+            busy: !self.pending.is_empty() || !self.todo.is_empty() || self.backfill.is_some() || !self.word_todo.is_empty(),
             model_size: merel_semantic::setup::size_on_disk(&self.model_dir),
         }
     }
@@ -181,7 +235,21 @@ impl Meaning {
                     }
                 }
                 Reply::Vector { id, vector } => {
-                    if self.pending.remove(&id) {
+                    if !self.pending.remove(&id) {
+                        continue;
+                    }
+                    if let Some(word) = id.strip_prefix(WORD) {
+                        if vector.len() != self.words.dim() {
+                            self.words = Vectors::new(vector.len());
+                            self.scanned = None;
+                        }
+                        self.words.insert(word, &vector);
+                        self.words_dirty = true;
+                        self.learned.clear();
+                    } else if let Some(word) = id.strip_prefix(SEARCH_WORD) {
+                        self.search_words.insert(word.to_string(), vector);
+                        query_came = true;
+                    } else {
                         if vector.len() != self.vectors.dim() {
                             // Another model than the vectors on disk came from: read all mail again.
                             self.vectors = Vectors::new(vector.len());
@@ -200,7 +268,7 @@ impl Meaning {
         if self.is_ready() {
             self.feed(index);
         }
-        if self.dirty && (force_save || self.saved.elapsed() >= SAVE_EVERY) {
+        if (self.dirty || self.words_dirty) && (force_save || self.saved.elapsed() >= SAVE_EVERY) {
             self.save();
         }
         query_came
@@ -227,6 +295,51 @@ impl Meaning {
             self.pending.insert(id.clone());
             self.worker.send(Request::Embed { id, text });
         }
+        // The mail's words once the messages are read, and again now and then.
+        if self.todo.is_empty() && self.backfill.is_none() && self.scanned.is_none_or(|t| t.elapsed() >= RESCAN) {
+            self.scanned = Some(Instant::now());
+            let vocabulary: HashSet<String> = index.common_words(VOCABULARY, WORD_MIN_DOCS, WORD_MAX_SHARE).into_iter().collect();
+            let before = self.words.len();
+            self.words.retain(|w| vocabulary.contains(w));
+            self.words_dirty |= self.words.len() != before;
+            self.word_todo = vocabulary.into_iter().filter(|w| !self.words.contains(w)).collect();
+            self.word_todo.sort();
+        }
+        while self.pending.len() < IN_FLIGHT
+            && let Some(word) = self.word_todo.pop()
+        {
+            let id = format!("{WORD}{word}");
+            if self.pending.insert(id.clone()) {
+                self.worker.send(Request::Embed { id, text: word });
+            }
+        }
+    }
+
+    /// The words of the person's own mail that mean what `word` means, for the search to look
+    /// for too; empty when there are none or the model is not there. `None` while the model
+    /// still reads the word, which it is asked to here.
+    pub fn learned(&mut self, word: &str) -> Option<Vec<String>> {
+        let Some(word) = merel_search::lexicon::folded(word) else { return Some(Vec::new()) };
+        if !self.is_ready() || self.words.len() < LEAST_WORDS || word.chars().count() < 4 || !word.chars().all(char::is_alphabetic) {
+            return Some(Vec::new());
+        }
+        if let Some(known) = self.learned.get(&word) {
+            return Some(known.clone());
+        }
+        let Some(vector) = self.words.get(&word).or_else(|| self.search_words.get(&word).cloned()) else {
+            if self.asked_words.insert(word.clone()) {
+                let id = format!("{SEARCH_WORD}{word}");
+                self.pending.insert(id.clone());
+                self.worker.send(Request::Embed { id, text: word });
+            }
+            return None;
+        };
+        let found = neighbours(&self.words, &word, &vector, self.word_similarity);
+        // While words are still being read, the answer may change.
+        if self.word_todo.is_empty() {
+            self.learned.insert(word, found.clone());
+        }
+        Some(found)
     }
 
     /// The messages about the same thing as `words`, with how close each is, best first;
@@ -262,19 +375,27 @@ impl Meaning {
     fn save(&mut self) {
         let (Some(dir), Some(sealer)) = (&self.index_dir, &self.sealer) else {
             self.dirty = false;
+            self.words_dirty = false;
             return;
         };
-        match sealer.seal(VECTORS_FILE, &self.vectors.to_bytes()).and_then(|sealed| std::fs::write(dir.join(VECTORS_FILE), sealed)) {
-            Ok(()) => {
-                self.dirty = false;
-                self.saved = Instant::now();
+        let write = |file: &str, vectors: &Vectors| sealer.seal(file, &vectors.to_bytes()).and_then(|sealed| std::fs::write(dir.join(file), sealed));
+        if self.dirty {
+            match write(VECTORS_FILE, &self.vectors) {
+                Ok(()) => self.dirty = false,
+                Err(e) => log::warn!("search on meaning: vectors not written: {e}"),
             }
-            Err(e) => log::warn!("search on meaning: vectors not written: {e}"),
         }
+        if self.words_dirty {
+            match write(WORDS_FILE, &self.words) {
+                Ok(()) => self.words_dirty = false,
+                Err(e) => log::warn!("search on meaning: words not written: {e}"),
+            }
+        }
+        self.saved = Instant::now();
     }
 
     pub fn flush(&mut self) {
-        if self.dirty {
+        if self.dirty || self.words_dirty {
             self.save();
         }
     }
@@ -286,8 +407,16 @@ impl Meaning {
         self.pending.clear();
         self.backfill = Some(0);
         self.dirty = false;
+        self.words.clear();
+        self.word_todo.clear();
+        self.scanned = None;
+        self.search_words.clear();
+        self.asked_words.clear();
+        self.learned.clear();
+        self.words_dirty = false;
         if let Some(dir) = &self.index_dir {
             let _ = std::fs::remove_file(dir.join(VECTORS_FILE));
+            let _ = std::fs::remove_file(dir.join(WORDS_FILE));
         }
     }
 
@@ -301,9 +430,35 @@ impl Meaning {
     }
 }
 
-fn load(dir: &Path, sealer: &dyn Sealer) -> Option<Vectors> {
-    let bytes = std::fs::read(dir.join(VECTORS_FILE)).ok()?;
-    Vectors::from_bytes(&sealer.open(VECTORS_FILE, bytes)?)
+fn load(dir: &Path, sealer: &dyn Sealer, file: &str) -> Option<Vectors> {
+    let bytes = std::fs::read(dir.join(file)).ok()?;
+    Vectors::from_bytes(&sealer.open(file, bytes)?)
+}
+
+/// The words among `words` that mean what `word` (with vector `v`) means: close to it, at least
+/// `floor` and not much less than the closest, with `word` among their own closest few (two
+/// words that are each other's nearest are what a translation looks like), and not the same
+/// word in another form, which the search finds anyway. The closest first, a few at most.
+pub fn neighbours(words: &Vectors, word: &str, v: &[f32], floor: f32) -> Vec<String> {
+    let near = words.nearest(v, WORD_NEIGHBOURS, |w| w != word);
+    let best = near.first().map(|x| x.1).unwrap_or(0.0);
+    let mut out = Vec::new();
+    for (other, similarity) in near {
+        if similarity < floor || similarity < best - WORD_BELOW_BEST || out.len() == MOST_LEARNED {
+            break;
+        }
+        if merel_search::lexicon::same_word(word, &other) || out.iter().any(|w: &String| merel_search::lexicon::same_word(w, &other)) {
+            continue;
+        }
+        let Some(theirs) = words.get(&other) else { continue };
+        // How close `word` is to the other word, against the other word's own closest.
+        let back: f32 = theirs.iter().zip(v).map(|(a, b)| a * b).sum();
+        let closest = words.nearest(&theirs, MUTUAL, |w| w != other && w != word);
+        if closest.len() < MUTUAL || closest.last().is_some_and(|(_, s)| back >= *s) {
+            out.push(other);
+        }
+    }
+    out
 }
 
 /// Mixes the index's hits (best first) with the related messages (best first) by rank: each
@@ -326,6 +481,34 @@ pub fn fuse(hits: &[String], related: &[String]) -> Vec<(String, f32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unit(v: &[f32]) -> Vec<f32> {
+        let n = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        v.iter().map(|x| x / n).collect()
+    }
+
+    #[test]
+    fn a_word_is_learned_when_both_words_are_each_others_closest() {
+        let mut words = Vectors::new(6);
+        let put = |words: &mut Vectors, w: &str, v: &[f32]| words.insert(w, &unit(v));
+        put(&mut words, "offerte", &[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        put(&mut words, "angebot", &[1.0, 0.15, 0.0, 0.0, 0.0, 0.0]);
+        put(&mut words, "offertes", &[1.0, 0.0, 0.1, 0.0, 0.0, 0.0]);
+        // Close to "offerte", but closer still to three words of its own: no translation of it.
+        put(&mut words, "document", &[1.0, 0.0, 0.0, 0.6, 0.0, 0.0]);
+        for (w, x) in [("bestand", 0.62), ("bijlage", 0.64), ("pagina", 0.66)] {
+            put(&mut words, w, &[1.0, 0.0, 0.0, x, 0.05, 0.0]);
+        }
+        put(&mut words, "keuken", &[0.0, 0.0, 0.0, 0.0, 0.0, 1.0]);
+        let v = words.get("offerte").unwrap();
+        assert_eq!(neighbours(&words, "offerte", &v, 0.80), ["angebot"]);
+        assert!(neighbours(&words, "offerte", &v, 0.999).is_empty(), "not close enough");
+        let k = words.get("keuken").unwrap();
+        assert!(neighbours(&words, "keuken", &k, 0.80).is_empty(), "nothing near");
+        // A search word the mail does not use, with a vector of its own.
+        let quote = unit(&[1.0, 0.12, 0.0, 0.0, 0.0, 0.0]);
+        assert!(neighbours(&words, "quote", &quote, 0.80).contains(&"angebot".to_string()));
+    }
 
     #[test]
     fn fusion_keeps_what_both_lists_found_on_top_and_adds_the_rest() {

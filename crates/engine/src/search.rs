@@ -27,6 +27,8 @@ pub struct Query {
     /// ([`merel_search::lexicon`]): the word or one of these must occur. Empty for a word in
     /// quotes, and all empty once [`Query::exact`] took them out.
     pub alike: Vec<Vec<String>>,
+    /// The words typed in quotes, searched only as they stand.
+    pub quoted: Vec<String>,
     /// Groups of words joined by `OF`: one word of each group must occur.
     pub either: Vec<Vec<String>>,
     /// Phrases that must occur as they stand.
@@ -291,10 +293,33 @@ impl Query {
         }
         flush(&mut q, last_plain);
         q.alike = q.words.iter().map(|w| if quoted.contains(w) { Vec::new() } else { merel_search::lexicon::alike(w) }).collect();
+        q.quoted = q.words.iter().filter(|w| quoted.contains(*w)).cloned().collect();
         if q.alike.iter().all(Vec::is_empty) {
             q.alike.clear();
         }
         q
+    }
+
+    /// Adds the words learned from the person's own mail ([`crate::meaning`]) to what each
+    /// word not in quotes also finds, after the built-in ones.
+    pub fn learn(&mut self, learned: &std::collections::HashMap<String, Vec<String>>) {
+        if learned.is_empty() {
+            return;
+        }
+        self.alike.resize(self.words.len(), Vec::new());
+        for (word, alike) in self.words.iter().zip(self.alike.iter_mut()) {
+            if self.quoted.contains(word) {
+                continue;
+            }
+            for w in learned.get(word).into_iter().flatten() {
+                if w != word && !alike.iter().any(|a| merel_search::lexicon::folded(a).as_deref() == Some(w.as_str())) {
+                    alike.push(w.clone());
+                }
+            }
+        }
+        if self.alike.iter().all(Vec::is_empty) {
+            self.alike.clear();
+        }
     }
 
     /// The query with every word as it stands, in no other language.
@@ -688,6 +713,24 @@ mod tests {
         s.search = "groot:>5MB".into();
         let found: Vec<&str> = s.visible_messages().iter().map(|m| m.subject.as_str()).collect();
         assert_eq!(found, ["Planning voor donderdag"], "the sample's one message with an attachment");
+    }
+
+    #[test]
+    fn words_learned_from_the_mail_come_after_the_list_and_not_for_quoted_words() {
+        let learned: std::collections::HashMap<String, Vec<String>> = [
+            ("voorstel".to_string(), vec!["kostenvoranschlag".to_string(), "begroting".to_string()]),
+            ("schuurtje".to_string(), vec!["gartenhaus".to_string()]),
+        ]
+        .into();
+        let mut q = Query::parse("voorstel \"schuurtje\"");
+        q.learn(&learned);
+        assert_eq!(q.alike[0].last().map(String::as_str), Some("begroting"), "after the built-in words: {:?}", q.alike[0]);
+        assert_eq!(q.alike[0].iter().filter(|w| w.as_str() == "kostenvoranschlag").count(), 1, "a word the list has is not added again");
+        assert!(q.alike[1].is_empty(), "a word in quotes stands as it is");
+        let mut plain = Query::parse("schuurtje");
+        plain.learn(&learned);
+        assert_eq!(plain.also_searched().last().map(String::as_str), Some("gartenhaus"), "after the list's own");
+        assert!(plain.exact().alike.is_empty());
     }
 
     #[test]
