@@ -425,8 +425,20 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
     // Signal on the phone knows which of its contacts are on Signal; a linked device asks it
     // for that list, as Signal Desktop does, once the waiting messages are in.
     let mut contacts_asked = false;
+    let mut asking: Option<future::LocalBoxFuture<'static, std::result::Result<(), String>>> = None;
     loop {
         tokio::select! {
+            asked = async {
+                match asking.as_mut() {
+                    Some(f) => f.await,
+                    None => Ok(()),
+                }
+            }, if asking.is_some() => {
+                asking = None;
+                if let Err(e) = asked {
+                    eprintln!("merel-signal: could not ask the phone for its contacts: {e}");
+                }
+            }
             note = notes.recv(), if calls_open => match note {
                 Some(note) => {
                     for event in phone.handle(note, &mut sending, &mut ringing).await {
@@ -443,14 +455,15 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
             received = messages.next() => match received {
                 Some(Received::QueueEmpty) => {
                     eprintln!("merel-signal: all waiting messages are in");
+                    emit(&Event::Contacts { people: contacts(&manager).await });
+                    emit(&Event::Synced { calls: phone.ready() });
+                    // Asked on the side: sending it can take long, and Merel waits for
+                    // `synced` before it shows the chats.
                     if !contacts_asked {
                         contacts_asked = true;
-                        if let Err(e) = sending.request_contacts().await {
-                            eprintln!("merel-signal: could not ask the phone for its contacts: {e}");
-                        }
+                        let mut asker = sending.clone();
+                        asking = Some(Box::pin(async move { asker.request_contacts().await.map_err(|e| e.to_string()) }));
                     }
-                    emit(&Event::Contacts { people: contacts(&manager).await });
-                    emit(&Event::Synced { calls: phone.ready() })
                 }
                 Some(Received::Content(content)) => {
                     if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::DeleteForMe(d)), .. }) = &content.body {
