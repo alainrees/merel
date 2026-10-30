@@ -14,6 +14,9 @@
 //! The store in `<dir>` is encrypted with the key in the environment variable `MEREL_SIGNAL_KEY`,
 //! which Merel keeps in the system keychain.
 
+mod phone;
+mod wire;
+
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -39,6 +42,9 @@ use presage::store::{ContentExt, Store, Thread};
 use presage_store_sqlite::SqliteStore;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
+
+use crate::phone::Phone;
+use crate::wire::Phase;
 
 /// What Merel hears.
 #[derive(Serialize)]
@@ -115,8 +121,21 @@ enum Event {
         read_receipts: Option<bool>,
         typing_indicators: Option<bool>,
     },
-    /// Every message waiting on the server is in.
-    Synced,
+    /// Every message waiting on the server is in. `calls` says whether this build can call.
+    Synced {
+        calls: bool,
+    },
+    /// Whether calls can be made from here now (the calls program runs and has sound).
+    Calls {
+        available: bool,
+    },
+    /// How a call in Merel goes: ringing, connected, ended….
+    Call {
+        thread: String,
+        name: String,
+        call_id: u64,
+        state: Phase,
+    },
     Sent {
         thread: String,
         timestamp: u64,
@@ -205,13 +224,37 @@ enum Command {
         files: Vec<OutFile>,
     },
     /// The contents of file `id`, as `{"type":"file"}`.
-    Fetch { id: String },
+    Fetch {
+        id: String,
+    },
     /// Tells `author` their messages sent at `timestamps` were read. Merel only asks when the
     /// account's Signal settings send read receipts.
-    MarkRead { author: String, timestamps: Vec<u64> },
+    MarkRead {
+        author: String,
+        timestamps: Vec<u64>,
+    },
     /// Reacts to the message `target_author` sent at `target_timestamp`; `remove` takes the
     /// reaction back. Signal keeps one reaction per person per message.
-    React { thread: String, emoji: String, remove: bool, target_author: String, target_timestamp: u64 },
+    React {
+        thread: String,
+        emoji: String,
+        remove: bool,
+        target_author: String,
+        target_timestamp: u64,
+    },
+    /// Call the person of this chat (sound only).
+    Call {
+        thread: String,
+    },
+    /// Answer the call ringing.
+    Accept {
+        call_id: u64,
+    },
+    /// End the call, or decline the one ringing.
+    HangUp,
+    Mute {
+        on: bool,
+    },
 }
 
 fn emit(event: &Event) {
@@ -306,12 +349,27 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut sending = sender;
     let mut ringing = Ringing::default();
+    let (mut phone, mut notes) = Phone::start();
+    let mut calls_open = true;
     loop {
         tokio::select! {
+            note = notes.recv(), if calls_open => match note {
+                Some(note) => {
+                    for event in phone.handle(note, &mut sending, &mut ringing).await {
+                        emit(&event);
+                    }
+                }
+                None => {
+                    calls_open = false;
+                    if let Some(event) = phone.stopped() {
+                        emit(&event);
+                    }
+                }
+            },
             received = messages.next() => match received {
                 Some(Received::QueueEmpty) => {
                     eprintln!("merel-signal: all waiting messages are in");
-                    emit(&Event::Synced)
+                    emit(&Event::Synced { calls: phone.ready() })
                 }
                 Some(Received::Content(content)) => {
                     if let Some(event) = status(&manager, &content).await {
@@ -321,7 +379,10 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                     // What kind of message came, never who or what: for finding out why one
                     // does not show.
                     let shown = match &content.body {
-                        ContentBody::CallMessage(call) => ringing.hear(&manager, &content, call).await,
+                        ContentBody::CallMessage(call) => {
+                            phone.received(&manager, &content, call).await;
+                            ringing.hear(&manager, &content, call).await
+                        }
                         _ => describe(&manager, &content, &mut files).await,
                     };
                     eprintln!("merel-signal: received {}, {}", kind(&content.body), if shown.is_some() { "shown" } else { "not shown" });
@@ -407,6 +468,26 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                                 emit(&Event::Sent { thread, timestamp });
                             }
                             Err(e) => emit(&Event::Error { message: format!("{e:#}") }),
+                        }
+                    }
+                    Ok(Command::Call { thread }) => {
+                        if let Err(e) = phone.call(&manager, &thread).await {
+                            emit(&Event::Error { message: format!("{e:#}") });
+                        }
+                    }
+                    Ok(Command::Accept { call_id }) => {
+                        if let Err(e) = phone.accept(call_id).await {
+                            emit(&Event::Error { message: format!("{e:#}") });
+                        }
+                    }
+                    Ok(Command::HangUp) => {
+                        if let Err(e) = phone.hang_up().await {
+                            emit(&Event::Error { message: format!("{e:#}") });
+                        }
+                    }
+                    Ok(Command::Mute { on }) => {
+                        if let Err(e) = phone.mute(on).await {
+                            emit(&Event::Error { message: format!("{e:#}") });
                         }
                     }
                     Err(e) => emit(&Event::Error { message: format!("unknown command: {e}") }),
@@ -632,6 +713,13 @@ async fn logged_call<S: Store>(manager: &Manager<S, Registered>, content: &Conte
 /// Calls ringing now, by Signal's id of the call: who calls, what kind, and when it started.
 #[derive(Default)]
 struct Ringing(HashMap<u64, (ServiceId, CallKind, u64)>);
+
+impl Ringing {
+    /// Merel itself took the call: how it ends is Merel's to log.
+    fn taken(&mut self, call_id: u64) {
+        self.0.remove(&call_id);
+    }
+}
 
 impl Ringing {
     /// What the signalling of a call says for Merel: someone calls, or how their call ended.

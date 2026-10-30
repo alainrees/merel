@@ -39,13 +39,18 @@ jobs:
         with:
           components: clippy, rustfmt
       # The Signal libraries compile their protocol buffers at build time.
+      # RingRTC (calls) plays sound through PulseAudio on Linux.
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libpulse-dev
       - if: runner.os == 'macOS'
-        run: brew install protobuf
+        # coreutils: RingRTC's build scripts use grealpath.
+        run: brew install protobuf coreutils
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/merel-signal
       - run: cargo fmt --check
       - run: cargo clippy --locked -- -D warnings
       - run: cargo build --locked
+      # With calls: RingRTC on the WebRTC Signal builds for its desktop app.
+      - run: cargo clippy --locked --all-targets --features calls-prebuilt -- -D warnings
+      - run: cargo test --locked --features calls-prebuilt
