@@ -470,7 +470,8 @@ mod tests {
         assert_eq!(s.chat_text("m2"), None, "not fetched yet");
         assert!(s.chat_is_mine("m2") && !s.chat_is_mine("m1"));
         s.selected_folder = Some("in".into());
-        assert!(s.visible_messages().iter().all(|m| m.chat.is_none()), "chat stays out of the mail list");
+        // Chat went by mail reads as mail again: the chat module is Signal's alone.
+        assert!(s.visible_messages().iter().any(|m| m.id == "m1"), "chat by mail shows as mail");
         assert!(s.visible_messages().iter().any(|m| m.id == "m5"));
     }
 
