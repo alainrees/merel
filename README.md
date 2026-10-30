@@ -44,7 +44,8 @@ two minutes (calendar, contacts and tasks every five), a notice counts new unrea
 the window asks for attention, and its title shows the unread mail in the inboxes of every account
 together ("Merel (3)"), so the count is visible in the dock, taskbar or window switcher. As in Outlook,
 that count also stands in red on the app icon (the Dock on macOS, the launcher on Linux desktops that show
-one), and while Merel is in the background the computer's own notification announces new mail and due
+one). Inside Merel the module icons on the left carry a count of their own, as Signal and Outlook show it:
+the unread mail on Mail, the unread chat messages on Chat and the tasks due today or overdue on Tasks. While Merel is in the background the computer's own notification announces new mail and due
 reminders; a click on one opens the message, appointment or task. "Bestand" > "Meldingen" switches each of
 these on or off; the notification names no sender, subject or title unless that is switched on there too,
 so nothing is read off a locked screen. On macOS the red window button closes the window but not Merel, as in
