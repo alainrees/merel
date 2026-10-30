@@ -60,6 +60,7 @@ pub mod unsubscribe;
 pub mod updates;
 pub mod vcard;
 pub mod view;
+mod voice;
 pub mod welcome;
 
 use crate::i18n::tr;
@@ -4084,6 +4085,34 @@ mod tests {
         h.get_by_label("Reageren").click();
         h.run();
         assert!(h.query_by_label("😮").is_some(), "the reactions are open");
+    }
+
+    #[test]
+    fn a_voice_message_shows_its_length_and_the_microphone_takes_the_send_buttons_place() {
+        let mut h = harness();
+        with_a_chat(h.state_mut());
+        h.state_mut().engine.session.accounts.iter_mut().filter(|a| a.id == "a1").for_each(|a| a.protocol = merel_model::Protocol::Signal);
+        let rate = 16_000;
+        let clip = merel_voice::Clip { samples: (0..rate * 3).map(|n| (n as f32 / 9.0).sin() * 0.3).collect::<Vec<_>>().into(), rate };
+        let bytes = merel_voice::mp3(&clip).unwrap();
+        let s = &mut h.state_mut().engine.session;
+        s.messages.iter_mut().filter(|m| m.id == "a1/INBOX#1").for_each(|m| m.chat.as_mut().unwrap().voice = true);
+        let body = s.bodies.get_mut("a1/INBOX#1").unwrap();
+        body.text = String::new();
+        body.attachments = vec![merel_mime::Attachment { name: "spraakbericht.mp3".into(), mime: "audio/mpeg".into(), size: bytes.len(), bytes: bytes.into() }];
+        h.state_mut().module = Module::Chat;
+        h.state_mut().chat.selected = Some(merel_engine::chat::person_chat_id("a1", "sanne@example.org"));
+        h.run();
+        h.get_by_label("Spraakbericht afspelen");
+        h.get_by_label("0:03");
+        h.get_by_label("Spraakbericht, 0:00 / 0:03");
+        // Nothing typed: the microphone; something typed: the send button.
+        assert!(h.query_by_label("Verzenden").is_none());
+        h.get_by_label("Spraakbericht opnemen");
+        h.state_mut().chat.input = "Hoi".into();
+        h.run();
+        assert!(h.query_by_label("Spraakbericht opnemen").is_none());
+        h.get_by_label("Verzenden");
     }
 
     #[test]

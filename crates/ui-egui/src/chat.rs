@@ -51,6 +51,10 @@ pub struct State {
     pub editing: Option<String>,
     /// The message the window to delete it asks about (Signal).
     pub deleting: Option<String>,
+    /// The voice messages heard and the one playing (Signal).
+    pub voice: crate::voice::Player,
+    /// A voice message being recorded (Signal).
+    pub recording: Option<merel_voice::Recording>,
     pub new: Option<NewChat>,
     /// Why the last message did not go out, or chat could not be turned on.
     pub error: Option<String>,
@@ -173,6 +177,40 @@ impl MailApp {
                 self.chat.input.clear();
                 self.chat.replying = None;
                 self.chat.files.clear();
+                self.chat.error = None;
+            }
+            Err(e) => self.chat.error = Some(e),
+        }
+    }
+
+    /// Stops recording and sends what was said as a voice message, as Signal does: MP3,
+    /// which every Signal app plays. Under half a second is a slip and goes nowhere.
+    fn send_voice(&mut self) {
+        let Some(recording) = self.chat.recording.take() else { return };
+        let clip = recording.finish();
+        let Some(chat) = self.chat.selected.as_deref().and_then(|id| self.chat_by_id(id)) else { return };
+        if clip.duration() < std::time::Duration::from_millis(500) {
+            return;
+        }
+        let bytes = match merel_voice::mp3(&clip) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                self.chat.error = Some(e);
+                return;
+            }
+        };
+        let mut draft = self.engine.session.chat_reply(&chat, "");
+        draft.attachments = vec![merel_model::DraftAttachment::new(&format!("{}.mp3", tr("chat-voice-file")), bytes)];
+        if let Some(tag) = draft.chat.as_mut() {
+            tag.voice = true;
+            if let Some(id) = self.chat.replying.as_deref() {
+                tag.quote = self.engine.session.chat_quote(id);
+            }
+        }
+        match self.engine.send_or_invite(&chat.account_id, draft) {
+            Ok(id) => {
+                self.chat.sending = id;
+                self.chat.replying = None;
                 self.chat.error = None;
             }
             Err(e) => self.chat.error = Some(e),
@@ -606,7 +644,7 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                         Some(Clicked::Reply) => reply = Some(id.clone()),
                         Some(Clicked::Picture(n)) => picture = Some((id.clone(), n)),
                         Some(Clicked::Save(n)) => save = Some((id.clone(), n)),
-                        Some(Clicked::Listen(n)) => listen = Some((id.clone(), n)),
+                        Some(Clicked::Voice(n, ask)) => listen = Some((id.clone(), n, ask)),
                         Some(Clicked::Edit) => edit = Some(id.clone()),
                         Some(Clicked::Delete) => delete = Some(id.clone()),
                         None => {}
@@ -630,9 +668,12 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
             if let Some(a) = save.as_ref().and_then(|p| file(app, p)) {
                 app.save_attachment(&a);
             }
-            if let Some(a) = listen.as_ref().and_then(|p| file(app, p)) {
-                app.chat.error = crate::attachments::open_in_app(&a).err();
+            if let Some((id, n, ask)) = listen
+                && let Some(a) = file(app, &(id.clone(), n))
+            {
+                app.chat.error = app.chat.voice.ask(&id, n, &a, ask).err();
             }
+            app.chat.voice.tick(ui.ctx());
             if let Some(id) = edit {
                 app.chat.replying = None;
                 app.chat.files.clear();
@@ -717,8 +758,8 @@ enum Clicked {
     Picture(usize),
     /// Save attachment `n` of the message under Downloads.
     Save(usize),
-    /// Listen to the voice message that is attachment `n`.
-    Listen(usize),
+    /// Play, pause or jump in the voice message that is attachment `n`.
+    Voice(usize, crate::voice::Ask),
     /// Change the text of one's own message.
     Edit,
     /// Ask how to delete the message.
@@ -826,7 +867,7 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                                 text_clicks = Some(crate::emoji::label(ui, &text, 14.0, t.text));
                             }
                             let voice = m.chat.as_ref().is_some_and(|c| c.voice);
-                            files_in_bubble(ui, t, id, files, voice, &mut accept);
+                            files_in_bubble(ui, t, &app.chat.voice, id, files, voice, &mut accept);
                         }
                     };
                     // A quote goes above the text and files under it; without either the text
@@ -920,10 +961,20 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
 
 /// The files of a message: pictures small, to open big with a click, as in Signal; other
 /// files as a line with their name and size, to save with a click.
-fn files_in_bubble(ui: &mut Ui, t: &Tokens, id: &str, files: &[merel_mime::Attachment], voice: bool, clicked: &mut Option<Clicked>) {
+fn files_in_bubble(
+    ui: &mut Ui,
+    t: &Tokens,
+    player: &crate::voice::Player,
+    id: &str,
+    files: &[merel_mime::Attachment],
+    voice: bool,
+    clicked: &mut Option<Clicked>,
+) {
     for (n, a) in files.iter().enumerate() {
         if voice && a.mime.starts_with("audio/") {
-            voice_row(ui, t, a, clicked, n);
+            if let Some(ask) = crate::voice::row(ui, t, player, id, n, a) {
+                *clicked = Some(Clicked::Voice(n, ask));
+            }
         } else if crate::attachments::previewable(a) {
             // Sized from the picture's own header: the bubble's row has no height to fit it in.
             let (w, h) = image::ImageReader::new(std::io::Cursor::new(&a.bytes[..]))
@@ -949,22 +1000,6 @@ fn files_in_bubble(ui: &mut Ui, t: &Tokens, id: &str, files: &[merel_mime::Attac
             }
         }
     }
-}
-
-/// A voice message, as Signal shows it: a round play button and what it is.
-fn voice_row(ui: &mut Ui, t: &Tokens, a: &merel_mime::Attachment, clicked: &mut Option<Clicked>, n: usize) {
-    ui.horizontal(|ui| {
-        let (rect, r) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
-        ui.painter().circle_filled(rect.center(), 16.0, t.accent);
-        Icon::Play.image(16.0, t.on_accent).paint_at(ui, egui::Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
-        let label = tr("chat-voice-play");
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone()));
-        if r.on_hover_text(label).clicked() {
-            *clicked = Some(Clicked::Listen(n));
-        }
-        ui.add(Icon::Mic.image(14.0, t.text_dim));
-        ui.label(RichText::new(format!("{}  ({})", tr("chat-voice"), crate::size_text(a.size))).size(13.0).color(t.text));
-    });
 }
 
 /// The files picked to go with the next message, each with a cross to leave it out.
@@ -1265,7 +1300,12 @@ fn composer(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
     ui.add_space(6.0);
     let mut send = false;
     let mut pick = false;
+    let mut record = false;
     let signal = app.engine.is_signal_account(&chat.account_id);
+    if app.chat.recording.is_some() {
+        recording_bar(app, ui, t);
+        return;
+    }
     egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.0, t.card_border)).corner_radius(10).inner_margin(Margin::symmetric(12, 6)).show(
         ui,
         |ui| {
@@ -1290,8 +1330,13 @@ fn composer(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                     pick = r.on_hover_text(tr("chat-attach")).clicked();
                 }
                 let ready = !app.chat.input.trim().is_empty() || !app.chat.files.is_empty();
-                let clicked = ui.add_enabled_ui(ready, |ui| send_button(ui, t)).inner.clicked();
-                send = (enter || clicked) && ready;
+                // With nothing typed, Signal's microphone takes the send button's place.
+                if signal && !ready && app.chat.editing.is_none() {
+                    record = mic_button(ui, t).clicked();
+                } else {
+                    let clicked = ui.add_enabled_ui(ready, |ui| send_button(ui, t)).inner.clicked();
+                    send = (enter || clicked) && ready;
+                }
             });
         },
     );
@@ -1303,6 +1348,70 @@ fn composer(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
         app.send_in_chat();
         ui.memory_mut(|m| m.request_focus(egui::Id::new(INPUT)));
     }
+    if record {
+        app.chat.voice.stop();
+        match merel_voice::record() {
+            Ok(r) => {
+                app.chat.recording = Some(r);
+                app.chat.error = None;
+            }
+            Err(e) => app.chat.error = Some(tr_args("chat-voice-no-mic", &[("error", e.into())])),
+        }
+    }
+}
+
+/// While a voice message is recorded: a red dot, the time, how loud it is, and buttons to
+/// throw it away or send it.
+fn recording_bar(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let Some(recording) = &app.chat.recording else { return };
+    let elapsed = recording.elapsed();
+    let level = recording.level();
+    let mut cancel = false;
+    let mut send = false;
+    egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.0, t.card_border)).corner_radius(10).inner_margin(Margin::symmetric(12, 6)).show(
+        ui,
+        |ui| {
+            ui.allocate_ui_with_layout(vec2(ui.available_width(), 36.0), Layout::left_to_right(Align::Center), |ui| {
+                let r = ui.add(egui::Button::image(Icon::X.image(18.0, t.text_dim)).frame(false).min_size(vec2(30.0, 30.0)));
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-voice-cancel")));
+                cancel = r.on_hover_text(tr("chat-voice-cancel")).clicked();
+                ui.add_space(6.0);
+                // The dot blinks, as on a recorder.
+                let (dot, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                if elapsed.as_millis() % 1000 < 600 {
+                    ui.painter().circle_filled(dot.center(), 6.0, t.flag);
+                }
+                ui.add_space(6.0);
+                let s = elapsed.as_secs();
+                let time = format!("{}:{:02}", s / 60, s % 60);
+                ui.label(RichText::new(format!("{}  {time}", tr("chat-voice-recording"))).size(14.0).color(t.text));
+                ui.add_space(10.0);
+                // How loud: a bar that grows, so one sees the microphone hears.
+                let width = (ui.available_width() - 50.0).clamp(40.0, 240.0);
+                let (bar, _) = ui.allocate_exact_size(vec2(width, 6.0), Sense::hover());
+                ui.painter().rect_filled(bar, 3.0, t.card_border);
+                let loud = egui::Rect::from_min_size(bar.min, vec2(bar.width() * level.sqrt().min(1.0), bar.height()));
+                ui.painter().rect_filled(loud, 3.0, t.accent);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| send = send_button(ui, t).clicked());
+            });
+        },
+    );
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+    if cancel {
+        app.chat.recording = None;
+    } else if send || elapsed >= merel_voice::MAX_LENGTH {
+        app.send_voice();
+    }
+}
+
+/// The microphone button: records a voice message.
+fn mic_button(ui: &mut Ui, t: &Tokens) -> egui::Response {
+    let (rect, r) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::click());
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-voice-record")));
+    let fill = if r.hovered() { t.accent.gamma_multiply(0.9) } else { t.accent };
+    ui.painter().rect_filled(rect, 8.0, fill);
+    Icon::Mic.image(18.0, t.on_accent).paint_at(ui, egui::Rect::from_center_size(rect.center(), vec2(18.0, 18.0)));
+    r.on_hover_text(tr("chat-voice-record"))
 }
 
 /// The emoji most used in chats, for the button next to the line to write in.

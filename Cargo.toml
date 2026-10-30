@@ -36,6 +36,7 @@ merel-sign = { path = "crates/sign" }
 merel-notify = { path = "crates/notify" }
 merel-i18n = { path = "crates/i18n" }
 merel-call = { path = "crates/call" }
+merel-voice = { path = "crates/voice" }
 merel-mobile = { path = "crates/mobile" }
 merel-search = { path = "crates/search" }
 merel-extract = { path = "crates/extract" }

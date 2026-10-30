@@ -138,6 +138,9 @@ fn build_message(from: &Address, draft: &Draft, keep_bcc: bool) -> Result<Messag
         if let Some(of) = &chat.delete_of {
             b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Merel-Delete"), of.clone()));
         }
+        if chat.voice {
+            b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Merel-Voice"), "yes".into()));
+        }
         // A step of setting up a meeting; the engine only sends it encrypted, and the
         // encryption keeps these headers inside.
         if let Some(call) = &chat.call {
