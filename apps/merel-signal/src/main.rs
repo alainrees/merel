@@ -422,6 +422,9 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
     let mut ringing = Ringing::default();
     let (mut phone, mut notes) = Phone::start();
     let mut calls_open = true;
+    // Signal on the phone knows which of its contacts are on Signal; a linked device asks it
+    // for that list, as Signal Desktop does, once the waiting messages are in.
+    let mut contacts_asked = false;
     loop {
         tokio::select! {
             note = notes.recv(), if calls_open => match note {
@@ -440,6 +443,12 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
             received = messages.next() => match received {
                 Some(Received::QueueEmpty) => {
                     eprintln!("merel-signal: all waiting messages are in");
+                    if !contacts_asked {
+                        contacts_asked = true;
+                        if let Err(e) = sending.request_contacts().await {
+                            eprintln!("merel-signal: could not ask the phone for its contacts: {e}");
+                        }
+                    }
                     emit(&Event::Contacts { people: contacts(&manager).await });
                     emit(&Event::Synced { calls: phone.ready() })
                 }
