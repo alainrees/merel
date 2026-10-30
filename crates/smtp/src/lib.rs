@@ -132,6 +132,12 @@ fn build_message(from: &Address, draft: &Draft, keep_bcc: bool) -> Result<Messag
         if let Some(to) = &chat.reaction_to {
             b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Merel-Reaction"), to.clone()));
         }
+        if let Some(of) = &chat.edit_of {
+            b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Merel-Edit"), of.clone()));
+        }
+        if let Some(of) = &chat.delete_of {
+            b = b.raw_header(HeaderValue::new(HeaderName::new_from_ascii_str("Merel-Delete"), of.clone()));
+        }
         // A step of setting up a meeting; the engine only sends it encrypted, and the
         // encryption keeps these headers inside.
         if let Some(call) = &chat.call {

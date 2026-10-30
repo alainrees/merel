@@ -23,6 +23,9 @@ pub const SIGNAL_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 const SIGNAL_BODIES: usize = 50;
 /// Most bytes of files one Signal message may carry, as Signal allows.
 const MAX_SIGNAL_FILES: usize = 100 * 1024 * 1024;
+/// How long after sending a Signal message it may be changed or deleted for everyone, in
+/// seconds: a day, as Signal allows.
+const CHANGE_FOR: i64 = 24 * 60 * 60;
 /// How the phone lists Merel among its linked devices.
 const DEVICE_NAME: &str = "Merel";
 
@@ -194,6 +197,85 @@ impl Engine {
         }
         self.session.send(&account_id, draft);
         Ok(())
+    }
+
+    /// Whether the Signal message `message_id` is one's own and may still be changed or deleted
+    /// for everyone: Signal allows it for a day.
+    pub fn signal_can_change(&self, message_id: &str) -> bool {
+        let Some(m) = self.session.message(message_id) else { return false };
+        let signal = self.session.folder(&m.folder_id).is_some_and(|f| self.is_signal_account(&f.account_id));
+        let tag = m.chat.as_ref();
+        let age = chrono::Utc::now().timestamp() - m.date;
+        signal && self.session.chat_is_mine(message_id) && !tag.is_some_and(|c| c.deleted) && age < CHANGE_FOR
+    }
+
+    /// Replaces the text of one's own Signal message `message_id`, for everyone in the chat, as
+    /// Signal does. It shows at once; the next listing confirms it.
+    pub fn signal_edit(&mut self, message_id: &str, text: &str) -> Result<(), String> {
+        let text = text.trim_end();
+        if text.trim().is_empty() {
+            return Err(merel_i18n::tr("chat-type-first"));
+        }
+        let draft = self.change_draft(message_id, text, false)?;
+        let (account_id, draft) = draft;
+        if let Some(body) = self.session.bodies.get_mut(message_id) {
+            body.text = text.to_string();
+        }
+        if let Some(chat) = self.session.messages.iter_mut().find(|x| x.id == message_id).and_then(|x| x.chat.as_mut()) {
+            chat.edited = true;
+        }
+        self.session.send(&account_id, draft);
+        self.dispatch();
+        Ok(())
+    }
+
+    /// Deletes the Signal message `message_id`: for everyone (one's own, within a day), as
+    /// Signal does, leaving a line in its place; or only here.
+    pub fn signal_delete(&mut self, message_id: &str, everyone: bool) -> Result<(), String> {
+        if !everyone {
+            crate::commands::delete_message(&mut self.session, message_id).map_err(|_| merel_i18n::tr("signal-unknown"))?;
+            self.dispatch();
+            return Ok(());
+        }
+        let (account_id, draft) = self.change_draft(message_id, "", true)?;
+        if let Some(body) = self.session.bodies.get_mut(message_id) {
+            body.text = merel_i18n::tr("signal-deleted");
+            body.attachments.clear();
+        }
+        if let Some(chat) = self.session.messages.iter_mut().find(|x| x.id == message_id).and_then(|x| x.chat.as_mut()) {
+            chat.deleted = true;
+            chat.reactions.clear();
+            chat.quote = None;
+        }
+        self.session.send(&account_id, draft);
+        self.dispatch();
+        Ok(())
+    }
+
+    /// What goes to the Signal program to change or delete message `message_id`.
+    fn change_draft(&self, message_id: &str, text: &str, delete: bool) -> Result<(String, Draft), String> {
+        if !self.signal_can_change(message_id) {
+            return Err(merel_i18n::tr("signal-cannot"));
+        }
+        let m = self.session.message(message_id).ok_or_else(|| merel_i18n::tr("signal-unknown"))?;
+        let account_id = self.session.folder(&m.folder_id).map(|f| f.account_id.clone()).ok_or_else(|| merel_i18n::tr("signal-unknown"))?;
+        let target = m.message_id.clone().ok_or_else(|| merel_i18n::tr("signal-unknown"))?;
+        let tag = m.chat.clone().unwrap_or_default();
+        let draft = Draft {
+            to: m.to.clone(),
+            body: text.to_string(),
+            chat: Some(merel_model::ChatTag {
+                group_id: tag.group_id.clone(),
+                group_name: tag.group_name.clone(),
+                edit_of: (!delete).then(|| target.clone()),
+                delete_of: delete.then_some(target),
+                ..Default::default()
+            }),
+            encrypt: false,
+            sign: Some(false),
+            ..Draft::default()
+        };
+        Ok((account_id, draft))
     }
 
     /// Who is typing in `chat` now, by name, when it is a Signal chat between two people.
