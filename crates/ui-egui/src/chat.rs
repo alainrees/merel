@@ -23,8 +23,6 @@ pub(crate) const SEARCH_BOX: &str = "chat_search_box";
 pub(crate) const INPUT: &str = "chat-input";
 /// The field for people in a new chat: its widget id.
 pub(crate) const PEOPLE: &str = "chat-people";
-/// The most suggestions shown under the people field.
-const MAX_SUGGESTIONS: usize = 6;
 
 /// Which chats the list shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -58,6 +56,9 @@ pub struct State {
     /// A voice message being recorded (Signal).
     pub recording: Option<merel_voice::Recording>,
     pub new: Option<NewChat>,
+    /// The chat just picked in the new-chat window, before its first message makes it a
+    /// real one.
+    pub fresh: Option<Chat>,
     /// Why the last message did not go out, or chat could not be turned on.
     pub error: Option<String>,
     /// The message on its way, by outbox id.
@@ -73,20 +74,13 @@ pub struct State {
     pub accept_note: Option<Result<String, String>>,
 }
 
-/// The window for a new chat.
+/// The window for a new chat: the Signal contacts to pick from, as Signal's pencil shows them.
 #[derive(Default)]
 pub struct NewChat {
     /// The account to chat from.
     pub account_id: String,
-    /// The people picked, as chips.
-    pub people: Vec<Address>,
-    /// What is typed after the chips: part of a name or an address.
+    /// What is typed to find someone: part of a name or a number.
     pub typed: String,
-    /// Outlook's "Groepschat": the chat gets a name and everyone sees everyone.
-    pub group: bool,
-    pub name: String,
-    pub text: String,
-    pub error: Option<String>,
 }
 
 impl MailApp {
@@ -102,22 +96,16 @@ impl MailApp {
     pub fn chat_with(&mut self, person: Address) {
         self.module = crate::Module::Chat;
         self.new_chat();
-        // Their Signal contact, by name; else the name stays typed to look for them.
+        // Their Signal contact, by name; else the window opens with the name typed to look
+        // for them.
         let account_id = self.chat.new.as_ref().map(|f| f.account_id.clone()).unwrap_or_default();
         let name = person.display().to_lowercase();
-        let known = self.engine.signal_contacts(&account_id).into_iter().map(|(a, _)| a).find(|a| a.display().to_lowercase() == name);
-        let existing = known.as_ref().and_then(|k| {
-            self.engine.session.chats().into_iter().find(|c| !c.is_group() && c.people.iter().any(|p| p.email().eq_ignore_ascii_case(k.email())))
-        });
-        if let Some(chat) = existing {
-            self.chat.new = None;
-            self.open_chat(&chat.id);
-            return;
-        }
-        if let Some(form) = self.chat.new.as_mut() {
-            match known {
-                Some(a) => form.people.push(a),
-                None => form.typed = person.display().to_string(),
+        match self.engine.signal_contacts(&account_id).into_iter().map(|(a, _)| a).find(|a| a.display().to_lowercase() == name) {
+            Some(known) => self.pick(&account_id, known),
+            None => {
+                if let Some(form) = self.chat.new.as_mut() {
+                    form.typed = person.display().to_string();
+                }
             }
         }
     }
@@ -140,12 +128,35 @@ impl MailApp {
         self.chat.selected = Some(id.to_string());
         self.chat.new = None;
         self.chat.error = None;
+        if self.chat.fresh.as_ref().is_some_and(|c| c.id != id) {
+            self.chat.fresh = None;
+        }
         self.engine.open_chat(id);
     }
 
     /// The chat `id`: one with messages, or one whose first message waits for a key.
     fn chat_by_id(&self, id: &str) -> Option<Chat> {
-        self.engine.session.chat(id)
+        self.engine.session.chat(id).or_else(|| self.chat.fresh.clone().filter(|c| c.id == id))
+    }
+
+    /// Opens the chat with the Signal contact `person` on `account_id`, as Signal does when one
+    /// is picked: the one going, else an empty one to type the first message in.
+    pub(crate) fn pick(&mut self, account_id: &str, person: Address) {
+        let id = engine_chat::person_chat_id(account_id, person.email());
+        if self.engine.session.chat(&id).is_none() {
+            self.chat.fresh = Some(Chat {
+                id: id.clone(),
+                account_id: account_id.to_string(),
+                title: person.display().to_string(),
+                people: vec![person],
+                group: None,
+                messages: Vec::new(),
+                last: 0,
+                unread: 0,
+            });
+        }
+        self.chat.input.clear();
+        self.open_chat(&id);
     }
 
     /// Leaves changing a message; what was typed for it goes.
@@ -224,72 +235,6 @@ impl MailApp {
             Err(e) => self.chat.error = Some(e),
         }
     }
-
-    /// Starts the chat the window describes: sends the first message, or holds it while an
-    /// invitation goes to whoever has no key yet.
-    fn start_chat(&mut self) {
-        let contacts = self.chat.new.as_ref().map(|f| self.engine.signal_contacts(&f.account_id)).unwrap_or_default();
-        let Some(form) = self.chat.new.as_mut() else { return };
-        if !commit_typed(form, &contacts) {
-            return;
-        }
-        if form.people.len() != 1 {
-            form.error = Some(tr(if form.people.is_empty() { "chat-pick-someone" } else { "signal-one-person" }));
-            return;
-        }
-        let draft = match engine_chat::new_chat(&form.people, "", &form.text) {
-            Ok(d) => d,
-            Err(e) => {
-                form.error = Some(e);
-                return;
-            }
-        };
-        let account_id = form.account_id.clone();
-        let id = engine_chat::person_chat_id(&account_id, draft.to.first().map(Address::email).unwrap_or(""));
-        match self.engine.send_or_invite(&account_id, draft) {
-            Ok(sent) => {
-                self.chat.sending = sent;
-                self.chat.new = None;
-                self.chat.selected = Some(id);
-            }
-            Err(e) => {
-                if let Some(form) = self.chat.new.as_mut() {
-                    form.error = Some(e);
-                }
-            }
-        }
-    }
-}
-
-/// Turns what is typed in the people field into a chip, when it names one of the Signal
-/// `contacts` (by name or number); false (with the reason in the form) when it does not.
-fn commit_typed(form: &mut NewChat, contacts: &[(Address, String)]) -> bool {
-    let typed = form.typed.trim().trim_end_matches([',', ';']).trim().to_lowercase();
-    if typed.is_empty() {
-        return true;
-    }
-    let digits = |s: &str| s.chars().filter(char::is_ascii_digit).collect::<String>();
-    let found = contacts.iter().find(|(a, number)| {
-        a.display().to_lowercase() == typed || (!number.is_empty() && digits(number) == digits(&typed) && !digits(&typed).is_empty())
-    });
-    match found {
-        Some((a, _)) => {
-            add_person(form, a.clone());
-            form.typed.clear();
-            true
-        }
-        None => {
-            form.error = Some(tr("chat-not-a-contact"));
-            false
-        }
-    }
-}
-
-fn add_person(form: &mut NewChat, person: Address) {
-    if !form.people.iter().any(|p| p.email().eq_ignore_ascii_case(person.email())) {
-        form.people.push(person);
-    }
-    form.error = None;
 }
 
 /// The messages of `chat` that wait for a key.
@@ -1499,48 +1444,7 @@ fn t_border(ui: &Ui) -> egui::Color32 {
     ui.visuals().widgets.noninteractive.bg_stroke.color
 }
 
-/// The Signal contacts that match what is typed, by name or number, leaving out who is
-/// picked already; the first few when nothing is typed yet.
-fn suggestions(app: &MailApp, form: &NewChat) -> Vec<(Address, String)> {
-    if !form.people.is_empty() {
-        return Vec::new();
-    }
-    let needle = form.typed.trim().to_lowercase();
-    let digits: String = needle.chars().filter(char::is_ascii_digit).collect();
-    app.engine
-        .signal_contacts(&form.account_id)
-        .into_iter()
-        .filter(|(a, number)| {
-            needle.is_empty()
-                || a.display().to_lowercase().contains(&needle)
-                || (!digits.is_empty() && number.chars().filter(char::is_ascii_digit).collect::<String>().contains(&digits))
-        })
-        .take(MAX_SUGGESTIONS)
-        .collect()
-}
-
-/// A person picked for the chat: avatar, name and a cross to take them out again. True when
-/// the cross is clicked.
-fn person_chip(ui: &mut Ui, t: &Tokens, person: &Address) -> bool {
-    let mut remove = false;
-    egui::Frame::new().fill(t.checked).corner_radius(14).inner_margin(Margin { left: 3, right: 4, top: 2, bottom: 2 }).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        let (rect, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
-        helder::avatar(ui.painter(), rect.center(), 11.0, person.display(), person.email());
-        ui.label(RichText::new(person.display()).size(13.5).color(t.accent_text));
-        let label = tr_args("chat-remove-person", &[("name", person.display().into())]);
-        let (rect, r) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
-        if r.hovered() {
-            ui.painter().circle_filled(rect.center(), 9.0, t.hover);
-        }
-        Icon::X.image(12.0, t.accent_text).paint_at(ui, egui::Rect::from_center_size(rect.center(), vec2(12.0, 12.0)));
-        remove = r.on_hover_text(label).clicked();
-    });
-    remove
-}
-
-/// One suggestion under the people field: avatar, name and number. True when clicked.
+/// One contact in the new-chat window: avatar, name and number. True when clicked.
 fn suggestion_row(ui: &mut Ui, t: &Tokens, person: &Address, number: &str) -> bool {
     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::click());
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, person.display()));
@@ -1556,9 +1460,23 @@ fn suggestion_row(ui: &mut Ui, t: &Tokens, person: &Address, number: &str) -> bo
     r.clicked()
 }
 
-/// The new-chat window: the command bar (Starten, the Signal account when there are more,
-/// Annuleren), the person as a chip with suggestions from the Signal contacts, and the first
-/// message.
+/// The `contacts` that match what is typed, by name or number: all of them when nothing is.
+fn matching(contacts: Vec<(Address, String)>, typed: &str) -> Vec<(Address, String)> {
+    let needle = typed.trim().to_lowercase();
+    // 06… finds +31 6…: the zero before the area is left out.
+    let digits: String = needle.chars().filter(char::is_ascii_digit).collect::<String>().trim_start_matches('0').to_string();
+    contacts
+        .into_iter()
+        .filter(|(a, number)| {
+            needle.is_empty()
+                || a.display().to_lowercase().contains(&needle)
+                || (!digits.is_empty() && number.chars().filter(char::is_ascii_digit).collect::<String>().contains(&digits))
+        })
+        .collect()
+}
+
+/// The new-chat window, as Signal's pencil: a field to find someone, the Signal account when
+/// there are more, and the contacts on Signal. A click opens the chat to type in.
 fn new_chat_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let accounts: Vec<(String, String)> = app
         .engine
@@ -1568,142 +1486,60 @@ fn new_chat_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         .filter(|a| merel_engine::signal::is_signal(a))
         .map(|a| (a.id.clone(), if a.name.trim().is_empty() { a.address.display().to_string() } else { a.name.clone() }))
         .collect();
-    let suggested = app.chat.new.as_ref().map(|f| suggestions(app, f)).unwrap_or_default();
-    let contacts = app.chat.new.as_ref().map(|f| app.engine.signal_contacts(&f.account_id)).unwrap_or_default();
-    let mut start = false;
+    let Some(form) = app.chat.new.as_ref() else { return };
+    let account_id = form.account_id.clone();
+    let shown = matching(app.engine.signal_contacts(&account_id), &form.typed);
+    let mut picked = None;
     let mut cancel = false;
     let Some(form) = app.chat.new.as_mut() else { return };
-    helder::quiet(ui, t, |ui| {
-        ui.horizontal(|ui| {
-            let can_start = !form.account_id.is_empty();
-            start = ui.add_enabled_ui(can_start, |ui| helder::primary_button(ui, t, Icon::Send, &tr("chat-start"))).inner.clicked();
-            // Which Signal account, only when there is more than one.
-            if accounts.len() > 1 {
-                helder::bar_separator(ui, t);
-                let current =
-                    accounts.iter().find(|(id, _)| *id == form.account_id).map(|(_, n)| n.clone()).unwrap_or_else(|| tr("chat-pick-account"));
-                helder::menu_button(ui, t, Some(Icon::MessagesSquare), RichText::new(current).size(14.0).color(t.text), |ui| {
-                    for (id, name) in &accounts {
-                        if ui.selectable_label(form.account_id == *id, name).clicked() {
-                            form.account_id = id.clone();
-                            form.people.clear();
-                            ui.close();
-                        }
-                    }
-                });
-            }
-            helder::trailing(ui, |ui| {
-                cancel = helder::tool_button(ui, t, Icon::X, &tr("chat-cancel")).clicked();
-            });
-        });
-    });
-    ui.add_space(8.0);
-    helder::card_frame(t).inner_margin(Margin::same(20)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        let width = (ui.available_width() - 48.0).max(200.0);
-        // The people: chips, then the field to type more in.
-        helder::icon_row(ui, t, Icon::Users, |ui| {
-            ui.vertical(|ui| {
-                ui.set_width(width);
-                let mut remove = None;
-                let mut typed_r = None;
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                    for (i, p) in form.people.iter().enumerate() {
-                        if person_chip(ui, t, p) {
-                            remove = Some(i);
-                        }
-                    }
-                    let hint = if form.people.is_empty() { tr("chat-people-hint") } else { String::new() };
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut form.typed)
-                            .id(egui::Id::new(PEOPLE))
-                            .frame(egui::Frame::NONE)
-                            .hint_text(RichText::new(hint).color(t.text_dim))
-                            .desired_width((ui.available_size_before_wrap().x - 8.0).max(160.0))
-                            .margin(Margin::symmetric(2, 6)),
-                    );
-                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tr("chat-people")));
-                    typed_r = Some(r);
-                });
-                let (line, _) = ui.allocate_exact_size(vec2(width, 1.0), Sense::hover());
-                let focused = typed_r.as_ref().is_some_and(egui::Response::has_focus);
-                ui.painter().hline(
-                    line.x_range(),
-                    line.center().y,
-                    egui::Stroke::new(if focused { 2.0 } else { 1.0 }, if focused { t.accent } else { t.card_border }),
-                );
-                if let Some(i) = remove {
-                    form.people.remove(i);
-                }
-                if let Some(r) = typed_r {
-                    let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    let comma = form.typed.ends_with([',', ';']);
-                    let backspace = r.has_focus() && form.typed.is_empty() && ui.input(|i| i.key_pressed(egui::Key::Backspace));
-                    if backspace {
-                        form.people.pop();
-                    } else if enter || comma {
-                        match suggested.first().filter(|_| !comma && !form.typed.trim().is_empty()) {
-                            Some((first, _)) => {
-                                add_person(form, first.clone());
-                                form.typed.clear();
-                            }
-                            None => {
-                                commit_typed(form, &contacts);
-                            }
-                        }
-                        ui.memory_mut(|m| m.request_focus(egui::Id::new(PEOPLE)));
-                    }
-                }
-                if !suggested.is_empty() {
-                    ui.add_space(4.0);
-                    egui::Frame::new()
-                        .fill(t.card)
-                        .stroke(egui::Stroke::new(1.0, t.card_border))
-                        .corner_radius(10)
-                        .inner_margin(Margin::same(6))
-                        .show(ui, |ui| {
-                            ui.set_width(width.min(420.0));
-                            ui.label(RichText::new(tr("chat-suggest")).size(12.0).color(t.text_dim));
-                            for (person, number) in &suggested {
-                                if suggestion_row(ui, t, person, number) {
-                                    add_person(form, person.clone());
-                                    form.typed.clear();
-                                    ui.memory_mut(|m| m.request_focus(egui::Id::new(PEOPLE)));
-                                }
-                            }
-                        });
-                }
-            });
-        });
-        ui.add_space(4.0);
-        helder::icon_row(ui, t, Icon::Notes, |ui| {
-            egui::Frame::new().fill(t.window).corner_radius(helder::CONTROL_RADIUS).inner_margin(Margin::same(10)).show(ui, |ui| {
-                let r = ui.add(
-                    egui::TextEdit::multiline(&mut form.text)
-                        .frame(egui::Frame::NONE)
-                        .hint_text(RichText::new(tr("chat-first-hint")).color(t.text_dim))
-                        .desired_width(width - 20.0)
-                        .desired_rows(6),
-                );
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tr("chat-first-hint")));
-            });
-        });
-        if let Some(e) = &form.error {
-            ui.add_space(6.0);
-            helder::icon_row(ui, t, Icon::CircleAlert, |ui| {
-                ui.label(RichText::new(e).color(t.flag));
-            });
+    ui.horizontal(|ui| {
+        ui.add(Icon::Search.image(16.0, t.text_dim));
+        let r = ui.add(
+            egui::TextEdit::singleline(&mut form.typed)
+                .id(egui::Id::new(PEOPLE))
+                .hint_text(RichText::new(tr("chat-people-hint")).color(t.text_dim))
+                .desired_width((ui.available_width() - 48.0).max(160.0)),
+        );
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tr("chat-people")));
+        if !r.has_focus() && !ui.memory(|m| m.focused().is_some()) {
+            r.request_focus();
         }
-        ui.add_space(10.0);
-        helder::icon_row(ui, t, Icon::ShieldCheck, |ui| {
-            ui.add(egui::Label::new(RichText::new(tr("chat-new-note")).size(12.5).color(t.text_dim)).wrap());
+        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && shown.len() == 1 {
+            picked = shown.first().map(|(a, _)| a.clone());
+        }
+        helder::trailing(ui, |ui| {
+            cancel = helder::tool_button(ui, t, Icon::X, &tr("chat-cancel")).clicked();
         });
     });
+    // Which Signal account, only when there is more than one.
+    if accounts.len() > 1 {
+        ui.horizontal(|ui| {
+            for (id, name) in &accounts {
+                if ui.selectable_label(form.account_id == *id, name).clicked() {
+                    form.account_id = id.clone();
+                }
+            }
+        });
+    }
+    ui.add_space(8.0);
+    if shown.is_empty() {
+        let key = if form.typed.trim().is_empty() { "chat-no-contacts" } else { "chat-not-a-contact" };
+        helder::note(ui, t, &tr(key));
+    } else {
+        ui.label(RichText::new(tr("chat-on-signal")).size(12.0).color(t.text_dim));
+        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+            for (person, number) in &shown {
+                if suggestion_row(ui, t, person, number) {
+                    picked = Some(person.clone());
+                }
+            }
+        });
+    }
     if cancel {
         app.chat.new = None;
-    } else if start {
-        app.start_chat();
+    } else if let Some(person) = picked {
+        app.pick(&account_id, person);
+        ui.memory_mut(|m| m.request_focus(egui::Id::new(INPUT)));
     }
 }
 
@@ -1739,17 +1575,14 @@ mod tests {
     }
 
     #[test]
-    fn a_typed_name_or_number_of_a_signal_contact_becomes_a_chip_and_nothing_else_does() {
+    fn the_new_chat_list_finds_contacts_by_name_or_number() {
         let sanne = Address::new(Some("Sanne"), "abc@signal.invalid").unwrap();
-        let contacts = vec![(sanne.clone(), "+31 6 12345678".to_string())];
-        let mut form = NewChat { typed: "sanne,".into(), ..NewChat::default() };
-        assert!(commit_typed(&mut form, &contacts));
-        assert_eq!(form.people, vec![sanne.clone()]);
-        form.typed = "+31612345678".into();
-        assert!(commit_typed(&mut form, &contacts));
-        assert_eq!(form.people.len(), 1, "once");
-        form.typed = "sanne@example.org".into();
-        assert!(!commit_typed(&mut form, &contacts), "an e-mail address is no Signal contact");
-        assert!(form.error.is_some());
+        let ravi = Address::new(Some("Ravi Kumar"), "def@signal.invalid").unwrap();
+        let contacts = || vec![(sanne.clone(), "+31 6 12345678".to_string()), (ravi.clone(), String::new())];
+        assert_eq!(matching(contacts(), "").len(), 2, "everyone before anything is typed");
+        assert_eq!(matching(contacts(), "sAn").into_iter().map(|(a, _)| a).collect::<Vec<_>>(), std::slice::from_ref(&sanne));
+        assert_eq!(matching(contacts(), "06 1234 5678").len(), 1, "as typed in the Netherlands");
+        assert_eq!(matching(contacts(), "612345678").len(), 1);
+        assert!(matching(contacts(), "sanne@example.org").is_empty());
     }
 }

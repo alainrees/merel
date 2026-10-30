@@ -4033,7 +4033,7 @@ mod tests {
     }
 
     #[test]
-    fn a_new_chat_picks_someone_from_the_signal_contacts() {
+    fn the_pencil_lists_the_signal_contacts_and_a_click_opens_the_chat_to_type_in() {
         let mut h = harness();
         with_a_signal_chat(h.state_mut());
         h.state_mut().module = Module::Chat;
@@ -4042,22 +4042,26 @@ mod tests {
         h.run();
         assert_eq!(h.state().chat.new.as_ref().map(|f| f.account_id.as_str()), Some("a1"));
         assert!(h.query_by_label("Groepschat").is_none(), "one person, as Signal starts a chat");
-        // Before anything is typed, the contacts show.
+        h.get_by_label("Op Signal");
+        h.state_mut().chat.new.as_mut().unwrap().typed = "iemand anders".into();
+        h.run();
+        h.get_by_label_contains("Kies iemand uit je Signal-contactpersonen");
+        h.state_mut().chat.new.as_mut().unwrap().typed = "sanne".into();
+        h.run();
         h.get_by_label("Sanne de Vries").click();
         h.run();
-        let form = h.state().chat.new.as_ref().unwrap();
-        assert_eq!(form.people.iter().map(|p| p.email()).collect::<Vec<_>>(), ["sanne@signal.invalid"]);
-        h.get_by_label("Sanne de Vries weghalen").click();
+        let id = merel_engine::chat::person_chat_id("a1", "sanne@signal.invalid");
+        assert!(h.state().chat.new.is_none(), "the window closes");
+        assert_eq!(h.state().chat.selected.as_deref(), Some(id.as_str()), "her chat opens");
+
+        // Someone without a chat yet: an empty one opens to type the first message in.
+        let ravi = merel_model::Address::new(Some("Ravi Kumar"), "ravi@signal.invalid").unwrap();
+        h.state_mut().pick("a1", ravi);
         h.run();
-        h.state_mut().chat.new.as_mut().unwrap().typed = "sanne@example.org".into();
-        h.run();
-        h.get_by_label("Starten").click();
-        h.run();
-        assert!(h.state().chat.new.as_ref().is_some_and(|f| f.error.is_some()), "an e-mail address is no Signal contact");
-        assert!(h.state().engine.session.outbox.is_empty(), "nothing went out");
-        h.get_by_label("Annuleren").click();
-        h.run();
-        assert!(h.state().chat.new.is_none());
+        let id = merel_engine::chat::person_chat_id("a1", "ravi@signal.invalid");
+        assert_eq!(h.state().chat.selected.as_deref(), Some(id.as_str()));
+        h.get_by_label("Ravi Kumar");
+        assert!(h.state().engine.session.chat(&id).is_none(), "no chat until the first message");
     }
 
     #[test]
