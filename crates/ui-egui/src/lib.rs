@@ -779,13 +779,24 @@ fn chip_menu(ui: &mut Ui, t: &Tokens, name: &str, chosen: Option<&str>, add: imp
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
 }
 
+/// A link that moves to the next line whole, never broken over two.
+fn whole_link(ui: &mut Ui, text: RichText) -> egui::Response {
+    ui.scope(|ui| {
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+        ui.link(text)
+    })
+    .inner
+}
+
 /// The chips under a search: Datum, Van and Map, each a menu that puts the search word in the
 /// box (or takes it out), so nobody has to know the words.
 /// What else the search looked for: the typed words in other languages, with the way to
 /// search only what was typed (and back).
 fn languages_strip(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let session = &mut app.engine.session;
-    let also = merel_engine::search::Query::parse(&session.search).also_searched();
+    let mut typed = merel_engine::search::Query::parse(&session.search);
+    typed.learn(&session.learned_words);
+    let also = typed.also_searched();
     if also.is_empty() {
         return;
     }
@@ -793,7 +804,7 @@ fn languages_strip(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     ui.horizontal_wrapped(|ui| {
         if session.search_exact {
             ui.label(RichText::new(tr("search-exact")).size(12.0).color(t.text_dim));
-            if ui.link(RichText::new(tr("search-also-on")).size(12.0).color(t.accent_text)).clicked() {
+            if whole_link(ui, RichText::new(tr("search-also-on")).size(12.0).color(t.accent_text)).clicked() {
                 session.search_exact = false;
             }
         } else {
@@ -804,7 +815,10 @@ fn languages_strip(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 words.push_str(", …");
             }
             ui.label(RichText::new(format!("{} {words}", tr("search-also"))).size(12.0).color(t.text_dim)).on_hover_text(also.join(", "));
-            if ui.link(RichText::new(tr("search-also-off")).size(12.0).color(t.accent_text)).on_hover_text(tr("search-also-off-hint")).clicked() {
+            if whole_link(ui, RichText::new(tr("search-also-off")).size(12.0).color(t.accent_text))
+                .on_hover_text(tr("search-also-off-hint"))
+                .clicked()
+            {
                 session.search_exact = true;
             }
         }
@@ -3831,6 +3845,21 @@ mod tests {
         h.run();
         assert!(!h.state().engine.session.search_exact);
         assert!(h.query_by_label("Re: Offerte drukwerk").is_some());
+    }
+
+    #[test]
+    fn words_learned_from_the_mail_are_searched_along_and_named() {
+        let mut h = harness();
+        h.state_mut().engine.session.search = "aannemer".into();
+        h.run();
+        // As the model would have put them in for this search.
+        h.state_mut().engine.session.learned_words.insert("aannemer".into(), vec!["klusbedrijf".into()]);
+        h.run();
+        assert!(h.query_by_label_contains("klusbedrijf").is_some(), "named under the search box");
+        h.get_by_label("Alleen wat ik typte").click();
+        h.run();
+        assert!(h.state().engine.session.search_exact);
+        assert!(h.query_by_label_contains("klusbedrijf").is_none(), "the way back is offered, not the words");
     }
 
     #[test]

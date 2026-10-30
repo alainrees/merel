@@ -510,6 +510,40 @@ impl Index {
             .collect()
     }
 
+    /// The words the mail uses most, in their folded form (lower case, no accents), most used
+    /// first: at most `limit`, each in at least `min_docs` messages and in no more than one in
+    /// `max_share` of them, which leaves out "de", "the" and "und". Only words of letters, at
+    /// least four of them (committed).
+    pub fn common_words(&self, limit: usize, min_docs: u32, max_share: u32) -> Vec<String> {
+        let searcher = self.reader.searcher();
+        let docs = searcher.num_docs();
+        let mut freq: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        for segment in searcher.segment_readers() {
+            // In a segment, a word in the subject and the text of the same message counts once.
+            let mut here: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+            for field in [self.fields.subject, self.fields.text] {
+                let Ok(inverted) = segment.inverted_index(field) else { continue };
+                let Ok(mut stream) = inverted.terms().stream() else { continue };
+                while stream.advance() {
+                    let Ok(word) = std::str::from_utf8(stream.key()) else { continue };
+                    let n = word.chars().count();
+                    if !(4..=30).contains(&n) || !word.chars().all(char::is_alphabetic) {
+                        continue;
+                    }
+                    let entry = here.entry(word.to_string()).or_default();
+                    *entry = (*entry).max(u64::from(stream.value().doc_freq));
+                }
+            }
+            for (word, n) in here {
+                *freq.entry(word).or_default() += n;
+            }
+        }
+        let most = docs / u64::from(max_share.max(1));
+        let mut words: Vec<(String, u64)> = freq.into_iter().filter(|(_, n)| *n >= u64::from(min_docs) && (docs < 20 || *n <= most)).collect();
+        words.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        words.into_iter().take(limit).map(|(w, _)| w).collect()
+    }
+
     /// The header and text the index keeps for a message (committed).
     pub fn stored_text(&self, id: &str) -> Option<(MessageHeader, String)> {
         if self.removed.contains(id) {
@@ -1054,6 +1088,27 @@ mod tests {
         i.add_header("a", &header(3, "Piet", "Invoices for October", 999_900_000)).unwrap();
         i.commit_if_due(true).unwrap();
         i
+    }
+
+    #[test]
+    fn the_words_the_mail_uses_most_come_first_folded_and_without_the_little_ones() {
+        let mut i = Index::in_memory().unwrap();
+        for n in 0..30 {
+            let text = match n {
+                0..10 => "De aannemer stuurt de factuur voor de keuken.",
+                10..12 => "De factuur volgt.",
+                _ => "Tot morgen.",
+            };
+            i.add_text("a", &header(n, "Sanne", if n == 0 { "Café" } else { "Bericht" }, 999_000_000 + i64::from(n)), text, &[]).unwrap();
+        }
+        i.commit_if_due(true).unwrap();
+        let words = i.common_words(10, 2, 2);
+        assert_eq!(words.first().map(String::as_str), Some("factuur"), "{words:?}");
+        assert!(words.contains(&"aannemer".to_string()) && words.contains(&"keuken".to_string()));
+        assert!(!words.iter().any(|w| w == "de" || w == "tot"), "too short");
+        assert!(!words.iter().any(|w| w == "bericht"), "in more than half the messages: {words:?}");
+        assert!(!words.iter().any(|w| w == "cafe"), "in one message only");
+        assert_eq!(i.common_words(1, 2, 1), ["bericht"], "a limit, and no share left out with a share of one");
     }
 
     #[test]

@@ -47,6 +47,16 @@ impl Vectors {
         }
     }
 
+    /// The vector kept for `id`, as near to the one put in as the bytes allow.
+    pub fn get(&self, id: &str) -> Option<Vec<f32>> {
+        self.map.get(id).map(|(scale, v)| v.iter().map(|x| f32::from(*x) * scale).collect())
+    }
+
+    /// The ids kept.
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.map.keys().map(String::as_str)
+    }
+
     pub fn remove(&mut self, id: &str) -> bool {
         self.map.remove(id).is_some()
     }

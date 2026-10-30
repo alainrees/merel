@@ -95,6 +95,25 @@ pub fn alike(word: &str) -> Vec<String> {
     out
 }
 
+/// A single word as the index keeps it: lower case, without accents; `None` for nothing or for
+/// more than one word.
+pub fn folded(word: &str) -> Option<String> {
+    let mut f = super::fold();
+    let mut words = tokens(&mut f, word).into_iter();
+    words.next().filter(|_| words.next().is_none()).map(|(w, _)| w)
+}
+
+/// Whether two words are one word in another form: written alike, with the same stem in one
+/// of the four languages, or one the start of the other ("factuur", "facturen", "factuurtje").
+pub fn same_word(a: &str, b: &str) -> bool {
+    let mut an = Analyzers::new();
+    let (Some(x), Some(y)) = (an.forms(a), an.forms(b)) else { return false };
+    let (short, long) = if x.folded.len() <= y.folded.len() { (&x.folded, &y.folded) } else { (&y.folded, &x.folded) };
+    x.folded == y.folded
+        || x.stems.iter().zip(&y.stems).any(|(p, q)| p.chars().count() >= SHORTEST && p == q)
+        || short.chars().count() >= 4 && long.starts_with(short.as_str())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,6 +129,13 @@ mod tests {
         assert!(alike("Rechnungen").contains(&"factuur".to_string()), "a German plural");
         assert!(alike("réunion").contains(&"vergadering".to_string()), "with an accent");
         assert!(alike("Bestätigung").contains(&"bevestiging".to_string()), "an umlaut");
+    }
+
+    #[test]
+    fn a_word_in_another_form_is_the_same_word() {
+        assert!(same_word("factuur", "facturen") && same_word("Rechnung", "rechnungen") && same_word("café", "cafe"));
+        assert!(same_word("keuken", "keukenkastje"), "one starts the other");
+        assert!(!same_word("factuur", "invoice") && !same_word("keuken", "kuche") && !same_word("de", "den"));
     }
 
     #[test]
