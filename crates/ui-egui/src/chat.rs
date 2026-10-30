@@ -766,6 +766,16 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                 ui.label(RichText::new(who).size(12.0).color(t.text_dim));
             });
         }
+        // The right-click menu takes the whole row. It goes under the buttons, links and files
+        // in it, so they still take their own clicks: egui gives a click to the widget drawn
+        // last, so it is laid down first, where the row was last frame.
+        let rect_id = egui::Id::new(("chat-bubble-rect", id));
+        let menu = (signal && (reacts || deleted))
+            .then(|| ui.data(|d| d.get_temp::<egui::Rect>(rect_id)))
+            .flatten()
+            .map(|rect| ui.interact(rect, egui::Id::new(("chat-bubble", id)), Sense::click()));
+        // The text takes its own clicks too (to select it); a right click there gives the menu.
+        let mut text_clicks = None;
         let row = ui.horizontal_top(|ui| {
             if mine && reacts {
                 react_button(ui, t, id, hovered, &mut accept);
@@ -816,7 +826,7 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                         None => {
                             let files = session.bodies.get(id).map(|b| b.attachments.as_slice()).unwrap_or_default();
                             if !text.trim().is_empty() || files.is_empty() {
-                                crate::emoji::label(ui, &text, 14.0, t.text);
+                                text_clicks = Some(crate::emoji::label(ui, &text, 14.0, t.text));
                             }
                             let voice = m.chat.as_ref().is_some_and(|c| c.voice);
                             files_in_bubble(ui, t, id, files, voice, &mut accept);
@@ -866,8 +876,20 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
         });
         if signal && (reacts || deleted) {
             let over = ui.rect_contains_pointer(row.response.rect);
-            ui.data_mut(|d| d.insert_temp(hover_id, over));
-            ui.interact(row.response.rect, egui::Id::new(("chat-bubble", id)), Sense::click()).context_menu(|ui| {
+            ui.data_mut(|d| {
+                d.insert_temp(hover_id, over);
+                d.insert_temp(rect_id, row.response.rect);
+            });
+            if menu.is_none() {
+                ui.ctx().request_repaint();
+            }
+        }
+        if let Some(menu) = menu {
+            let menu = match text_clicks {
+                Some(text) => menu.union(text),
+                None => menu,
+            };
+            menu.context_menu(|ui| {
                 if reacts && ui.add(egui::Button::image_and_text(Icon::Reply.image(16.0, t.text), tr("chat-reply"))).clicked() {
                     accept = Some(Clicked::Reply);
                     ui.close();

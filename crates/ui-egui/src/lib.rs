@@ -4016,6 +4016,48 @@ mod tests {
     }
 
     #[test]
+    fn a_web_link_and_the_smiley_by_a_signal_message_take_their_clicks() {
+        let mut h = harness();
+        // The emoji sheet is 4092 pixels; every graphics card Merel runs on takes that.
+        h.input_mut().max_texture_side = Some(8192);
+        with_a_chat(h.state_mut());
+        h.state_mut().engine.session.accounts.iter_mut().filter(|a| a.id == "a1").for_each(|a| a.protocol = merel_model::Protocol::Signal);
+        h.state_mut().engine.session.bodies.get_mut("a1/INBOX#1").unwrap().text = "Kijk eens: https://signal.org/nl/.".into();
+        h.state_mut().module = Module::Chat;
+        h.state_mut().chat.selected = Some(merel_engine::chat::person_chat_id("a1", "sanne@example.org"));
+        h.run();
+        h.get_by_label("Kijk eens: ").hover();
+        h.run();
+        assert!(h.query_by_label("Reageren").is_some(), "hovering shows the smiley");
+        // A right click on the text gives the message's menu.
+        h.get_by_label("Kijk eens: ").click_secondary();
+        h.run();
+        assert!(h.query_by_label("Bewerken").is_none() && h.query_by_label("Verwijderen…").is_some(), "the menu is open");
+        h.key_press(egui::Key::Escape);
+        h.run();
+        assert!(h.query_by_label("Verwijderen…").is_none(), "the menu is closed");
+        // The link opens in the browser, though the whole message has a right-click menu.
+        h.get_by_label("https://signal.org/nl/").click();
+        h.step();
+        let opened: Vec<_> = h
+            .output()
+            .platform_output
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                egui::OutputCommand::OpenUrl(o) => Some(o.url.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(opened, ["https://signal.org/nl/"]);
+        h.run();
+        // So does the smiley: it opens the reactions.
+        h.get_by_label("Reageren").click();
+        h.run();
+        assert!(h.query_by_label("😮").is_some(), "the reactions are open");
+    }
+
+    #[test]
     fn a_chat_calls_only_encrypted_and_joins_a_meeting_that_rings() {
         let mut h = harness();
         with_a_chat(h.state_mut());
