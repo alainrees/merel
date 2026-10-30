@@ -292,7 +292,7 @@ impl Engine {
     }
 
     /// The address of the Signal account `account_id`, which its program is known by.
-    fn signal_address(&self, account_id: &str) -> Result<String, String> {
+    pub(crate) fn signal_address(&self, account_id: &str) -> Result<String, String> {
         self.session
             .accounts
             .iter()

@@ -4061,6 +4061,36 @@ mod tests {
     }
 
     #[test]
+    fn a_whole_signal_chat_is_deleted_only_after_asking_from_its_menu_or_the_open_chat() {
+        let mut h = harness();
+        with_a_chat(h.state_mut());
+        h.state_mut().engine.session.accounts.iter_mut().filter(|a| a.id == "a1").for_each(|a| a.protocol = merel_model::Protocol::Signal);
+        h.state_mut().module = Module::Chat;
+        h.run();
+        h.get_by_label("Sanne de Vries, 1 ongelezen").click_secondary();
+        h.run();
+        h.get_by_label("Chat verwijderen…").click();
+        h.run();
+        h.get_by_label_contains("De chat met Sanne de Vries en al zijn berichten verdwijnen uit Merel en van je andere gekoppelde apparaten");
+        h.get_by_label("Annuleren").click();
+        h.run();
+        assert!(h.state().chat.deleting_chat.is_none());
+        let id = merel_engine::chat::person_chat_id("a1", "sanne@example.org");
+        assert!(h.state().engine.session.chat(&id).is_some(), "nothing goes without a yes");
+
+        h.get_by_label("Sanne de Vries, 1 ongelezen").click();
+        h.run();
+        h.get_by_label("Verwijderen").click();
+        h.run();
+        h.get_by_role_and_label(egui::accesskit::Role::Button, "Chat verwijderen").click();
+        h.run();
+        // Signal's program does not run here: the chat stays, and Merel says why, as it would
+        // come back from the phone's store otherwise.
+        assert!(h.state().engine.session.chat(&id).is_some() && h.state().chat.deleting_chat.is_none());
+        h.get_by_label_contains(&merel_i18n::tr("signal-stopped"));
+    }
+
+    #[test]
     fn a_web_link_and_the_smiley_by_a_signal_message_take_their_clicks() {
         let mut h = harness();
         // The emoji sheet is 4092 pixels; every graphics card Merel runs on takes that.
