@@ -47,6 +47,10 @@ pub struct State {
     pub replying: Option<String>,
     /// Files going with the next message (Signal).
     pub files: Vec<merel_model::DraftAttachment>,
+    /// One's own message whose text the line to write in changes (Signal).
+    pub editing: Option<String>,
+    /// The message the window to delete it asks about (Signal).
+    pub deleting: Option<String>,
     pub new: Option<NewChat>,
     /// Why the last message did not go out, or chat could not be turned on.
     pub error: Option<String>,
@@ -119,6 +123,7 @@ impl MailApp {
 
     fn open_chat(&mut self, id: &str) {
         self.chat.replying = None;
+        self.stop_editing();
         self.chat.files.clear();
         self.chat.selected = Some(id.to_string());
         self.chat.new = None;
@@ -131,10 +136,29 @@ impl MailApp {
         self.engine.session.chat(id).or_else(|| waiting_chats(self).into_iter().find(|c| c.id == id))
     }
 
-    /// Sends what is typed in the open chat.
+    /// Leaves changing a message; what was typed for it goes.
+    fn stop_editing(&mut self) {
+        if self.chat.editing.take().is_some() {
+            self.chat.input.clear();
+        }
+    }
+
+    /// Sends what is typed in the open chat: a new message, or the new text of the one being
+    /// changed.
     fn send_in_chat(&mut self) {
         let Some(chat) = self.chat.selected.as_deref().and_then(|id| self.chat_by_id(id)) else { return };
         let text = self.chat.input.trim().to_string();
+        if let Some(id) = self.chat.editing.clone() {
+            match self.engine.signal_edit(&id, &text) {
+                Ok(()) => {
+                    self.chat.editing = None;
+                    self.chat.input.clear();
+                    self.chat.error = None;
+                }
+                Err(e) => self.chat.error = Some(e),
+            }
+            return;
+        }
         if text.is_empty() && self.chat.files.is_empty() {
             return;
         }
@@ -545,6 +569,8 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
         composer(app, ui, t, chat);
         picked_files(app, ui, t);
         replying_strip(app, ui, t);
+        editing_strip(app, ui, t);
+        delete_window(app, ui.ctx(), t);
         if signal_chat {
             typing_line(app, ui, t, chat);
         }
@@ -560,6 +586,8 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
             let mut reply = None;
             let mut picture = None;
             let mut save = None;
+            let mut edit = None;
+            let mut delete = None;
             egui::ScrollArea::vertical().auto_shrink(false).stick_to_bottom(true).show(ui, |ui| {
                 let mut day = None;
                 let mut previous: Option<String> = None;
@@ -580,6 +608,8 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                         Some(Clicked::Reply) => reply = Some(id.clone()),
                         Some(Clicked::Picture(n)) => picture = Some((id.clone(), n)),
                         Some(Clicked::Save(n)) => save = Some((id.clone(), n)),
+                        Some(Clicked::Edit) => edit = Some(id.clone()),
+                        Some(Clicked::Delete) => delete = Some(id.clone()),
                         None => {}
                     }
                 }
@@ -601,7 +631,18 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
             if let Some(a) = save.as_ref().and_then(|p| file(app, p)) {
                 app.save_attachment(&a);
             }
+            if let Some(id) = edit {
+                app.chat.replying = None;
+                app.chat.files.clear();
+                app.chat.input = app.engine.session.chat_text(&id).unwrap_or_default();
+                app.chat.editing = Some(id);
+                ui.memory_mut(|m| m.request_focus(egui::Id::new(INPUT)));
+            }
+            if delete.is_some() {
+                app.chat.deleting = delete;
+            }
             if let Some(id) = reply {
+                app.stop_editing();
                 app.chat.replying = Some(id);
                 ui.memory_mut(|m| m.request_focus(egui::Id::new(INPUT)));
             }
@@ -661,6 +702,10 @@ enum Clicked {
     Picture(usize),
     /// Save attachment `n` of the message under Downloads.
     Save(usize),
+    /// Change the text of one's own message.
+    Edit,
+    /// Ask how to delete the message.
+    Delete,
 }
 
 /// The reactions Signal offers first, in its order.
@@ -679,7 +724,11 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
     let ring = m.chat.as_ref().and_then(|c| c.call.as_ref()).is_some_and(|c| c.step == merel_model::CallStep::Ring);
     let max = (ui.available_width() * 0.7).min(480.0);
     let mut accept = None;
-    let reacts = app.engine.is_signal_account(&chat.account_id) && invite.is_none() && !ring;
+    let signal = app.engine.is_signal_account(&chat.account_id);
+    let deleted = m.chat.as_ref().is_some_and(|c| c.deleted);
+    let edited = m.chat.as_ref().is_some_and(|c| c.edited);
+    let reacts = signal && invite.is_none() && !ring && !deleted;
+    let can_change = reacts && app.engine.signal_can_change(id);
     let reactions = m.chat.as_ref().map(|c| c.reactions.clone()).unwrap_or_default();
     // Whether the pointer was over this message last frame: then the smiley shows.
     let hover_id = egui::Id::new(("chat-hover", id));
@@ -737,6 +786,13 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                                 ui.add(egui::Label::new(RichText::new(line).size(14.0).color(t.text)).wrap());
                             });
                         }
+                        // As Signal leaves it: a quiet line where the message was.
+                        None if deleted => {
+                            ui.horizontal(|ui| {
+                                ui.add(Icon::Trash.image(14.0, t.text_dim));
+                                ui.label(RichText::new(tr("signal-deleted")).size(14.0).italics().color(t.text_dim));
+                            });
+                        }
                         None => {
                             let files = session.bodies.get(id).map(|b| b.attachments.as_slice()).unwrap_or_default();
                             if !text.trim().is_empty() || files.is_empty() {
@@ -751,22 +807,34 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                     // In the bubble's corner, as Signal shows it.
                     let ticks = mine && reacts;
                     let delivery = m.chat.as_ref().and_then(|c| c.delivery);
-                    if quote.is_some() || has_files {
-                        ui.vertical(|ui| {
-                            if let Some(q) = quote {
-                                quote_block(ui, t, session, q, mine);
-                            }
-                            content(ui);
-                            if ticks {
-                                ui.with_layout(Layout::right_to_left(Align::Min), |ui| delivery_ticks(ui, t, delivery));
-                            }
-                        });
-                    } else {
-                        // One's own row runs right to left: the ticks first end up after the text.
+                    let corner = |ui: &mut Ui| {
                         if ticks {
                             delivery_ticks(ui, t, delivery);
                         }
+                        if edited && !deleted {
+                            ui.label(RichText::new(tr("chat-edited")).size(12.0).color(t.text_dim));
+                        }
+                    };
+                    if quote.is_some() || has_files {
+                        ui.vertical(|ui| {
+                            if let Some(q) = quote.filter(|_| !deleted) {
+                                quote_block(ui, t, session, q, mine);
+                            }
+                            content(ui);
+                            if ticks || edited {
+                                ui.with_layout(Layout::right_to_left(Align::Min), corner);
+                            }
+                        });
+                    } else if mine {
+                        // One's own row runs right to left: what comes first ends up after the
+                        // text.
+                        corner(ui);
                         content(ui);
+                    } else {
+                        content(ui);
+                        if edited && !deleted {
+                            ui.label(RichText::new(tr("chat-edited")).size(12.0).color(t.text_dim));
+                        }
                     }
                 },
             );
@@ -775,25 +843,35 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                 react_button(ui, t, id, hovered, &mut accept);
             }
         });
-        if reacts {
+        if signal && (reacts || deleted) {
             let over = ui.rect_contains_pointer(row.response.rect);
             ui.data_mut(|d| d.insert_temp(hover_id, over));
             ui.interact(row.response.rect, egui::Id::new(("chat-bubble", id)), Sense::click()).context_menu(|ui| {
-                if ui.add(egui::Button::image_and_text(Icon::Reply.image(16.0, t.text), tr("chat-reply"))).clicked() {
+                if reacts && ui.add(egui::Button::image_and_text(Icon::Reply.image(16.0, t.text), tr("chat-reply"))).clicked() {
                     accept = Some(Clicked::Reply);
                     ui.close();
                 }
-                ui.separator();
-                reaction_menu(ui, &mut accept);
+                if can_change && ui.add(egui::Button::image_and_text(Icon::Pencil.image(16.0, t.text), tr("chat-edit"))).clicked() {
+                    accept = Some(Clicked::Edit);
+                    ui.close();
+                }
+                if ui.add(egui::Button::image_and_text(Icon::Trash.image(16.0, t.text), tr("chat-delete"))).clicked() {
+                    accept = Some(Clicked::Delete);
+                    ui.close();
+                }
+                if reacts {
+                    ui.separator();
+                    reaction_menu(ui, &mut accept);
+                }
             });
-            if !reactions.is_empty() {
-                ui.horizontal(|ui| {
-                    if !mine {
-                        ui.add_space(40.0);
-                    }
-                    reaction_chips(ui, t, &reactions, &mut accept);
-                });
-            }
+        }
+        if reacts && !reactions.is_empty() {
+            ui.horizontal(|ui| {
+                if !mine {
+                    ui.add_space(40.0);
+                }
+                reaction_chips(ui, t, &reactions, &mut accept);
+            });
         }
     });
     ui.add_space(4.0);
@@ -938,6 +1016,68 @@ fn quote_block(ui: &mut Ui, t: &Tokens, session: &merel_engine::Session, q: &mer
     let r = frame.response.rect;
     ui.painter().rect_filled(egui::Rect::from_min_max(r.min, egui::pos2(r.min.x + 3.0, r.max.y)), 2.0, t.accent);
     ui.add_space(4.0);
+}
+
+/// Above the line to write in while changing a message: what it said, and a cross to stop.
+fn editing_strip(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    let Some(id) = app.chat.editing.clone() else { return };
+    let mut stop = false;
+    ui.add_space(4.0);
+    egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.0, t.card_border)).corner_radius(8).inner_margin(Margin::symmetric(10, 6)).show(
+        ui,
+        |ui| {
+            ui.horizontal(|ui| {
+                ui.add(Icon::Pencil.image(16.0, t.accent));
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(tr("chat-editing")).size(12.5).strong().color(t.text));
+                    let was = app.engine.session.chat_text(&id).unwrap_or_default();
+                    ui.label(RichText::new(merel_mime::preview(&was, 120)).size(12.5).color(t.text_dim));
+                });
+                helder::right(ui, |ui| {
+                    let r = ui.add(egui::Button::image(Icon::X.image(14.0, t.text_dim)).frame(false));
+                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-edit-stop")));
+                    stop = r.on_hover_text(tr("chat-edit-stop")).clicked();
+                });
+            });
+        },
+    );
+    if stop || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        app.stop_editing();
+    }
+}
+
+/// The window that asks how to delete a Signal message, as Signal does: only here, or for
+/// everyone (one's own, within a day).
+fn delete_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    let Some(id) = app.chat.deleting.clone() else { return };
+    let everyone = app.engine.signal_can_change(&id);
+    let mut choice = None;
+    let closed = helder::dialog(ctx, t, &tr("chat-delete-title"), 420.0, |ui| {
+        let line = if everyone { tr("chat-delete-ask-everyone") } else { tr("chat-delete-ask") };
+        ui.label(RichText::new(line).size(14.0).color(t.text));
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            if everyone && ui.add(helder::primary_text(t, &tr("chat-delete-everyone"))).clicked() {
+                choice = Some(true);
+            }
+            if helder::secondary(ui, t, |ui| ui.button(tr("chat-delete-me"))).clicked() {
+                choice = Some(false);
+            }
+            if helder::secondary(ui, t, |ui| ui.button(tr("cancel"))).clicked() {
+                app.chat.deleting = None;
+            }
+        });
+    });
+    if closed {
+        app.chat.deleting = None;
+    }
+    if let Some(everyone) = choice {
+        app.chat.deleting = None;
+        if app.chat.editing.as_deref() == Some(id.as_str()) {
+            app.stop_editing();
+        }
+        app.chat.error = app.engine.signal_delete(&id, everyone).err();
+    }
 }
 
 /// Above the line to write in while answering: whom and what, and a cross to stop.
@@ -1086,7 +1226,7 @@ fn composer(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                 let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 emoji_button(ui, t, &mut app.chat.input);
                 // Files go over Signal; chat over mail stays text, as Delta Chat keeps it.
-                if signal {
+                if signal && app.chat.editing.is_none() {
                     let r = ui.add(egui::Button::image(Icon::Paperclip.image(18.0, t.text_dim)).frame(false).min_size(vec2(30.0, 30.0)));
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-attach")));
                     pick = r.on_hover_text(tr("chat-attach")).clicked();

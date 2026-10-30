@@ -51,6 +51,22 @@ pub struct ChatTag {
     /// receipts say. Only Signal says it; the engine drops it from any other account.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery: Option<Delivery>,
+    /// Set on an edit going out (`Merel-Edit`): the Message-ID of one's own message whose
+    /// text this one's text replaces. Only Signal sends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit_of: Option<String>,
+    /// Set on a deletion going out (`Merel-Delete`): the Message-ID of one's own message to
+    /// delete for everyone. Only Signal sends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delete_of: Option<String>,
+    /// Whether the writer changed the text after sending it (`Merel-Edited`). Only Signal says
+    /// it; the engine drops it from any other account.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub edited: bool,
+    /// Whether the writer deleted the message for everyone (`Merel-Deleted`): what is left is
+    /// a line saying so. Only Signal says it; the engine drops it from any other account.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deleted: bool,
 }
 
 /// How far a message one sent came.

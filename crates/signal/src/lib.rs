@@ -149,6 +149,12 @@ pub struct Received {
     /// Set when this is a call rather than a message.
     #[serde(default)]
     pub call: Option<Call>,
+    /// When the writer last changed the text; 0 when never.
+    #[serde(default)]
+    pub edited: u64,
+    /// The writer deleted it for everyone: a line says so in its place.
+    #[serde(default)]
+    pub deleted: bool,
 }
 
 /// A Signal call in a chat. Merel cannot take part in it: it shows who calls and how it ended.
@@ -272,6 +278,9 @@ impl Received {
 
     /// The text to show: the message, or what happened with the call.
     fn shown_text(&self) -> String {
+        if self.deleted {
+            return merel_i18n::tr("signal-deleted");
+        }
         match self.call {
             // No news of how it ended (it may have been answered on the phone): just "a call".
             Some(mut call) if call.state == CallState::Ringing && self.age() > RING_TIME => {
@@ -313,6 +322,16 @@ enum Asked<'a> {
         remove: bool,
         target_author: &'a str,
         target_timestamp: u64,
+    },
+    Edit {
+        thread: &'a str,
+        timestamp: u64,
+        text: &'a str,
+    },
+    Delete {
+        thread: &'a str,
+        timestamp: u64,
+        everyone: bool,
     },
 }
 
@@ -446,6 +465,13 @@ impl Messages {
         if let (Some(new), Some(Received { call: Some(old), .. })) = (m.call, self.by_id.get(&m.id()))
             && old.state == CallState::Answered
             && new.state != CallState::Answered
+        {
+            return;
+        }
+        // The store keeps a message and each change to it apart, in any order: a deletion holds,
+        // and of the texts the newest.
+        if let Some(old) = self.by_id.get(&m.id())
+            && (old.deleted || (!m.deleted && old.edited > m.edited))
         {
             return;
         }
@@ -776,6 +802,19 @@ impl SignalMailbox {
     }
 }
 
+impl SignalMailbox {
+    /// The chat and time of the account's own message with Message-ID `of`, to change it.
+    fn own(&self, of: &str) -> Result<(String, u64)> {
+        let id = of.trim().trim_matches(['<', '>']).strip_suffix(&format!("@{DOMAIN}")).unwrap_or_default();
+        let messages = lock(&self.messages);
+        let m = messages.by_id.get(id).ok_or_else(|| MailboxError::NotFound(id.to_string()))?;
+        if !m.mine || m.deleted || m.call.is_some() {
+            return Err(not_here());
+        }
+        Ok((m.thread.clone(), m.timestamp))
+    }
+}
+
 fn lock(m: &Mutex<Messages>) -> std::sync::MutexGuard<'_, Messages> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
@@ -859,6 +898,15 @@ impl Mailbox for SignalMailbox {
         if let Some(to) = header.chat.as_ref().and_then(|c| c.reaction_to.clone()) {
             return self.react(&to, merel_mime::parse_body(raw).text.trim());
         }
+        if let Some(of) = header.chat.as_ref().and_then(|c| c.edit_of.clone()) {
+            let (thread, timestamp) = self.own(&of)?;
+            let text = merel_mime::parse_body(raw).text.trim_end().to_string();
+            return self.ask(&Asked::Edit { thread: &thread, timestamp, text: &text }, &thread);
+        }
+        if let Some(of) = header.chat.as_ref().and_then(|c| c.delete_of.clone()) {
+            let (thread, timestamp) = self.own(&of)?;
+            return self.ask(&Asked::Delete { thread: &thread, timestamp, everyone: true }, &thread);
+        }
         let thread = match header.chat.as_ref().and_then(|c| c.group_id.clone()) {
             Some(group) => group,
             None => {
@@ -900,8 +948,18 @@ impl Mailbox for SignalMailbox {
         Err(not_here())
     }
 
-    fn delete_message(&mut self, _folder: &str, _id: &str) -> Result<()> {
-        Err(not_here())
+    /// Deletes the message on this device only, as Signal's "Delete for me": it stays with
+    /// the others in the chat.
+    fn delete_message(&mut self, folder: &str, id: &str) -> Result<()> {
+        only_folder(folder)?;
+        let (thread, timestamp) = {
+            let messages = lock(&self.messages);
+            let m = messages.by_id.get(id).ok_or_else(|| MailboxError::NotFound(id.to_string()))?;
+            (m.thread.clone(), m.timestamp)
+        };
+        self.ask(&Asked::Delete { thread: &thread, timestamp, everyone: false }, &thread)?;
+        lock(&self.messages).by_id.remove(id);
+        Ok(())
     }
 
     fn empty_folder(&mut self, _folder: &str) -> Result<()> {
@@ -958,6 +1016,12 @@ fn message_with(m: &Received, me: &str, reactions: &[merel_model::Reacted], file
     }
     if let Some(d) = m.delivery {
         out.push_str(&format!("Merel-Delivery: {d}\r\n"));
+    }
+    if m.edited > 0 {
+        out.push_str("Merel-Edited: yes\r\n");
+    }
+    if m.deleted {
+        out.push_str("Merel-Deleted: yes\r\n");
     }
     if let Some(q) = &m.quote {
         let name = if q.author_name.is_empty() { q.author.clone() } else { q.author_name.clone() };
@@ -1136,7 +1200,39 @@ mod tests {
             call: None,
             quote: None,
             delivery: None,
+            edited: 0,
+            deleted: false,
         }
+    }
+
+    #[test]
+    fn a_change_holds_whichever_order_the_store_passes_it_in() {
+        let mut messages = Messages::default();
+        let first = received("Tot morgen");
+        let mut changed = received("Tot overmorgen");
+        changed.edited = 1_761_681_700_000;
+        messages.add(changed.clone());
+        messages.add(first.clone());
+        assert_eq!(messages.by_id[&first.id()].text, "Tot overmorgen");
+        let mut gone = received("");
+        gone.deleted = true;
+        messages.add(gone);
+        messages.add(changed);
+        messages.add(first.clone());
+        let left = &messages.by_id[&first.id()];
+        assert!(left.deleted);
+        let raw = message(left, "me@signal.invalid", &[]);
+        let header = merel_mime::parse_header(&raw);
+        assert!(header.chat.as_ref().is_some_and(|c| c.deleted && !c.edited));
+        assert_eq!(merel_mime::parse_body(&raw).text.trim_end(), merel_i18n::tr("signal-deleted"));
+    }
+
+    #[test]
+    fn a_changed_message_says_so() {
+        let mut m = received("Tot overmorgen");
+        m.edited = 1_761_681_700_000;
+        let header = merel_mime::parse_header(&message(&m, "me@signal.invalid", &[]));
+        assert!(header.chat.is_some_and(|c| c.edited && !c.deleted));
     }
 
     #[test]
