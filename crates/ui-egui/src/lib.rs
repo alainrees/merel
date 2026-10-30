@@ -1390,6 +1390,10 @@ fn file_menu(app: &mut MailApp) {
         app.tab = Tab::File;
         app.file_page = backstage::Page::Notifications;
     }
+    if menubar::item(&format!("{}…", search_page::page_label()), true, None) {
+        app.tab = Tab::File;
+        app.file_page = backstage::Page::Search;
+    }
     menubar::separator();
     for action in backstage::FileAction::ALL {
         if menubar::item(&action.label(), true, None) {
@@ -3326,6 +3330,9 @@ mod tests {
         h.state_mut().click_menu(0, vec!["Accounts…".into()]);
         h.run();
         assert_eq!(h.state().tab, Tab::File);
+        h.state_mut().click_menu(0, vec!["Zoeken…".into()]);
+        h.run();
+        assert_eq!(h.state().file_page, backstage::Page::Search, "Bestand > Zoeken… opens the search settings");
     }
 
     #[test]
