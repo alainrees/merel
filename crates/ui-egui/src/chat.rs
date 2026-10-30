@@ -1475,8 +1475,10 @@ fn matching(contacts: Vec<(Address, String)>, typed: &str) -> Vec<(Address, Stri
         .collect()
 }
 
-/// The new-chat window, as Signal's pencil: a field to find someone, the Signal account when
-/// there are more, and the contacts on Signal. A click opens the chat to type in.
+/// The new-chat window, as the design and Signal's pencil have it: a bar with the Signal
+/// account (when there are more) and Annuleren, and on a card a field to find someone, the
+/// contacts on Signal under it and a line on how the chat travels. A click opens the chat to
+/// type in. Everything wraps or shrinks to the window, so nothing is cut off.
 fn new_chat_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let accounts: Vec<(String, String)> = app
         .engine
@@ -1492,49 +1494,77 @@ fn new_chat_form(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     let mut picked = None;
     let mut cancel = false;
     let Some(form) = app.chat.new.as_mut() else { return };
-    ui.horizontal(|ui| {
-        ui.add(Icon::Search.image(16.0, t.text_dim));
-        let r = ui.add(
-            egui::TextEdit::singleline(&mut form.typed)
-                .id(egui::Id::new(PEOPLE))
-                .hint_text(RichText::new(tr("chat-people-hint")).color(t.text_dim))
-                .desired_width((ui.available_width() - 48.0).max(160.0)),
-        );
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tr("chat-people")));
-        if !r.has_focus() && !ui.memory(|m| m.focused().is_some()) {
-            r.request_focus();
-        }
-        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && shown.len() == 1 {
-            picked = shown.first().map(|(a, _)| a.clone());
-        }
-        helder::trailing(ui, |ui| {
-            cancel = helder::tool_button(ui, t, Icon::X, &tr("chat-cancel")).clicked();
+    helder::quiet(ui, t, |ui| {
+        ui.horizontal(|ui| {
+            // Which Signal account, only when there is more than one.
+            if accounts.len() > 1 {
+                let current = accounts.iter().find(|(id, _)| *id == form.account_id).map_or("", |(_, n)| n.as_str());
+                helder::menu_button(ui, t, Some(Icon::MessagesSquare), RichText::new(current).size(14.0).color(t.text), |ui| {
+                    for (id, name) in &accounts {
+                        if ui.selectable_label(form.account_id == *id, name).clicked() {
+                            form.account_id = id.clone();
+                            ui.close();
+                        }
+                    }
+                });
+            }
+            helder::trailing(ui, |ui| {
+                cancel = helder::tool_button(ui, t, Icon::X, &tr("chat-cancel")).clicked();
+            });
         });
     });
-    // Which Signal account, only when there is more than one.
-    if accounts.len() > 1 {
-        ui.horizontal(|ui| {
-            for (id, name) in &accounts {
-                if ui.selectable_label(form.account_id == *id, name).clicked() {
-                    form.account_id = id.clone();
-                }
-            }
-        });
-    }
     ui.add_space(8.0);
-    if shown.is_empty() {
-        let key = if form.typed.trim().is_empty() { "chat-no-contacts" } else { "chat-not-a-contact" };
-        helder::note(ui, t, &tr(key));
-    } else {
-        ui.label(RichText::new(tr("chat-on-signal")).size(12.0).color(t.text_dim));
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            for (person, number) in &shown {
-                if suggestion_row(ui, t, person, number) {
-                    picked = Some(person.clone());
-                }
+    helder::card_frame(t).inner_margin(16).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.set_min_height(ui.available_height());
+        helder::icon_row(ui, t, Icon::Users, |ui| {
+            let r = ui.add(
+                egui::TextEdit::singleline(&mut form.typed)
+                    .id(egui::Id::new(PEOPLE))
+                    .frame(egui::Frame::NONE)
+                    .hint_text(RichText::new(tr("chat-people-hint")).size(helder::FIELD_TEXT).color(t.text_dim))
+                    .font(FontId::proportional(helder::FIELD_TEXT))
+                    .text_color(t.text)
+                    .desired_width(ui.available_width())
+                    .margin(Margin::symmetric(4, 8)),
+            );
+            helder::underline(ui, t, &r);
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tr("chat-people")));
+            if !r.has_focus() && !ui.memory(|m| m.focused().is_some()) {
+                r.request_focus();
+            }
+            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && shown.len() == 1 {
+                picked = shown.first().map(|(a, _)| a.clone());
             }
         });
-    }
+        ui.add_space(12.0);
+        // The line on how the chat travels stays at the foot of the card; the list scrolls above it.
+        let foot = 40.0;
+        let list_height = (ui.available_height() - foot).max(80.0);
+        ui.allocate_ui(vec2(ui.available_width(), list_height), |ui| {
+            if shown.is_empty() {
+                let key = if form.typed.trim().is_empty() { "chat-no-contacts" } else { "chat-not-a-contact" };
+                helder::note(ui, t, &tr(key));
+            } else {
+                ui.horizontal(|ui| {
+                    helder::indent(ui);
+                    ui.label(RichText::new(tr("chat-on-signal")).size(12.0).color(t.text_dim));
+                });
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    for (person, number) in &shown {
+                        if suggestion_row(ui, t, person, number) {
+                            picked = Some(person.clone());
+                        }
+                    }
+                });
+            }
+        });
+        ui.add_space((ui.available_height() - foot).max(0.0));
+        ui.horizontal(|ui| {
+            ui.add(Icon::ShieldCheck.image(14.0, t.text_dim));
+            ui.add(egui::Label::new(RichText::new(tr("chat-new-note")).size(12.0).color(t.text_dim)).wrap());
+        });
+    });
     if cancel {
         app.chat.new = None;
     } else if let Some(person) = picked {
