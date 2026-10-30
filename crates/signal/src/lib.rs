@@ -236,6 +236,9 @@ struct OutFile<'a> {
     name: &'a str,
     mime: &'a str,
     data: String,
+    /// A voice message recorded in Merel: Signal shows it with a play button.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    voice: bool,
 }
 
 /// The message a message answers, as the program passes it on and is asked to send it.
@@ -1077,10 +1080,16 @@ impl Mailbox for SignalMailbox {
             })
         });
         let body = merel_mime::parse_body(raw);
+        let voice = header.chat.as_ref().is_some_and(|c| c.voice);
         let files: Vec<OutFile<'_>> = body
             .attachments
             .iter()
-            .map(|a| OutFile { name: &a.name, mime: &a.mime, data: base64::engine::general_purpose::STANDARD.encode(&a.bytes) })
+            .map(|a| OutFile {
+                name: &a.name,
+                mime: &a.mime,
+                data: base64::engine::general_purpose::STANDARD.encode(&a.bytes),
+                voice: voice && a.mime.starts_with("audio/"),
+            })
             .collect();
         self.ask(&Asked::Send { thread: &thread, text: &text, quote, files }, &thread)
     }

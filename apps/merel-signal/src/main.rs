@@ -171,6 +171,9 @@ struct OutFile {
     name: String,
     mime: String,
     data: String,
+    /// A voice message: Signal shows it with a play button.
+    #[serde(default)]
+    voice: bool,
 }
 
 /// Every file of the messages passed on, by id, to fetch when Merel asks.
@@ -883,7 +886,7 @@ async fn send<S: Store>(
             length: bytes.len(),
             file_name: Some(f.name),
             preview: None,
-            voice_note: None,
+            voice_note: f.voice.then_some(true),
             borderless: None,
             width: None,
             height: None,
