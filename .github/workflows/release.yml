@@ -31,6 +31,8 @@ jobs:
       - run: brew install protobuf coreutils
       - uses: Swatinem/rust-cache@v2
         with:
+          # The runner image is in the key: a cache from an older macOS links against its Xcode.
+          key: macos-15
           workspaces: |
             .
             apps/merel-signal

@@ -48,6 +48,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/merel-signal
+          # The runner image is in the key: a cache from an older macOS links against its Xcode.
+          key: ${{ matrix.os }}
       - run: cargo fmt --check
       - run: cargo clippy --locked -- -D warnings
       - run: cargo build --locked
