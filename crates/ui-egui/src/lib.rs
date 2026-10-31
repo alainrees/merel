@@ -198,6 +198,8 @@ pub struct MailApp {
     pub cleanup: Option<cleanup::Confirm>,
     /// The picture attachment open in its preview window.
     pub preview: Option<attachments::Preview>,
+    /// Attachments that wait for "Save anyway": a program, a script or macros among them.
+    pub risky: Option<attachments::Risky>,
     /// The selected message is open in its own window (Enter, a double-click, or always when the
     /// reading pane is off).
     pub message_window: bool,
@@ -338,6 +340,7 @@ impl MailApp {
             receipts_sent: Default::default(),
             cleanup: None,
             preview: None,
+            risky: None,
             message_window: false,
             search_folder_form: None,
             shown_message: None,
@@ -485,6 +488,7 @@ impl MailApp {
         unsubscribe::window(self, &ctx, &t);
         cleanup::window(self, &ctx, &t);
         attachments::preview_window(self, &ctx, &t);
+        attachments::risky_window(self, &ctx, &t);
         message_window(self, &ctx, &t);
         search_folders::window(self, &ctx, &t);
         categories::window(self, &ctx, &t);
@@ -5054,6 +5058,48 @@ mod tests {
         h.get_by_label("Sluiten").click();
         h.run();
         assert!(h.state().preview.is_none());
+    }
+
+    #[test]
+    fn a_program_or_macros_among_the_attachments_asks_before_anything_is_saved() {
+        let mut h = harness();
+        let file = |name: &str| merel_mime::Attachment {
+            name: name.into(),
+            mime: "application/octet-stream".into(),
+            size: 2,
+            bytes: std::sync::Arc::from(&b"MZ"[..]),
+        };
+        let body = merel_engine::Body { text: "Zie bijlage".into(), attachments: vec![file("bon.pdf"), file("bon.pdf.exe")], ..Default::default() };
+        h.state_mut().engine.session.bodies.insert("m3".into(), body);
+        h.state_mut().engine.session.selected_message = Some("m3".into());
+        h.run();
+
+        // One risky file: the safe choice is the main button, and it writes nothing.
+        h.get_by_label_contains("📎 bon.pdf.exe").click();
+        h.run();
+        assert_eq!(h.state().risky.as_ref().map(|r| r.list.len()), Some(1));
+        h.get_by_label_contains("bon.pdf.exe is een programma of script");
+        h.get_by_label("Toch opslaan");
+        h.get_by_label("Niet opslaan").click();
+        h.run();
+        assert!(h.state().risky.is_none());
+        assert!(h.state().notice.is_none(), "nothing was saved");
+
+        // Save all with an ordinary file among them: the others can go without the risky one.
+        h.get_by_label(&attachments::save_all_label()).click();
+        h.run();
+        assert_eq!(h.state().risky.as_ref().map(|r| r.others().len()), Some(1));
+        h.get_by_label("Zonder deze opslaan");
+        h.get_by_label("Alles opslaan");
+        h.get_by_label("Annuleren").click();
+        h.run();
+        assert!(h.state().risky.is_none());
+        assert!(h.state().notice.is_none(), "nothing was saved");
+
+        // A macro document says so.
+        h.state_mut().risky = Some(attachments::Risky { list: vec![file("begroting.xlsm")] });
+        h.run();
+        h.get_by_label_contains("begroting.xlsm is een Office-bestand met macro's");
     }
 
     #[test]

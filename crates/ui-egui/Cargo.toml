@@ -34,6 +34,7 @@ base64 = { workspace = true }
 merel-sign = { workspace = true }
 merel-notify = { workspace = true }
 merel-i18n = { workspace = true }
+merel-quarantine = { workspace = true }
 merel-call = { workspace = true }
 merel-voice = { workspace = true }
 qrcode = { workspace = true }

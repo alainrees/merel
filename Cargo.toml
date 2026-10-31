@@ -43,6 +43,7 @@ merel-search = { path = "crates/search" }
 merel-extract = { path = "crates/extract" }
 merel-semantic = { path = "crates/semantic" }
 merel-signal-link = { path = "crates/signal" }
+merel-quarantine = { path = "crates/quarantine" }
 
 # foundation
 thiserror = "2"

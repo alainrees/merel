@@ -1,0 +1,32 @@
+[package]
+name = "merel-quarantine"
+description = "Attachments as files the computer's own protection checks: the downloaded-from-the-internet label, and on Windows a scan by the installed virus scanner."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+log = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Antimalware"] }
+
+# One of four crates that may use `unsafe` (with merel-notify, merel-touch-bar and
+# merel-window-buttons): setting an extended attribute on macOS and asking the virus scanner
+# through AMSI on Windows are C calls. Every other crate keeps the workspace's
+# `unsafe_code = "forbid"`.
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

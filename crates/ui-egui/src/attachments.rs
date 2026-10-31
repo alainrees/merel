@@ -1,6 +1,10 @@
 //! Saving an attachment to the Downloads folder, and the preview of a picture. Nothing is
 //! opened or run: the file is written under a name cleaned of paths and control characters,
-//! never over an existing one, and a notice says where it went. A picture attachment
+//! never over an existing one, and a notice says where it went. Merel has no virus scanner of
+//! its own; it leaves that to the one on the computer (see merel-quarantine): on Windows the
+//! scanner looks at the bytes before they are written, and every file gets the label of a
+//! download from the internet, so the scanner and macOS check it again when it is opened. A
+//! program, a script or an Office file with macros asks first. A picture attachment
 //! gets a thumbnail under the message and a window with the full picture, decoded by the same
 //! image loader the HTML view uses; other kinds are only saved.
 
@@ -44,9 +48,15 @@ pub fn safe_filename(name: &str) -> String {
 }
 
 /// Writes `bytes` into `dir` as `name`, adding ` (2)`, ` (3)`… when the name is taken. The
-/// file is created new, so nothing existing is ever replaced.
+/// file is created new, so nothing existing is ever replaced. Where the computer's virus
+/// scanner can be asked first (Windows), a file it finds a threat in is not written at all;
+/// a written file is labelled as downloaded from the internet.
 pub fn save_to(dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<PathBuf> {
     let name = safe_filename(name);
+    if merel_quarantine::scan(&name, bytes) == merel_quarantine::Verdict::Malware {
+        log::warn!("the virus scanner found a threat in an attachment; not written");
+        return Err(std::io::Error::other(tr("attachment-malware")));
+    }
     let (stem, ext) = match name.rfind('.') {
         Some(i) if i > 0 => (&name[..i], &name[i..]),
         _ => (name.as_str(), ""),
@@ -58,6 +68,10 @@ pub fn save_to(dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<PathBuf>
             Ok(mut f) => {
                 use std::io::Write;
                 f.write_all(bytes)?;
+                drop(f);
+                if let Err(e) = merel_quarantine::mark(&path) {
+                    log::info!("no downloaded-from-the-internet label on the file: {e}");
+                }
                 return Ok(path);
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -198,9 +212,56 @@ pub fn open_in_app(a: &Attachment) -> Result<(), String> {
     open::that_detached(path).map_err(|e| e.to_string())
 }
 
+/// Attachments that wait for a "Save anyway": they include a program, a script or an Office
+/// file with macros.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Risky {
+    pub list: Vec<Attachment>,
+}
+
+impl Risky {
+    /// The attachments that ask first, with why.
+    pub fn risky(&self) -> Vec<(&Attachment, merel_model::AttachmentRisk)> {
+        self.list.iter().filter_map(|a| Some((a, merel_model::attachment_risk(&a.name)?))).collect()
+    }
+
+    /// The ordinary ones among them.
+    pub fn others(&self) -> Vec<Attachment> {
+        self.list.iter().filter(|a| merel_model::attachment_risk(&a.name).is_none()).cloned().collect()
+    }
+}
+
+/// The sentence that says why one attachment asks first.
+pub fn risk_text(name: &str, risk: merel_model::AttachmentRisk) -> String {
+    let key = match risk {
+        merel_model::AttachmentRisk::Program => "risky-program",
+        merel_model::AttachmentRisk::Macros => "risky-macros",
+    };
+    crate::i18n::tr_args(key, &[("name", name.into())])
+}
+
 impl MailApp {
-    /// Saves the attachment under Downloads and says where it went.
+    /// Saves the attachment under Downloads and says where it went; a risky one asks first.
     pub fn save_attachment(&mut self, a: &Attachment) {
+        if merel_model::attachment_risk(&a.name).is_some() {
+            self.risky = Some(Risky { list: vec![a.clone()] });
+        } else {
+            self.store_attachment(a);
+        }
+    }
+
+    /// Saves every attachment of the message under Downloads; when one of them is risky, asks
+    /// first.
+    pub fn save_attachments(&mut self, list: &[Attachment]) {
+        if list.iter().any(|a| merel_model::attachment_risk(&a.name).is_some()) {
+            self.risky = Some(Risky { list: list.to_vec() });
+        } else {
+            self.store_attachments(list);
+        }
+    }
+
+    /// Writes the attachment under Downloads, without asking, and says where it went.
+    fn store_attachment(&mut self, a: &Attachment) {
         self.notice = Some(match downloads_dir() {
             Some(dir) => match save_to(&dir, &a.name, &a.bytes) {
                 Ok(path) => saved(&tr("noun-attachment"), &path),
@@ -210,8 +271,8 @@ impl MailApp {
         });
     }
 
-    /// Saves every attachment of the message under Downloads and says how it went.
-    pub fn save_attachments(&mut self, list: &[Attachment]) {
+    /// Writes every attachment under Downloads, without asking, and says how it went.
+    fn store_attachments(&mut self, list: &[Attachment]) {
         self.notice = Some(match downloads_dir() {
             Some(dir) => match save_all(&dir, list) {
                 (n, None) => Notice::success(crate::i18n::tr_args("attachments-saved", &[("count", n.into()), ("folder", folder_name(&dir).into())]))
@@ -225,6 +286,64 @@ impl MailApp {
             },
             None => Notice::error(tr("attachments-no-downloads")),
         });
+    }
+}
+
+/// The window that asks before a program, a script or an Office file with macros is saved.
+/// The safe choice is the main button, as the person did not ask for a risk.
+pub fn risky_window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    let Some(r) = app.risky.clone() else { return };
+    let risky = r.risky();
+    if risky.is_empty() {
+        app.risky = None;
+        return;
+    }
+    let others = r.others();
+    #[derive(Clone, Copy)]
+    enum Pick {
+        Nothing,
+        Others,
+        All,
+    }
+    let mut pick = None;
+    let closed = crate::helder::dialog(ctx, t, &tr("risky-title"), 460.0, |ui| {
+        for (a, risk) in &risky {
+            ui.label(egui::RichText::new(risk_text(&a.name, *risk)).size(14.0).color(t.text));
+            ui.add_space(6.0);
+        }
+        ui.label(egui::RichText::new(tr("risky-advice")).size(12.0).color(t.text_dim));
+        ui.add_space(12.0);
+        ui.horizontal_wrapped(|ui| {
+            if others.is_empty() {
+                if ui.add(crate::helder::primary_text(t, &tr("risky-dont-save"))).clicked() {
+                    pick = Some(Pick::Nothing);
+                }
+                if crate::helder::secondary(ui, t, |ui| ui.button(tr("risky-save-anyway"))).clicked() {
+                    pick = Some(Pick::All);
+                }
+            } else {
+                if ui.add(crate::helder::primary_text(t, &tr("risky-save-others"))).clicked() {
+                    pick = Some(Pick::Others);
+                }
+                if crate::helder::secondary(ui, t, |ui| ui.button(tr("risky-save-all"))).clicked() {
+                    pick = Some(Pick::All);
+                }
+                if crate::helder::secondary(ui, t, |ui| ui.button(tr("cancel"))).clicked() {
+                    pick = Some(Pick::Nothing);
+                }
+            }
+        });
+    });
+    if closed || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        pick.get_or_insert(Pick::Nothing);
+    }
+    let Some(pick) = pick else { return };
+    app.risky = None;
+    match pick {
+        Pick::Nothing => {}
+        Pick::Others => app.store_attachments(&others),
+        Pick::All if r.list.len() == 1 => app.store_attachment(&r.list[0]),
+        Pick::All => app.store_attachments(&r.list),
     }
 }
 

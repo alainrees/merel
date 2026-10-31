@@ -11,6 +11,32 @@ pub const RISKY_EXTENSIONS: &[&str] = &[
     "reg", "iso", "img", "vhd", "vhdx", "apk", "app", "dmg", "pkg", "cpl", "inf", "sct", "chm", "url", "html", "htm", "svg",
 ];
 
+/// File extensions of Office documents that carry macros, code that runs once the person allows
+/// it. Office from the internet asks first; the warning says not to.
+pub const MACRO_EXTENSIONS: &[&str] = &["docm", "dotm", "xlsm", "xltm", "xlam", "xlsb", "pptm", "potm", "ppsm", "ppam", "sldm"];
+
+/// Why an attachment deserves a second thought before it is saved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttachmentRisk {
+    /// It runs as a program or script when opened.
+    Program,
+    /// An Office document with macros.
+    Macros,
+}
+
+/// The risk of an attachment called `name`, by its last extension (so `factuur.pdf.exe` is a
+/// program), or `None` for an ordinary file.
+pub fn attachment_risk(name: &str) -> Option<AttachmentRisk> {
+    let ext = name.trim().rsplit_once('.').map(|(_, e)| e.trim().to_ascii_lowercase())?;
+    if RISKY_EXTENSIONS.contains(&ext.as_str()) {
+        Some(AttachmentRisk::Program)
+    } else if MACRO_EXTENSIONS.contains(&ext.as_str()) {
+        Some(AttachmentRisk::Macros)
+    } else {
+        None
+    }
+}
+
 /// Domains shorter than this are not compared letter by letter: "a.nl" vs "b.nl" says nothing.
 const MIN_LOOKALIKE_LEN: usize = 6;
 
@@ -27,6 +53,8 @@ pub enum Warning {
     MisleadingLink { shown: String, host: String },
     /// An attachment that runs as a program when opened.
     RiskyAttachment { name: String },
+    /// An Office document with macros.
+    MacroAttachment { name: String },
 }
 
 impl Warning {
@@ -42,6 +70,7 @@ impl Warning {
                 merel_i18n::tr_args("warn-misleading-link", &[("shown", shown.clone().into()), ("host", host.clone().into())])
             }
             Warning::RiskyAttachment { name } => merel_i18n::tr_args("warn-risky-attachment", &[("name", name.clone().into())]),
+            Warning::MacroAttachment { name } => merel_i18n::tr_args("warn-macro-attachment", &[("name", name.clone().into())]),
         }
     }
 }
@@ -209,15 +238,15 @@ pub fn link_warnings(links: &[(String, String)]) -> Vec<Warning> {
     out
 }
 
-/// Attachments that run as a program when opened, by their last extension.
+/// Attachments that run as a program when opened, or Office documents with macros, by their
+/// last extension.
 pub fn attachment_warnings<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<Warning> {
     names
         .into_iter()
-        .filter(|n| {
-            let ext = n.trim().rsplit_once('.').map(|(_, e)| e.trim().to_ascii_lowercase()).unwrap_or_default();
-            RISKY_EXTENSIONS.contains(&ext.as_str())
+        .filter_map(|n| match attachment_risk(n)? {
+            AttachmentRisk::Program => Some(Warning::RiskyAttachment { name: n.to_string() }),
+            AttachmentRisk::Macros => Some(Warning::MacroAttachment { name: n.to_string() }),
         })
-        .map(|n| Warning::RiskyAttachment { name: n.to_string() })
         .collect()
 }
 
@@ -320,15 +349,26 @@ mod tests {
 
     #[test]
     fn program_attachments_are_pointed_out_by_their_last_extension() {
-        let w = attachment_warnings(["factuur.pdf", "Factuur.PDF.exe", "foto.jpg", "script.js", "archief.zip", "pagina.html"]);
+        let w = attachment_warnings(["factuur.pdf", "Factuur.PDF.exe", "foto.jpg", "script.js", "archief.zip", "pagina.html", "begroting.xlsm"]);
         let names: Vec<String> = w
             .into_iter()
             .map(|w| match w {
                 Warning::RiskyAttachment { name } => name,
+                Warning::MacroAttachment { name } => format!("macro:{name}"),
                 other => other.text(),
             })
             .collect();
-        assert_eq!(names, ["Factuur.PDF.exe", "script.js", "pagina.html"]);
+        assert_eq!(names, ["Factuur.PDF.exe", "script.js", "pagina.html", "macro:begroting.xlsm"]);
         assert!(Warning::RiskyAttachment { name: "a.exe".into() }.text().contains("a.exe"));
+        assert!(Warning::MacroAttachment { name: "b.docm".into() }.text().contains("b.docm"));
+    }
+
+    #[test]
+    fn the_risk_of_an_attachment_goes_by_its_last_extension() {
+        assert_eq!(attachment_risk("setup.EXE"), Some(AttachmentRisk::Program));
+        assert_eq!(attachment_risk("factuur.pdf.scr "), Some(AttachmentRisk::Program));
+        assert_eq!(attachment_risk("Begroting.XLSM"), Some(AttachmentRisk::Macros));
+        assert_eq!(attachment_risk("verslag.docx"), None);
+        assert_eq!(attachment_risk("exe"), None, "a name without an extension is no program by its name");
     }
 }

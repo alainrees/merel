@@ -264,7 +264,7 @@ images-load = Afbeeldingen laden
 images-load-hint = Haalt de afbeeldingen van dit ene bericht op van internet. De afzender kan daaraan zien dat je het bericht hebt geopend.
 images-always-hint = Zet de afzender op je lijst met veilige afzenders (venster Ongewenste e-mail) en laadt de afbeeldingen van die afzender voortaan zonder te vragen.
 attachment-junk-hint = Uitgeschakeld in Ongewenste e-mail. Klik op Geen ongewenst als je deze afzender vertrouwt.
-attachment-save-hint = Opslaan in je map Downloads. Merel opent bijlagen niet zelf.
+attachment-save-hint = Opslaan in je map Downloads, gemarkeerd als gedownload van internet, zodat je virusscanner het controleert. Merel opent bijlagen niet zelf.
 attachments-save-all-hint = Zet alle bijlagen van dit bericht in je map Downloads, elk onder zijn eigen naam.
 quick-reply-hint = Opent een antwoord aan de afzender.
 arrived = { $count ->
@@ -458,6 +458,15 @@ attachments-not-saved = Bijlagen niet opgeslagen: { $error }
 attachments-partly-saved = { $count } van { $total } bijlagen opgeslagen in { $folder }; { $error }
 attachments-no-downloads = Bijlagen niet opgeslagen: geen map Downloads gevonden.
 file-not-saved = { $name } niet opgeslagen: { $error }
+attachment-malware = je virusscanner heeft er een bedreiging in gevonden
+risky-title = Bijlage met risico
+risky-program = { $name } is een programma of script. Het kan je computer overnemen zodra je het opent.
+risky-macros = { $name } is een Office-bestand met macro's. Zet macro's niet aan, tenzij je de afzender kent en het bestand verwachtte.
+risky-advice = Twijfel je, vraag dan via een ander kanaal na of de afzender het echt stuurde. Merel markeert elk opgeslagen bestand als gedownload van internet, zodat je computer het controleert als je het opent.
+risky-dont-save = Niet opslaan
+risky-save-anyway = Toch opslaan
+risky-save-others = Zonder deze opslaan
+risky-save-all = Alles opslaan
 
 ## Zoekmappen
 
@@ -1815,6 +1824,7 @@ warn-lookalike = Het domein { $domain } lijkt op { $like }, maar is het niet.
 warn-unauthenticated = Je mailserver kon niet bevestigen dat dit bericht echt van de afzender komt ({ $checks } mislukt).
 warn-misleading-link = Een link toont { $shown } maar gaat naar { $host }.
 warn-risky-attachment = De bijlage { $name } is een programma; open die niet.
+warn-macro-attachment = De bijlage { $name } kan macro's bevatten; zet ze niet aan als Office daarom vraagt.
 
 ## Browser sign-in
 
