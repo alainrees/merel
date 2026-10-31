@@ -16,6 +16,7 @@
 //! The store in `<dir>` is encrypted with the key in the environment variable `MEREL_SIGNAL_KEY`,
 //! which Merel keeps in the system keychain.
 
+mod history;
 mod phone;
 mod wire;
 
@@ -357,10 +358,15 @@ async fn start() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let key = std::env::var("MEREL_SIGNAL_KEY").context("MEREL_SIGNAL_KEY is not set")?;
     match args.get(1..).unwrap_or_default() {
-        [cmd, dir, name] if cmd == "link" => link(open(dir, &key).await?, name).await,
+        [cmd, dir, name] if cmd == "link" => link(open(dir, &key).await?, dir, &key, name).await,
         [cmd, dir] if cmd == "run" => {
             let manager = Manager::load_registered(open(dir, &key).await?).await?;
             let mut files = Files::new();
+            // The chats from before linking, as far as the phone sent them.
+            match history::stored(dir, &key).await {
+                Ok(lines) => lines.iter().for_each(|l| println!("{l}")),
+                Err(e) => eprintln!("merel-signal: the history from before linking did not come: {e:#}"),
+            }
             // Without the stored messages Merel still gets the new ones.
             match threads(dir, &key).await {
                 Ok(threads) => {
@@ -386,16 +392,24 @@ async fn open(dir: &str, key: &str) -> Result<SqliteStore> {
     Ok(SqliteStore::open_with_passphrase(&url, Some(key), OnNewIdentity::Trust).await?)
 }
 
-async fn link(store: SqliteStore, name: &str) -> Result<()> {
+async fn link(store: SqliteStore, dir: &str, key: &str, name: &str) -> Result<()> {
     let (tx, rx) = oneshot::channel();
     let (linked, _) = future::join(Manager::link_secondary_device(store, SignalServers::Production, name.to_string(), tx), async {
-        if let Ok(url) = rx.await {
+        if let Ok(mut url) = rx.await {
+            // So the phone offers to transfer the message history.
+            url.query_pairs_mut().append_pair("capabilities", history::LINK_CAPABILITIES);
             emit(&Event::Link { url: url.to_string() });
         }
     })
     .await;
     let manager = linked.map_err(|e| anyhow!("{e}"))?;
     let data = manager.registration_data();
+    // Only now there is a key for the history the phone sends; it is not kept elsewhere.
+    if let Some(backup_key) = data.ephemeral_backup_key()
+        && let Err(e) = history::keep_key(dir, key, &backup_key).await
+    {
+        eprintln!("merel-signal: the message history cannot be taken over: {e:#}");
+    }
     let id = ServiceId::from(data.service_ids.aci()).service_id_string();
     emit(&Event::Linked { number: Some(data.phone_number.to_string()), id });
     Ok(())
@@ -480,10 +494,36 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
     // for that list, as Signal Desktop does, once the waiting messages are in.
     let mut contacts_asked = false;
     let mut asking: Option<future::LocalBoxFuture<'static, std::result::Result<(), String>>> = None;
+    // The message history the phone sends after linking, taken in on the side.
+    let mut history: Option<future::LocalBoxFuture<'static, Result<Vec<String>>>> = match serde_json::to_value(manager.registration_data()) {
+        Ok(registration) => match history::Login::from_registration(&registration) {
+            Ok(login) => Some(Box::pin(history::take_over(dir.to_string(), key.to_string(), login))),
+            Err(e) => {
+                eprintln!("merel-signal: no history: {e:#}");
+                None
+            }
+        },
+        Err(e) => {
+            eprintln!("merel-signal: no history: {e:#}");
+            None
+        }
+    };
     // A lookup of address book numbers, also on the side: it goes to another service.
     let mut finding: Option<future::LocalBoxFuture<'static, std::result::Result<Vec<Person>, String>>> = None;
     loop {
         tokio::select! {
+            taken = async {
+                match history.as_mut() {
+                    Some(f) => f.await,
+                    None => Ok(Vec::new()),
+                }
+            }, if history.is_some() => {
+                history = None;
+                match taken {
+                    Ok(lines) => lines.iter().for_each(|l| println!("{l}")),
+                    Err(e) => eprintln!("merel-signal: the history from before linking: {e:#}"),
+                }
+            }
             found = async {
                 match finding.as_mut() {
                     Some(f) => f.await,
@@ -1124,7 +1164,9 @@ fn now() -> Result<u64> {
 /// The chat Merel names `thread`: a person's service id, or a group by its hashed key.
 async fn find_thread(dir: &str, key: &str, thread: &str) -> Result<Thread> {
     if thread.starts_with('g') {
-        let groups = threads(dir, key).await?;
+        let mut groups = threads(dir, key).await?;
+        // Groups known only from the history before linking.
+        groups.extend(history::groups(dir, key).await.unwrap_or_default().into_iter().map(Thread::Group));
         groups.into_iter().find(|t| matches!(t, Thread::Group(k) if group_id(k) == thread)).ok_or_else(|| anyhow!("unknown chat {thread}"))
     } else {
         ServiceId::parse_from_service_id_string(thread).map(Thread::Contact).ok_or_else(|| anyhow!("unknown chat {thread}"))
