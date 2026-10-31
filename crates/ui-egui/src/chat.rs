@@ -842,7 +842,7 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                 Some(text) => menu.union(text),
                 None => menu,
             };
-            menu.context_menu(|ui| {
+            egui::Popup::context_menu(&menu).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
                 if reacts && ui.add(egui::Button::image_and_text(Icon::Reply.image(16.0, t.text), tr("chat-reply"))).clicked() {
                     accept = Some(Clicked::Reply);
                     ui.close();
@@ -1173,7 +1173,8 @@ fn react_button(ui: &mut Ui, t: &Tokens, id: &str, hovered: bool, clicked: &mut 
     let button = egui::Button::new(RichText::new("☺").size(17.0).color(t.text_dim)).frame(false).min_size(size);
     let r = ui.add(button);
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-react")));
-    egui::Popup::menu(&r).id(menu_id).show(|ui| reaction_menu(ui, clicked));
+    // Stays open for clicks inside, such as the dots that open every emoji; a pick closes it.
+    egui::Popup::menu(&r).id(menu_id).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| reaction_menu(ui, clicked));
     r.on_hover_text(tr("chat-react"));
 }
 
@@ -1393,14 +1394,16 @@ pub(crate) fn all_emoji() -> impl Iterator<Item = &'static str> {
 /// A smiley that opens every emoji to add to `input`, as Signal's picker; the computer's own
 /// picker works as well.
 fn emoji_button(ui: &mut Ui, t: &Tokens, input: &mut String) {
-    let r = ui.menu_button(RichText::new("🙂").size(19.0).color(t.text_dim), |ui| {
+    let r = ui.add(egui::Button::new(RichText::new("🙂").size(19.0).color(t.text_dim)).frame(false));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-emoji")));
+    // Stays open while searching or switching groups; a pick closes it.
+    egui::Popup::menu(&r).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         if let Some(e) = crate::emoji_picker::picker(ui, t, egui::Id::new("chat-emoji-picker")) {
             input.push_str(&e);
             ui.close();
         }
     });
-    r.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-emoji")));
-    r.response.on_hover_text(tr("chat-emoji"));
+    r.on_hover_text(tr("chat-emoji"));
 }
 
 /// The square blue send button with the paper plane.
@@ -1643,6 +1646,27 @@ mod tests {
         let text = "Ik wil graag chatten. Open deze link:\n\nhttps://i.delta.chat/#ABC&i=x&s=y&a=a%40b.nl\n";
         assert_eq!(invite_in(text), Some("https://i.delta.chat/#ABC&i=x&s=y&a=a%40b.nl"));
         assert_eq!(invite_in("Gewoon een bericht"), None);
+    }
+
+    #[test]
+    fn the_dots_beside_the_reactions_open_every_emoji_and_keep_the_menu_open() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut h = Harness::builder().with_size(vec2(600.0, 700.0)).build_ui(|ui| {
+            let t = Tokens::for_dark(false);
+            let mut clicked = None;
+            ui.add_space(20.0);
+            react_button(ui, &t, "m1", true, &mut clicked);
+        });
+        // The colour emoji sheet is larger than the test renderer's default.
+        h.input_mut().max_texture_side = Some(8192);
+        h.run();
+        h.get_by_label(&tr("chat-react")).click();
+        h.run();
+        h.get_by_label(&tr("emoji-more")).click();
+        h.run();
+        h.run();
+        assert!(h.query_by_label("😀").is_some(), "the picker shows after the dots, and the menu stays open");
     }
 
     #[test]
