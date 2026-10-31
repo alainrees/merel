@@ -16,6 +16,11 @@ presage = { git = "https://github.com/whisperfish/presage", rev = "aeaedf99babeb
 presage-store-sqlite = { git = "https://github.com/whisperfish/presage", rev = "aeaedf99babebae2dbc6b86bca797807d4cd9fda", default-features = false }
 # SQLCipher with its own OpenSSL, so the app needs nothing installed on the computer.
 libsqlite3-sys = { version = "0.36.0", features = ["bundled-sqlcipher-vendored-openssl"] }
+# The message history the phone transfers while linking: a message backup.
+libsignal-message-backup = { git = "https://github.com/signalapp/libsignal", tag = "v0.99.0", features = ["json"] }
+libsignal-account-keys = { git = "https://github.com/signalapp/libsignal", tag = "v0.99.0" }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 anyhow = "1.0"
 base64 = "0.22"
 futures = "0.3"
