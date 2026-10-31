@@ -22,16 +22,47 @@ mod mac {
     use std::cell::RefCell;
     use std::ptr::NonNull;
 
-    use block2::StackBlock;
+    use block2::{RcBlock, StackBlock};
     use objc2::AllocAnyThread as _;
     use objc2::runtime::{Bool, ProtocolObject};
     use objc2_contacts::{
-        CNContact, CNContactFamilyNameKey, CNContactFetchRequest, CNContactGivenNameKey, CNContactOrganizationNameKey, CNContactPhoneNumbersKey,
-        CNContactStore, CNKeyDescriptor,
+        CNAuthorizationStatus, CNContact, CNContactFamilyNameKey, CNContactFetchRequest, CNContactGivenNameKey, CNContactOrganizationNameKey,
+        CNContactPhoneNumbersKey, CNContactStore, CNEntityType, CNKeyDescriptor,
     };
     use objc2_foundation::{NSArray, NSError};
 
+    /// Asks the person, the first time, whether Merel may read Contacten, and waits for the
+    /// answer: reading before it is given finds nobody, and Merel would not look again.
+    fn allowed(store: &CNContactStore) -> bool {
+        // SAFETY: a class method taking the framework's own entity type.
+        let status = unsafe { CNContactStore::authorizationStatusForEntityType(CNEntityType::Contacts) };
+        if status == CNAuthorizationStatus::Authorized || status == CNAuthorizationStatus::Limited {
+            return true;
+        }
+        if status != CNAuthorizationStatus::NotDetermined {
+            log::warn!("address book: Merel may not read Contacten ({status:?})");
+            return false;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let answer = RcBlock::new(move |granted: Bool, _error: *mut NSError| {
+            let _ = tx.send(granted.as_bool());
+        });
+        // SAFETY: the block only sends on a channel; the framework calls it once, on a queue of
+        // its own, and keeps it as long as it needs.
+        unsafe { store.requestAccessForEntityType_completionHandler(CNEntityType::Contacts, &answer) };
+        let granted = rx.recv_timeout(std::time::Duration::from_secs(600)).unwrap_or(false);
+        if !granted {
+            log::warn!("address book: Contacten not allowed");
+        }
+        granted
+    }
+
     pub fn read() -> Vec<(String, Vec<String>)> {
+        // SAFETY: a plain new store; it is safe to use from any thread.
+        let store = unsafe { CNContactStore::new() };
+        if !allowed(&store) {
+            return Vec::new();
+        }
         let people = RefCell::new(Vec::new());
         let each = |contact: NonNull<CNContact>, _stop: NonNull<Bool>| {
             // SAFETY: the framework hands a valid contact for the call's duration, fetched with
@@ -61,12 +92,14 @@ mod mac {
             ];
             let keys = NSArray::from_slice(&keys);
             let request = CNContactFetchRequest::initWithKeysToFetch(CNContactFetchRequest::alloc(), &keys);
-            CNContactStore::new().enumerateContactsWithFetchRequest_error_usingBlock(&request, Some(&mut error), &block)
+            store.enumerateContactsWithFetchRequest_error_usingBlock(&request, Some(&mut error), &block)
         };
         if !read {
             log::warn!("address book: not read: {error:?}");
         }
         drop(block);
-        people.into_inner()
+        let people = people.into_inner();
+        log::info!("address book: {} people with a phone number", people.len());
+        people
     }
 }
