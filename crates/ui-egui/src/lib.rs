@@ -2813,6 +2813,7 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
         }
     }
     let known = app.engine.session.contact_with_email(m.from.email()).is_some();
+    let on_behalf = app.engine.session.selected_body().and_then(|b| b.sender.clone());
     // The buttons get their own row when the pane is too narrow to keep the sender readable
     // beside them; their width is the one measured in the previous frame.
     let buttons_id = ui.id().with("header-buttons-width");
@@ -2826,10 +2827,10 @@ fn reading_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let before = ui.available_width();
                 actions = header_actions(ui, t, known, in_junk);
                 measured = before - ui.available_width();
-                ui.with_layout(Layout::left_to_right(Align::Center), |ui| header_sender(ui, t, &m));
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| header_sender(ui, t, &m, on_behalf.as_ref()));
             });
         } else {
-            header_sender(ui, t, &m);
+            header_sender(ui, t, &m, on_behalf.as_ref());
         }
     });
     if !one_row {
@@ -3148,13 +3149,18 @@ struct HeaderActions {
 }
 
 /// The sender's picture, name, address and the "Aan" line, cut short with "…" when the pane
-/// is narrow, so the header buttons never cover them.
-fn header_sender(ui: &mut Ui, t: &Tokens, m: &merel_model::MessageHeader) {
+/// is narrow, so the header buttons never cover them. `on_behalf` is who sent it for the
+/// author, shown before them as Outlook does: "X namens Y".
+fn header_sender(ui: &mut Ui, t: &Tokens, m: &merel_model::MessageHeader, on_behalf: Option<&merel_model::Address>) {
     let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
     helder::avatar(ui.painter(), rect.center(), 20.0, m.from.display(), m.from.email());
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
+            if let Some(sender) = on_behalf {
+                ui.add(egui::Label::new(RichText::new(sender.display()).color(t.text_dim)).truncate()).on_hover_text(sender.email());
+                ui.label(RichText::new(tr("on-behalf-of")).color(t.text_dim));
+            }
             ui.add(egui::Label::new(RichText::new(m.from.display()).strong().color(t.text)).truncate());
             if m.from.display() != m.from.email() && !merel_engine::signal::is_signal_address(m.from.email()) {
                 ui.add(egui::Label::new(RichText::new(format!("<{}>", m.from.email())).color(t.text_dim)).truncate()).on_hover_text(m.from.email());
@@ -5040,6 +5046,18 @@ mod tests {
         h.get_by_label("Sluiten").click();
         h.run();
         assert!(h.state().preview.is_none());
+    }
+
+    #[test]
+    fn a_message_sent_for_its_author_says_who_sent_it_on_whose_behalf() {
+        let mut h = harness();
+        let sender = merel_model::parse_address_list("noreply=lalal.ai@mg.lalal.ai").ok().and_then(|l| l.into_iter().next());
+        let body = merel_engine::Body { text: "Hallo".into(), sender, ..Default::default() };
+        h.state_mut().engine.session.bodies.insert("m1".into(), body);
+        h.state_mut().engine.session.selected_message = Some("m1".into());
+        h.run();
+        h.get_by_label("noreply=lalal.ai@mg.lalal.ai");
+        h.get_by_label("namens");
     }
 
     #[test]

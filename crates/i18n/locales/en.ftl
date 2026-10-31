@@ -293,6 +293,7 @@ drafts-title = Drafts ({ $count })
 no-subject = (No subject)
 drafts-send-at = ⏰ Send { $when }
 drafts-no-recipient = (no recipient yet)
+on-behalf-of = on behalf of
 to-line = To: { $to }
 search-results = Search results ({ $count })
 search-server-found = { $count ->

@@ -77,6 +77,9 @@ pub struct Body {
     /// Where the sender asks a read receipt to go (`Disposition-Notification-To`), as Outlook's
     /// "Leesbevestiging vragen" sets it. Nothing is sent back unless the person asks for it.
     pub receipt_to: Option<Address>,
+    /// Who sent the message for its author (`Sender`), when that is another address than
+    /// `From`: a mailing service sending for a company, shown as Outlook's "X namens Y".
+    pub sender: Option<Address>,
     /// The S/MIME signature on the message, when it is signed.
     pub signature: Option<merel_smime::Signature>,
     /// The OpenPGP signature on the message, when it is signed that way; the engine checks it,
@@ -214,6 +217,14 @@ pub fn parse_body(bytes: &[u8]) -> Body {
         .find(|(name, _)| name.eq_ignore_ascii_case("Disposition-Notification-To"))
         .and_then(|(_, v)| parse_address_list(&v.replace(['\r', '\n'], " ")).ok())
         .and_then(|list| list.into_iter().next());
+    let from =
+        m.headers_raw().find(|(name, _)| name.eq_ignore_ascii_case("From")).and_then(|(_, v)| parse_address_list(&v.replace(['\r', '\n'], " ")).ok());
+    let sender = m
+        .headers_raw()
+        .find(|(name, _)| name.eq_ignore_ascii_case("Sender"))
+        .and_then(|(_, v)| parse_address_list(&v.replace(['\r', '\n'], " ")).ok())
+        .and_then(|list| list.into_iter().next())
+        .filter(|s| !from.iter().flatten().any(|f| f.email().eq_ignore_ascii_case(s.email())));
     let pgp_signed = m.content_type().is_some_and(|c| {
         c.ctype().eq_ignore_ascii_case("multipart")
             && c.subtype().is_some_and(|s| s.eq_ignore_ascii_case("signed"))
@@ -233,7 +244,20 @@ pub fn parse_body(bytes: &[u8]) -> Body {
             bytes: p.contents().into(),
         })
         .collect();
-    Body { text, from_html, rich, images, attachments, authentication, unsubscribe, receipt_to, signature, pgp_signature: None, encrypted: None }
+    Body {
+        text,
+        from_html,
+        rich,
+        images,
+        attachments,
+        authentication,
+        unsubscribe,
+        receipt_to,
+        sender,
+        signature,
+        pgp_signature: None,
+        encrypted: None,
+    }
 }
 
 fn mime_of(p: &mail_parser::MessagePart<'_>) -> String {
@@ -296,6 +320,10 @@ mod tests {
         assert_eq!((to.email(), to.display()), ("receipts@example.org", "Sanne de Vries"));
         assert!(parse_body(b"From: a@example.org\r\nDisposition-Notification-To: nonsense\r\n\r\nHallo").receipt_to.is_none());
         assert!(parse_body(MSG).receipt_to.is_none());
+        let raw = b"From: LALAL.AI <noreply@lalal.ai>\r\nSender: noreply=lalal.ai@mg.lalal.ai\r\n\r\nHallo";
+        assert_eq!(parse_body(raw).sender.expect("the sender").email(), "noreply=lalal.ai@mg.lalal.ai");
+        let same = b"From: Sanne <sanne@example.org>\r\nSender: SANNE@example.org\r\n\r\nHallo";
+        assert!(parse_body(same).sender.is_none(), "the author sending for herself is not shown twice");
     }
 
     #[test]

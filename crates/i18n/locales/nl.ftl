@@ -293,6 +293,7 @@ drafts-title = Concepten ({ $count })
 no-subject = (Geen onderwerp)
 drafts-send-at = ⏰ Verzenden { $when }
 drafts-no-recipient = (nog geen ontvanger)
+on-behalf-of = namens
 to-line = Aan: { $to }
 search-results = Zoekresultaten ({ $count })
 search-server-found = { $count ->
