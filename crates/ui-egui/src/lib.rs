@@ -19,6 +19,7 @@ mod date_picker;
 mod dates;
 pub mod eml;
 mod emoji;
+mod emoji_picker;
 pub mod folders;
 mod fonts;
 mod found;
@@ -447,6 +448,7 @@ impl MailApp {
             theme::install(ui.ctx());
             ui.ctx().set_theme(self.view.theme.preference());
             self.theme_applied = true;
+            emoji_picker::set_recent(ui.ctx(), self.view.recent_emoji.clone());
         }
         let t = Tokens::for_dark(ui.visuals().dark_mode);
         // Decoders for pictures embedded in mail; a no-op after the first frame.
@@ -492,6 +494,12 @@ impl MailApp {
         drag_preview(self, &ctx, &t);
         calendar::drag_preview(self, &ctx, &t);
         helder::linger_closed_windows(&ctx);
+        // The emoji used lately are kept with the view choices.
+        let recent = emoji_picker::recent(&ctx);
+        if recent != self.view.recent_emoji {
+            self.view.recent_emoji = recent;
+            self.save_view(&ctx);
+        }
         if self.tab == Tab::Home && self.module == Module::Mail {
             shortcuts(self, &ctx);
         } else if self.tab == Tab::Home {
