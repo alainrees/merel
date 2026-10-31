@@ -72,6 +72,9 @@ pub struct State {
     pub accept_account: String,
     /// What became of the last invitation accepted.
     pub accept_note: Option<Result<String, String>>,
+    /// The computer's address book on its way, read the first time the new-chat window opens.
+    pub book: Option<std::sync::mpsc::Receiver<crate::AddressBook>>,
+    pub book_read: bool,
 }
 
 /// The window for a new chat: the Signal contacts to pick from, as Signal's pencil shows them.
@@ -86,8 +89,21 @@ pub struct NewChat {
 impl MailApp {
     /// Opens the window for a new chat, from the first account that can chat.
     pub fn new_chat(&mut self) {
-        let account_id = self.chat_accounts().into_iter().next();
-        self.chat.new = Some(NewChat { account_id: account_id.unwrap_or_default(), ..NewChat::default() });
+        let account_id = self.chat_accounts().into_iter().next().unwrap_or_default();
+        // Who in the address book is on Signal, as Signal finds out on the phone: the
+        // computer's address book is read once, on a thread (the system may ask first).
+        if !self.chat.book_read
+            && let Some(read) = self.address_book
+        {
+            self.chat.book_read = true;
+            let (tx, rx) = std::sync::mpsc::channel();
+            let _ = std::thread::Builder::new().name("address-book".into()).spawn(move || {
+                let _ = tx.send(read());
+            });
+            self.chat.book = Some(rx);
+        }
+        self.engine.signal_discover(&account_id);
+        self.chat.new = Some(NewChat { account_id, ..NewChat::default() });
         self.chat.error = None;
     }
 
@@ -313,6 +329,16 @@ pub fn windows(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     if app.chat.new.is_none() {
         return;
     }
+    if let Some(people) = app.chat.book.as_ref().and_then(|rx| rx.try_recv().ok()) {
+        app.chat.book = None;
+        app.engine.set_address_book(people);
+        if let Some(form) = &app.chat.new {
+            let account_id = form.account_id.clone();
+            app.engine.signal_discover(&account_id);
+        }
+    }
+    // The address book and Signal's answer come on their own.
+    ctx.request_repaint_after(std::time::Duration::from_millis(500));
     let mut open = true;
     helder::item_window(ctx, t, "new-chat-window", &tr("chat-new"), vec2(720.0, 560.0), &mut open, |ui| new_chat_form(app, ui, t));
     if !open {

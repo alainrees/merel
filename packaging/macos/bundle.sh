@@ -31,6 +31,12 @@ if [ -f "$signal/aarch64-apple-darwin/release/merel-signal-calls" ] && [ -f "$si
     "$signal/aarch64-apple-darwin/release/merel-signal-calls" \
     "$signal/x86_64-apple-darwin/release/merel-signal-calls"
 fi
+# So does the lookup of the address book on Signal.
+if [ -f "$signal/aarch64-apple-darwin/release/merel-signal-lookup" ] && [ -f "$signal/x86_64-apple-darwin/release/merel-signal-lookup" ]; then
+  lipo -create -output "$app/Contents/MacOS/merel-signal-lookup" \
+    "$signal/aarch64-apple-darwin/release/merel-signal-lookup" \
+    "$signal/x86_64-apple-darwin/release/merel-signal-lookup"
+fi
 
 iconset="$work/Merel.iconset"
 mkdir -p "$iconset"

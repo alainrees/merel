@@ -56,3 +56,5 @@ jobs:
       # With calls: RingRTC on the WebRTC Signal builds for its desktop app.
       - run: cargo clippy --locked --all-targets --features calls-prebuilt -- -D warnings
       - run: cargo test --locked --features calls-prebuilt
+      # The address book lookup, on its own (see release.yml).
+      - run: cargo clippy --locked --features lookup --bin merel-signal-lookup -- -D warnings

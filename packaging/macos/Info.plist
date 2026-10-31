@@ -30,5 +30,7 @@
   <true/>
   <key>NSMicrophoneUsageDescription</key>
   <string>Merel gebruikt de microfoon alleen tijdens een vergadering, zodat de anderen je horen.</string>
+  <key>NSContactsUsageDescription</key>
+  <string>Merel zoekt in je contactpersonen wie Signal heeft, zodat je met hen kunt chatten. Alleen de telefoonnummers gaan versleuteld naar Signal; namen blijven op je Mac.</string>
 </dict>
 </plist>
