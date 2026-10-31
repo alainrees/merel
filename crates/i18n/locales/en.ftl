@@ -264,7 +264,7 @@ images-load = Load pictures
 images-load-hint = Fetches the pictures of this one message from the internet. The sender can tell from that that you opened the message.
 images-always-hint = Puts the sender on your safe senders list (Junk Email window) and loads that sender's pictures from now on without asking.
 attachment-junk-hint = Off in Junk Email. Click Not junk if you trust this sender.
-attachment-save-hint = Save to your Downloads folder. Merel does not open attachments itself.
+attachment-save-hint = Save to your Downloads folder, marked as downloaded from the internet so your virus scanner checks it. Merel does not open attachments itself.
 attachments-save-all-hint = Puts every attachment of this message in your Downloads folder, each under its own name.
 quick-reply-hint = Opens a reply to the sender.
 arrived = { $count ->
@@ -458,6 +458,15 @@ attachments-not-saved = Attachments not saved: { $error }
 attachments-partly-saved = { $count } of { $total } attachments saved in { $folder }; { $error }
 attachments-no-downloads = Attachments not saved: no Downloads folder found.
 file-not-saved = { $name } not saved: { $error }
+attachment-malware = your virus scanner found a threat in it
+risky-title = Risky attachment
+risky-program = { $name } is a program or script. It can take over your computer as soon as you open it.
+risky-macros = { $name } is an Office file with macros. Do not enable macros unless you know the sender and expected the file.
+risky-advice = If in doubt, ask the sender through another channel whether they really sent it. Merel marks every saved file as downloaded from the internet, so your computer checks it when you open it.
+risky-dont-save = Don't save
+risky-save-anyway = Save anyway
+risky-save-others = Save the others
+risky-save-all = Save all
 
 ## Zoekmappen
 
@@ -1830,6 +1839,7 @@ warn-lookalike = The domain { $domain } looks like { $like }, but it is not.
 warn-unauthenticated = Your mail server could not confirm that this message really comes from the sender ({ $checks } failed).
 warn-misleading-link = A link shows { $shown } but goes to { $host }.
 warn-risky-attachment = The attachment { $name } is a program; do not open it.
+warn-macro-attachment = The attachment { $name } may contain macros; do not enable them when Office asks.
 
 ## Browser sign-in
 

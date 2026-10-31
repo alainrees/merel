@@ -39,7 +39,10 @@ pub use learn::{JUNK_SCORE, Learned, MIN_TRAINED};
 pub use online::{MAX_LINK as MAX_MEETING_LINK, MeetingLink, Service as MeetingService, find_meeting_link, meeting_link};
 pub use quicksteps::{MAX_QUICK_STEP_NAME, QuickStep, QuickStepError};
 pub use rules::{MAX_RULE_TEXT, Rule, RuleError, RuleField};
-pub use safety::{RISKY_EXTENSIONS, Warning, attachment_warnings, authentication_warning, host_of, link_warnings, lookalike, sender_warnings};
+pub use safety::{
+    AttachmentRisk, MACRO_EXTENSIONS, RISKY_EXTENSIONS, Warning, attachment_risk, attachment_warnings, authentication_warning, host_of,
+    link_warnings, lookalike, sender_warnings,
+};
 pub use task::{Priority, Repeat, Task, TaskError};
 pub use templates::{MAX_TEMPLATE_NAME, MAX_TEMPLATE_TEXT, Template, TemplateError};
 

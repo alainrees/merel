@@ -4662,6 +4662,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "merel-quarantine"
+version = "0.1.37"
+dependencies = [
+ "libc",
+ "log",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "merel-search"
 version = "0.1.37"
 dependencies = [
@@ -4805,6 +4814,7 @@ dependencies = [
  "merel-model",
  "merel-notify",
  "merel-pgp",
+ "merel-quarantine",
  "merel-search",
  "merel-secrets",
  "merel-sign",
