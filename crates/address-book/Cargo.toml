@@ -1,0 +1,37 @@
+[package]
+name = "merel-address-book"
+description = "The computer's own address book (macOS Contacten), to find who is on Signal."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+log = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSArray", "NSEnumerator", "NSError", "NSObject"] }
+objc2-contacts = { version = "0.3", default-features = false, features = [
+    "std",
+    "block2",
+    "CNContact",
+    "CNContactStore",
+    "CNContactFetchRequest",
+    "CNFetchRequest",
+    "CNLabeledValue",
+    "CNPhoneNumber",
+] }
+
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

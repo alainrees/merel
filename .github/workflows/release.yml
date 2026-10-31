@@ -48,6 +48,10 @@ jobs:
       - run: cargo build --release --locked --manifest-path apps/merel-signal/Cargo.toml --features calls-prebuilt --target x86_64-apple-darwin
         env:
           OUTPUT_DIR: ${{ runner.temp }}/webrtc-x86_64
+      # The address book lookup links BoringSSL, so it is built on its own: built together with
+      # merel-signal, the lookup's features would reach merel-signal too.
+      - run: cargo build --release --locked --manifest-path apps/merel-signal/Cargo.toml --features lookup --bin merel-signal-lookup --target aarch64-apple-darwin
+      - run: cargo build --release --locked --manifest-path apps/merel-signal/Cargo.toml --features lookup --bin merel-signal-lookup --target x86_64-apple-darwin
       - run: packaging/macos/bundle.sh
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}

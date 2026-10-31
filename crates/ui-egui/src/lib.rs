@@ -146,6 +146,9 @@ impl Tab {
     }
 }
 
+/// People with their phone numbers, as an address book lists them.
+pub type AddressBook = Vec<(String, Vec<String>)>;
+
 pub struct MailApp {
     pub engine: Engine,
     pub module: Module,
@@ -221,6 +224,9 @@ pub struct MailApp {
     /// Whether the ribbon's tabs live in the system's menu bar (macOS) instead of the window;
     /// the window then keeps one command bar, the module's Start tab, as Outlook for Mac.
     pub native_menu: bool,
+    /// Reads the computer's own address book (macOS Contacten) as names with phone numbers,
+    /// where the platform has one: the app sets it.
+    pub address_book: Option<fn() -> AddressBook>,
     /// The menus for the menu bar, noted each frame while [`MailApp::native_menu`] is on.
     pub menu_bar: Vec<menubar::Menu>,
     /// A click in the menu bar, to run in the next frame: the menu's place and the item's path.
@@ -353,6 +359,7 @@ impl MailApp {
             theme_applied: false,
             title_bar_inset: 0.0,
             native_menu: false,
+            address_book: None,
             menu_bar: Vec::new(),
             menu_click: None,
             title: None,

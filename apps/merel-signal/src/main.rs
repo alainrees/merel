@@ -139,6 +139,11 @@ enum Event {
     Contacts {
         people: Vec<Person>,
     },
+    /// Which of the numbers Merel asked about are on Signal, with their service id; the
+    /// numbers that are not are left out.
+    Found {
+        people: Vec<Person>,
+    },
     /// Every message waiting on the server is in. `calls` says whether this build can call.
     Synced {
         calls: bool,
@@ -263,6 +268,12 @@ enum CallState {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Command {
+    /// Asks Signal which of these phone numbers (as +31612345678) are on Signal, as Signal
+    /// itself does with the address book: through its contact discovery service, where the
+    /// numbers are looked up inside an enclave nobody can look into.
+    Discover {
+        numbers: Vec<String>,
+    },
     Send {
         thread: String,
         text: String,
@@ -353,9 +364,11 @@ async fn start() -> Result<()> {
             // Without the stored messages Merel still gets the new ones.
             match threads(dir, &key).await {
                 Ok(threads) => {
+                    let at = std::time::Instant::now();
                     if let Err(e) = replay(&manager, &threads, &mut files).await {
                         eprintln!("merel-signal: the stored messages did not come: {e:#}");
                     }
+                    eprintln!("merel-signal: {} stored chats passed on in {} ms", threads.len(), at.elapsed().as_millis());
                 }
                 Err(e) => eprintln!("merel-signal: the stored chats could not be listed: {e:#}"),
             }
@@ -388,6 +401,45 @@ async fn link(store: SqliteStore, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Asks merel-signal-lookup, next to this program, which of `numbers` are on Signal.
+async fn look_up(registration: serde_json::Value, numbers: Vec<String>) -> std::result::Result<Vec<Person>, String> {
+    use tokio::io::AsyncWriteExt as _;
+    #[derive(Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum Answer {
+        Found { people: Vec<Found> },
+        Error { message: String },
+    }
+    #[derive(Deserialize)]
+    struct Found {
+        id: String,
+        number: String,
+    }
+    let program = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name(format!("merel-signal-lookup{}", std::env::consts::EXE_SUFFIX));
+    let mut child = tokio::process::Command::new(&program)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("{}: {e}", program.display()))?;
+    let asked = serde_json::json!({ "registration": registration, "numbers": numbers });
+    let mut stdin = child.stdin.take().ok_or("no input")?;
+    stdin.write_all(format!("{asked}\n").as_bytes()).await.map_err(|e| e.to_string())?;
+    drop(stdin);
+    let out = child.wait_with_output().await.map_err(|e| e.to_string())?;
+    let line = String::from_utf8_lossy(&out.stdout);
+    match serde_json::from_str::<Answer>(line.trim()).map_err(|e| e.to_string())? {
+        Answer::Found { people } => Ok(people.into_iter().map(|f| Person { id: f.id, name: String::new(), number: f.number }).collect()),
+        Answer::Error { message } => Err(message),
+    }
+}
+
+/// How many seconds ago `sent` (milliseconds since 1970) was: how long a message took to come.
+fn late(sent: u64) -> u64 {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    u64::try_from(now.saturating_sub(u128::from(sent)) / 1000).unwrap_or(u64::MAX)
+}
+
 /// Most calls kept ringing at once; a caller that never hangs up is forgotten.
 const MAX_RINGING: usize = 64;
 
@@ -414,8 +466,10 @@ async fn replay<S: Store>(manager: &Manager<S, Registered>, threads: &[Thread], 
 }
 
 async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str, mut files: Files) -> Result<()> {
+    let started = std::time::Instant::now();
     let sender = manager.clone();
     let messages = manager.receive_messages().await.map_err(|e| anyhow!("{e}"))?;
+    eprintln!("merel-signal: connected to Signal in {} ms", started.elapsed().as_millis());
     pin_mut!(messages);
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut sending = sender;
@@ -426,8 +480,25 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
     // for that list, as Signal Desktop does, once the waiting messages are in.
     let mut contacts_asked = false;
     let mut asking: Option<future::LocalBoxFuture<'static, std::result::Result<(), String>>> = None;
+    // A lookup of address book numbers, also on the side: it goes to another service.
+    let mut finding: Option<future::LocalBoxFuture<'static, std::result::Result<Vec<Person>, String>>> = None;
     loop {
         tokio::select! {
+            found = async {
+                match finding.as_mut() {
+                    Some(f) => f.await,
+                    None => Ok(Vec::new()),
+                }
+            }, if finding.is_some() => {
+                finding = None;
+                match found {
+                    Ok(people) => {
+                        eprintln!("merel-signal: {} of the numbers asked about are on Signal", people.len());
+                        emit(&Event::Found { people });
+                    }
+                    Err(e) => eprintln!("merel-signal: could not look up the address book: {e}"),
+                }
+            }
             asked = async {
                 match asking.as_mut() {
                     Some(f) => f.await,
@@ -454,7 +525,7 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
             },
             received = messages.next() => match received {
                 Some(Received::QueueEmpty) => {
-                    eprintln!("merel-signal: all waiting messages are in");
+                    eprintln!("merel-signal: all waiting messages are in, {} s after the start", started.elapsed().as_secs());
                     emit(&Event::Contacts { people: contacts(&manager).await });
                     emit(&Event::Synced { calls: phone.ready() });
                     // Asked on the side: sending it can take long, and Merel waits for
@@ -485,7 +556,12 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                         }
                         _ => describe(&manager, &content, &mut files).await,
                     };
-                    eprintln!("merel-signal: received {}, {}", kind(&content.body), if shown.is_some() { "shown" } else { "not shown" });
+                    eprintln!(
+                        "merel-signal: received {}, {}, {} s after it was sent",
+                        kind(&content.body),
+                        if shown.is_some() { "shown" } else { "not shown" },
+                        late(content.timestamp())
+                    );
                     if let Some(event) = shown {
                         emit(&event);
                     }
@@ -544,6 +620,15 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                     },
                     // Merel let go of the chat already; should telling the phone fail, it stays
                     // gone here all the same.
+                    Ok(Command::Discover { numbers }) => {
+                        if finding.is_none() {
+                            let data = manager.registration_data();
+                            let mut registration = serde_json::to_value(data).map_err(|e| anyhow!("{e}"))?;
+                            // The number as text, +31612345678, rather than its parts.
+                            registration["phone_number"] = data.phone_number.format().mode(presage::libsignal_service::prelude::phonenumber::Mode::E164).to_string().into();
+                            finding = Some(Box::pin(look_up(registration, numbers)));
+                        }
+                    }
                     Ok(Command::DeleteChat { thread }) => {
                         if let Err(e) = delete_chat(&mut sending, dir, key, &thread).await {
                             eprintln!("merel-signal: deleting a chat: {e:#}");

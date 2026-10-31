@@ -37,6 +37,8 @@ ringrtc = { git = "https://github.com/signalapp/ringrtc", tag = "v2.73.0", featu
 calls = ["dep:ringrtc"]
 # …or on the WebRTC Signal builds for its own desktop app, fetched while building.
 calls-prebuilt = ["calls", "ringrtc/prebuilt_webrtc"]
+# The address book lookup program merel-signal-lookup, with Signal's contact discovery.
+lookup = ["presage/cdsi"]
 
 [[bin]]
 name = "merel-signal"
@@ -48,6 +50,13 @@ path = "src/main.rs"
 name = "merel-signal-calls"
 path = "src/bin/merel-signal-calls.rs"
 required-features = ["calls"]
+
+# Signal's contact discovery brings BoringSSL too, so the address book lookup is a program of
+# its own as well.
+[[bin]]
+name = "merel-signal-lookup"
+path = "src/bin/merel-signal-lookup.rs"
+required-features = ["lookup"]
 
 [patch.crates-io]
 libsqlite3-sys = { version = "0.36.0", git = "https://github.com/whisperfish/rusqlite", rev = "2a42b3354c9194700d08aa070f70a131a470e7dc" }

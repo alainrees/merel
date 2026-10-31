@@ -81,8 +81,24 @@ impl eframe::App for App {
 /// The app icon for the window, the Dock and the taskbar; the installers carry the same picture.
 const ICON: &[u8] = include_bytes!("../../../packaging/icon-256.png");
 
-/// Writes warnings and errors to the terminal, so a window that fails to open says why.
+/// Writes warnings and errors to the terminal, so a window that fails to open says why, and
+/// to `merel.log` beside the accounts, where someone who opened Merel from the Dock can find
+/// them. Only what the code notes along the way: never a message's text or a password.
 struct Stderr;
+
+/// The log file, opened once at the start; none when there is no config directory.
+static LOG_FILE: std::sync::OnceLock<Option<std::sync::Mutex<std::fs::File>>> = std::sync::OnceLock::new();
+
+/// A log larger than this is set aside as `merel.old.log` at the start.
+const LOG_LIMIT: u64 = 2 * 1024 * 1024;
+
+fn open_log() -> Option<std::sync::Mutex<std::fs::File>> {
+    let path = merel_engine::config::default_path()?.with_file_name("merel.log");
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > LOG_LIMIT) {
+        let _ = std::fs::rename(&path, path.with_file_name("merel.old.log"));
+    }
+    std::fs::OpenOptions::new().create(true).append(true).open(path).ok().map(std::sync::Mutex::new)
+}
 
 /// Libraries that warn about what they meet in a message itself (a PDF attachment's text that
 /// cannot be decoded, say): normal for mail, so only their errors are written.
@@ -96,7 +112,13 @@ impl log::Log for Stderr {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            eprintln!("[{} {}] {}", record.level(), record.target(), record.args());
+            let line = format!("[{} {}] {}", record.level(), record.target(), record.args());
+            eprintln!("{line}");
+            if let Some(file) = LOG_FILE.get_or_init(open_log) {
+                use std::io::Write as _;
+                let mut file = file.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let _ = writeln!(file, "{} {line}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+            }
         }
     }
 
@@ -147,6 +169,7 @@ fn main() -> eframe::Result {
             #[cfg(target_os = "macos")]
             {
                 app.native_menu = menu.is_some();
+                app.address_book = Some(merel_address_book::read);
             }
             // The count on the app icon and the computer's notifications; a click on one
             // wakes the window so it can open what the notification was about.

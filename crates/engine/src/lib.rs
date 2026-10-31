@@ -1387,6 +1387,11 @@ pub struct Engine {
     last_item_refresh: Instant,
     last_chat_refresh: Instant,
     last_signal_refresh: Instant,
+    /// The computer's own address book (macOS Contacten), as names with phone numbers: who in it
+    /// is on Signal can be chatted with.
+    address_book: Vec<(String, Vec<String>)>,
+    /// The numbers already asked about at Signal, as +31612345678.
+    signal_asked: HashSet<String>,
     /// Linking a Signal account, while that is under way, and how far it came.
     signal_link: Option<signal::SignalLinking>,
     signal_state: Option<signal::LinkState>,
@@ -1460,6 +1465,8 @@ impl Engine {
             last_signal_refresh: Instant::now(),
             signal_link: None,
             signal_state: None,
+            address_book: Vec::new(),
+            signal_asked: HashSet::new(),
             refresh_every: Some(REFRESH_EVERY),
             items_every: Some(ITEMS_EVERY),
             indexer: indexing::Indexer::none(),
@@ -1491,6 +1498,8 @@ impl Engine {
             last_signal_refresh: Instant::now(),
             signal_link: None,
             signal_state: None,
+            address_book: Vec::new(),
+            signal_asked: HashSet::new(),
             refresh_every: Some(REFRESH_EVERY),
             items_every: Some(ITEMS_EVERY),
             indexer: indexing::Indexer::none(),

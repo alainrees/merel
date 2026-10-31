@@ -14,9 +14,11 @@ merel-ui-egui = { workspace = true }
 merel-touch-bar = { workspace = true }
 merel-window-buttons = { workspace = true }
 merel-notify = { workspace = true }
+merel-address-book = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
 log = { workspace = true }
+chrono = { workspace = true }
 
 # The macOS app menu with "Over Merel" and "Zoek naar updates…" (see src/app_menu.rs).
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -34,6 +34,42 @@ pub fn available() -> bool {
     merel_signal_link::helper().is_some()
 }
 
+/// Country calling codes, to find the one a phone number starts with.
+const COUNTRY_CODES: [&str; 48] = [
+    "1", "7", "20", "27", "30", "31", "32", "33", "34", "36", "39", "40", "41", "43", "44", "45", "46", "47", "48", "49", "51", "52", "54", "55",
+    "61", "64", "81", "86", "90", "91", "297", "350", "351", "352", "353", "354", "356", "357", "358", "359", "370", "371", "372", "380", "385",
+    "386", "420", "421",
+];
+
+/// The country code of the international number `own` (+31612345678 gives "31"); "31" when
+/// it is none of those known.
+fn country_code(own: &str) -> &'static str {
+    let own = digits(own);
+    COUNTRY_CODES.iter().filter(|c| own.starts_with(*c)).max_by_key(|c| c.len()).copied().unwrap_or("31")
+}
+
+/// Only the digits of `number`.
+fn digits(number: &str) -> String {
+    number.chars().filter(char::is_ascii_digit).collect()
+}
+
+/// `number` as Signal knows phone numbers, +31612345678: one written in the country itself
+/// (06 12345678) takes the country `code`, 0031… becomes +31…. None for what is no number.
+fn e164(number: &str, code: &str) -> Option<String> {
+    // +31 (0)6…: the zero in brackets is only for calling from within the country.
+    let trimmed = number.trim().replace("(0)", "");
+    let trimmed = trimmed.trim();
+    let d = digits(trimmed);
+    let full = if trimmed.starts_with('+') {
+        d
+    } else if let Some(rest) = d.strip_prefix("00") {
+        rest.to_string()
+    } else {
+        format!("{code}{}", d.strip_prefix('0')?)
+    };
+    (8..=15).contains(&full.len()).then(|| format!("+{full}"))
+}
+
 /// Whether `account` is a Signal account.
 pub fn is_signal(account: &Account) -> bool {
     account.protocol == Protocol::Signal
@@ -310,6 +346,43 @@ impl Engine {
     /// The Signal contacts of `account_id` as people to chat with, by name, each with their
     /// phone number when Signal shares it; also whoever a chat of the account is with, so
     /// there is someone to pick before Signal has sent its list.
+    /// Takes in the computer's own address book: names with their phone numbers.
+    pub fn set_address_book(&mut self, people: Vec<(String, Vec<String>)>) {
+        self.address_book = people;
+    }
+
+    /// Everyone with a phone number in the address books, the computer's and Merel's own, with
+    /// their numbers as +31612345678; numbers without a country code take the account's own.
+    fn people_with_numbers(&self, account_id: &str) -> Vec<(String, Vec<String>)> {
+        let own = self.session.accounts.iter().find(|a| a.id == account_id).map(|a| a.username.clone()).unwrap_or_default();
+        let code = country_code(&own);
+        let merel = self.session.contacts.iter().map(|c| (c.name.clone(), c.phones.iter().map(|p| p.number.clone()).collect::<Vec<_>>()));
+        self.address_book
+            .iter()
+            .cloned()
+            .chain(merel)
+            .map(|(name, numbers)| (name, numbers.iter().filter_map(|n| e164(n, code)).collect::<Vec<_>>()))
+            .filter(|(name, numbers)| !name.trim().is_empty() && !numbers.is_empty())
+            .collect()
+    }
+
+    /// Asks Signal which numbers in the address books are on Signal, as Signal does with the
+    /// phone's: only numbers not asked about before. Who is comes in [`Engine::signal_contacts`].
+    pub fn signal_discover(&mut self, account_id: &str) {
+        let Ok(me) = self.signal_address(account_id) else { return };
+        let mut numbers: Vec<String> =
+            self.people_with_numbers(account_id).into_iter().flat_map(|(_, n)| n).filter(|n| !self.signal_asked.contains(n)).collect();
+        numbers.sort();
+        numbers.dedup();
+        if numbers.is_empty() {
+            return;
+        }
+        match merel_signal_link::discover(&me, &numbers) {
+            Ok(()) => self.signal_asked.extend(numbers),
+            Err(e) => log::warn!("signal: the address book could not be looked up: {e}"),
+        }
+    }
+
     pub fn signal_contacts(&self, account_id: &str) -> Vec<(merel_model::Address, String)> {
         let Ok(me) = self.signal_address(account_id) else { return Vec::new() };
         let mut out: Vec<(merel_model::Address, String)> = merel_signal_link::contacts(&me)
@@ -324,6 +397,19 @@ impl Engine {
             for person in chat.people {
                 if is_signal_address(person.email()) && !out.iter().any(|(a, _)| a.email().eq_ignore_ascii_case(person.email())) {
                     out.push((person, String::new()));
+                }
+            }
+        }
+        // Who of the address books is on Signal, by the name the address book gives them.
+        let found = merel_signal_link::found(&me);
+        if !found.is_empty() {
+            let book = self.people_with_numbers(account_id);
+            for p in found {
+                let number = digits(&p.number);
+                let Some((name, _)) = book.iter().find(|(_, numbers)| numbers.iter().any(|n| digits(n) == number)) else { continue };
+                let Ok(address) = merel_model::Address::new(Some(name.as_str()), &p.address()) else { continue };
+                if !out.iter().any(|(a, _)| a.email().eq_ignore_ascii_case(address.email())) {
+                    out.push((address, p.number.clone()));
                 }
             }
         }
@@ -384,6 +470,19 @@ fn signal_account(account_id: &str, number: Option<&str>, id: &str) -> Result<Ac
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn address_book_numbers_are_written_as_signal_knows_them() {
+        assert_eq!(e164("06 1234 5678", "31").as_deref(), Some("+31612345678"));
+        assert_eq!(e164("+31 (0)6-12345678", "31").as_deref(), Some("+31612345678"));
+        assert_eq!(e164("0031 6 12345678", "31").as_deref(), Some("+31612345678"));
+        assert_eq!(e164("0475 12 34 56", "32").as_deref(), Some("+32475123456"));
+        assert_eq!(e164("112", "31"), None);
+        assert_eq!(e164("12345678", "31"), None, "no country and no 0: unknown");
+        assert_eq!(country_code("+31612345678"), "31");
+        assert_eq!(country_code("+351912345678"), "351");
+        assert_eq!(country_code(""), "31");
+    }
 
     #[test]
     fn a_linked_account_is_named_after_signal_and_its_number() {

@@ -116,6 +116,12 @@ pub enum Said {
         #[serde(default)]
         people: Vec<Person>,
     },
+    /// Which address book numbers Merel asked about are on Signal: `name` is empty, the
+    /// address book has it.
+    Found {
+        #[serde(default)]
+        people: Vec<Person>,
+    },
     /// `calls` says whether this build of the program can call.
     Synced {
         #[serde(default)]
@@ -145,6 +151,7 @@ pub enum Said {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct Person {
     pub id: String,
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub number: String,
@@ -385,6 +392,9 @@ enum Asked<'a> {
     Mute {
         on: bool,
     },
+    Discover {
+        numbers: &'a [String],
+    },
     DeleteChat {
         thread: &'a str,
     },
@@ -507,6 +517,17 @@ pub fn hang_up(me: &str) -> std::result::Result<(), String> {
     ask(me, &Asked::HangUp)
 }
 
+/// Asks Signal which of `numbers` (as +31612345678) are on Signal, for the account `me`; the
+/// answer comes in [`found`].
+pub fn discover(me: &str, numbers: &[String]) -> std::result::Result<(), String> {
+    ask(me, &Asked::Discover { numbers })
+}
+
+/// The address book numbers found on Signal so far for the account `me`, with their service id.
+pub fn found(me: &str) -> Vec<Person> {
+    lines().as_ref().and_then(|l| l.get(&me.to_lowercase())).map(|l| lock(&l.messages).found.clone()).unwrap_or_default()
+}
+
 pub fn mute(me: &str, on: bool) -> std::result::Result<(), String> {
     ask(me, &Asked::Mute { on })
 }
@@ -622,6 +643,8 @@ struct Messages {
     news: Vec<Said>,
     /// The account's Signal contacts, by name.
     contacts: Vec<Person>,
+    /// Address book numbers found on Signal.
+    found: Vec<Person>,
 }
 
 impl Messages {
@@ -774,6 +797,15 @@ fn take_news(messages: &Mutex<Messages>, said: Said) -> Option<Said> {
                 m.threads.entry(p.address()).or_insert_with(|| p.id.clone());
             }
             m.contacts = people;
+        }
+        Said::Found { people } => {
+            let mut m = lock(messages);
+            for p in people {
+                m.threads.entry(p.address()).or_insert_with(|| p.id.clone());
+                if !m.found.iter().any(|f| f.id == p.id) {
+                    m.found.push(p);
+                }
+            }
         }
         other => return Some(other),
     }
