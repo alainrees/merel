@@ -265,7 +265,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
             }
             _ => {
                 if !place.is_empty() {
-                    ui.label(RichText::new(place).size(12.0).color(t.text_dim));
+                    ui.label(RichText::new(place.as_str()).size(12.0).color(t.text_dim));
                 }
                 let field = ui.add(egui::TextEdit::singleline(&mut edit.name).desired_width(280.0).hint_text(tr("folder-name")));
                 if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
