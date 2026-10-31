@@ -513,6 +513,7 @@ mod tests {
             authentication: Vec::new(),
             unsubscribe: Vec::new(),
             receipt_to: None,
+            sender: None,
             signature: None,
             pgp_signature: None,
             encrypted: None,

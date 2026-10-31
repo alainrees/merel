@@ -64,8 +64,6 @@ struct Painter<'a> {
     align: Align,
     /// Whether the app's bold and italic fonts are loaded yet.
     faces: bool,
-    data_images: usize,
-    remote_images: usize,
     /// Rows of columns drawn so far, to name where each remembers its cell heights.
     rows: usize,
     clicked: Option<Clicked>,
@@ -74,6 +72,14 @@ struct Painter<'a> {
 /// What hovering a switched-off link says, before its target.
 pub fn links_off() -> String {
     tr("junk-links-off")
+}
+
+/// A short name for a picture's address, the same every time.
+fn name_of(url: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    url.hash(&mut h);
+    h.finish()
 }
 
 fn rgb(c: Rgb) -> Color32 {
@@ -115,8 +121,6 @@ pub fn show(
             let (family, _) = crate::fonts::family(Face::Sans, true, false);
             ui.ctx().fonts(|f| f.definitions().families.contains_key(&family))
         },
-        data_images: 0,
-        remote_images: 0,
         rows: 0,
         clicked: None,
     };
@@ -395,8 +399,6 @@ impl Painter<'_> {
 
     /// How wide each line of `inlines` is, written out without wrapping.
     fn line_widths(&mut self, ui: &Ui, inlines: &[Inline], size: f32) -> Vec<f32> {
-        // Naming pictures counts them; measuring must not change the names drawing gives.
-        let counted = (self.data_images, self.remote_images);
         let mut widths = vec![0.0];
         for inline in inlines {
             let w = match inline {
@@ -422,7 +424,6 @@ impl Painter<'_> {
                 *last += w;
             }
         }
-        (self.data_images, self.remote_images) = counted;
         widths
     }
 
@@ -493,20 +494,17 @@ impl Painter<'_> {
 
     /// The name and bytes of a picture that can be drawn now; `None` for one that is
     /// missing, blocked, loading or broken.
-    fn picture(&mut self, image: &Image) -> Option<(String, std::sync::Arc<[u8]>)> {
+    fn picture(&self, image: &Image) -> Option<(String, std::sync::Arc<[u8]>)> {
         match &image.source {
             ImageSource::Inline(cid) => {
                 self.images.iter().find(|i| i.cid == *cid).map(|i| (format!("bytes://merel/{}/cid/{cid}", self.key), i.bytes.clone()))
             }
-            ImageSource::Data { bytes, .. } => {
-                self.data_images += 1;
-                Some((format!("bytes://merel/{}/data/{}", self.key, self.data_images), bytes.clone()))
-            }
+            // Each picture is named after what it is, never after its place among the pictures
+            // drawn so far: the pictures of a message arrive one by one, and a name that moved
+            // to another picture would show the one cached under it.
+            ImageSource::Data { bytes, .. } => Some((format!("bytes://merel/{}/data/{:p}", self.key, bytes.as_ptr()), bytes.clone())),
             ImageSource::Remote(url) => match self.remote.and_then(|r| r.get(url)) {
-                Some(Load::Ready(bytes)) => {
-                    self.remote_images += 1;
-                    Some((format!("bytes://merel/{}/remote/{}", self.key, self.remote_images), bytes.clone()))
-                }
+                Some(Load::Ready(bytes)) => Some((format!("bytes://merel/{}/remote/{:016x}", self.key, name_of(url)), bytes.clone())),
                 _ => None,
             },
         }
@@ -625,6 +623,44 @@ mod tests {
         h.run();
         assert!(h.query_by_label("facturen").is_some());
         assert!(h.query_by_label("Hierbij de ").is_some(), "the rest stays as it was");
+    }
+
+    fn png(w: u32, h: u32) -> std::sync::Arc<[u8]> {
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(w, h, image::Rgba([0x40, 0x80, 0xc0, 255])).write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner().into()
+    }
+
+    #[test]
+    fn each_picture_from_the_internet_keeps_its_own_image_whatever_order_they_arrive_in() {
+        // The banner arrives after a smaller picture further down. It used to be drawn with
+        // the picture that arrived first, stretched (LALAL.AI's Halloween banner showed as
+        // "Download for Windows").
+        let doc = merel_html::parse(
+            r#"<p><img src="https://t.example/banner.png" alt="banner"></p><p><img src="https://t.example/windows.png" alt="windows"></p>"#,
+        );
+        let mut loads = Loads::new();
+        loads.insert("https://t.example/banner.png".into(), Load::Pending);
+        loads.insert("https://t.example/windows.png".into(), Load::Ready(png(40, 20)));
+        let t = Tokens::light();
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(700.0, 400.0)).build_ui_state(
+            move |ui, loads: &mut Loads| {
+                egui_extras::install_image_loaders(ui.ctx());
+                show(ui, &t, &doc, &[], "m6", Some(loads), true, None);
+            },
+            loads,
+        );
+        for _ in 0..4 {
+            h.run();
+        }
+        h.state_mut().insert("https://t.example/banner.png".into(), Load::Ready(png(120, 30)));
+        for _ in 0..4 {
+            h.run();
+        }
+        let banner = h.get_by_label("banner").rect();
+        let windows = h.get_by_label("windows").rect();
+        assert!((banner.width() - 120.0).abs() < 0.5 && (banner.height() - 30.0).abs() < 0.5, "the banner's own image: {banner:?}");
+        assert!((windows.width() - 40.0).abs() < 0.5 && (windows.height() - 20.0).abs() < 0.5, "{windows:?}");
     }
 
     #[test]
