@@ -163,6 +163,8 @@ pub struct ViewPrefs {
     /// The minutes between automatic syncs, as Outlook's "Automatisch verzenden/ontvangen
     /// elke n minuten"; 0 syncs only by hand.
     pub sync_minutes: u32,
+    /// The emoji picked lately, newest first, for "Onlangs gebruikt".
+    pub recent_emoji: Vec<String>,
 }
 
 /// How many recent searches the menu next to the search box keeps.
@@ -202,6 +204,7 @@ impl Default for ViewPrefs {
             closed_accounts: Vec::new(),
             open_folders: Vec::new(),
             sync_minutes: merel_engine::SYNC_DEFAULT,
+            recent_emoji: Vec::new(),
         }
     }
 }

@@ -1177,30 +1177,36 @@ fn react_button(ui: &mut Ui, t: &Tokens, id: &str, hovered: bool, clicked: &mut 
     r.on_hover_text(tr("chat-react"));
 }
 
-/// Signal's six reactions in a row, and under them the other emoji.
+/// Signal's six reactions in a row and, behind the dots at the end, every emoji as in the
+/// picker to write with.
 fn reaction_menu(ui: &mut Ui, clicked: &mut Option<Clicked>) {
-    let mut pick = |ui: &mut Ui, e: &str, size: f32| {
-        let b = ui.add(emoji_button_of(ui, e, size).frame(false).min_size(vec2(size + 12.0, size + 12.0)));
-        b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, e));
-        if b.clicked() {
-            *clicked = Some(Clicked::React(e.to_string()));
-            ui.close();
-        }
-    };
+    let more_id = ui.id().with("chat-react-more");
+    let mut more = ui.ctx().data(|d| d.get_temp::<bool>(more_id)).unwrap_or(false);
     ui.horizontal(|ui| {
         for e in QUICK_REACTIONS {
-            pick(ui, e, 24.0);
-        }
-    });
-    ui.separator();
-    egui::Grid::new("chat-react-more").spacing(vec2(2.0, 2.0)).show(ui, |ui| {
-        for (i, e) in EMOJI.iter().filter(|e| !QUICK_REACTIONS.iter().any(|q| q.trim_end_matches('\u{FE0F}') == **e)).enumerate() {
-            pick(ui, e, 18.0);
-            if i % 8 == 7 {
-                ui.end_row();
+            let b = ui.add(emoji_button_of(ui, e, 24.0).frame(false).min_size(vec2(36.0, 36.0)));
+            b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, e));
+            if b.clicked() {
+                *clicked = Some(Clicked::React(e.to_string()));
+                ui.close();
             }
         }
+        let dots = ui.add(egui::Button::new(RichText::new("⋯").size(20.0)).frame(more).min_size(vec2(36.0, 36.0)));
+        dots.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("emoji-more")));
+        if dots.on_hover_text(tr("emoji-more")).clicked() {
+            more = !more;
+        }
     });
+    if more {
+        ui.separator();
+        let t = Tokens::for_dark(ui.visuals().dark_mode);
+        if let Some(e) = crate::emoji_picker::picker(ui, &t, egui::Id::new("chat-react-picker")) {
+            *clicked = Some(Clicked::React(e));
+            more = false;
+            ui.close();
+        }
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(more_id, more));
 }
 
 /// The reactions under a message: each emoji once with how many chose it, framed in the
@@ -1370,12 +1376,6 @@ fn mic_button(ui: &mut Ui, t: &Tokens) -> egui::Response {
     r.on_hover_text(tr("chat-voice-record"))
 }
 
-/// The emoji most used in chats, for the button next to the line to write in.
-const EMOJI: [&str; 32] = [
-    "😀", "😂", "🙂", "😉", "😍", "🥰", "😘", "😎", "🤔", "😅", "😢", "😮", "😡", "🥳", "🙏", "👍", "👎", "👏", "🙌", "💪", "👋", "❤", "🔥", "🎉",
-    "✅", "❌", "⭐", "☕", "🍻", "🥂", "🎂", "🌹",
-];
-
 /// A button showing emoji `e` in colour, `size` points.
 fn emoji_button_of(ui: &Ui, e: &str, size: f32) -> egui::Button<'static> {
     match crate::emoji::image_of(ui.ctx(), e, size) {
@@ -1387,25 +1387,17 @@ fn emoji_button_of(ui: &Ui, e: &str, size: f32) -> egui::Button<'static> {
 /// Every emoji the pickers offer.
 #[cfg(test)]
 pub(crate) fn all_emoji() -> impl Iterator<Item = &'static str> {
-    EMOJI.into_iter().chain(QUICK_REACTIONS)
+    crate::emoji_picker::catalog().iter().flat_map(|(_, l)| l.iter().map(|e| e.text)).chain(QUICK_REACTIONS)
 }
 
-/// A smiley that opens the emoji to add to `input`; the computer's own picker works as well.
+/// A smiley that opens every emoji to add to `input`, as Signal's picker; the computer's own
+/// picker works as well.
 fn emoji_button(ui: &mut Ui, t: &Tokens, input: &mut String) {
     let r = ui.menu_button(RichText::new("🙂").size(19.0).color(t.text_dim), |ui| {
-        egui::Grid::new("chat-emoji").spacing(vec2(2.0, 2.0)).show(ui, |ui| {
-            for (i, e) in EMOJI.iter().enumerate() {
-                let b = ui.add(emoji_button_of(ui, e, 20.0).frame(false).min_size(vec2(32.0, 32.0)));
-                b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, *e));
-                if b.clicked() {
-                    input.push_str(e);
-                    ui.close();
-                }
-                if i % 8 == 7 {
-                    ui.end_row();
-                }
-            }
-        });
+        if let Some(e) = crate::emoji_picker::picker(ui, t, egui::Id::new("chat-emoji-picker")) {
+            input.push_str(&e);
+            ui.close();
+        }
     });
     r.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("chat-emoji")));
     r.response.on_hover_text(tr("chat-emoji"));
