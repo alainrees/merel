@@ -1023,7 +1023,7 @@ pub fn item_window<R>(
     title: &str,
     size: egui::Vec2,
     open: &mut bool,
-    add: impl FnOnce(&mut Ui) -> R,
+    add: impl FnMut(&mut Ui) -> R,
 ) -> Option<R> {
     own_window(ctx, t, id, title, Shape::Item(size), open, add)
 }
@@ -1034,7 +1034,7 @@ pub fn item_window<R>(
 /// as tall as what `add` draws, and opens over the middle of the main window. Returns whether it
 /// was closed from its title bar. Where the platform cannot open a second window (and in the
 /// tests) it is drawn as a window inside the main one.
-pub fn popup(ctx: &egui::Context, t: &Tokens, id: &str, title: &str, width: f32, add: impl FnOnce(&mut Ui)) -> bool {
+pub fn popup(ctx: &egui::Context, t: &Tokens, id: &str, title: &str, width: f32, add: impl FnMut(&mut Ui)) -> bool {
     let mut open = true;
     own_window(ctx, t, id, title, Shape::Popup(width, true), &mut open, add);
     !open
@@ -1054,7 +1054,15 @@ enum Shape {
 const POPUP_GROUND: f32 = 12.0;
 const POPUP_CARD: f32 = 16.0;
 
-fn own_window<R>(ctx: &egui::Context, t: &Tokens, id: &str, title: &str, shape: Shape, open: &mut bool, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+fn own_window<R>(
+    ctx: &egui::Context,
+    t: &Tokens,
+    id: &str,
+    title: &str,
+    shape: Shape,
+    open: &mut bool,
+    mut add: impl FnMut(&mut Ui) -> R,
+) -> Option<R> {
     // An item opens over the main window, a little in from its corner, as Outlook opens one; a
     // dialog over its middle. The system could otherwise put the window where it is not seen,
     // off screen or behind the main one. Inside the main window (embedded) egui places it.
@@ -1112,16 +1120,16 @@ fn own_window<R>(ctx: &egui::Context, t: &Tokens, id: &str, title: &str, shape: 
         // A window that just opened comes to the front, above the main window that was clicked.
         ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::Focus);
     }
-    let mut add = Some(add);
+    // egui can run a frame of the window twice (a discarded first pass, as when a widget's size
+    // settles), so `add` draws on every pass: a pass that drew nothing showed the window black.
     let mut out = None;
     ctx.show_viewport_immediate(viewport, builder, |ui, class| {
-        let Some(add) = add.take() else { return };
         if class == egui::ViewportClass::EmbeddedWindow {
             out = Some(match shape {
                 Shape::Item(_) => add(ui),
                 Shape::Popup(width, _) => {
                     ui.set_width(width);
-                    secondary(ui, t, add)
+                    secondary(ui, t, &mut add)
                 }
             });
             return;
@@ -1140,7 +1148,7 @@ fn own_window<R>(ctx: &egui::Context, t: &Tokens, id: &str, title: &str, shape: 
                     let frame = if card { card_frame(t) } else { Frame::NONE };
                     let card = frame.inner_margin(POPUP_CARD).show(ui, |ui| {
                         ui.set_width(width);
-                        secondary(ui, t, add)
+                        secondary(ui, t, &mut add)
                     });
                     out = Some(card.inner);
                     // The window takes the height of what it shows.
@@ -1230,7 +1238,7 @@ pub fn close_label() -> String {
 /// A dialog in the Helder style in a window of its own (see [`popup`]), such as "Over Merel" or
 /// the welcome. Inside the main window (embedded) it keeps a quiet close button of its own, as
 /// such a window has no title bar buttons. Returns whether it was closed.
-pub fn dialog(ctx: &egui::Context, t: &Tokens, title: &str, width: f32, add: impl FnOnce(&mut Ui)) -> bool {
+pub fn dialog(ctx: &egui::Context, t: &Tokens, title: &str, width: f32, mut add: impl FnMut(&mut Ui)) -> bool {
     let mut close = false;
     let mut open = true;
     own_window(ctx, t, title, title, Shape::Popup(width, false), &mut open, |ui| {

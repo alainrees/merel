@@ -139,7 +139,7 @@ pub fn window(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
     let mut go = false;
     let mut close = false;
     if crate::helder::popup(ctx, t, "unsubscribe", &tr("unsubscribe-title"), 340.0, |ui| {
-        ui.label(RichText::new(text).color(t.text));
+        ui.label(RichText::new(text.as_str()).color(t.text));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             if ui.add(crate::helder::primary_text(t, &tr("unsubscribe-yes"))).clicked() {

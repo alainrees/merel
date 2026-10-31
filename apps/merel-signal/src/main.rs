@@ -415,6 +415,15 @@ async fn link(store: SqliteStore, dir: &str, key: &str, name: &str) -> Result<()
     Ok(())
 }
 
+/// The account's registration as merel-signal-lookup takes it: the store's, with the number as
+/// text, +31612345678, rather than its parts.
+fn lookup_registration<S: Store>(manager: &Manager<S, Registered>) -> Result<serde_json::Value> {
+    let data = manager.registration_data();
+    let mut registration = serde_json::to_value(data).map_err(|e| anyhow!("{e}"))?;
+    registration["phone_number"] = data.phone_number.format().mode(presage::libsignal_service::prelude::phonenumber::Mode::E164).to_string().into();
+    Ok(registration)
+}
+
 /// Asks merel-signal-lookup, next to this program, which of `numbers` are on Signal.
 async fn look_up(registration: serde_json::Value, numbers: Vec<String>) -> std::result::Result<Vec<Person>, String> {
     use tokio::io::AsyncWriteExt as _;
@@ -510,6 +519,8 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
     };
     // A lookup of address book numbers, also on the side: it goes to another service.
     let mut finding: Option<future::LocalBoxFuture<'static, std::result::Result<Vec<Person>, String>>> = None;
+    // Numbers asked about while a lookup was under way; looked up as soon as it is done.
+    let mut to_find: Vec<String> = Vec::new();
     loop {
         tokio::select! {
             taken = async {
@@ -537,6 +548,9 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                         emit(&Event::Found { people });
                     }
                     Err(e) => eprintln!("merel-signal: could not look up the address book: {e}"),
+                }
+                if !to_find.is_empty() {
+                    finding = Some(Box::pin(look_up(lookup_registration(&manager)?, std::mem::take(&mut to_find))));
                 }
             }
             asked = async {
@@ -661,12 +675,12 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                     // Merel let go of the chat already; should telling the phone fail, it stays
                     // gone here all the same.
                     Ok(Command::Discover { numbers }) => {
+                        // One lookup at a time; numbers asked about meanwhile wait their turn
+                        // (dropping them lost the address book read while the first ran).
                         if finding.is_none() {
-                            let data = manager.registration_data();
-                            let mut registration = serde_json::to_value(data).map_err(|e| anyhow!("{e}"))?;
-                            // The number as text, +31612345678, rather than its parts.
-                            registration["phone_number"] = data.phone_number.format().mode(presage::libsignal_service::prelude::phonenumber::Mode::E164).to_string().into();
-                            finding = Some(Box::pin(look_up(registration, numbers)));
+                            finding = Some(Box::pin(look_up(lookup_registration(&manager)?, numbers)));
+                        } else {
+                            to_find.extend(numbers);
                         }
                     }
                     Ok(Command::DeleteChat { thread }) => {
