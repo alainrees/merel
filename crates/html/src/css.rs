@@ -3,10 +3,121 @@
 //! colour or a fixed choice; nothing from the message is passed on as text, so there is no
 //! way for a value to reach anything that interprets it.
 
+use std::collections::HashMap;
+
 use crate::{Align, Length, Rgb, VAlign};
 
-/// Longest `style` attribute read; the rest is ignored.
-const MAX_STYLE: usize = 4096;
+/// Longest `style` attribute read, with the class rules that apply to it; the rest is ignored.
+const MAX_STYLE: usize = 8192;
+/// Longest `<style>` text read, all blocks together.
+pub const MAX_SHEET: usize = 64 * 1024;
+/// Most class rules kept from it.
+const MAX_RULES: usize = 1000;
+
+/// The rules of the message's `<style>` blocks that name a single class (`.button`,
+/// `div.column`), as mail tools such as MJML write them for the columns of a newsletter. Rules
+/// for a narrow screen (`max-width` media queries) are left out, as Outlook on a computer does;
+/// every other selector is ignored. What a rule says is read like a `style` attribute, into
+/// numbers and fixed choices.
+#[derive(Default)]
+pub struct Sheet {
+    /// Class to (declarations, declarations marked `!important`).
+    rules: HashMap<String, (String, String)>,
+}
+
+impl Sheet {
+    pub fn parse(css: &str) -> Self {
+        let mut sheet = Sheet::default();
+        let mut css: String = css.chars().take(MAX_SHEET).collect();
+        // Comments out.
+        while let Some(start) = css.find("/*") {
+            let end = css[start + 2..].find("*/").map_or(css.len(), |e| start + 2 + e + 2);
+            css.replace_range(start..end, " ");
+        }
+        // HTML comment markers some mail still wraps its CSS in.
+        let css = css.replace("<!--", " ").replace("-->", " ");
+        sheet.rules_of(&css, 0);
+        sheet
+    }
+
+    fn rules_of(&mut self, mut css: &str, depth: usize) {
+        while let Some(open) = css.find('{') {
+            let prelude = css[..open].trim();
+            let rest = &css[open + 1..];
+            // The end of this block, counting nested braces.
+            let mut level = 1;
+            let mut close = rest.len();
+            for (i, c) in rest.char_indices() {
+                match c {
+                    '{' => level += 1,
+                    '}' => {
+                        level -= 1;
+                        if level == 0 {
+                            close = i;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let body = &rest[..close];
+            css = rest.get(close + 1..).unwrap_or("");
+            // A prelude may still hold the end of an at-rule without a block (`@import …;`).
+            let prelude = prelude.rsplit(';').next().unwrap_or("").trim().to_ascii_lowercase();
+            if let Some(media) = prelude.strip_prefix("@media") {
+                let narrow = media.contains("max-width") || media.contains("max-device-width");
+                if !narrow && depth < 2 {
+                    self.rules_of(body, depth + 1);
+                }
+                continue;
+            }
+            if prelude.starts_with('@') || body.contains('{') {
+                continue;
+            }
+            let (mut normal, mut important) = (String::new(), String::new());
+            for decl in body.split(';') {
+                if !decl.contains(':') {
+                    continue;
+                }
+                let target = if decl.to_ascii_lowercase().contains("!important") { &mut important } else { &mut normal };
+                target.push_str(decl.trim());
+                target.push(';');
+            }
+            for selector in prelude.split(',') {
+                let Some(class) = single_class(selector.trim()) else { continue };
+                if self.rules.len() >= MAX_RULES && !self.rules.contains_key(class) {
+                    continue;
+                }
+                let entry = self.rules.entry(class.to_string()).or_default();
+                entry.0.push_str(&normal);
+                entry.1.push_str(&important);
+            }
+        }
+    }
+
+    /// What the rules say for an element of these classes (its `class` attribute), to be read
+    /// before its own `style`, and after it for what is marked `!important`.
+    pub fn for_classes(&self, classes: &str) -> (String, String) {
+        let (mut normal, mut important) = (String::new(), String::new());
+        if self.rules.is_empty() {
+            return (normal, important);
+        }
+        for class in classes.split_ascii_whitespace().take(16) {
+            if let Some((n, i)) = self.rules.get(&class.to_ascii_lowercase()) {
+                normal.push_str(n);
+                important.push_str(i);
+            }
+        }
+        (normal, important)
+    }
+}
+
+/// The class a selector names when it names nothing else: `.x` or `div.x`.
+fn single_class(selector: &str) -> Option<&str> {
+    let (tag, class) = selector.split_once('.')?;
+    let word = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    ((tag.is_empty() || word(tag)) && word(class)).then_some(class)
+}
 
 /// The declarations of one `style` attribute, later ones first so the last one wins.
 pub struct Declarations(Vec<(String, String)>);
@@ -162,6 +273,13 @@ pub fn align(value: &str) -> Option<Align> {
     }
 }
 
+/// The rounding of the corners in `border-radius`: top left, top right, bottom right, bottom
+/// left. Only the horizontal radii (before a `/`) count.
+pub fn radius(value: &str) -> Option<[u16; 4]> {
+    let corners = sides(value.split('/').next()?)?;
+    corners.iter().any(|&r| r > 0).then_some(corners)
+}
+
 pub fn valign(value: &str) -> Option<VAlign> {
     match value.trim().to_ascii_lowercase().as_str() {
         "top" => Some(VAlign::Top),
@@ -203,5 +321,25 @@ mod tests {
         let d = Declarations::parse("COLOR: #fff; width:100px !important; color:#000;garbage");
         assert_eq!(d.get("color"), Some("#000"), "the last one wins");
         assert_eq!(d.get("width"), Some("100px"));
+        assert_eq!(radius("24px"), Some([24; 4]));
+        assert_eq!(radius("8px 8px 0 0"), Some([8, 8, 0, 0]));
+        assert_eq!(radius("0"), None);
+    }
+
+    #[test]
+    fn class_rules_for_a_wide_screen_are_read_and_the_rest_ignored() {
+        let sheet = Sheet::parse(
+            "<!-- #outlook a { padding:0; } body{margin:0} /* .x{width:1px} */
+            @media only screen and (min-width:480px) { .mj-column-per-20 { width:20% !important; max-width: 20%; } .moz-text-html .mj-column-per-20 { width:99% } }
+            @media only screen and (max-width:480px) { .mj-column-per-20 { width:100% !important; } }
+            @import url(https://t.example/a.css); div.Card, .button { border-radius: 8px } @font-face { font-family: X; src: url(x) } -->",
+        );
+        let (normal, important) = sheet.for_classes("mj-column-per-20 mj-outlook-group-fix");
+        assert_eq!((normal.as_str(), important.as_str()), ("max-width: 20%;", "width:20% !important;"));
+        assert_eq!(sheet.for_classes("card").0, "border-radius: 8px;");
+        assert_eq!(sheet.for_classes("button").0, "border-radius: 8px;");
+        assert_eq!(sheet.for_classes("x"), (String::new(), String::new()));
+        let d = Declarations::parse(&format!("{normal};width:100%;{important}"));
+        assert_eq!(d.get("width"), Some("20%"), "!important in a class beats the element's own style");
     }
 }

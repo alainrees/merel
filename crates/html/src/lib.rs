@@ -5,7 +5,8 @@
 //! tables, rules, preformatted text, emphasis, links and images survive; scripts, styles,
 //! forms, frames, embedded objects and hidden blocks are dropped. Of the attributes only
 //! `href`, `src` and `alt` pass as text; the look of the mail (colours, backgrounds, widths,
-//! alignment, padding, text size and weight, from `style` and the old presentation attributes)
+//! alignment, padding, rounded corners, text size and weight, from `style`, the class rules of
+//! `<style>` and the old presentation attributes)
 //! is read into numbers and fixed choices (see `css`), so a newsletter can be drawn the way
 //! Outlook draws it without anything of its CSS being interpreted further. Links keep only `http`, `https` and `mailto` targets. Images stay
 //! references: a picture embedded in the message (`cid:` or a `data:` URL) can be shown,
@@ -21,7 +22,7 @@ use html5ever::tree_builder::TreeBuilderOpts;
 use html5ever::{ParseOpts, parse_document};
 use merel_model::clean_text;
 
-use css::Declarations;
+use css::{Declarations, Sheet};
 use dom::{Data, Dom, Node};
 
 /// Deepest nesting that is followed; anything below is dropped.
@@ -103,6 +104,11 @@ pub struct Look {
     /// Where the content of a table cell sits when the row is taller; in the middle when
     /// unset, as in a browser.
     pub valign: Option<VAlign>,
+    /// How round its corners are, in pixels (a card, a button): top left, top right, bottom
+    /// right, bottom left.
+    pub radius: [u16; 4],
+    /// The colour of a line along its top (`border-top`), as a divider draws it.
+    pub line: Option<Rgb>,
 }
 
 impl Look {
@@ -185,6 +191,8 @@ pub struct Image {
     /// own when unset.
     pub width: Option<Length>,
     pub height: Option<u16>,
+    /// How round its corners are, in pixels; half its width makes it a circle.
+    pub radius: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -252,7 +260,8 @@ pub fn parse(html: &str) -> Document {
     let opts = ParseOpts { tree_builder: TreeBuilderOpts { scripting_enabled: false, ..Default::default() }, ..Default::default() };
     let dom = parse_document(Dom::default(), opts).one(html);
     let nodes = dom.nodes();
-    let mut b = Builder { nodes: &nodes, budget: MAX_NODES, remote_images: 0, truncated: false, designed: false, aligned: false };
+    let sheet = Sheet::parse(&style_text(&nodes));
+    let mut b = Builder { nodes: &nodes, budget: MAX_NODES, remote_images: 0, truncated: false, designed: false, aligned: false, sheet };
     let mut out = Blocks::default();
     b.children(0, &mut out, Style::default(), None, 0);
     let blocks = out.finish();
@@ -362,6 +371,47 @@ struct Builder<'a> {
     designed: bool,
     /// Whether an element around the one being read centres or right-aligns its text.
     aligned: bool,
+    /// The class rules of the message's `<style>` blocks.
+    sheet: Sheet,
+}
+
+/// The text of every `<style>` element, up to [`css::MAX_SHEET`].
+fn style_text(nodes: &[Node]) -> String {
+    let mut out = String::new();
+    for node in nodes {
+        if matches!(&node.data, Data::Element { name, .. } if &*name.local == "style") {
+            for &c in &node.children {
+                if let Some(Node { data: Data::Text(t), .. }) = nodes.get(c) {
+                    if out.len() + t.len() > css::MAX_SHEET {
+                        return out;
+                    }
+                    out.push_str(t);
+                    out.push('\n');
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A character that mail uses as a separator but no font of Merel draws, as one that looks
+/// the same; the rest as given. Variation selectors, which pick the colour form of an emoji
+/// Merel draws in one form anyway, are left out.
+fn stand_ins(text: &str) -> std::borrow::Cow<'_, str> {
+    let odd = |c: char| matches!(c, '\u{30FB}' | '\u{FF65}' | '\u{FE0E}' | '\u{FE0F}');
+    if !text.contains(odd) {
+        return text.into();
+    }
+    let mut out = String::with_capacity(text.len() + 8);
+    for c in text.chars() {
+        match c {
+            // Katakana middle dot: as wide as a character of its own, so a dot with room around it.
+            '\u{30FB}' | '\u{FF65}' => out.push_str(" \u{2022} "),
+            '\u{FE0E}' | '\u{FE0F}' => {}
+            c => out.push(c),
+        }
+    }
+    out.into()
 }
 
 /// Elements whose content is never shown.
@@ -472,8 +522,12 @@ const BOXES: &[&str] = &[
 ];
 
 impl Builder<'_> {
+    /// What the element's classes and its own `style` say, the class rules first so its own
+    /// style wins, except over a rule marked `!important`.
     fn declarations(&self, node: &Node) -> Declarations {
-        Declarations::parse(self.attr(node, "style").unwrap_or(""))
+        let own = self.attr(node, "style").unwrap_or("");
+        let (normal, important) = self.sheet.for_classes(self.attr(node, "class").unwrap_or(""));
+        if normal.is_empty() && important.is_empty() { Declarations::parse(own) } else { Declarations::parse(&format!("{normal};{own};{important}")) }
     }
 
     /// `style` with what element `name` and its `style` attribute change about the text.
@@ -578,6 +632,12 @@ impl Builder<'_> {
             }
         }
         look.valign = self.attr(node, "valign").and_then(css::valign).or_else(|| css.get("vertical-align").and_then(css::valign));
+        look.radius = css.get("border-radius").and_then(css::radius).unwrap_or_default();
+        look.line = css
+            .get("border-top")
+            .filter(|b| !b.contains("none") && !b.starts_with('0'))
+            .and_then(css::background)
+            .or_else(|| css.get("border-top-color").and_then(css::color));
         if look.background.is_some() {
             self.designed = true;
         }
@@ -595,15 +655,67 @@ impl Builder<'_> {
         if self.attr(node, "hidden").is_some() {
             return true;
         }
-        let style: String = self.attr(node, "style").unwrap_or("").chars().filter(|c| !c.is_whitespace()).collect::<String>().to_ascii_lowercase();
-        style.contains("display:none") || style.contains("visibility:hidden")
+        let css = self.declarations(node);
+        css.get("display") == Some("none") || css.get("visibility") == Some("hidden")
     }
 
     fn children(&mut self, id: usize, out: &mut Blocks, style: Style, href: Option<&str>, depth: usize) {
         let Some(node) = self.nodes.get(id) else { return };
+        if let Some(cells) = self.inline_columns(node, style, href, depth) {
+            out.flush();
+            out.done.push(Block::Columns(cells));
+            return;
+        }
         for &c in &node.children {
             self.visit(c, out, style, href, depth);
         }
+    }
+
+    /// The columns of a newsletter laid out as blocks side by side (`display: inline-block`,
+    /// as MJML writes them) when every element under `node` is one and there are at least
+    /// two; `None` otherwise.
+    fn inline_columns(&mut self, node: &Node, style: Style, href: Option<&str>, depth: usize) -> Option<Vec<Cell>> {
+        let mut columns = Vec::new();
+        for &c in &node.children {
+            match &self.nodes.get(c)?.data {
+                Data::Text(t) if t.chars().all(is_html_space) => {}
+                Data::Other => {}
+                Data::Element { name, .. } if matches!(&*name.local, "div" | "section") => {
+                    let child = self.nodes.get(c)?;
+                    if self.hidden(child) {
+                        continue;
+                    }
+                    let css = self.declarations(child);
+                    if css.get("display") != Some("inline-block") {
+                        return None;
+                    }
+                    columns.push((c, css));
+                }
+                _ => return None,
+            }
+        }
+        if columns.len() < 2 || self.budget < columns.len() || depth > MAX_DEPTH {
+            return None;
+        }
+        let aligned = self.aligned;
+        let mut cells = Vec::with_capacity(columns.len());
+        for (c, css) in columns {
+            self.budget -= 1;
+            let child = self.nodes.get(c)?;
+            let name = match &child.data {
+                Data::Element { name, .. } => &*name.local,
+                _ => continue,
+            };
+            let style = self.style_of(child, name, &css, style);
+            let mut look = self.look(child, name, &css);
+            look.place = None;
+            self.aligned = look.align.map_or(aligned, |a| a != Align::Left);
+            let mut inner = Blocks::default();
+            self.element(c, child, name, &css, &mut inner, style, href, depth + 1);
+            self.aligned = aligned;
+            cells.push(Cell { header: false, blocks: inner.finish(), look });
+        }
+        Some(cells)
     }
 
     /// Blocks for the content of `id`, closed off on their own (a list item, a cell, a quote).
@@ -623,7 +735,7 @@ impl Builder<'_> {
         let name = match &node.data {
             Data::Text(t) => {
                 if style.size != Some(0) {
-                    out.text(t, style, href);
+                    out.text(&stand_ins(t), style, href);
                 }
                 return;
             }
@@ -639,6 +751,22 @@ impl Builder<'_> {
         }
         let css = self.declarations(node);
         let style = self.style_of(node, name, &css, style);
+        if name == "a" && matches!(css.get("display"), Some("inline-block" | "block")) {
+            // A link drawn as a button: its own background, padding and corners, as wide as
+            // its text.
+            let mut look = self.look(node, name, &css);
+            if look.background.is_some() || look.padding != [0; 4] {
+                look.fit = look.width.is_none();
+                let mut inner = Blocks::default();
+                self.element(id, node, name, &css, &mut inner, style, href, depth + 1);
+                let blocks = inner.finish();
+                if !blocks.is_empty() {
+                    out.flush();
+                    out.done.push(Block::Section { look, blocks });
+                }
+                return;
+            }
+        }
         if BOXES.contains(&name) {
             let look = self.look(node, name, &css);
             if !look.is_plain() {
@@ -649,7 +777,7 @@ impl Builder<'_> {
                 self.element(id, node, name, &css, &mut inner, style, href, depth + 1);
                 self.aligned = aligned;
                 let blocks = inner.finish();
-                if !blocks.is_empty() || look.height.is_some() {
+                if !blocks.is_empty() || look.height.is_some() || look.line.is_some() {
                     out.done.push(Block::Section { look, blocks });
                 }
                 return;
@@ -899,9 +1027,15 @@ impl Builder<'_> {
         } else {
             return None;
         };
-        let mut width = self.attr(node, "width").and_then(css::length);
+        let own = self.attr(node, "width").and_then(css::length);
+        let mut width = own;
         if let Some(w) = css.get("width").and_then(css::length) {
-            width = Some(w);
+            // A picture as wide as its box, with a width of its own in pixels: drawn at that
+            // width, as Outlook does, so it never stretches past the size it was made for.
+            width = match (w, own) {
+                (Length::Percent(_), Some(Length::Px(px))) => Some(Length::Px(px)),
+                _ => Some(w),
+            };
         }
         if let Some(Length::Px(max)) = css.get("max-width").and_then(css::length)
             && !matches!(width, Some(Length::Px(w)) if w <= max)
@@ -912,7 +1046,19 @@ impl Builder<'_> {
             Length::Px(px) => Some(px),
             Length::Percent(_) => None,
         });
-        Some(Image { source, alt, width, height })
+        let radius = match css.get("border-radius") {
+            // A round picture (an avatar): half of whichever side is shorter.
+            Some(r) if r.trim().ends_with('%') => {
+                let side = match width {
+                    Some(Length::Px(w)) => height.map_or(w, |h| w.min(h)),
+                    _ => height.unwrap_or(0),
+                };
+                (side / 2).max(1)
+            }
+            Some(r) => css::radius(r).map_or(0, |c| c[0]),
+            None => 0,
+        };
+        Some(Image { source, alt, width, height, radius })
     }
 }
 
@@ -1073,6 +1219,52 @@ mod tests {
           </td></tr>
          </table>
         </td></tr></table></body>"##;
+
+    #[test]
+    fn a_notification_built_with_mjml_keeps_its_columns_pictures_and_corners() {
+        // Laid out as Discord's notification mails are: columns as inline blocks whose width
+        // only the <style> block gives, pictures at width:100% inside a box of their size.
+        let d = parse(include_str!("../testdata/discord.html"));
+        assert!(d.designed);
+        let mut columns = Vec::new();
+        fn find<'a>(blocks: &'a [Block], out: &mut Vec<&'a [Cell]>) {
+            for b in blocks {
+                match b {
+                    Block::Columns(cells) => {
+                        out.push(cells);
+                        cells.iter().for_each(|c| find(&c.blocks, out));
+                    }
+                    Block::Section { blocks, .. } => find(blocks, out),
+                    _ => {}
+                }
+            }
+        }
+        find(&d.blocks, &mut columns);
+        let [row] = columns.as_slice() else { panic!("one row of columns: {columns:?}") };
+        let widths: Vec<_> = row.iter().map(|c| c.look.width).collect();
+        assert_eq!(widths, [Some(Length::Percent(15)), Some(Length::Percent(55)), Some(Length::Percent(30))]);
+        assert_eq!(text(&row[1].blocks).trim(), "📢 • announcements", "a dot every font has, in place of the katakana one");
+        let all = sections(&d.blocks);
+        let button = all.iter().find(|(l, b)| l.fit && text(b).trim() == "Berichten lezen" && l.padding == [12, 24, 12, 24]).expect("the button");
+        assert_eq!(button.0.radius, [24; 4]);
+        assert_eq!(button.0.background, Some(Rgb(0x58, 0x65, 0xf2)));
+        assert!(all.iter().any(|(l, _)| l.radius == [8, 8, 0, 0] && l.background == Some(Rgb(255, 255, 255))), "the card's rounded top");
+        assert!(all.iter().any(|(l, b)| l.line == Some(Rgb(0xeb, 0xed, 0xef)) && b.is_empty()), "the divider");
+        let mut pictures = Vec::new();
+        for_each_run(&d.blocks, &mut |inlines| {
+            for i in inlines {
+                if let Inline::Image(img) = i {
+                    pictures.push((img.width, img.height, img.radius));
+                }
+            }
+        });
+        assert_eq!(
+            pictures,
+            [(Some(Length::Px(168)), Some(40), 0), (Some(Length::Px(300)), Some(200), 0), (Some(Length::Px(48)), Some(48), 24)],
+            "each at its own size, never stretched to the width of the mail"
+        );
+        assert_eq!(text(&d.blocks).matches("Je hebt 3 nieuwe berichten").count(), 1, "the hidden preview text stays hidden");
+    }
 
     fn sections(blocks: &[Block]) -> Vec<(&Look, &[Block])> {
         let mut out = Vec::new();

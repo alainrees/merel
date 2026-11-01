@@ -216,6 +216,16 @@ fn look_css(look: &Look) -> String {
     if let Some(h) = look.height {
         let _ = write!(css, "min-height:{h}px;");
     }
+    if let Some(c) = look.line {
+        let _ = write!(css, "border-top:1px solid #{:02x}{:02x}{:02x};", c.0, c.1, c.2);
+    }
+    if look.radius != [0; 4] {
+        let [a, b, c, d] = look.radius;
+        let _ = write!(css, "border-radius:{a}px {b}px {c}px {d}px;");
+    }
+    if look.fit {
+        css.push_str("width:fit-content;");
+    }
     css
 }
 
@@ -485,8 +495,14 @@ mod tests {
                         style: Style { bold: true, ..Style::default() },
                     },
                     Inline::Break,
-                    Inline::Image(Image { source: ImageSource::Inline("logo".into()), alt: "Logo".into(), width: None, height: None }),
-                    Inline::Image(Image { source: ImageSource::Remote("https://x/y.png".into()), alt: "Ver weg".into(), width: None, height: None }),
+                    Inline::Image(Image { source: ImageSource::Inline("logo".into()), alt: "Logo".into(), width: None, height: None, radius: 0 }),
+                    Inline::Image(Image {
+                        source: ImageSource::Remote("https://x/y.png".into()),
+                        alt: "Ver weg".into(),
+                        width: None,
+                        height: None,
+                        radius: 0,
+                    }),
                 ]),
                 Block::Table(vec![vec![Cell {
                     header: true,
