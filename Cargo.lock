@@ -4365,7 +4365,7 @@ dependencies = [
 
 [[package]]
 name = "merel"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "chrono",
  "eframe",
@@ -4384,7 +4384,7 @@ dependencies = [
 
 [[package]]
 name = "merel-address-book"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "block2 0.6.2",
  "log",
@@ -4395,7 +4395,7 @@ dependencies = [
 
 [[package]]
 name = "merel-call"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "async-trait",
  "audiopus",
@@ -4410,7 +4410,7 @@ dependencies = [
 
 [[package]]
 name = "merel-dav"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4429,7 +4429,7 @@ dependencies = [
 
 [[package]]
 name = "merel-engine"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4464,7 +4464,7 @@ dependencies = [
 
 [[package]]
 name = "merel-exchange"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4481,7 +4481,7 @@ dependencies = [
 
 [[package]]
 name = "merel-extract"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "log",
  "lopdf",
@@ -4492,7 +4492,7 @@ dependencies = [
 
 [[package]]
 name = "merel-google"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "chrono",
  "iana-time-zone",
@@ -4508,7 +4508,7 @@ dependencies = [
 
 [[package]]
 name = "merel-graph"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4526,7 +4526,7 @@ dependencies = [
 
 [[package]]
 name = "merel-html"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "base64 0.23.1",
  "html5ever",
@@ -4535,7 +4535,7 @@ dependencies = [
 
 [[package]]
 name = "merel-i18n"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "fluent-bundle",
  "fluent-syntax",
@@ -4546,7 +4546,7 @@ dependencies = [
 
 [[package]]
 name = "merel-imap"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "imap",
  "imap-proto",
@@ -4563,7 +4563,7 @@ dependencies = [
 
 [[package]]
 name = "merel-mailbox"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "merel-mime",
  "merel-model",
@@ -4574,7 +4574,7 @@ dependencies = [
 
 [[package]]
 name = "merel-mime"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "base64 0.23.1",
  "html2text",
@@ -4588,7 +4588,7 @@ dependencies = [
 
 [[package]]
 name = "merel-mobile"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "chrono",
  "jni",
@@ -4605,7 +4605,7 @@ dependencies = [
 
 [[package]]
 name = "merel-model"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4618,7 +4618,7 @@ dependencies = [
 
 [[package]]
 name = "merel-notify"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "block2 0.6.2",
  "log",
@@ -4632,7 +4632,7 @@ dependencies = [
 
 [[package]]
 name = "merel-oauth"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.4.3",
@@ -4650,7 +4650,7 @@ dependencies = [
 
 [[package]]
 name = "merel-pgp"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "base64 0.23.1",
  "merel-i18n",
@@ -4663,7 +4663,7 @@ dependencies = [
 
 [[package]]
 name = "merel-quarantine"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "libc",
  "log",
@@ -4672,7 +4672,7 @@ dependencies = [
 
 [[package]]
 name = "merel-search"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "log",
  "merel-extract",
@@ -4685,7 +4685,7 @@ dependencies = [
 
 [[package]]
 name = "merel-secrets"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -4698,7 +4698,7 @@ dependencies = [
 
 [[package]]
 name = "merel-semantic"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -4714,7 +4714,7 @@ dependencies = [
 
 [[package]]
 name = "merel-sign"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -4724,7 +4724,7 @@ dependencies = [
 
 [[package]]
 name = "merel-signal-link"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4741,7 +4741,7 @@ dependencies = [
 
 [[package]]
 name = "merel-smime"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -4757,7 +4757,7 @@ dependencies = [
 
 [[package]]
 name = "merel-smtp"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "lettre",
  "merel-i18n",
@@ -4769,7 +4769,7 @@ dependencies = [
 
 [[package]]
 name = "merel-store"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -4786,7 +4786,7 @@ dependencies = [
 
 [[package]]
 name = "merel-touch-bar"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "log",
  "objc2 0.6.5",
@@ -4794,7 +4794,7 @@ dependencies = [
 
 [[package]]
 name = "merel-ui-egui"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4832,7 +4832,7 @@ dependencies = [
 
 [[package]]
 name = "merel-voice"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "cpal",
  "log",
@@ -4842,7 +4842,7 @@ dependencies = [
 
 [[package]]
 name = "merel-window-buttons"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "log",
  "objc2 0.6.5",
