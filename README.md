@@ -321,6 +321,10 @@ date stays on this computer (`follow_ups.json`, filed under the message's Messag
 the open message a strip names the day, turns red once it has passed, and "Voltooid" takes flag and date off;
 the hover text of a row in the list names the day too.
 
+With the pointer on a row in the message list, three buttons show on its first line, as in Outlook: mark as
+read or unread, flag or clear the flag, and delete. Each acts on that message alone, in one click, and leaves the
+selection as it was; the date steps down to the second line meanwhile. Deleting from Verwijderde items asks first.
+
 A newsletter (mail with a `List-Unsubscribe` header) shows "Afmelden…" over the message, as Outlook does. Nothing
 happens by itself: a window first says what will be done, a mail to the list's address from the account the message
 came in on (preferred, since it tells the sender nothing new) or the list's web page in the browser (which does tell
