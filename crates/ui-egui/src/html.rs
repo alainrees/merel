@@ -82,6 +82,13 @@ fn name_of(url: &str) -> u64 {
     h.finish()
 }
 
+/// Corners rounded as far as the message asked (top left, top right, bottom right, bottom
+/// left), within what egui draws.
+fn corners([nw, ne, se, sw]: [u16; 4]) -> CornerRadius {
+    let r = |v: u16| u8::try_from(v).unwrap_or(u8::MAX);
+    CornerRadius { nw: r(nw), ne: r(ne), se: r(se), sw: r(sw) }
+}
+
 fn rgb(c: Rgb) -> Color32 {
     Color32::from_rgb(c.0, c.1, c.2)
 }
@@ -127,6 +134,9 @@ pub fn show(
     if designed {
         egui::Frame::NONE.fill(PAPER).corner_radius(CornerRadius::same(4)).show(ui, |ui| {
             ui.set_width(ui.available_width());
+            // Boxes of a designed message meet, as in a browser; the room between blocks is
+            // what the message and `blocks` give it.
+            ui.spacing_mut().item_spacing.y = 0.0;
             p.blocks(ui, &doc.blocks);
         });
     } else {
@@ -241,11 +251,20 @@ impl Painter<'_> {
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.add_space(offset);
             ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                egui::Frame::NONE.fill(look.background.map_or(Color32::TRANSPARENT, rgb)).inner_margin(margin).show(ui, |ui| {
-                    ui.set_width(inner);
-                    ui.set_min_height(min_height);
-                    self.blocks(ui, blocks);
-                });
+                let frame = egui::Frame::NONE
+                    .fill(look.background.map_or(Color32::TRANSPARENT, rgb))
+                    .corner_radius(corners(look.radius))
+                    .inner_margin(margin)
+                    .show(ui, |ui| {
+                        ui.set_width(inner);
+                        // A divider is a box with nothing in it but its line.
+                        ui.set_min_height(if look.line.is_some() { min_height.max(1.0) } else { min_height });
+                        self.blocks(ui, blocks);
+                    });
+                if let Some(c) = look.line {
+                    let r = frame.response.rect;
+                    ui.painter().hline(r.x_range(), r.top() + 0.5, Stroke::new(1.0, rgb(c)));
+                }
             });
         });
         self.align = saved;
@@ -306,14 +325,14 @@ impl Painter<'_> {
                 });
                 heights.push(r.inner);
                 if let Some(c) = cell.look.background {
-                    grounds.push((ground, r.response.rect.x_range(), rgb(c)));
+                    grounds.push((ground, r.response.rect.x_range(), rgb(c), corners(cell.look.radius)));
                 }
             }
         });
         self.align = saved;
         let y = row.response.rect.y_range();
-        for (ground, x, color) in grounds {
-            ui.painter().set(ground, egui::Shape::rect_filled(egui::Rect::from_x_y_ranges(x, y), 0.0, color));
+        for (ground, x, color, radius) in grounds {
+            ui.painter().set(ground, egui::Shape::rect_filled(egui::Rect::from_x_y_ranges(x, y), radius, color));
         }
         if heights != before {
             ui.data_mut(|d| d.insert_temp(id, heights));
@@ -538,7 +557,8 @@ impl Painter<'_> {
             };
             return self.placeholder(ui, &tr(what), &image.alt);
         };
-        let mut widget = self.sized(egui::Image::from_bytes(uri, bytes), image, ui.available_width()).corner_radius(CornerRadius::same(2));
+        let radius = if image.radius > 0 { corners([image.radius; 4]) } else { CornerRadius::same(2) };
+        let mut widget = self.sized(egui::Image::from_bytes(uri, bytes), image, ui.available_width()).corner_radius(radius);
         if !image.alt.is_empty() {
             widget = widget.alt_text(&image.alt);
         }
