@@ -716,8 +716,8 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                             emoji: Some(emoji.clone()),
                             remove: Some(remove),
                             target_author_aci: Some(target_author.clone()),
+                            target_author_aci_binary: aci_binary(&target_author),
                             target_sent_timestamp: Some(target_timestamp),
-                            ..Default::default()
                         };
                         let message = DataMessage { reaction: Some(reaction), ..Default::default() };
                         match send_data(&mut sending, dir, key, &thread, message).await {
@@ -837,9 +837,9 @@ async fn status<S: Store>(manager: &Manager<S, Registered>, content: &Content) -
         ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Configuration(c)), .. }) => {
             Some(Event::Settings { read_receipts: c.read_receipts, typing_indicators: c.typing_indicators })
         }
-        ContentBody::SynchronizeMessage(m) if !m.read.is_empty() => {
-            Some(Event::ReadElsewhere { read: m.read.iter().filter_map(|r| Some((r.sender_aci.clone()?, r.timestamp?))).collect() })
-        }
+        ContentBody::SynchronizeMessage(m) if !m.read.is_empty() => Some(Event::ReadElsewhere {
+            read: m.read.iter().filter_map(|r| Some((aci(r.sender_aci.as_ref(), r.sender_aci_binary.as_ref())?, r.timestamp?))).collect(),
+        }),
         _ => None,
     }
 }
@@ -905,7 +905,7 @@ async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content,
             timestamp: content.timestamp(),
             emoji: r.emoji.clone().filter(|e| !e.is_empty())?,
             remove: r.remove.unwrap_or(false),
-            target_author: r.target_author_aci.clone()?,
+            target_author: aci(r.target_author_aci.as_ref(), r.target_author_aci_binary.as_ref())?,
             target_timestamp: r.target_sent_timestamp?,
         });
     }
@@ -1089,6 +1089,7 @@ async fn send<S: Store>(
     let quote = quote.map(|q| Quote {
         id: Some(q.timestamp),
         author_aci: Some(q.author.clone()),
+        author_aci_binary: aci_binary(&q.author),
         text: Some(q.text.clone()).filter(|t| !t.is_empty()),
         r#type: Some(quote::Type::Normal as i32),
         ..Default::default()
@@ -1141,9 +1142,24 @@ fn info(a: &AttachmentPointer, files: &mut Files) -> FileInfo {
 /// The flag Signal sets on an attachment that is a voice message.
 const VOICE_MESSAGE: u32 = 1;
 
+/// Who a message names (the author of the one reacted to or quoted, the sender of one read),
+/// as text. Newer Signal apps send only the 16 bytes of the id, older ones only the text.
+fn aci(text: Option<&String>, binary: Option<&Vec<u8>>) -> Option<String> {
+    match (text.filter(|t| !t.is_empty()), binary) {
+        (Some(t), _) => Some(t.clone()),
+        (None, Some(b)) => uuid::Uuid::from_slice(b).ok().map(|u| u.to_string()),
+        (None, None) => None,
+    }
+}
+
+/// Id `text` as the 16 bytes newer Signal apps read, sent beside the text older ones read.
+fn aci_binary(text: &str) -> Option<Vec<u8>> {
+    uuid::Uuid::parse_str(text).ok().map(|u| u.as_bytes().to_vec())
+}
+
 /// The message `q` quotes, with its author's name.
 async fn quoted<S: Store>(manager: &Manager<S, Registered>, q: &Quote) -> Option<Quoted> {
-    let author = q.author_aci.clone()?;
+    let author = aci(q.author_aci.as_ref(), q.author_aci_binary.as_ref())?;
     let name = match ServiceId::parse_from_service_id_string(&author) {
         Some(id) => contact_name(manager, &id).await,
         None => String::new(),
@@ -1407,4 +1423,21 @@ async fn deleted_line<S: Store>(manager: &Manager<S, Registered>, thread: Thread
         edited: 0,
         deleted: true,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_id_sent_only_as_bytes_is_read_as_text() {
+        let id = "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9".to_string();
+        let bytes = aci_binary(&id);
+        assert_eq!(bytes.as_ref().map(Vec::len), Some(16));
+        assert_eq!(aci(None, bytes.as_ref()), Some(id.clone()));
+        assert_eq!(aci(Some(&id), None), Some(id.clone()));
+        assert_eq!(aci(Some(&String::new()), bytes.as_ref()), Some(id));
+        assert_eq!(aci(None, Some(&vec![1, 2, 3])), None);
+        assert_eq!(aci(None, None), None);
+    }
 }
