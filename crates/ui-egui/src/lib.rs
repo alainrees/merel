@@ -2255,6 +2255,91 @@ fn drafts_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens, account_id: &str) {
 }
 
 /// The message list: title, search box and rows; the caller puts it in a panel.
+/// A button that shows on a message row under the pointer, as Outlook has them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Quick {
+    Read,
+    Flag,
+    Delete,
+}
+
+/// Side of a quick button on a row, and the room between two of them.
+const QUICK_SIZE: f32 = 26.0;
+const QUICK_GAP: f32 = 2.0;
+
+/// Where the three quick buttons stand, the last one's right edge at `right_center`.
+fn quick_rects(right_center: egui::Pos2) -> [egui::Rect; 3] {
+    let at = |i: f32| {
+        let right = right_center.x - (2.0 - i) * (QUICK_SIZE + QUICK_GAP);
+        egui::Rect::from_min_size(egui::pos2(right - QUICK_SIZE, right_center.y - QUICK_SIZE / 2.0), vec2(QUICK_SIZE, QUICK_SIZE))
+    };
+    [at(0.0), at(1.0), at(2.0)]
+}
+
+/// The label of a quick button on the row of `m`; what it does, and to which message.
+fn quick_label(q: Quick, m: &merel_model::MessageHeader) -> (String, String) {
+    let action = tr(match q {
+        Quick::Read if m.flags.seen => "list-quick-unread",
+        Quick::Read => "list-quick-read",
+        Quick::Flag if m.flags.flagged => "list-quick-unflag",
+        Quick::Flag => "list-quick-flag",
+        Quick::Delete => "list-quick-delete",
+    });
+    let name = crate::i18n::tr_args("list-quick-on", &[("action", action.as_str().into()), ("subject", m.subject.as_str().into())]);
+    (action, name)
+}
+
+/// Draws the quick buttons in `rects` over the row of `m`; the one clicked comes back.
+fn quick_buttons(ui: &Ui, t: &Tokens, m: &merel_model::MessageHeader, rects: [egui::Rect; 3]) -> Option<Quick> {
+    let mut picked = None;
+    for (q, rect) in [Quick::Read, Quick::Flag, Quick::Delete].into_iter().zip(rects) {
+        let (icon, color) = match q {
+            Quick::Read if m.flags.seen => (helder::Icon::Mail, t.text),
+            Quick::Read => (helder::Icon::MailOpen, t.text),
+            Quick::Flag if m.flags.flagged => (helder::Icon::Flag, t.flag),
+            Quick::Flag => (helder::Icon::Flag, t.text),
+            Quick::Delete => (helder::Icon::Trash, t.text),
+        };
+        let (action, name) = quick_label(q, m);
+        let r = ui.interact(rect, ui.make_persistent_id(("quick", q as u8, &m.id)), Sense::click());
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+        if r.hovered() {
+            ui.painter().rect(rect, CornerRadius::same(6), t.card, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
+        }
+        helder_icon(ui, icon, color, rect);
+        if r.on_hover_text(action).clicked() {
+            picked = Some(q);
+        }
+    }
+    picked
+}
+
+/// Paints `icon` in the middle of `rect`, at the size the lists use.
+fn helder_icon(ui: &Ui, icon: helder::Icon, color: Color32, rect: egui::Rect) {
+    icon.image(16.0, color).paint_at(ui, egui::Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
+}
+
+impl MailApp {
+    /// Runs a quick button from a row in the list on that message alone; the selection stays.
+    /// Deleting from the Deleted folder removes for good, so that selects it and asks first.
+    fn quick_action(&mut self, m: &merel_model::MessageHeader, q: Quick) {
+        let id = json!({ "id": m.id });
+        match q {
+            Quick::Read => self.run(if m.flags.seen { "message.mark_unread" } else { "message.mark_read" }, id),
+            Quick::Flag => self.run("message.flag", id),
+            Quick::Delete => {
+                let in_deleted = self.engine.session.folder(&m.folder_id).is_some_and(|f| f.kind == FolderKind::Deleted);
+                if in_deleted {
+                    self.select_message(&m.id);
+                    self.run("message.delete", Value::Null);
+                } else {
+                    self.run("message.delete", id);
+                }
+            }
+        }
+    }
+}
+
 fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
     {
         {
@@ -2383,6 +2468,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                 let mut toggle: Option<String> = None;
                 let mut menu_pick: Option<(merel_model::MessageHeader, message_menu::Pick)> = None;
                 let mut open_window: Option<String> = None;
+                let mut quick_pick: Option<(merel_model::MessageHeader, Quick)> = None;
                 // Date groups, as Outlook heads the list, while the list is in date order.
                 // Not while the search index ranks the hits: best match first has no dates to group by.
                 let ranked = app.engine.session.current_index_hits().is_some() && !app.engine.session.search_newest;
@@ -2430,10 +2516,13 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                             toggle = Some(fold.key.clone());
                         }
                     }
+                    // Outlook's buttons on the row under the pointer: read, flag and delete in one
+                    // click, without selecting the message first. Not while something is dragged.
+                    let quick = ui.rect_contains_pointer(rect) && !egui::DragAndDrop::has_any_payload(ui.ctx());
                     let p = ui.painter();
                     let fill = if on {
                         t.checked
-                    } else if r.hovered() {
+                    } else if quick {
                         t.hover
                     } else {
                         Color32::TRANSPARENT
@@ -2483,17 +2572,20 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     if m.flags.flagged {
                         right = format!("⚑ {right}");
                     }
+                    // With the quick buttons on the first line the date steps down a line, as in Outlook.
+                    let buttons = quick_rects(egui::pos2(x + w, rect.top() + 14.0));
                     let right_rect = p.text(
-                        egui::pos2(x + w, rect.top() + 14.0),
+                        egui::pos2(x + w, rect.top() + if quick { 34.0 } else { 14.0 }),
                         egui::Align2::RIGHT_CENTER,
                         right,
                         egui::FontId::proportional(12.0),
                         if m.flags.flagged { t.flag } else { t.text_dim },
                     );
-                    let mut from_end = right_rect.left() - 8.0;
+                    let line_end = if quick { buttons[0].left() } else { right_rect.left() };
+                    let mut from_end = line_end - 8.0;
                     if let Some((glyph, color)) = importance::mark(m.importance, t) {
                         let mark = p.text(
-                            egui::pos2(right_rect.left() - 6.0, rect.top() + 14.0),
+                            egui::pos2(line_end - 6.0, rect.top() + 14.0),
                             egui::Align2::RIGHT_CENTER,
                             glyph,
                             egui::FontId::proportional(15.0),
@@ -2503,7 +2595,8 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                     }
                     // Each line ends in "…" where the room ends, never over the date or the edge.
                     one_line(ui, p, egui::pos2(x, rect.top() + 14.0), &from, egui::FontId::proportional(14.0), from_color, from_end - x);
-                    let squares = categories::squares(app, p, egui::pos2(x + w, rect.top() + 34.0), &m.categories);
+                    let second_end = if quick { right_rect.left() - 8.0 } else { x + w };
+                    let squares = categories::squares(app, p, egui::pos2(second_end, rect.top() + 34.0), &m.categories);
                     one_line(
                         ui,
                         p,
@@ -2511,7 +2604,7 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                         &m.subject,
                         egui::FontId::proportional(13.0),
                         if m.flags.seen { t.text } else { t.accent_text },
-                        w - squares - if squares > 0.0 { 8.0 } else { 0.0 },
+                        second_end - x - squares - if squares > 0.0 { 8.0 } else { 0.0 },
                     );
                     if !compact {
                         // Which channel a chat came by, always; the folder when searching everywhere.
@@ -2551,9 +2644,15 @@ fn message_list(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
                             }
                         }
                     }
+                    if quick && let Some(q) = quick_buttons(ui, t, m, buttons) {
+                        quick_pick = Some((m.clone(), q));
+                    }
                     if r.clicked() {
                         pick = Some((m.id.clone(), click_modifiers(ui), row_ids.clone()));
                     }
+                }
+                if let Some((m, q)) = quick_pick {
+                    app.quick_action(&m, q);
                 }
                 if let Some(key) = toggle
                     && !app.expanded.remove(&key)
@@ -5456,6 +5555,54 @@ mod tests {
         h.run();
         let s = &h.state().engine.session;
         assert!(!s.message("m1").unwrap().flags.flagged && s.follow_up("m1").is_none());
+    }
+
+    #[test]
+    fn hovering_a_row_shows_read_flag_and_delete_that_act_on_that_message_alone() {
+        let mut h = harness();
+        h.run();
+        let subject = "Planning voor donderdag";
+        let on = |action: &str| crate::i18n::tr_args("list-quick-on", &[("action", tr(action).into()), ("subject", subject.into())]);
+        assert!(h.query_by_label(&on("list-quick-delete")).is_none(), "the buttons wait for the pointer");
+        // Another message is selected; the buttons leave that selection alone.
+        h.get_by_label("Wat er deze maand speelt").click();
+        h.run();
+        // The row's tooltip carries the subject too: the row is the first node with it.
+        let row = h.get_by_label(subject).rect();
+        h.get_by_label(subject).hover();
+        h.run();
+        let seen = h.state().engine.session.message("m1").unwrap().flags.seen;
+        let read = on(if seen { "list-quick-unread" } else { "list-quick-read" });
+        let rects = [h.get_by_label(&read).rect(), h.get_by_label(&on("list-quick-flag")).rect(), h.get_by_label(&on("list-quick-delete")).rect()];
+        for (i, a) in rects.iter().enumerate() {
+            assert!(row.contains_rect(*a), "each button stays on its row");
+            for b in &rects[i + 1..] {
+                assert!(!a.intersects(*b), "the quick buttons never overlap");
+            }
+        }
+
+        h.get_by_label(&read).click();
+        h.run();
+        assert_eq!(h.state().engine.session.message("m1").unwrap().flags.seen, !seen);
+        h.query_all_by_label(subject).next().unwrap().hover();
+        h.run();
+        h.get_by_label(&on("list-quick-flag")).click();
+        h.run();
+        assert!(h.state().engine.session.message("m1").unwrap().flags.flagged);
+        h.query_all_by_label(subject).next().unwrap().hover();
+        h.run();
+        h.get_by_label(&on("list-quick-unflag")).click();
+        h.run();
+        assert!(!h.state().engine.session.message("m1").unwrap().flags.flagged);
+        h.query_all_by_label(subject).next().unwrap().hover();
+        h.run();
+        h.get_by_label(&on("list-quick-delete")).click();
+        h.run();
+        let s = &h.state().engine.session;
+        let folder = s.message("m1").unwrap().folder_id.clone();
+        assert_eq!(s.folder(&folder).unwrap().kind, FolderKind::Deleted);
+        assert_eq!(s.selected_message.as_deref(), Some("m3"), "the selected message stays selected");
+        assert_eq!(s.folder(&s.message("m3").unwrap().folder_id).unwrap().kind, FolderKind::Inbox);
     }
 
     #[test]

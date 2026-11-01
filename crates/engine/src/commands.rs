@@ -57,8 +57,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "message.select", label: "Open message", run: message_select },
     CommandSpec { id: "message.select_more", label: "Select this message too", run: message_select_more },
     CommandSpec { id: "message.select_many", label: "Select these messages", run: message_select_many },
-    CommandSpec { id: "message.mark_read", label: "Mark as Read", run: |s, _| set_seen(s, true) },
-    CommandSpec { id: "message.mark_unread", label: "Mark as Unread", run: |s, _| set_seen(s, false) },
+    CommandSpec { id: "message.mark_read", label: "Mark as Read", run: |s, p| set_seen(s, p, true) },
+    CommandSpec { id: "message.mark_unread", label: "Mark as Unread", run: |s, p| set_seen(s, p, false) },
     CommandSpec {
         id: "message.mark_read_one",
         label: "Mark this message as read",
@@ -248,6 +248,15 @@ fn selection(s: &Session) -> Result<Vec<String>, CommandError> {
     if ids.is_empty() { Err(CommandError::NoSelection) } else { Ok(ids) }
 }
 
+/// The message named by `id` in `params`, as the quick buttons on a row in the list name it,
+/// else the selection.
+fn targets(s: &Session, params: &Value) -> Result<Vec<String>, CommandError> {
+    match params.get("id").and_then(Value::as_str) {
+        Some(id) => s.message(id).map(|m| vec![m.id.clone()]).ok_or(CommandError::NotFound),
+        None => selection(s),
+    }
+}
+
 fn header_mut<'a>(s: &'a mut Session, id: &str) -> Result<&'a mut merel_model::MessageHeader, CommandError> {
     s.messages.iter_mut().find(|m| m.id == id).ok_or(CommandError::NoSelection)
 }
@@ -276,8 +285,9 @@ pub(crate) fn set_seen_one(s: &mut Session, message_id: &str, seen: bool) -> Res
 }
 
 /// Marks the whole selection read or unread.
-fn set_seen(s: &mut Session, seen: bool) -> Result<(), CommandError> {
-    for id in selection(s)? {
+/// `message.mark_read { id? }` / `message.mark_unread { id? }`: the given message, else the selection.
+fn set_seen(s: &mut Session, params: &Value, seen: bool) -> Result<(), CommandError> {
+    for id in targets(s, params)? {
         set_seen_one(s, &id, seen)?;
     }
     Ok(())
@@ -300,10 +310,7 @@ pub(crate) fn flag_message(s: &mut Session, message_id: &str, on: bool) -> Resul
 /// `message.flag { id? }`: flags the given message, else the whole selection; takes the flag
 /// off instead when the message (the selected one, for a selection) has it, as Outlook does.
 fn toggle_flag(s: &mut Session, params: &Value) -> Result<(), CommandError> {
-    let ids = match params.get("id").and_then(Value::as_str) {
-        Some(id) => vec![id.to_string()],
-        None => selection(s)?,
-    };
+    let ids = targets(s, params)?;
     let first = ids.first().ok_or(CommandError::NoSelection)?;
     let on = !s.message(first).ok_or(CommandError::NotFound)?.flags.flagged;
     for id in ids {
@@ -312,10 +319,10 @@ fn toggle_flag(s: &mut Session, params: &Value) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// `message.delete`: the selection goes to the Deleted folder; a message that is there already
+/// `message.delete { id? }`: the given message, else the selection, goes to the Deleted folder; a message that is there already
 /// goes for good, the way Outlook has it (the window asks first).
-fn message_delete(s: &mut Session, _: &Value) -> Result<(), CommandError> {
-    for id in selection(s)? {
+fn message_delete(s: &mut Session, params: &Value) -> Result<(), CommandError> {
+    for id in targets(s, params)? {
         let folder = s.message(&id).and_then(|m| s.folder(&m.folder_id));
         let in_deleted = folder.is_some_and(|f| f.kind == FolderKind::Deleted);
         // Signal has no Deleted folder: deleting is Signal's "Delete for me".
@@ -506,6 +513,23 @@ mod tests {
         assert_eq!(s.selection(), [ids[1].clone()]);
         assert_eq!(s.run("message.select_many", &json!({ "ids": ["missing"] })), Err(CommandError::NotFound));
         assert_eq!(s.run("message.select_many", &json!({ "ids": [] })), Err(CommandError::Param("ids")));
+    }
+
+    #[test]
+    fn read_and_delete_take_an_id_and_leave_the_selection_alone() {
+        let mut s = Session::sample();
+        s.run("message.select", &json!({ "id": "m3" })).unwrap();
+        s.run("message.mark_unread", &json!({ "id": "m1" })).unwrap();
+        assert!(!s.message("m1").unwrap().flags.seen);
+        s.run("message.mark_read", &json!({ "id": "m1" })).unwrap();
+        assert!(s.message("m1").unwrap().flags.seen);
+        s.run("message.delete", &json!({ "id": "m1" })).unwrap();
+        let folder = s.message("m1").unwrap().folder_id.clone();
+        assert_eq!(s.folder(&folder).unwrap().kind, FolderKind::Deleted);
+        assert_eq!(s.selected_message.as_deref(), Some("m3"));
+        assert_ne!(s.folder(&s.message("m3").unwrap().folder_id).unwrap().kind, FolderKind::Deleted);
+        assert_eq!(s.run("message.delete", &json!({ "id": "missing" })), Err(CommandError::NotFound));
+        assert_eq!(s.run("message.mark_read", &json!({ "id": "missing" })), Err(CommandError::NotFound));
     }
 
     #[test]
