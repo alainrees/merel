@@ -12,8 +12,8 @@ publish = false
 [workspace]
 
 [dependencies]
-presage = { git = "https://github.com/whisperfish/presage", rev = "aeaedf99babebae2dbc6b86bca797807d4cd9fda" }
-presage-store-sqlite = { git = "https://github.com/whisperfish/presage", rev = "aeaedf99babebae2dbc6b86bca797807d4cd9fda", default-features = false }
+presage = { git = "https://github.com/whisperfish/presage", rev = "4b81740610c301cbd54d95f4dbd4cadd692af95e" }
+presage-store-sqlite = { git = "https://github.com/whisperfish/presage", rev = "4b81740610c301cbd54d95f4dbd4cadd692af95e", default-features = false }
 # SQLCipher with its own OpenSSL, so the app needs nothing installed on the computer.
 libsqlite3-sys = { version = "0.36.0", features = ["bundled-sqlcipher-vendored-openssl"] }
 # The message history the phone transfers while linking: a message backup.
