@@ -165,6 +165,9 @@ pub struct ViewPrefs {
     pub sync_minutes: u32,
     /// The emoji picked lately, newest first, for "Onlangs gebruikt".
     pub recent_emoji: Vec<String>,
+    /// Whether a chat message shows the preview of its link (picture, title, description) that
+    /// the sender's app sent along, as Signal does (Bestand > Chat). On unless switched off.
+    pub link_previews: bool,
 }
 
 /// How many recent searches the menu next to the search box keeps.
@@ -205,6 +208,7 @@ impl Default for ViewPrefs {
             open_folders: Vec::new(),
             sync_minutes: merel_engine::SYNC_DEFAULT,
             recent_emoji: Vec::new(),
+            link_previews: true,
         }
     }
 }

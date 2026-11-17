@@ -274,6 +274,7 @@ pub enum Page {
     Accounts,
     Notifications,
     Search,
+    Chat,
     Updates,
 }
 
@@ -298,6 +299,9 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             if helder::nav_item(ui, t, Icon::Search, &crate::search_page::page_label(), app.file_page == Page::Search).clicked() {
                 app.file_page = Page::Search;
             }
+            if helder::nav_item(ui, t, Icon::MessagesSquare, &crate::chat::settings_label(), app.file_page == Page::Chat).clicked() {
+                app.file_page = Page::Chat;
+            }
             let mut r = helder::nav_item(ui, t, Icon::Download, &crate::updates::check(), app.file_page == Page::Updates);
             if let Some(release) = crate::updates::badge(app) {
                 helder::alert_dot(ui, t, r.rect.right_center() - egui::vec2(18.0, 0.0), 8.0);
@@ -321,6 +325,9 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
             Page::Search => {
                 egui::ScrollArea::vertical().show(ui, |ui| crate::search_page::page(app, ui, t));
+            }
+            Page::Chat => {
+                egui::ScrollArea::vertical().show(ui, |ui| crate::chat::settings_page(app, ui, t));
             }
             Page::Updates => {
                 egui::ScrollArea::vertical().show(ui, |ui| crate::updates::page(app, ui, t));
