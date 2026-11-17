@@ -31,6 +31,8 @@ serde_json = "1.0"
 # Only to list the chats in the store; presage keeps no list of them.
 sqlx = { version = "0.9.0", default-features = false, features = ["sqlite", "uuid", "runtime-tokio"] }
 uuid = { version = "1.12", features = ["v4"] }
+# What the Signal libraries warn about goes to Merel's log, so a stalled sync can be explained.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync", "process"] }
 
 # Signal's own calling library, for calls in Merel. It plays and records sound itself.

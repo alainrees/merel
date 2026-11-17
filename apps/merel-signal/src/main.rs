@@ -348,7 +348,20 @@ fn emit(event: &Event) {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
-    if let Err(e) = start().await {
+    // Warnings and errors of the Signal libraries (a message that could not be opened, a
+    // connection that closed), on stderr, which Merel writes to its log. Never more than that:
+    // the finer levels can hold message details.
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_max_level(tracing_subscriber::filter::LevelFilter::WARN)
+        .with_ansi(false)
+        .without_time()
+        .init();
+    // presage hands some work to `tokio::task::spawn_local` (answering a sync request from the
+    // phone, asking it for keys), which panics outside a LocalSet: the helper stopped at such a
+    // message, and after a long absence Merel never got past the queue.
+    let local = tokio::task::LocalSet::new();
+    if let Err(e) = local.run_until(start()).await {
         emit(&Event::Error { message: format!("{e:#}") });
         std::process::exit(1);
     }
