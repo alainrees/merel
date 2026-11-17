@@ -165,6 +165,11 @@ pub struct ViewPrefs {
     pub sync_minutes: u32,
     /// The emoji picked lately, newest first, for "Onlangs gebruikt".
     pub recent_emoji: Vec<String>,
+    /// The chats pinned to the top of the chat list, in order, by chat id.
+    pub pinned_chats: Vec<String>,
+    /// The chats last seen pinned on the phone of each Signal account, by account id: what the
+    /// phone changes since then goes here too (see [`ViewPrefs::take_phone_pins`]).
+    pub phone_pins: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 /// How many recent searches the menu next to the search box keeps.
@@ -205,11 +210,37 @@ impl Default for ViewPrefs {
             open_folders: Vec::new(),
             sync_minutes: merel_engine::SYNC_DEFAULT,
             recent_emoji: Vec::new(),
+            pinned_chats: Vec::new(),
+            phone_pins: Default::default(),
         }
     }
 }
 
 impl ViewPrefs {
+    /// Whether chat `id` is pinned to the top of the chat list.
+    pub fn is_pinned(&self, id: &str) -> bool {
+        self.pinned_chats.iter().any(|p| p == id)
+    }
+
+    /// Takes in the chats pinned on the phone of Signal account `account_id`: what the phone
+    /// pinned since the last time is pinned here too, and what it let go of is let go of here.
+    /// Pins made in Merel stay until the phone changes those very chats. Returns whether
+    /// anything changed.
+    pub fn take_phone_pins(&mut self, account_id: &str, pins: &[String]) -> bool {
+        let seen = self.phone_pins.get(account_id).cloned().unwrap_or_default();
+        if seen == pins {
+            return false;
+        }
+        self.pinned_chats.retain(|p| !seen.contains(p) || pins.contains(p));
+        for p in pins {
+            if !seen.contains(p) && !self.is_pinned(p) {
+                self.pinned_chats.push(p.clone());
+            }
+        }
+        self.phone_pins.insert(account_id.to_string(), pins.to_vec());
+        true
+    }
+
     /// Folds `id` open when it is in `list` of the shut ones, or shut when it is not; or the
     /// other way round for a list of open ones.
     pub fn toggle(list: &mut Vec<String>, id: &str) {
@@ -518,6 +549,21 @@ pub(crate) fn group(ui: &mut egui::Ui, _t: &Tokens, name: &str, add: impl FnOnce
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn what_the_phone_pins_or_lets_go_of_goes_here_too_and_merels_own_pins_stay() {
+        let mut v = ViewPrefs { pinned_chats: vec!["mine".into()], ..ViewPrefs::default() };
+        assert!(v.take_phone_pins("s", &["a".into(), "b".into()]));
+        assert_eq!(v.pinned_chats, ["mine", "a", "b"]);
+        assert!(!v.take_phone_pins("s", &["a".into(), "b".into()]), "nothing new, nothing done");
+        // Let go of in Merel: stays let go of while the phone keeps the same pins.
+        v.pinned_chats.retain(|p| p != "a");
+        assert!(!v.take_phone_pins("s", &["a".into(), "b".into()]));
+        assert_eq!(v.pinned_chats, ["mine", "b"]);
+        // The phone lets go of b and pins c.
+        assert!(v.take_phone_pins("s", &["a".into(), "c".into()]));
+        assert_eq!(v.pinned_chats, ["mine", "c"]);
+    }
 
     #[test]
     fn recent_searches_keep_the_newest_once_and_drop_the_oldest() {

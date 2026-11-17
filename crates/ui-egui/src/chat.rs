@@ -282,10 +282,11 @@ fn waiting_in<'a>(app: &'a MailApp, chat: &Chat) -> Vec<&'a Waiting> {
 }
 
 /// The chats the list shows, by the filter and the search box.
-fn listed(app: &MailApp) -> Vec<Chat> {
+pub(crate) fn listed(app: &MailApp) -> Vec<Chat> {
     let needle = app.chat.query.trim().to_lowercase();
     let signal = app.chat_accounts();
-    app.engine
+    let mut list: Vec<Chat> = app
+        .engine
         .session
         .chats()
         .into_iter()
@@ -300,7 +301,42 @@ fn listed(app: &MailApp) -> Vec<Chat> {
                 || c.title.to_lowercase().contains(&needle)
                 || c.people.iter().any(|p| p.email().to_lowercase().contains(&needle) || p.display().to_lowercase().contains(&needle))
         })
-        .collect()
+        .collect();
+    // The pinned ones on top, in their own order, as in Signal; the rest newest first.
+    let place = |c: &Chat| app.view.pinned_chats.iter().position(|p| *p == c.id).unwrap_or(usize::MAX);
+    list.sort_by_key(place);
+    list
+}
+
+/// Most chats pinned at once, as in Signal.
+pub const MAX_PINNED: usize = 4;
+
+impl MailApp {
+    /// Pins chat `id` to the top of the chat list, or lets go of it when it is pinned. Pins
+    /// stay on this computer: Signal keeps the phone's in a place a linked device can read
+    /// but should not write.
+    pub fn toggle_pin(&mut self, id: &str, ctx: &egui::Context) {
+        if self.view.is_pinned(id) {
+            self.view.pinned_chats.retain(|p| p != id);
+        } else if self.view.pinned_chats.len() >= MAX_PINNED {
+            self.notice = Some(crate::Notice::info(tr_args("chat-pin-full", &[("max", MAX_PINNED.into())])));
+            return;
+        } else {
+            self.view.pinned_chats.push(id.to_string());
+        }
+        self.save_view(ctx);
+    }
+
+    /// Takes in the chats pinned on the phones of the Signal accounts, once read or changed.
+    fn take_phone_pins(&mut self, ctx: &egui::Context) {
+        let mut changed = false;
+        for (account, pins) in self.engine.signal_pins() {
+            changed |= self.view.take_phone_pins(&account, &pins);
+        }
+        if changed {
+            self.save_view(ctx);
+        }
+    }
 }
 
 /// "14:05" today, else "21-10".
@@ -349,6 +385,7 @@ pub fn show(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
 
 /// The new-chat window, wherever the person is in Merel.
 pub fn windows(app: &mut MailApp, ctx: &egui::Context, t: &Tokens) {
+    app.take_phone_pins(ctx);
     if app.chat.book.is_some() {
         app.take_address_book();
         // The address book comes on its own.
@@ -408,13 +445,27 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             }
             let mut pick = None;
             let mut delete = None;
+            let mut pin = None;
+            let any_pinned = list.first().is_some_and(|c| app.view.is_pinned(&c.id));
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                let mut header = None;
                 for chat in &list {
+                    let pinned = app.view.is_pinned(&chat.id);
+                    // With chats pinned, a line over them and one over the others, as in Signal.
+                    if any_pinned && header != Some(pinned) {
+                        header = Some(pinned);
+                        list_header(ui, t, &tr(if pinned { "chat-pinned" } else { "chat-others" }));
+                    }
                     let row = chat_row(app, ui, t, chat);
                     if row.clicked() {
                         pick = Some(chat.id.clone());
                     }
                     row.context_menu(|ui| {
+                        let (icon, text) = if pinned { (Icon::PinOff, tr("chat-unpin")) } else { (Icon::Pin, tr("chat-pin")) };
+                        if ui.add(egui::Button::image_and_text(icon.image(16.0, t.text), text)).clicked() {
+                            pin = Some(chat.id.clone());
+                            ui.close();
+                        }
                         if ui.add(egui::Button::image_and_text(Icon::Trash.image(16.0, t.text), tr("chat-delete-chat"))).clicked() {
                             delete = Some(chat.id.clone());
                             ui.close();
@@ -425,10 +476,20 @@ fn list_pane(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
             if let Some(id) = pick {
                 app.open_chat(&id);
             }
+            if let Some(id) = pin {
+                app.toggle_pin(&id, ui.ctx());
+            }
             if delete.is_some() {
                 app.chat.deleting_chat = delete;
             }
         });
+}
+
+/// The small line over the pinned chats, and over the others.
+fn list_header(ui: &mut Ui, t: &Tokens, text: &str) {
+    ui.add_space(4.0);
+    ui.label(RichText::new(text).size(12.5).strong().color(t.text_dim));
+    ui.add_space(2.0);
 }
 
 /// The avatar of a chat: the group's, or the other person's.
@@ -446,11 +507,13 @@ fn chat_avatar(p: &egui::Painter, center: egui::Pos2, radius: f32, chat: &Chat) 
 fn chat_row(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) -> egui::Response {
     let on = app.chat.selected.as_deref() == Some(chat.id.as_str());
     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 58.0), Sense::click());
+    let pinned = app.view.is_pinned(&chat.id);
     let label = if chat.unread > 0 {
         tr_args("chat-unread-label", &[("title", chat.title.as_str().into()), ("count", chat.unread.into())])
     } else {
         chat.title.clone()
     };
+    let label = if pinned { tr_args("chat-pinned-label", &[("title", label.as_str().into())]) } else { label };
     r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &label));
     let p = ui.painter();
     if on || r.hovered() {
@@ -482,7 +545,7 @@ fn chat_row(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) -> egui::Respon
         }
         None => tr_args("chat-waiting-short", &[("name", chat.title.as_str().into())]),
     };
-    let badge_w = if unread { 26.0 } else { 0.0 };
+    let badge_w = if unread { 26.0 } else { 0.0 } + if pinned { 22.0 } else { 0.0 };
     let clip = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(right - badge_w, rect.bottom()));
     let preview_color = if unread { t.text } else { t.text_dim };
     p.with_clip_rect(clip).text(egui::pos2(x, rect.top() + 31.0), egui::Align2::LEFT_TOP, preview, FontId::proportional(13.0), preview_color);
@@ -490,6 +553,12 @@ fn chat_row(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) -> egui::Respon
         let c = egui::pos2(right - 10.0, rect.top() + 39.0);
         p.circle_filled(c, 9.0, t.accent);
         p.text(c, egui::Align2::CENTER_CENTER, chat.unread.min(99).to_string(), FontId::proportional(11.0), t.on_accent);
+    }
+    if pinned {
+        // The pin sits where Signal puts it: bottom right, left of the count.
+        let x = right - if unread { 26.0 } else { 0.0 } - 8.0;
+        let at = egui::Rect::from_center_size(egui::pos2(x, rect.top() + 39.0), vec2(14.0, 14.0));
+        Icon::Pin.image(14.0, t.text_dim).paint_at(ui, at);
     }
     r
 }
@@ -523,6 +592,10 @@ fn conversation(app: &mut MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat) {
                 .clicked()
             {
                 app.chat.deleting_chat = Some(chat.id.clone());
+            }
+            let (icon, text) = if app.view.is_pinned(&chat.id) { (Icon::PinOff, tr("chat-unpin")) } else { (Icon::Pin, tr("chat-pin")) };
+            if helder::secondary(ui, t, |ui| helder::icon_button(ui, t, icon, &text)).clicked() {
+                app.toggle_pin(&chat.id, ui.ctx());
             }
             call_button(app, ui, t, chat);
         });

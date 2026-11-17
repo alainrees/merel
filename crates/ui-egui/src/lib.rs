@@ -4264,6 +4264,55 @@ mod tests {
     }
 
     #[test]
+    fn a_chat_is_pinned_to_the_top_from_its_menu_and_let_go_of_in_the_open_chat() {
+        let mut h = harness();
+        with_a_chat(h.state_mut());
+        // A later chat with Ravi, so Sanne's is second until she is pinned.
+        let mut later = h.state().engine.session.messages.iter().find(|m| m.id == "a1/INBOX#1").unwrap().clone();
+        later.id = "a1/INBOX#2".into();
+        later.remote_id = "2".into();
+        later.from = merel_model::Address::new(Some("Ravi Kumar"), "ravi@example.org").unwrap();
+        later.date += 60;
+        later.message_id = Some("<c2@example.org>".into());
+        later.flags.seen = true;
+        h.state_mut().engine.session.messages.push(later);
+        h.state_mut().engine.session.accounts.iter_mut().filter(|a| a.id == "a1").for_each(|a| a.protocol = merel_model::Protocol::Signal);
+        h.state_mut().module = Module::Chat;
+        h.run();
+        let titles = |h: &egui_kittest::Harness<'_, MailApp>| crate::chat::listed(h.state()).into_iter().map(|c| c.title).collect::<Vec<_>>();
+        assert_eq!(titles(&h), ["Ravi Kumar", "Sanne de Vries"]);
+        assert!(h.query_by_label("Vastgezet").is_none(), "no headers without pins");
+
+        h.get_by_label("Sanne de Vries, 1 ongelezen").click_secondary();
+        h.run();
+        h.get_by_label("Chat vastzetten").click();
+        h.run();
+        let sanne = merel_engine::chat::person_chat_id("a1", "sanne@example.org");
+        assert_eq!(h.state().view.pinned_chats, [sanne.clone()]);
+        assert_eq!(titles(&h), ["Sanne de Vries", "Ravi Kumar"], "the pinned chat goes on top");
+        h.get_by_label("Vastgezet");
+        h.get_by_label("Chats");
+        h.get_by_label("Sanne de Vries, 1 ongelezen, vastgezet").click();
+        h.run();
+        h.get_by_label("Chat losmaken").click();
+        h.run();
+        assert!(h.state().view.pinned_chats.is_empty());
+        assert_eq!(titles(&h), ["Ravi Kumar", "Sanne de Vries"]);
+    }
+
+    #[test]
+    fn no_more_than_four_chats_are_pinned_as_in_signal() {
+        let mut h = harness();
+        h.state_mut().view.pinned_chats = (0..crate::chat::MAX_PINNED).map(|i| format!("person:a1:{i}@signal.invalid")).collect();
+        let ctx = h.ctx.clone();
+        h.state_mut().toggle_pin("person:a1:extra@signal.invalid", &ctx);
+        assert_eq!(h.state().view.pinned_chats.len(), crate::chat::MAX_PINNED);
+        assert!(h.state().notice.as_ref().is_some_and(|n| n.text.contains("maximaal 4")));
+        h.state_mut().toggle_pin("person:a1:0@signal.invalid", &ctx);
+        assert_eq!(h.state().view.pinned_chats.len(), crate::chat::MAX_PINNED - 1);
+    }
+
+    #[test]
     fn a_whole_signal_chat_is_deleted_only_after_asking_from_its_menu_or_the_open_chat() {
         let mut h = harness();
         with_a_chat(h.state_mut());
