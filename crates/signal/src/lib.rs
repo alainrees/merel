@@ -198,7 +198,28 @@ pub struct Received {
     /// The writer deleted it for everyone: a line says so in its place.
     #[serde(default)]
     pub deleted: bool,
+    /// The preview of the link in the text, as the sender's app made it.
+    #[serde(default)]
+    pub preview: Option<Box<PreviewOf>>,
 }
+
+/// A link's preview as the program passes it on: the picture is a file to fetch, like an
+/// attachment.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct PreviewOf {
+    pub url: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub date: u64,
+    #[serde(default)]
+    pub image: Option<FileRef>,
+}
+
+/// Most bytes of a preview's picture that Merel fetches.
+const PREVIEW_IMAGE_UP_TO: u64 = 2 * 1024 * 1024;
 
 /// A Signal call in a chat. Merel cannot take part in it: it shows who calls and how it ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -1117,7 +1138,10 @@ impl Mailbox for SignalMailbox {
         // The files come along, as Signal shows pictures in the chat; very big ones by name only.
         let files: Vec<(FileRef, Option<Arc<[u8]>>)> =
             m.attachments.iter().map(|f| (f.clone(), if f.size <= FETCH_UP_TO { self.fetch(&f.id) } else { None })).collect();
-        Ok(message_with(&m, &self.me, &reactions, &files))
+        // The picture the sender's app took from the page, never the page itself.
+        let image = m.preview.as_ref().and_then(|p| p.image.clone()).filter(|f| f.size <= PREVIEW_IMAGE_UP_TO && f.mime.starts_with("image/"));
+        let fetched = image.as_ref().and_then(|f| self.fetch(&f.id).map(|b| (f, b)));
+        Ok(message_with(&m, &self.me, &reactions, &files, fetched))
     }
 
     fn set_flag(&mut self, folder: &str, id: &str, flag: Flag, on: bool) -> Result<()> {
@@ -1242,11 +1266,17 @@ impl Mailbox for SignalMailbox {
 /// chat headers that put it in its chat.
 fn message(m: &Received, me: &str, reactions: &[merel_model::Reacted]) -> Vec<u8> {
     let files: Vec<(FileRef, Option<Arc<[u8]>>)> = m.attachments.iter().map(|f| (f.clone(), None)).collect();
-    message_with(m, me, reactions, &files)
+    message_with(m, me, reactions, &files, None)
 }
 
 /// The message with its files: those fetched as attachments, the others named in the text.
-fn message_with(m: &Received, me: &str, reactions: &[merel_model::Reacted], files: &[(FileRef, Option<Arc<[u8]>>)]) -> Vec<u8> {
+fn message_with(
+    m: &Received,
+    me: &str,
+    reactions: &[merel_model::Reacted],
+    files: &[(FileRef, Option<Arc<[u8]>>)],
+    preview_image: Option<(&FileRef, Arc<[u8]>)>,
+) -> Vec<u8> {
     let from = if m.mine { me.to_string() } else { address_of(&m.sender) };
     let to = if m.mine { thread_address(m) } else { me.to_string() };
     let from_name = if m.sender_name.is_empty() { &m.sender } else { &m.sender_name };
@@ -1295,12 +1325,25 @@ fn message_with(m: &Received, me: &str, reactions: &[merel_model::Reacted], file
         let quoted = merel_model::Quoted { message_id: format!("<{}@{DOMAIN}>", message_id(q.timestamp, &q.author)), name, text };
         out.push_str(&format!("Merel-Quote: {}\r\n", fold(&quoted.header())));
     }
+    if let Some(p) = m.preview.as_ref().filter(|_| !m.deleted) {
+        let preview = merel_model::LinkPreview {
+            url: p.url.clone(),
+            title: p.title.chars().take(merel_model::MAX_PREVIEW_TEXT).collect(),
+            description: p.description.chars().take(merel_model::MAX_PREVIEW_TEXT).collect(),
+            date: i64::try_from(p.date).unwrap_or_default(),
+            image: preview_image.as_ref().map(|(f, _)| preview_name(f)).unwrap_or_default(),
+        };
+        out.push_str(&format!("Merel-Preview: {}\r\n", fold(&preview.header())));
+    }
     if !reactions.is_empty() {
         let value = merel_model::Reacted::header(reactions);
         out.push_str(&format!("Merel-Reactions: {}\r\n", fold(&value)));
     }
     out.push_str("MIME-Version: 1.0\r\n");
-    let fetched: Vec<(&FileRef, &Arc<[u8]>)> = files.iter().filter_map(|(f, b)| b.as_ref().map(|b| (f, b))).collect();
+    let mut fetched: Vec<(&FileRef, &Arc<[u8]>)> = files.iter().filter_map(|(f, b)| b.as_ref().map(|b| (f, b))).collect();
+    if let Some((f, b)) = preview_image.as_ref().filter(|_| m.preview.is_some() && !m.deleted) {
+        fetched.push((f, b));
+    }
     let boundary = format!("merel-signal-{}", m.id().replace(['.', '-'], ""));
     if !fetched.is_empty() {
         out.push_str(&format!("Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n--{boundary}\r\n"));
@@ -1311,7 +1354,7 @@ fn message_with(m: &Received, me: &str, reactions: &[merel_model::Reacted], file
         let mime = if f.mime.contains('/') && f.mime.chars().all(|c| c.is_ascii_graphic()) { f.mime.as_str() } else { "application/octet-stream" };
         out.push_str(&format!(
             "--{boundary}\r\nContent-Type: {mime}\r\nContent-Disposition: attachment; filename*=utf-8''{}\r\nContent-Transfer-Encoding: base64\r\n\r\n",
-            percent(&file_name(f))
+            percent(&if m.preview.as_ref().and_then(|p| p.image.as_ref()).is_some_and(|p| p.id == f.id) { preview_name(f) } else { file_name(f) })
         ));
         push_base64(&mut out, bytes);
     }
@@ -1331,6 +1374,18 @@ fn push_base64(out: &mut String, bytes: &[u8]) {
 }
 
 /// A file's name, or one made from its kind when it came without (a photo taken in Signal).
+/// The attachment name a preview's picture travels under, so the chat finds it and does not
+/// list it among the files.
+fn preview_name(f: &FileRef) -> String {
+    let ext = match f.mime.as_str() {
+        "image/png" => "png",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        _ => "jpg",
+    };
+    format!("{}.{ext}", merel_model::PREVIEW_IMAGE)
+}
+
 fn file_name(f: &FileRef) -> String {
     let name = clean(f.name.trim());
     if !name.is_empty() {
@@ -1471,6 +1526,7 @@ mod tests {
             delivery: None,
             edited: 0,
             deleted: false,
+            preview: None,
         }
     }
 
@@ -1660,12 +1716,40 @@ mod tests {
         let big = FileRef { id: "b2".into(), name: "film.mp4".into(), mime: "video/mp4".into(), size: 900_000_000, voice: false };
         m.attachments = vec![photo.clone(), big.clone()];
         let bytes: Arc<[u8]> = vec![1u8, 2, 3, 4].into();
-        let raw = message_with(&m, "me@signal.invalid", &[], &[(photo, Some(bytes)), (big, None)]);
+        let raw = message_with(&m, "me@signal.invalid", &[], &[(photo, Some(bytes)), (big, None)], None);
         let body = merel_mime::parse_body(&raw);
         assert_eq!(body.attachments.len(), 1);
         assert_eq!(body.attachments[0].name, "foto.png");
         assert_eq!(&body.attachments[0].bytes[..], [1, 2, 3, 4]);
         assert!(body.text.contains("Kijk!") && body.text.contains("film.mp4"), "{}", body.text);
+    }
+
+    #[test]
+    fn a_link_preview_travels_as_a_header_with_its_picture_apart_from_the_files() {
+        let mut m = received("https://blog.example.com/artikel Lees dit");
+        let image = FileRef { id: "p1".into(), name: String::new(), mime: "image/jpeg".into(), size: 3, voice: false };
+        m.preview = Some(Box::new(PreviewOf {
+            url: "https://blog.example.com/artikel".into(),
+            title: "Een artikel".into(),
+            description: "Waar het over gaat".into(),
+            date: 1_763_337_600_000,
+            image: Some(image.clone()),
+        }));
+        let bytes: Arc<[u8]> = vec![7u8, 8, 9].into();
+        let raw = message_with(&m, "me@signal.invalid", &[], &[], Some((&image, bytes)));
+        let preview = merel_mime::parse_header(&raw).chat.and_then(|c| c.preview).unwrap_or_default();
+        assert_eq!(preview.title, "Een artikel");
+        assert_eq!(preview.description, "Waar het over gaat");
+        assert_eq!(preview.site(), "blog.example.com");
+        assert_eq!(preview.date, 1_763_337_600_000);
+        assert_eq!(preview.image, "merel-link-preview.jpg");
+        let body = merel_mime::parse_body(&raw);
+        assert_eq!(body.attachments.len(), 1);
+        assert_eq!(body.attachments[0].name, preview.image);
+        assert!(!body.text.contains("merel-link-preview"), "the picture is not named in the text: {}", body.text);
+        // Listed without the picture, the preview still has its words.
+        let listed = merel_mime::parse_header(&message(&m, "me@signal.invalid", &[])).chat.and_then(|c| c.preview).unwrap_or_default();
+        assert_eq!((listed.title.as_str(), listed.image.as_str()), ("Een artikel", ""));
     }
 
     #[test]

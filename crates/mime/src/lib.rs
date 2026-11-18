@@ -136,6 +136,7 @@ fn chat_of(m: &mail_parser::Message<'_>) -> Option<ChatTag> {
     tag.edited = raw("Merel-Edited").is_some_and(|v| v == "yes");
     tag.deleted = raw("Merel-Deleted").is_some_and(|v| v == "yes");
     tag.voice = raw("Merel-Voice").is_some_and(|v| v == "yes");
+    tag.preview = merel_model::LinkPreview::from_header(raw("Merel-Preview").as_deref());
     tag.call = merel_model::CallSignal::from_headers(raw("Merel-Call").as_deref(), raw("Merel-Call-Sdp").as_deref());
     tag.handshake = merel_model::Handshake::from_headers(
         raw("Secure-Join").as_deref(),
