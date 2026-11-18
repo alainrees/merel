@@ -38,10 +38,10 @@ use presage::libsignal_service::sender::AttachmentSpec;
 use presage::manager::Registered;
 use presage::model::identity::OnNewIdentity;
 use presage::model::messages::Received;
-use presage::proto::AttachmentPointer;
 use presage::proto::data_message::{Delete, Quote, Reaction, quote};
 use presage::proto::sync_message::{CallEvent, Content as SyncContent, DeleteForMe, Sent, call_event, delete_for_me, fetch_latest};
 use presage::proto::{AddressableMessage, ConversationIdentifier, addressable_message, conversation_identifier};
+use presage::proto::{AttachmentPointer, Preview};
 use presage::proto::{CallMessage, EditMessage, GroupContextV2, SyncMessage, call_message};
 use presage::proto::{ReceiptMessage, receipt_message, typing_message};
 use presage::store::{ContentExt, Store, Thread};
@@ -98,6 +98,10 @@ enum Event {
         /// The writer deleted it for everyone: only that it was there is left.
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         deleted: bool,
+        /// The preview of the link in the text, as the sender's app made it: Merel shows it
+        /// without visiting the page itself.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        preview: Option<Box<LinkPreview>>,
     },
     /// Someone reacted with an emoji to a message, or took a reaction back (`remove`). The
     /// message is the one `target_author` sent at `target_timestamp`.
@@ -228,6 +232,34 @@ type Files = HashMap<String, AttachmentPointer>;
 
 /// Most bytes a file to fetch or send may have: Signal's own limit is 100 MB.
 const MAX_FILE: usize = 100 * 1024 * 1024;
+
+/// A link's preview: the page's title, description and picture, fetched by the app that
+/// sent the message.
+#[derive(Serialize, Clone)]
+struct LinkPreview {
+    url: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    title: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    description: String,
+    /// When the page was published, in milliseconds since 1970; 0 when not known.
+    #[serde(skip_serializing_if = "is_zero")]
+    date: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    image: Option<FileInfo>,
+}
+
+/// The first preview Signal sent with a message, if it has a link to show.
+fn link_preview(previews: &[Preview], files: &mut Files) -> Option<Box<LinkPreview>> {
+    let p = previews.iter().find(|p| p.url.as_deref().is_some_and(|u| u.starts_with("https://") || u.starts_with("http://")))?;
+    Some(Box::new(LinkPreview {
+        url: p.url.clone().unwrap_or_default(),
+        title: p.title.clone().unwrap_or_default(),
+        description: p.description.clone().unwrap_or_default(),
+        date: p.date.unwrap_or(0),
+        image: p.image.as_ref().map(|a| info(a, files)),
+    }))
+}
 
 /// The message a message answers: who sent it when, and (the start of) its text.
 #[derive(Serialize, Deserialize, Clone)]
@@ -727,6 +759,7 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                                 call: None,
                                 edited: 0,
                                 deleted: false,
+                                preview: None,
                             });
                             emit(&Event::Sent { thread, timestamp });
                         }
@@ -969,7 +1002,7 @@ async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content,
         None if sent_here => Thread::Contact(content.metadata.destination),
         _ => Thread::try_from(content).ok()?,
     };
-    let DataMessage { body, attachments, reaction, quote, group_call_update, delete, .. } = data;
+    let DataMessage { body, attachments, reaction, quote, group_call_update, delete, preview, .. } = data;
     if let Some(Delete { target_sent_timestamp: Some(target) }) = delete {
         return deleted(manager, content, thread, *target).await;
     }
@@ -1015,6 +1048,7 @@ async fn describe<S: Store>(manager: &Manager<S, Registered>, content: &Content,
         call: None,
         edited: if edited { data.timestamp.unwrap_or(1) } else { 0 },
         deleted: false,
+        preview: link_preview(preview, files),
     })
 }
 
@@ -1042,6 +1076,7 @@ async fn chat_call<S: Store>(
         call: Some(call),
         edited: 0,
         deleted: false,
+        preview: None,
     })
 }
 
@@ -1500,6 +1535,7 @@ async fn deleted_line<S: Store>(manager: &Manager<S, Registered>, thread: Thread
         call: None,
         edited: 0,
         deleted: true,
+        preview: None,
     })
 }
 

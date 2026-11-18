@@ -71,6 +71,63 @@ pub struct ChatTag {
     /// Only Signal says it; the engine drops it from any other account.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub voice: bool,
+    /// The preview of the link in the text (`Merel-Preview`), as the sender's app made it.
+    /// Only Signal says it; the engine drops it from any other account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<LinkPreview>,
+}
+
+/// A link's preview, as Signal sends it with a message: the page's title, description and
+/// picture, fetched by the app that sent it. Merel never visits the page for it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkPreview {
+    pub url: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    /// When the page was published, in milliseconds since 1970; 0 when not known.
+    #[serde(default)]
+    pub date: i64,
+    /// The name of the message's attachment that holds the picture; empty without one.
+    #[serde(default)]
+    pub image: String,
+}
+
+/// The name (without extension) of the attachment that holds a link preview's picture.
+pub const PREVIEW_IMAGE: &str = "merel-link-preview";
+
+/// Most characters of a preview's title and description kept.
+pub const MAX_PREVIEW_TEXT: usize = 400;
+
+impl LinkPreview {
+    /// The `Merel-Preview` header value: base64 JSON.
+    pub fn header(&self) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(self).unwrap_or_default())
+    }
+
+    /// The preview a `Merel-Preview` header value holds, if it is one with a web address.
+    pub fn from_header(value: Option<&str>) -> Option<LinkPreview> {
+        use base64::Engine as _;
+        let b64: String = value?.chars().filter(|c| !c.is_whitespace()).collect();
+        let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
+        let p: LinkPreview = serde_json::from_slice(&bytes).ok()?;
+        let url: String = clean_text(p.url.trim()).chars().take(2048).collect();
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return None;
+        }
+        let short = |s: &str| clean_text(s.trim()).chars().take(MAX_PREVIEW_TEXT).collect::<String>();
+        Some(LinkPreview { url, title: short(&p.title), description: short(&p.description), date: p.date.max(0), image: short(&p.image) })
+    }
+
+    /// The site, as Signal shows it under the preview: blog.example.com.
+    pub fn site(&self) -> &str {
+        let rest = self.url.split_once("://").map_or(self.url.as_str(), |(_, r)| r);
+        let host = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+        let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
+        host.strip_prefix("www.").unwrap_or(host)
+    }
 }
 
 /// How far a message one sent came.
@@ -340,6 +397,16 @@ impl ChatTag {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_preview_keeps_web_addresses_only_and_names_the_site() {
+        let p = LinkPreview { url: "https://user@www.example.org:8443/a?b".into(), title: "T".into(), ..Default::default() };
+        let back = LinkPreview::from_header(Some(&p.header())).unwrap();
+        assert_eq!(back.site(), "example.org:8443");
+        let other = LinkPreview { url: "javascript:alert(1)".into(), ..Default::default() };
+        assert_eq!(LinkPreview::from_header(Some(&other.header())), None);
+        assert_eq!(LinkPreview::from_header(Some("not base64")), None);
+    }
 
     #[test]
     fn a_tag_comes_from_chat_version_and_keeps_only_a_clean_group() {

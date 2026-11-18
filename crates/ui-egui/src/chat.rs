@@ -783,6 +783,7 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
     let reacts = signal && invite.is_none() && !ring && !deleted;
     let can_change = reacts && app.engine.signal_can_change(id);
     let reactions = m.chat.as_ref().map(|c| c.reactions.clone()).unwrap_or_default();
+    let link_previews = app.view.link_previews;
     // Whether the pointer was over this message last frame: then the smiley shows.
     let hover_id = egui::Id::new(("chat-hover", id));
     let hovered = ui.data(|d| d.get_temp::<bool>(hover_id)).unwrap_or(false);
@@ -826,6 +827,10 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                 |ui| {
                     ui.set_max_width(max);
                     let quote = m.chat.as_ref().and_then(|c| c.quote.as_ref());
+                    // The link's preview the sender's app sent along, unless switched off; its
+                    // picture never shows among the files.
+                    let preview_of_message = m.chat.as_ref().and_then(|c| c.preview.as_ref()).filter(|_| !deleted);
+                    let preview = preview_of_message.filter(|_| link_previews);
                     let mut content = |ui: &mut Ui| match &invite {
                         Some(_) => {
                             ui.horizontal(|ui| {
@@ -852,16 +857,19 @@ fn bubble(app: &MailApp, ui: &mut Ui, t: &Tokens, chat: &Chat, id: &str, first_o
                         }
                         None => {
                             let files = session.bodies.get(id).map(|b| b.attachments.as_slice()).unwrap_or_default();
-                            if !text.trim().is_empty() || files.is_empty() {
+                            if let Some(p) = preview {
+                                link_preview_card(ui, t, id, p, files);
+                            }
+                            let others = files.iter().filter(|a| !is_preview_image(a, preview_of_message)).count();
+                            if !text.trim().is_empty() || others == 0 {
                                 text_clicks = Some(crate::emoji::label(ui, &text, 14.0, t.text));
                             }
-                            let voice = m.chat.as_ref().is_some_and(|c| c.voice);
-                            files_in_bubble(ui, t, &app.chat.voice, id, files, voice, &mut accept);
+                            files_in_bubble(ui, t, &app.chat.voice, id, files, m.chat.as_ref(), &mut accept);
                         }
                     };
                     // A quote goes above the text and files under it; without either the text
                     // keeps the bubble narrow.
-                    let has_files = session.bodies.get(id).is_some_and(|b| !b.attachments.is_empty());
+                    let has_files = preview.is_some() || session.bodies.get(id).is_some_and(|b| !b.attachments.is_empty());
                     // In the bubble's corner, as Signal shows it.
                     let ticks = mine && reacts;
                     let delivery = m.chat.as_ref().and_then(|c| c.delivery);
@@ -956,10 +964,15 @@ fn files_in_bubble(
     player: &crate::voice::Player,
     id: &str,
     files: &[merel_mime::Attachment],
-    voice: bool,
+    tag: Option<&merel_model::ChatTag>,
     clicked: &mut Option<Clicked>,
 ) {
+    let voice = tag.is_some_and(|c| c.voice);
+    let preview = tag.and_then(|c| c.preview.as_ref());
     for (n, a) in files.iter().enumerate() {
+        if is_preview_image(a, preview) {
+            continue;
+        }
         if voice && a.mime.starts_with("audio/") {
             if let Some(ask) = crate::voice::row(ui, t, player, id, n, a) {
                 *clicked = Some(Clicked::Voice(n, ask));
@@ -989,6 +1002,86 @@ fn files_in_bubble(
             }
         }
     }
+}
+
+/// Whether `a` is the picture of the message's link preview, which is no file of its own.
+fn is_preview_image(a: &merel_mime::Attachment, preview: Option<&merel_model::LinkPreview>) -> bool {
+    preview.is_some_and(|p| !p.image.is_empty() && a.name == p.image)
+}
+
+/// The preview of a link, as Signal shows it above the text: the page's picture, its title in
+/// bold, a few lines of its description, and the site with the date. All of it came with the
+/// message; a click opens the page in the browser.
+fn link_preview_card(ui: &mut Ui, t: &Tokens, id: &str, p: &merel_model::LinkPreview, files: &[merel_mime::Attachment]) {
+    let width = ui.max_rect().width().max(120.0);
+    let image = files.iter().enumerate().find(|(_, a)| is_preview_image(a, Some(p)) && crate::attachments::previewable(a));
+    let card = egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.0, t.card_border)).corner_radius(8).show(ui, |ui| {
+        ui.set_width(width);
+        ui.spacing_mut().item_spacing.y = 4.0;
+        if let Some((n, a)) = image {
+            let (w, h) = image::ImageReader::new(std::io::Cursor::new(&a.bytes[..]))
+                .with_guessed_format()
+                .ok()
+                .and_then(|r| r.into_dimensions().ok())
+                .unwrap_or((1200, 630));
+            let scale = (width / w.max(1) as f32).min(1.0);
+            let size = vec2(w as f32 * scale, (h as f32 * scale).min(width));
+            ui.add(
+                egui::Image::from_bytes(crate::attachments::preview_uri(id, n), egui::load::Bytes::Shared(a.bytes.clone()))
+                    .fit_to_exact_size(size)
+                    .corner_radius(egui::CornerRadius { nw: 8, ne: 8, sw: 0, se: 0 }),
+            );
+        }
+        egui::Frame::new().inner_margin(Margin::symmetric(10, 6)).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 3.0;
+            if !p.title.is_empty() {
+                ui.add(egui::Label::new(RichText::new(&p.title).size(14.0).strong().color(t.text)).wrap());
+            }
+            if !p.description.is_empty() {
+                let mut d: String = p.description.chars().take(PREVIEW_DESCRIPTION).collect();
+                if p.description.chars().count() > PREVIEW_DESCRIPTION {
+                    d.push('…');
+                }
+                ui.add(egui::Label::new(RichText::new(d).size(13.0).color(t.text)).wrap());
+            }
+            let mut site = p.site().to_string();
+            if p.date > 0 {
+                site = format!("{site} · {}", crate::dates::day(p.date / 1000));
+            }
+            ui.add(egui::Label::new(RichText::new(site).size(12.0).color(t.text_dim)).truncate());
+        });
+    });
+    let r = ui.interact(card.response.rect, egui::Id::new(("chat-link-preview", id)), Sense::click());
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Link, true, tr_args("chat-link-preview-open", &[("site", p.site().into())])));
+    let r = r.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(&p.url);
+    if r.clicked() {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(&p.url));
+    }
+    ui.add_space(2.0);
+}
+
+/// Most characters of a preview's description shown, as Signal cuts it off.
+const PREVIEW_DESCRIPTION: usize = 220;
+
+pub fn settings_label() -> String {
+    tr("chat-settings-page")
+}
+pub fn link_previews_label() -> String {
+    tr("chat-link-previews-on")
+}
+
+/// Bestand > Chat: how chat messages show.
+pub fn settings_page(app: &mut MailApp, ui: &mut Ui, t: &Tokens) {
+    ui.label(RichText::new(settings_label()).size(helder::TITLE_TEXT).strong().color(t.text));
+    ui.add(egui::Label::new(RichText::new(tr("chat-settings-intro")).size(13.0).color(t.text_dim)).wrap());
+    ui.add_space(10.0);
+    if helder::toggle(ui, t, &mut app.view.link_previews, &link_previews_label()).changed() {
+        app.save_view(ui.ctx());
+    }
+    ui.horizontal(|ui| {
+        ui.add_space(44.0);
+        ui.add(egui::Label::new(RichText::new(tr("chat-link-previews-hint")).size(12.0).color(t.text_dim)).wrap());
+    });
 }
 
 /// The files picked to go with the next message, each with a cross to leave it out.
@@ -1741,6 +1834,35 @@ mod tests {
         h.run();
         h.run();
         assert!(h.query_by_label("😀").is_some(), "the picker shows after the dots, and the menu stays open");
+    }
+
+    #[test]
+    fn a_link_preview_shows_its_title_and_site_and_hides_its_picture_from_the_files() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let p = merel_model::LinkPreview {
+            url: "https://www.blog.example.com/artikel".into(),
+            title: "Een artikel".into(),
+            description: "Waar het over gaat".into(),
+            date: 0,
+            image: "merel-link-preview.png".into(),
+        };
+        let mut png = Vec::new();
+        image::RgbaImage::new(4, 2).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        let picture = merel_mime::Attachment { name: p.image.clone(), mime: "image/png".into(), size: png.len(), bytes: png.into() };
+        assert!(is_preview_image(&picture, Some(&p)));
+        assert!(!is_preview_image(&picture, None));
+        let files = vec![picture];
+        let mut h = Harness::builder().with_size(vec2(500.0, 400.0)).build_ui(|ui| {
+            let t = Tokens::for_dark(false);
+            ui.set_max_width(360.0);
+            link_preview_card(ui, &t, "m1", &p, &files);
+        });
+        h.run();
+        assert!(h.query_by_label("Een artikel").is_some());
+        assert!(h.query_by_label("Waar het over gaat").is_some());
+        assert!(h.query_by_label("blog.example.com").is_some(), "the site without www, as Signal shows it");
+        assert!(h.query_by_label(&tr_args("chat-link-preview-open", &[("site", "blog.example.com".into())])).is_some());
     }
 
     #[test]

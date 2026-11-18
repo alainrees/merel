@@ -170,6 +170,9 @@ pub struct ViewPrefs {
     /// The chats last seen pinned on the phone of each Signal account, by account id: what the
     /// phone changes since then goes here too (see [`ViewPrefs::take_phone_pins`]).
     pub phone_pins: std::collections::BTreeMap<String, Vec<String>>,
+    /// Whether a chat message shows the preview of its link (picture, title, description) that
+    /// the sender's app sent along, as Signal does (Bestand > Chat). On unless switched off.
+    pub link_previews: bool,
 }
 
 /// How many recent searches the menu next to the search box keeps.
@@ -212,6 +215,7 @@ impl Default for ViewPrefs {
             recent_emoji: Vec::new(),
             pinned_chats: Vec::new(),
             phone_pins: Default::default(),
+            link_previews: true,
         }
     }
 }
