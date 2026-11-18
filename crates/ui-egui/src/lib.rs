@@ -4288,7 +4288,7 @@ mod tests {
         h.get_by_label("Chat vastzetten").click();
         h.run();
         let sanne = merel_engine::chat::person_chat_id("a1", "sanne@example.org");
-        assert_eq!(h.state().view.pinned_chats, [sanne.clone()]);
+        assert_eq!(h.state().view.pinned_chats, [sanne]);
         assert_eq!(titles(&h), ["Sanne de Vries", "Ravi Kumar"], "the pinned chat goes on top");
         h.get_by_label("Vastgezet");
         h.get_by_label("Chats");
@@ -4310,6 +4310,8 @@ mod tests {
         assert!(h.state().notice.as_ref().is_some_and(|n| n.text.contains("maximaal 4")));
         h.state_mut().toggle_pin("person:a1:0@signal.invalid", &ctx);
         assert_eq!(h.state().view.pinned_chats.len(), crate::chat::MAX_PINNED - 1);
+        h.state_mut().toggle_pin("person:a1:new@signal.invalid", &ctx);
+        assert_eq!(h.state().view.pinned_chats[0], "person:a1:new@signal.invalid", "the newest pin goes on top");
     }
 
     #[test]

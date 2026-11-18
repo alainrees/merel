@@ -322,7 +322,8 @@ impl MailApp {
             self.notice = Some(crate::Notice::info(tr_args("chat-pin-full", &[("max", MAX_PINNED.into())])));
             return;
         } else {
-            self.view.pinned_chats.push(id.to_string());
+            // The chat just pinned goes to the very top, above the ones pinned before.
+            self.view.pinned_chats.insert(0, id.to_string());
         }
         self.save_view(ctx);
     }
