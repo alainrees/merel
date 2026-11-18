@@ -1171,8 +1171,14 @@ impl Mailbox for SignalMailbox {
         let files: Vec<(FileRef, Option<Arc<[u8]>>)> =
             m.attachments.iter().map(|f| (f.clone(), if f.size <= FETCH_UP_TO { self.fetch(&f.id) } else { None })).collect();
         // The picture the sender's app took from the page, never the page itself.
-        let image = m.preview.as_ref().and_then(|p| p.image.clone()).filter(|f| f.size <= PREVIEW_IMAGE_UP_TO && f.mime.starts_with("image/"));
-        let fetched = image.as_ref().and_then(|f| self.fetch(&f.id).map(|b| (f, b)));
+        // Signal apps do not always say what kind of picture it is: the bytes say it.
+        let image = m.preview.as_ref().and_then(|p| p.image.clone()).filter(|f| f.size <= PREVIEW_IMAGE_UP_TO);
+        let fetched = image.and_then(|f| {
+            let bytes = self.fetch(&f.id)?;
+            let mime = picture_kind(&bytes)?;
+            Some((FileRef { mime: mime.into(), ..f }, bytes))
+        });
+        let fetched = fetched.as_ref().map(|(f, b)| (f, b.clone()));
         Ok(message_with(&m, &self.me, &reactions, &files, fetched))
     }
 
@@ -1366,6 +1372,11 @@ fn message_with(
             image: preview_image.as_ref().map(|(f, _)| preview_name(f)).unwrap_or_default(),
         };
         out.push_str(&format!("Merel-Preview: {}\r\n", fold(&preview.header())));
+        // Says there is a picture to fetch. It also makes the listed size differ from 0.1.44's,
+        // which kept such messages without their picture, so Merel fetches them again.
+        if p.image.is_some() {
+            out.push_str("Merel-Preview-Picture: yes\r\n");
+        }
     }
     if !reactions.is_empty() {
         let value = merel_model::Reacted::header(reactions);
@@ -1406,6 +1417,18 @@ fn push_base64(out: &mut String, bytes: &[u8]) {
 }
 
 /// A file's name, or one made from its kind when it came without (a photo taken in Signal).
+/// The kind of picture `bytes` hold, from their first bytes; `None` when they hold none Merel
+/// shows.
+fn picture_kind(bytes: &[u8]) -> Option<&'static str> {
+    match bytes {
+        [0xFF, 0xD8, 0xFF, ..] => Some("image/jpeg"),
+        [0x89, b'P', b'N', b'G', ..] => Some("image/png"),
+        [b'G', b'I', b'F', b'8', ..] => Some("image/gif"),
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some("image/webp"),
+        _ => None,
+    }
+}
+
 /// The attachment name a preview's picture travels under, so the chat finds it and does not
 /// list it among the files.
 fn preview_name(f: &FileRef) -> String {
@@ -1794,6 +1817,14 @@ mod tests {
         // Listed without the picture, the preview still has its words.
         let listed = merel_mime::parse_header(&message(&m, "me@signal.invalid", &[])).chat.and_then(|c| c.preview).unwrap_or_default();
         assert_eq!((listed.title.as_str(), listed.image.as_str()), ("Een artikel", ""));
+    }
+
+    #[test]
+    fn a_picture_is_known_by_its_first_bytes_whatever_the_app_called_it() {
+        assert_eq!(picture_kind(&[0xFF, 0xD8, 0xFF, 0xE0, 0]), Some("image/jpeg"));
+        assert_eq!(picture_kind(b"\x89PNG\r\n"), Some("image/png"));
+        assert_eq!(picture_kind(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
+        assert_eq!(picture_kind(b"<html>"), None);
     }
 
     #[test]
