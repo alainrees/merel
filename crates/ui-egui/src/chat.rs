@@ -1005,8 +1005,11 @@ fn files_in_bubble(
 }
 
 /// Whether `a` is the picture of the message's link preview, which is no file of its own.
+///
+/// The message as listed names no picture (it is fetched with the text), so the name it
+/// travels under tells it.
 fn is_preview_image(a: &merel_mime::Attachment, preview: Option<&merel_model::LinkPreview>) -> bool {
-    preview.is_some_and(|p| !p.image.is_empty() && a.name == p.image)
+    preview.is_some() && a.name.strip_prefix(merel_model::PREVIEW_IMAGE).is_some_and(|rest| rest.starts_with('.'))
 }
 
 /// The preview of a link, as Signal shows it above the text: the page's picture, its title in
@@ -1845,11 +1848,12 @@ mod tests {
             title: "Een artikel".into(),
             description: "Waar het over gaat".into(),
             date: 0,
-            image: "merel-link-preview.png".into(),
+            // As listed: the picture comes with the text, so the listing names none.
+            image: String::new(),
         };
         let mut png = Vec::new();
         image::RgbaImage::new(4, 2).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
-        let picture = merel_mime::Attachment { name: p.image.clone(), mime: "image/png".into(), size: png.len(), bytes: png.into() };
+        let picture = merel_mime::Attachment { name: "merel-link-preview.png".into(), mime: "image/png".into(), size: png.len(), bytes: png.into() };
         assert!(is_preview_image(&picture, Some(&p)));
         assert!(!is_preview_image(&picture, None));
         let files = vec![picture];
@@ -1862,6 +1866,10 @@ mod tests {
         assert!(h.query_by_label("Een artikel").is_some());
         assert!(h.query_by_label("Waar het over gaat").is_some());
         assert!(h.query_by_label("blog.example.com").is_some(), "the site without www, as Signal shows it");
+        assert!(
+            h.query_all(egui_kittest::kittest::by().role(egui::accesskit::Role::Image)).count() == 1,
+            "the picture shows in the card although the listing named none"
+        );
         assert!(h.query_by_label(&tr_args("chat-link-preview-open", &[("site", "blog.example.com".into())])).is_some());
     }
 
