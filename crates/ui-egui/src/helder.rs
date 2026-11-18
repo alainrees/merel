@@ -138,11 +138,13 @@ pub enum Icon {
     Settings,
     Play,
     Pause,
+    Pin,
+    PinOff,
 }
 
 impl Icon {
     /// Every icon, for the test that each one loads.
-    pub const ALL: [Icon; 108] = [
+    pub const ALL: [Icon; 110] = [
         Icon::Archive,
         Icon::Bell,
         Icon::Calendar,
@@ -251,6 +253,8 @@ impl Icon {
         Icon::Settings,
         Icon::Play,
         Icon::Pause,
+        Icon::Pin,
+        Icon::PinOff,
     ];
 
     /// The image's uri and its SVG source.
@@ -367,6 +371,8 @@ impl Icon {
             Icon::MicOff => svg!("mic-off"),
             Icon::Play => svg!("play"),
             Icon::Pause => svg!("pause"),
+            Icon::Pin => svg!("pin"),
+            Icon::PinOff => svg!("pin-off"),
             Icon::PhoneOff => svg!("phone-off"),
             Icon::Settings => svg!("settings"),
         }

@@ -136,6 +136,11 @@ pub enum Said {
     ChatDeleted {
         thread: String,
     },
+    /// The chats pinned on the phone, in its order, as threads.
+    Pinned {
+        #[serde(default)]
+        threads: Vec<String>,
+    },
     /// How a call goes.
     Call(CallUpdate),
     /// Whether calls can be made now: the calls program runs and has sound.
@@ -544,6 +549,30 @@ pub fn discover(me: &str, numbers: &[String]) -> std::result::Result<(), String>
     ask(me, &Asked::Discover { numbers })
 }
 
+/// A chat pinned on the phone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Pinned {
+    /// A group, by its thread (Merel's group id).
+    Group(String),
+    /// The chat with one person, by their Signal address.
+    Person(String),
+}
+
+/// The chats the account `me` has pinned on the phone, in its order: `None` until the program
+/// could read them.
+pub fn pinned(me: &str) -> Option<Vec<Pinned>> {
+    let guard = lines();
+    let threads = lock(&guard.as_ref()?.get(&me.to_lowercase())?.messages).pinned.clone()?;
+    Some(threads.iter().map(|t| pinned_of(t)).collect())
+}
+
+/// A group's thread is `g` and 32 hex digits; a person's is their service id, a UUID that
+/// may start with `PNI:`.
+fn pinned_of(thread: &str) -> Pinned {
+    let group = thread.len() == 33 && thread.starts_with('g') && thread[1..].bytes().all(|b| b.is_ascii_hexdigit());
+    if group { Pinned::Group(thread.to_string()) } else { Pinned::Person(address_of(thread)) }
+}
+
 /// The address book numbers found on Signal so far for the account `me`, with their service id.
 pub fn found(me: &str) -> Vec<Person> {
     lines().as_ref().and_then(|l| l.get(&me.to_lowercase())).map(|l| lock(&l.messages).found.clone()).unwrap_or_default()
@@ -666,6 +695,8 @@ struct Messages {
     contacts: Vec<Person>,
     /// Address book numbers found on Signal.
     found: Vec<Person>,
+    /// The chats pinned on the phone, as threads, once the program read them.
+    pinned: Option<Vec<String>>,
 }
 
 impl Messages {
@@ -810,6 +841,7 @@ fn take_news(messages: &Mutex<Messages>, said: Said) -> Option<Said> {
         Said::Reaction(r) => lock(messages).react(r),
         Said::Typing { sender, sender_name, typing } => note_typing(&sender, &sender_name, typing),
         Said::ChatDeleted { thread } => lock(messages).forget(&thread),
+        Said::Pinned { threads } => lock(messages).pinned = Some(threads),
         news @ (Said::Receipt { .. } | Said::ReadElsewhere { .. } | Said::Settings { .. }) => lock(messages).news.push(news),
         Said::Contacts { people } => {
             let mut m = lock(messages);
@@ -1528,6 +1560,18 @@ mod tests {
             deleted: false,
             preview: None,
         }
+    }
+
+    #[test]
+    fn the_phones_pins_are_kept_and_tell_groups_from_people() {
+        let messages = Mutex::new(Messages::default());
+        let group = format!("g{}", "0a".repeat(16));
+        let said: Said = serde_json::from_str(&format!(r#"{{"type":"pinned","threads":["{group}","PNI:1B2C"]}}"#)).unwrap();
+        assert_eq!(take_news(&messages, said), None);
+        let pinned: Vec<Pinned> = lock(&messages).pinned.clone().unwrap().iter().map(|t| pinned_of(t)).collect();
+        assert_eq!(pinned, vec![Pinned::Group(group), Pinned::Person(address_of("PNI:1B2C"))]);
+        // A person whose id happens to start with a g is no group.
+        assert_eq!(pinned_of("gabc"), Pinned::Person(address_of("gabc")));
     }
 
     #[test]

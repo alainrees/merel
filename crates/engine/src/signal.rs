@@ -383,6 +383,28 @@ impl Engine {
         }
     }
 
+    /// The chats pinned on the phone of each Signal account, in the phone's order, by chat id;
+    /// an account whose pins are not read yet is left out.
+    pub fn signal_pins(&self) -> Vec<(String, Vec<String>)> {
+        self.session
+            .accounts
+            .iter()
+            .filter(|a| self.is_signal_account(&a.id))
+            .filter_map(|a| {
+                let me = self.signal_address(&a.id).ok()?;
+                let pins = merel_signal_link::pinned(&me)?;
+                let ids = pins
+                    .into_iter()
+                    .map(|p| match p {
+                        merel_signal_link::Pinned::Group(g) => crate::chat::group_chat_id(&a.id, &g),
+                        merel_signal_link::Pinned::Person(address) => crate::chat::person_chat_id(&a.id, &address),
+                    })
+                    .collect();
+                Some((a.id.clone(), ids))
+            })
+            .collect()
+    }
+
     pub fn signal_contacts(&self, account_id: &str) -> Vec<(merel_model::Address, String)> {
         let Ok(me) = self.signal_address(account_id) else { return Vec::new() };
         let mut out: Vec<(merel_model::Address, String)> = merel_signal_link::contacts(&me)

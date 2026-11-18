@@ -18,6 +18,7 @@
 
 mod history;
 mod phone;
+mod pins;
 mod wire;
 
 use std::collections::HashMap;
@@ -38,7 +39,7 @@ use presage::manager::Registered;
 use presage::model::identity::OnNewIdentity;
 use presage::model::messages::Received;
 use presage::proto::data_message::{Delete, Quote, Reaction, quote};
-use presage::proto::sync_message::{CallEvent, Content as SyncContent, DeleteForMe, Sent, call_event, delete_for_me};
+use presage::proto::sync_message::{CallEvent, Content as SyncContent, DeleteForMe, Sent, call_event, delete_for_me, fetch_latest};
 use presage::proto::{AddressableMessage, ConversationIdentifier, addressable_message, conversation_identifier};
 use presage::proto::{AttachmentPointer, Preview};
 use presage::proto::{CallMessage, EditMessage, GroupContextV2, SyncMessage, call_message};
@@ -59,6 +60,11 @@ enum Event {
     /// The chat `thread` was deleted on another device of the account's, so it goes here too.
     ChatDeleted {
         thread: String,
+    },
+    /// The chats pinned on the phone, in its order, as threads: sent at the start and each time
+    /// the phone changes them.
+    Pinned {
+        threads: Vec<String>,
     },
     Link {
         url: String,
@@ -469,6 +475,26 @@ fn lookup_registration<S: Store>(manager: &Manager<S, Registered>) -> Result<ser
     Ok(registration)
 }
 
+/// Reading the pinned chats: their manifest version and threads, `None` when unchanged.
+type Pinning = future::LocalBoxFuture<'static, Result<Option<(u64, Vec<String>)>>>;
+
+/// Starts reading the chats pinned on the phone, unless they are still at version `at`; `None`
+/// when that cannot be done yet (the phone has not sent the account's master key).
+async fn read_pins<S: Store>(manager: &Manager<S, Registered>, at: Option<u64>) -> Option<Pinning> {
+    let registration = lookup_registration(manager).ok()?;
+    match pins::Reader::new(manager.store(), registration).await {
+        Ok(Some(reader)) => Some(Box::pin(reader.pinned(at))),
+        Ok(None) => {
+            eprintln!("merel-signal: no master key yet, so no pinned chats");
+            None
+        }
+        Err(e) => {
+            eprintln!("merel-signal: cannot read the pinned chats: {e:#}");
+            None
+        }
+    }
+}
+
 /// Asks merel-signal-lookup, next to this program, which of `numbers` are on Signal.
 async fn look_up(registration: serde_json::Value, numbers: Vec<String>) -> std::result::Result<Vec<Person>, String> {
     use tokio::io::AsyncWriteExt as _;
@@ -566,6 +592,11 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
     let mut finding: Option<future::LocalBoxFuture<'static, std::result::Result<Vec<Person>, String>>> = None;
     // Numbers asked about while a lookup was under way; looked up as soon as it is done.
     let mut to_find: Vec<String> = Vec::new();
+    // The chats pinned on the phone, read from Signal's storage service on the side; again
+    // when the phone says its storage changed (`again`). `pins_at` is the version last read.
+    let mut pinning: Option<Pinning> = None;
+    let mut pins_again = false;
+    let mut pins_at: Option<u64> = None;
     loop {
         tokio::select! {
             taken = async {
@@ -596,6 +627,26 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                 }
                 if !to_find.is_empty() {
                     finding = Some(Box::pin(look_up(lookup_registration(&manager)?, std::mem::take(&mut to_find))));
+                }
+            }
+            pinned = async {
+                match pinning.as_mut() {
+                    Some(f) => f.await,
+                    None => Ok(None),
+                }
+            }, if pinning.is_some() => {
+                pinning = None;
+                match pinned {
+                    Ok(Some((version, threads))) => {
+                        eprintln!("merel-signal: {} chats pinned on the phone", threads.len());
+                        pins_at = Some(version);
+                        emit(&Event::Pinned { threads });
+                    }
+                    Ok(None) => {}
+                    Err(e) => eprintln!("merel-signal: could not read the pinned chats: {e:#}"),
+                }
+                if std::mem::take(&mut pins_again) {
+                    pinning = read_pins(&manager, pins_at).await;
                 }
             }
             asked = async {
@@ -629,6 +680,9 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                     emit(&Event::Synced { calls: phone.ready() });
                     // Asked on the side: sending it can take long, and Merel waits for
                     // `synced` before it shows the chats.
+                    if pinning.is_none() {
+                        pinning = read_pins(&manager, pins_at).await;
+                    }
                     if !contacts_asked {
                         contacts_asked = true;
                         let mut asker = sending.clone();
@@ -636,6 +690,17 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                     }
                 }
                 Some(Received::Content(content)) => {
+                    // The phone changed something in the storage service, perhaps the pins.
+                    if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::FetchLatest(f)), .. }) = &content.body
+                        && f.r#type() == fetch_latest::Type::StorageManifest
+                    {
+                        if pinning.is_some() {
+                            pins_again = true;
+                        } else {
+                            pinning = read_pins(&manager, pins_at).await;
+                        }
+                        continue;
+                    }
                     if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::DeleteForMe(d)), .. }) = &content.body {
                         for thread in chats_deleted(&manager, d).await {
                             emit(&Event::ChatDeleted { thread });
