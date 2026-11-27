@@ -16,7 +16,7 @@ merel-window-buttons = { workspace = true }
 merel-notify = { workspace = true }
 merel-address-book = { workspace = true }
 egui = { workspace = true }
-eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
+eframe = { workspace = true, features = ["default_fonts", "links", "wgpu", "accesskit", "wayland", "x11"] }
 log = { workspace = true }
 chrono = { workspace = true }
 

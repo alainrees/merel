@@ -205,6 +205,15 @@ mod tests {
         assert!(!super::Stderr.enabled(&meta(log::Level::Info, "merel_engine")));
     }
 
+    /// Without eframe's `links` the browser never opens: a click on a link in a chat, a mail
+    /// or an appointment did nothing.
+    #[test]
+    fn links_open_in_the_browser() {
+        let manifest = include_str!("../Cargo.toml");
+        let eframe = manifest.lines().find(|l| l.starts_with("eframe")).expect("eframe");
+        assert!(eframe.contains("\"links\""), "{eframe}");
+    }
+
     #[test]
     fn the_app_icon_decodes() {
         let icon = eframe::icon_data::from_png_bytes(super::ICON).expect("icon");
