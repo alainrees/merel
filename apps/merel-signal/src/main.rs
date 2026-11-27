@@ -823,6 +823,10 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
                         emit(&event);
                     }
                     Ok(Command::React { thread, emoji, remove, target_author, target_timestamp }) => {
+                        // One's own messages from the history before linking carry no author:
+                        // they are the account's own.
+                        let target_author = author_or_me(&manager, target_author);
+                        eprintln!("merel-signal: reacting {} to the message of {target_author} at {target_timestamp}", if remove { "back" } else { "with an emoji" });
                         let reaction = Reaction {
                             emoji: Some(emoji.clone()),
                             remove: Some(remove),
@@ -1201,8 +1205,8 @@ async fn send<S: Store>(
 ) -> Result<(Thread, u64, Vec<AttachmentPointer>)> {
     let quote = quote.map(|q| Quote {
         id: Some(q.timestamp),
-        author_aci: Some(q.author.clone()),
-        author_aci_binary: aci_binary(&q.author),
+        author_aci: Some(author_or_me(manager, q.author.clone())),
+        author_aci_binary: aci_binary(&author_or_me(manager, q.author.clone())),
         text: Some(q.text.clone()).filter(|t| !t.is_empty()),
         r#type: Some(quote::Type::Normal as i32),
         ..Default::default()
@@ -1266,6 +1270,12 @@ fn aci(text: Option<&String>, binary: Option<&Vec<u8>>) -> Option<String> {
 }
 
 /// Id `text` as the 16 bytes newer Signal apps read, sent beside the text older ones read.
+/// The author `named`, or the account itself when no one is named: Signal's history names no
+/// author for one's own messages, and Signal's apps ignore a reaction or quote without one.
+fn author_or_me<S: Store>(manager: &Manager<S, Registered>, named: String) -> String {
+    if named.trim().is_empty() { ServiceId::from(manager.registration_data().service_ids.aci()).service_id_string() } else { named }
+}
+
 fn aci_binary(text: &str) -> Option<Vec<u8>> {
     uuid::Uuid::parse_str(text).ok().map(|u| u.as_bytes().to_vec())
 }
