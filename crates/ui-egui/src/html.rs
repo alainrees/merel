@@ -363,40 +363,52 @@ impl Painter<'_> {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             let mut line = 0;
+            // Nothing drawn yet on this line, and the style of the last text: a line break on
+            // an empty line leaves a blank line as tall as the text, as `<br><br>` does in a
+            // browser, where an empty row would otherwise take no room at all.
+            let mut empty = true;
+            let mut last = Style::default();
             if let Some(&indent) = indents.first() {
                 ui.add_space(indent);
             }
             for inline in inlines {
+                match inline {
+                    Inline::Text { style, .. } | Inline::Link { style, .. } if style.size != Some(0) => {
+                        last = *style;
+                        empty = false;
+                    }
+                    Inline::Image(_) => empty = false,
+                    _ => {}
+                }
                 match inline {
                     Inline::Text { style, .. } | Inline::Link { style, .. } if style.size == Some(0) => {}
                     Inline::Text { text, style } => match self.found.and_then(|f| f.get(text)) {
                         Some(marks) => {
                             for (piece, hit) in found::pieces(text, marks) {
                                 let rich = self.rich(piece, *style, size);
-                                let rich =
-                                    if hit { rich.color(self.t.on_found).background_color(self.t.found) } else { rich.color(self.ink_of(*style)) };
-                                ui.add(egui::Label::new(rich).wrap());
+                                let (rich, ink) =
+                                    if hit { (rich.background_color(self.t.found), self.t.on_found) } else { (rich, self.ink_of(*style)) };
+                                self.put(ui, rich, ink, *style, false, Sense::hover());
                             }
                         }
                         None => {
-                            ui.add(egui::Label::new(self.rich(text, *style, size).color(self.ink_of(*style))).wrap());
+                            self.put(ui, self.rich(text, *style, size), self.ink_of(*style), *style, false, Sense::hover());
                         }
                     },
                     Inline::Link { href, text, style } if !self.links => {
-                        let rich = self.rich(text, *style, size).color(self.dim).underline();
-                        ui.add(egui::Label::new(rich).wrap()).on_hover_text(format!("{}: {href}", links_off()));
+                        self.put(ui, self.rich(text, *style, size), self.dim, *style, true, Sense::hover())
+                            .on_hover_text(format!("{}: {href}", links_off()));
                     }
                     Inline::Link { href, text, style } => {
-                        let mut rich = self.rich(text, *style, size).color(style.color.map_or(self.link, rgb));
-                        if !style.plain_link {
-                            rich = rich.underline();
-                        }
+                        let mut rich = self.rich(text, *style, size);
+                        let mut ink = style.color.map_or(self.link, rgb);
                         // A link with a word found in it is marked whole, so it stays one link.
                         if self.found.is_some_and(|f| f.contains_key(text)) {
-                            rich = rich.color(self.t.on_found).background_color(self.t.found);
+                            rich = rich.background_color(self.t.found);
+                            ink = self.t.on_found;
                         }
-                        let r = ui
-                            .add(egui::Label::new(rich).sense(Sense::click()).wrap())
+                        let r = self
+                            .put(ui, rich, ink, *style, !style.plain_link, Sense::click())
                             .on_hover_cursor(egui::CursorIcon::PointingHand)
                             .on_hover_text(href);
                         if r.clicked() {
@@ -405,6 +417,10 @@ impl Painter<'_> {
                     }
                     Inline::Image(image) => self.image(ui, image),
                     Inline::Break => {
+                        if empty {
+                            ui.add(egui::Label::new(self.rich(" ", last, size)));
+                        }
+                        empty = true;
                         ui.end_row();
                         line += 1;
                         if let Some(&indent) = indents.get(line) {
@@ -489,16 +505,44 @@ impl Painter<'_> {
                 r = r.italics();
             }
         }
-        if style.underline {
-            r = r.underline();
-        }
-        if style.strike {
-            r = r.strikethrough();
+        if let Some(line) = style.line {
+            r = r.line_height(Some(f32::from(line)));
         }
         if style.code {
             r = r.monospace().background_color(self.panel);
         }
         r
+    }
+
+    /// Draws a run of text in `ink`, underlined when `underline` or its style says so. With a
+    /// line height of the message's own, egui would draw the underline at the foot of the
+    /// taller line, far below the letters, so the lines are drawn here, under the letters.
+    fn put(&self, ui: &mut Ui, rich: RichText, ink: Color32, style: Style, underline: bool, sense: Sense) -> egui::Response {
+        let (under, strike) = (underline || style.underline, style.strike);
+        let rich = rich.color(ink);
+        if style.line.is_none() || !(under || strike) {
+            let rich = if under { rich.underline() } else { rich };
+            let rich = if strike { rich.strikethrough() } else { rich };
+            return ui.add(egui::Label::new(rich).sense(sense).wrap());
+        }
+        let (pos, galley, response) = egui::Label::new(rich).sense(sense).wrap().layout_in_ui(ui);
+        if ui.is_rect_visible(response.rect) {
+            let painter = ui.painter();
+            for row in &galley.rows {
+                let Some(first) = row.row.glyphs.first() else { continue };
+                let rect = row.rect_without_leading_space().translate(pos.to_vec2());
+                let baseline = pos.y + row.pos.y + first.pos.y;
+                let stroke = Stroke::new(1.0, ink);
+                if under {
+                    painter.hline(rect.x_range(), baseline + 2.0, stroke);
+                }
+                if strike {
+                    painter.hline(rect.x_range(), baseline - first.font_ascent * 0.3, stroke);
+                }
+            }
+            painter.galley(pos, galley, ink);
+        }
+        response
     }
 
     fn open(&mut self, ui: &Ui, href: &str) {
@@ -613,6 +657,26 @@ mod tests {
         h.get_by_label("mail Sanne").click();
         h.run();
         assert_eq!(*clicked.borrow(), Some(Clicked::Mailto("sanne@example.org".into())));
+    }
+
+    #[test]
+    fn an_empty_line_between_breaks_keeps_its_room_and_line_height_spreads_the_lines() {
+        // As a confirmation from the Chamber of Commerce writes it: blocks apart by <br><br>,
+        // a heading in bold right above its lines, and room between the lines.
+        let tight = merel_html::parse(r#"<p>Ontvangen.<br>Wat nu?<br>Lijn</p>"#);
+        let loose = merel_html::parse(r#"<p style="line-height:1.6">Ontvangen.<br><br><b>Wat nu?</b><br>Lijn</p>"#);
+        let top = |doc: Document, label: &'static str| {
+            let t = Tokens::light();
+            let mut h = egui_kittest::Harness::builder().with_size(vec2(600.0, 400.0)).build_ui(move |ui| {
+                show(ui, &t, &doc, &[], "m1", None, true, None);
+            });
+            h.run();
+            h.get_by_label(label).rect().top() - h.get_by_label("Ontvangen.").rect().top()
+        };
+        let (a, b) = (top(tight.clone(), "Wat nu?"), top(tight, "Lijn"));
+        let (c, d) = (top(loose.clone(), "Wat nu?"), top(loose, "Lijn"));
+        assert!(c > 2.5 * a, "a blank line, each line spread: {a} then {c}");
+        assert!(d - c > (b - a) * 1.4, "lines further apart with line-height 1.6: {} vs {}", d - c, b - a);
     }
 
     #[test]

@@ -181,6 +181,9 @@ pub struct Style {
     pub size: Option<u8>,
     /// A link the message drew without its underline.
     pub plain_link: bool,
+    /// How far apart the lines of the text are, in pixels (`line-height`); the font's own
+    /// spacing when unset.
+    pub line: Option<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -560,6 +563,9 @@ impl Builder<'_> {
         }
         if let Some(px) = css.get("font-size").and_then(css::px) {
             s.size = Some(px.clamp(0.0, 72.0).round() as u8);
+        }
+        if let Some(px) = css.get("line-height").and_then(|v| css::line_height(v, s.size.map_or(16.0, f32::from))) {
+            s.line = Some(px.clamp(0.0, 200.0).round() as u8);
         }
         match css.get("font-weight") {
             Some("bold" | "bolder" | "600" | "700" | "800" | "900") => s.bold = true,
@@ -1358,5 +1364,38 @@ mod tests {
         let d = parse("<p>Caf&eacute;\n\n  &amp; <span> thee </span>&nbsp;!</p><p>twee</p>");
         // A regular space before a non-breaking one stays, as in a browser.
         assert_eq!(text(&d.blocks), "Café & thee \u{a0}!\ntwee\n");
+    }
+
+    #[test]
+    fn line_height_is_read_and_blank_lines_survive() {
+        let d = parse(r#"<div style="font-size:15px;line-height:1.6"><p>een<br><br><strong>Kop</strong><br>twee</p></div>"#);
+        let [Block::Paragraph(p)] = d.blocks.as_slice() else { panic!("one paragraph: {:?}", d.blocks) };
+        assert!(matches!(&p[..3], [Inline::Text { .. }, Inline::Break, Inline::Break]), "both breaks are kept: {p:?}");
+        let Inline::Text { style, .. } = &p[3] else { panic!() };
+        assert!(style.bold && style.line == Some(24), "15 px × 1.6, inherited: {style:?}");
+    }
+
+    #[test]
+    fn a_confirmation_written_with_breaks_keeps_its_blank_lines_and_spacing() {
+        // Rebuilt after a Chamber of Commerce mail that Merel showed without any room.
+        let d = parse(include_str!("../testdata/kvk.html"));
+        let mut inlines = Vec::new();
+        fn walk<'a>(blocks: &'a [Block], out: &mut Vec<&'a Inline>) {
+            for b in blocks {
+                match b {
+                    Block::Paragraph(p) => out.extend(p),
+                    Block::Section { blocks, .. } => walk(blocks, out),
+                    Block::Columns(cells) => cells.iter().for_each(|c| walk(&c.blocks, out)),
+                    _ => {}
+                }
+            }
+        }
+        walk(&d.blocks, &mut inlines);
+        let blank = inlines.windows(2).filter(|w| matches!(w, [Inline::Break, Inline::Break])).count();
+        assert_eq!(blank, 7, "every <br><br> stays a blank line");
+        assert!(
+            inlines.iter().all(|i| !matches!(i, Inline::Text { text, style } if !text.trim().is_empty() && style.line != Some(26))),
+            "26 px between lines"
+        );
     }
 }
