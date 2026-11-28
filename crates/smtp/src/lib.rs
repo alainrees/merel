@@ -236,6 +236,23 @@ mod tests {
         assert!(raw.contains("From: alain@voorbeeld.nl\r\n"), "{raw}");
     }
 
+    /// A reaction, an edit or a deletion for Signal travels as these headers to the Signal
+    /// mailbox, which reads them back: without them it went out as a plain message, or not.
+    #[test]
+    fn a_reaction_an_edit_and_a_deletion_read_back() {
+        use merel_model::ChatTag;
+        let from = Address::new(None, "jij@example.org").unwrap();
+        let to = vec![Address::new(None, "sanne@signal.invalid").unwrap()];
+        let id = "<1764323000000.7a1c0b9e-0000-4000-8000-000000000001@signal.invalid>".to_string();
+        let back = |chat: ChatTag| {
+            let draft = Draft { to: to.clone(), body: "❤️".into(), chat: Some(chat), ..Draft::default() };
+            merel_mime::parse_header(&build_for_store(&from, &draft).unwrap().formatted()).chat.unwrap()
+        };
+        assert_eq!(back(ChatTag { reaction_to: Some(id.clone()), ..ChatTag::default() }).reaction_to.as_deref(), Some(id.as_str()));
+        assert_eq!(back(ChatTag { edit_of: Some(id.clone()), ..ChatTag::default() }).edit_of.as_deref(), Some(id.as_str()));
+        assert_eq!(back(ChatTag { delete_of: Some(id.clone()), ..ChatTag::default() }).delete_of.as_deref(), Some(id.as_str()));
+    }
+
     #[test]
     fn a_chat_message_carries_the_chat_headers() {
         use merel_model::ChatTag;

@@ -133,6 +133,11 @@ fn chat_of(m: &mail_parser::Message<'_>) -> Option<ChatTag> {
     tag.reactions = merel_model::Reacted::from_header(raw("Merel-Reactions").as_deref());
     tag.quote = merel_model::Quoted::from_header(raw("Merel-Quote").as_deref());
     tag.delivery = merel_model::Delivery::from_header(raw("Merel-Delivery").as_deref());
+    // What a reaction, an edit or a deletion going out to Signal is about; the Signal
+    // mailbox reads it back from the message Merel built.
+    tag.reaction_to = raw("Merel-Reaction");
+    tag.edit_of = raw("Merel-Edit");
+    tag.delete_of = raw("Merel-Delete");
     tag.edited = raw("Merel-Edited").is_some_and(|v| v == "yes");
     tag.deleted = raw("Merel-Deleted").is_some_and(|v| v == "yes");
     tag.voice = raw("Merel-Voice").is_some_and(|v| v == "yes");

@@ -415,7 +415,10 @@ async fn start() -> Result<()> {
             let mut files = Files::new();
             // The chats from before linking, as far as the phone sent them.
             match history::stored(dir, &key).await {
-                Ok(lines) => lines.iter().for_each(|l| println!("{l}")),
+                Ok(lines) => {
+                    let me = ServiceId::from(manager.registration_data().service_ids.aci()).service_id_string();
+                    lines.iter().for_each(|l| println!("{}", from_me(l, &me)));
+                }
                 Err(e) => eprintln!("merel-signal: the history from before linking did not come: {e:#}"),
             }
             // Without the stored messages Merel still gets the new ones.
@@ -607,7 +610,10 @@ async fn run<S: Store>(mut manager: Manager<S, Registered>, dir: &str, key: &str
             }, if history.is_some() => {
                 history = None;
                 match taken {
-                    Ok(lines) => lines.iter().for_each(|l| println!("{l}")),
+                    Ok(lines) => {
+                        let me = ServiceId::from(manager.registration_data().service_ids.aci()).service_id_string();
+                        lines.iter().for_each(|l| println!("{}", from_me(l, &me)));
+                    }
                     Err(e) => eprintln!("merel-signal: the history from before linking: {e:#}"),
                 }
             }
@@ -1270,6 +1276,20 @@ fn aci(text: Option<&String>, binary: Option<&Vec<u8>>) -> Option<String> {
 }
 
 /// Id `text` as the 16 bytes newer Signal apps read, sent beside the text older ones read.
+/// A message from the history with the account's own messages under its own address, as
+/// the ones that come now are: Signal's history names no author for them, and a reaction to
+/// one is known by its author.
+fn from_me(line: &str, me: &str) -> String {
+    let Ok(mut v) = serde_json::from_str::<serde_json::Value>(line) else { return line.to_string() };
+    let mine = v.get("mine").and_then(serde_json::Value::as_bool).unwrap_or(false);
+    let unnamed = v.get("sender").and_then(serde_json::Value::as_str).is_none_or(str::is_empty);
+    if !(mine && unnamed) {
+        return line.to_string();
+    }
+    v["sender"] = me.into();
+    v.to_string()
+}
+
 /// The author `named`, or the account itself when no one is named: Signal's history names no
 /// author for one's own messages, and Signal's apps ignore a reaction or quote without one.
 fn author_or_me<S: Store>(manager: &Manager<S, Registered>, named: String) -> String {
@@ -1551,6 +1571,17 @@ async fn deleted_line<S: Store>(manager: &Manager<S, Registered>, thread: Thread
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ones_own_history_messages_name_the_account() {
+        let me = "7a1c0b9e-0000-4000-8000-000000000001";
+        let line = r#"{"type":"message","sender":"","mine":true,"timestamp":5,"text":"hoi"}"#;
+        let v: serde_json::Value = serde_json::from_str(&super::from_me(line, me)).unwrap();
+        assert_eq!(v["sender"], me);
+        let theirs = r#"{"type":"message","sender":"abc","mine":false,"timestamp":5}"#;
+        assert_eq!(super::from_me(theirs, me), theirs);
+        assert_eq!(super::from_me("not json", me), "not json");
+    }
+
     use super::*;
 
     #[test]
