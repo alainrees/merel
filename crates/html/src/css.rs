@@ -236,6 +236,24 @@ pub fn px(value: &str) -> Option<f32> {
     (n.is_finite() && n >= 0.0).then_some(n * factor)
 }
 
+/// `line-height` in pixels for text of `size` pixels: a length, a factor (`1.6`) or a
+/// percentage of the size. `normal` and anything unknown leave the font's own spacing.
+pub fn line_height(value: &str, size: f32) -> Option<f32> {
+    let v = value.trim().to_ascii_lowercase();
+    if let Some(p) = v.strip_suffix('%') {
+        let p: f32 = p.trim().parse().ok()?;
+        return (p.is_finite() && p > 0.0).then_some(size * p / 100.0);
+    }
+    if let Ok(factor) = v.parse::<f32>() {
+        return (factor.is_finite() && factor > 0.0).then_some(size * factor);
+    }
+    if let Some(n) = v.strip_suffix("em").filter(|n| !n.ends_with('r')) {
+        let n: f32 = n.trim().parse().ok()?;
+        return (n.is_finite() && n > 0.0).then_some(size * n);
+    }
+    px(&v).filter(|&px| px > 0.0)
+}
+
 /// A width: pixels or a percentage of the room there is.
 pub fn length(value: &str) -> Option<Length> {
     let v = value.trim();
@@ -318,6 +336,11 @@ mod tests {
         assert_eq!(sides("10px 20px"), Some([10, 20, 10, 20]));
         assert_eq!(px("12pt"), Some(16.0));
         assert_eq!(font_size("+1"), Some(18.0));
+        assert_eq!(line_height("1.6", 15.0), Some(24.0));
+        assert_eq!(line_height("150%", 16.0), Some(24.0));
+        assert_eq!(line_height("26px", 15.0), Some(26.0));
+        assert_eq!(line_height("1.5em", 12.0), Some(18.0));
+        assert_eq!(line_height("normal", 16.0), None);
         let d = Declarations::parse("COLOR: #fff; width:100px !important; color:#000;garbage");
         assert_eq!(d.get("color"), Some("#000"), "the last one wins");
         assert_eq!(d.get("width"), Some("100px"));
